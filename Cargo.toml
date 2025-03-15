@@ -1,0 +1,8 @@
+[package]
+name = "blockwatch"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.97"
+regex = "1.11.1"
