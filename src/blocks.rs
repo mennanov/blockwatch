@@ -1,5 +1,5 @@
 use anyhow::Context;
-use regex::RegexBuilder;
+use regex::{Regex, RegexBuilder};
 use std::string::ToString;
 
 #[derive(Debug, PartialEq)]
@@ -36,32 +36,10 @@ impl BlocksRegexParser {
     fn new() -> Self {
         BlocksRegexParser {}
     }
-}
 
-struct PartialBlock {
-    name: Option<String>,
-    starts_at: u32,
-    ends_at: Option<u32>,
-    affects: Vec<(Option<String>, String)>,
-    children: Vec<Block>,
-}
-
-impl Into<Block> for PartialBlock {
-    fn into(self) -> Block {
-        Block {
-            name: self.name,
-            starts_at: self.starts_at,
-            ends_at: self.ends_at.unwrap(),
-            affects: self.affects,
-            children: self.children,
-        }
-    }
-}
-
-const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
-
-impl BlocksParser for BlocksRegexParser {
-    fn parse(self, contents: &str, config: &ParserConfig) -> anyhow::Result<Vec<Block>> {
+    fn single_line_comment_start_end_regex(
+        config: &ParserConfig,
+    ) -> anyhow::Result<(Regex, Regex)> {
         let single_line_comments_exp = config
             .single_line_comments
             .iter()
@@ -70,22 +48,32 @@ impl BlocksParser for BlocksRegexParser {
             .join("|");
         let single_line_start_block_regex = RegexBuilder::new(
             format!(
-                r#"({})\s*{}\s+(?<name>[\w-]+)"#,
+                r#"({})\s*{}\s*(?<name>[\w-]+)?"#,
                 single_line_comments_exp, config.block_start_definition
             )
             .as_str(),
         )
         .build()
         .context("failed to build a single line start block regex")?;
+
         let single_line_end_block_regex = RegexBuilder::new(
             format!(
-                r#"({})\s*{}\s+(?<name>[\w-]+)"#,
+                r#"({})\s*{}\s*(?<name>[\w-]+)?"#,
                 single_line_comments_exp, config.block_end_definition
             )
             .as_str(),
         )
         .build()
         .context("failed to build a single line end block regex")?;
+
+        Ok((single_line_start_block_regex, single_line_end_block_regex))
+    }
+}
+
+impl BlocksParser for BlocksRegexParser {
+    fn parse(self, contents: &str, config: &ParserConfig) -> anyhow::Result<Vec<Block>> {
+        let (single_line_start_block_regex, single_line_end_block_regex) =
+            Self::single_line_comment_start_end_regex(config)?;
         let mut blocks: Vec<Block> = Vec::new();
         let mut partial_blocks: Vec<PartialBlock> = Vec::new();
         for (line_number, line) in contents
@@ -144,6 +132,28 @@ impl BlocksParser for BlocksRegexParser {
         Ok(blocks)
     }
 }
+
+struct PartialBlock {
+    name: Option<String>,
+    starts_at: u32,
+    ends_at: Option<u32>,
+    affects: Vec<(Option<String>, String)>,
+    children: Vec<Block>,
+}
+
+impl Into<Block> for PartialBlock {
+    fn into(self) -> Block {
+        Block {
+            name: self.name,
+            starts_at: self.starts_at,
+            ends_at: self.ends_at.unwrap(),
+            affects: self.affects,
+            children: self.children,
+        }
+    }
+}
+
+const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
 
 #[cfg(test)]
 mod tests {
@@ -364,6 +374,103 @@ mod tests {
         };
         let error_message = parser.parse(contents, &config).unwrap_err().to_string();
         assert_eq!(error_message, "Line: 5, Unexpected end of block \"foo\"");
+        Ok(())
+    }
+
+    #[test]
+    fn unnamed_blocks_parsed_correctly() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#""
+        // @block
+        fn say_hello_world() {
+          println!("hello world!");
+        }
+        // @endblock
+        
+        // @block
+        fn say_hello_world2() {
+          println!("hello world!");
+        }
+        // @endblock
+        "#;
+        let config = ParserConfig {
+            block_start_definition: "@block",
+            block_end_definition: "@endblock",
+            single_line_comments: vec!["//", "///"],
+            multi_line_comments: vec![],
+        };
+        let blocks = parser.parse(contents, &config)?;
+        assert_eq!(
+            blocks,
+            vec![
+                Block {
+                    name: None,
+                    starts_at: 2,
+                    ends_at: 6,
+                    affects: vec![],
+                    children: vec![]
+                },
+                Block {
+                    name: None,
+                    starts_at: 8,
+                    ends_at: 12,
+                    affects: vec![],
+                    children: vec![]
+                }
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unnamed_nested_blocks_parsed_correctly() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#""
+        // @block
+        fn say_hello_world() {
+          println!("hello world!");
+        }
+        // @block
+        fn say_hello_world2() {
+          println!("hello world!");
+        }
+        // @block foo
+        fn say_hello_world2() {
+          println!("hello world!");
+        }
+        // @endblock foo
+        // @endblock
+        // @endblock
+        "#;
+        let config = ParserConfig {
+            block_start_definition: "@block",
+            block_end_definition: "@endblock",
+            single_line_comments: vec!["//", "///"],
+            multi_line_comments: vec![],
+        };
+        let blocks = parser.parse(contents, &config)?;
+        assert_eq!(
+            blocks,
+            vec![Block {
+                name: None,
+                starts_at: 2,
+                ends_at: 16,
+                affects: vec![],
+                children: vec![Block {
+                    name: None,
+                    starts_at: 6,
+                    ends_at: 15,
+                    affects: vec![],
+                    children: vec![Block {
+                        name: Some("foo".into()),
+                        starts_at: 10,
+                        ends_at: 14,
+                        affects: vec![],
+                        children: vec![]
+                    }]
+                }]
+            },]
+        );
         Ok(())
     }
 }
