@@ -16,7 +16,9 @@ struct Block {
 
 /// Parses [`Blocks`] from a source code.
 trait BlocksParser {
-    /// Returns [`Blocks`] extracted from the given `contents` string.
+    /// Returns [`Block`]s extracted from the given `contents` string.
+    ///
+    /// The blocks are required to be sorted by the `starts_at` field in ascending order.
     fn parse(&self, contents: &str) -> anyhow::Result<Vec<Block>>;
 }
 
@@ -146,7 +148,7 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
                         .binary_search_by(|(line_start_position, _)| {
                             line_start_position.cmp(&(reader.buffer_position() as usize))
                         })
-                        .unwrap()]
+                        .unwrap_or_else(|e| e)]
                     .1;
                     let mut name = None;
                     let mut affects = vec![];
@@ -176,7 +178,7 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
                         .binary_search_by(|(line_start_position, _)| {
                             line_start_position.cmp(&(reader.buffer_position() as usize))
                         })
-                        .unwrap()]
+                        .unwrap_or_else(|e| e)]
                     .1;
                     if let Some(mut block) = stack.pop() {
                         block.ends_at = ends_at;
@@ -229,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn blocks_defined_in_single_line_comments_parsed_correctly() -> anyhow::Result<()> {
+    fn unnested_blocks_parsed_correctly() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
         // <block name="foo">
@@ -329,6 +331,53 @@ mod tests {
                     name: Some("fizz".into()),
                     starts_at: 26,
                     ends_at: 27,
+                    affects: vec![],
+                }
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn block_defined_at_first_and_last_lines_parsed_correctly() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"// <block name="foo">
+        fn say_hello_world() {
+          println!("hello world!");
+        }
+        // </block>"#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(
+            blocks,
+            vec![Block {
+                name: Some("foo".into()),
+                starts_at: 1,
+                ends_at: 5,
+                affects: vec![],
+            },]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn one_line_blocks_parsed_correctly() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"/*<block name="foo"></block>
+        <block name="bar"></block>*/"#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(
+            blocks,
+            vec![
+                Block {
+                    name: Some("foo".into()),
+                    starts_at: 1,
+                    ends_at: 1,
+                    affects: vec![],
+                },
+                Block {
+                    name: Some("bar".into()),
+                    starts_at: 2,
+                    ends_at: 2,
                     affects: vec![],
                 }
             ]

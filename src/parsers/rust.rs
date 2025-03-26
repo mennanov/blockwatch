@@ -48,7 +48,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_rust_comments_correctly() -> anyhow::Result<()> {
+    fn parses_comments_correctly() -> anyhow::Result<()> {
         let parser = parser()?;
 
         let blocks = parser.parse(

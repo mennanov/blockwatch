@@ -40,7 +40,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn java_parser() -> anyhow::Result<()> {
+    fn parses_comments_correctly() -> anyhow::Result<()> {
         let parser = parser()?;
 
         let blocks = parser.parse(
