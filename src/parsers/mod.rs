@@ -111,7 +111,7 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
         for block_ref in value.split(",") {
             let block = block_ref.trim();
             let (mut filename, block_name) = block.split_once(":").context(format!(
-                "Failed to parse filename and block name in '{:?}'",
+                "Invalid \"affects\" attribute value: \"{}\"",
                 block
             ))?;
             filename = filename.trim();
@@ -156,7 +156,8 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
                         let attr = attr.context("Failed to parse attribute")?;
                         let attr_name = attr.key.as_ref();
                         if attr_name == b"name" {
-                            name = String::from_utf8(attr.value.into()).map(|v| Some(v))?;
+                            name = String::from_utf8(attr.value.into())
+                                .map(|v| if v.is_empty() { None } else { Some(v) })?;
                         } else if attr_name == b"affects" {
                             affects = Self::parse_affects_attribute(
                                 String::from_utf8(attr.value.into())?.as_str(),
@@ -511,6 +512,155 @@ mod tests {
                     affects: vec![],
                 }
             ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn affects_attribute_parsed_correctly() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <block affects="README.md:foo-docs, tests.py:foo-tests">
+        fn foo() {
+          println!("hello world!");
+        }
+        // </block>
+        "#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(
+            blocks[0].affects,
+            vec![
+                (Some("README.md".to_string()), "foo-docs".to_string()),
+                (Some("tests.py".to_string()), "foo-tests".to_string())
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn nested_blocks_with_affects_parsed_correctly() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <block name="outer" affects="outer.rs:test">
+        fn outer() {
+            // <block name="inner" affects="inner.rs:test">
+            fn inner() {}
+            // </block>
+        }
+        // </block>
+        "#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(
+            blocks[0].affects,
+            vec![(Some("outer.rs".to_string()), "test".to_string())]
+        );
+        assert_eq!(
+            blocks[1].affects,
+            vec![(Some("inner.rs".to_string()), "test".to_string())]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn empty_affects_attribute_parsed_correctly() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <block affects="">
+        fn foo() {}
+        // </block>
+        "#;
+        assert_eq!(
+            parser.parse(contents).unwrap_err().to_string(),
+            "Invalid \"affects\" attribute value: \"\""
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn relative_paths_in_affects_parsed_correctly() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <block affects="../docs/README.md:docs, ./tests/test_foo.py:tests">
+        fn foo() {}
+        // </block>
+        "#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(
+            blocks[0].affects,
+            vec![
+                (Some("../docs/README.md".to_string()), "docs".to_string()),
+                (Some("./tests/test_foo.py".to_string()), "tests".to_string())
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_affects_attribute_returns_error() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <block affects="invalid-format">
+        fn foo() {}
+        // </block>
+        "#;
+        assert_eq!(
+            parser.parse(contents).unwrap_err().to_string(),
+            "Invalid \"affects\" attribute value: \"invalid-format\""
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn empty_block_name_parsed_correctly() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <block name="">
+        fn foo() {}
+        // </block>
+        "#;
+        let blocks = parser.parse(contents)?;
+        assert!(blocks[0].name.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn malformed_block_tag_returns_error() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <block name="foo" affects="file:block" invalid>
+        fn foo() {}
+        // </block>
+        "#;
+        assert!(parser.parse(contents).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_tags_are_ignored() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <unknown-tag>
+        // <block name="foo" affects="README.md:foo-docs, tests.py:foo-tests">
+        fn foo() {
+          println!("hello world!");
+        }
+        // </block>
+        // </unknown-tag>
+        "#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(
+            blocks,
+            vec![Block {
+                name: Some("foo".into()),
+                starts_at: 3,
+                ends_at: 7,
+                affects: vec![
+                    (Some("README.md".to_string()), "foo-docs".to_string()),
+                    (Some("tests.py".to_string()), "foo-tests".to_string())
+                ],
+            },]
         );
         Ok(())
     }
