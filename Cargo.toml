@@ -9,6 +9,7 @@ tree-sitter = "0.25.3"
 tree-sitter-rust = "0.23"
 tree-sitter-java = "0.23.5"
 quick-xml = "0.37.2"
+diffy = "0.4.2"
 
 [build-dependencies]
 cc="1.2.16"
