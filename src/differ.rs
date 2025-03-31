@@ -1,5 +1,5 @@
 use anyhow::Context;
-use diffy::Line;
+use diffy::{Line, Patch};
 use std::cmp::min;
 use std::collections::HashMap;
 
@@ -35,6 +35,48 @@ impl DiffyExtractor {
         file_diffs.push(&patch_diff[prev_pos..]);
         file_diffs
     }
+
+    fn hunks(patch: &Patch<str>) -> anyhow::Result<Vec<(usize, usize)>> {
+        let mut hunks = Vec::new();
+        for hunk in patch.hunks() {
+            let hunk_start = hunk.new_range().start();
+            let mut start = None;
+            let mut end = None;
+            let mut prev_line = None;
+            for (idx, line) in hunk.lines().iter().enumerate() {
+                match line {
+                    Line::Insert(_) => {
+                        if start.is_none() {
+                            start = Some(hunk_start + idx);
+                        }
+                        if !matches!(prev_line, Some(&Line::Delete(_))) {
+                            // A `Delete` followed immediately by the `Insert` is a modified
+                            // line and should be counted as single.
+                            end = Some(hunk_start + idx);
+                        }
+                    }
+                    Line::Delete(_) => {
+                        if start.is_none() {
+                            start = Some(hunk_start + idx);
+                        }
+                        end = Some(hunk_start + idx);
+                    }
+                    Line::Context(_) => {
+                        if let Some(start) = start.take() {
+                            let end = end.take().unwrap_or(start);
+                            hunks.push((start, end));
+                        }
+                    }
+                }
+                prev_line = Some(line);
+            }
+            if let Some(start) = start.take() {
+                let end = end.take().unwrap_or(start);
+                hunks.push((start, end));
+            }
+        }
+        Ok(hunks)
+    }
 }
 
 impl HunksExtractor for DiffyExtractor {
@@ -52,44 +94,7 @@ impl HunksExtractor for DiffyExtractor {
             let filename = patch
                 .modified()
                 .context("Modified filename not found in diff")?;
-            let mut hunks = Vec::new();
-            for hunk in patch.hunks() {
-                let hunk_start = hunk.new_range().start();
-                let mut start = None;
-                let mut end = None;
-                let mut prev_line = None;
-                for (idx, line) in hunk.lines().iter().enumerate() {
-                    match line {
-                        Line::Insert(_) => {
-                            if start.is_none() {
-                                start = Some(hunk_start + idx);
-                            }
-                            if !matches!(prev_line, Some(&Line::Delete(_))) {
-                                // A `Delete` followed immediately by the `Insert` is a modified
-                                // line and should be counted as single.
-                                end = Some(hunk_start + idx);
-                            }
-                        }
-                        Line::Delete(_) => {
-                            if start.is_none() {
-                                start = Some(hunk_start + idx);
-                            }
-                            end = Some(hunk_start + idx);
-                        }
-                        Line::Context(_) => {
-                            if let Some(start) = start.take() {
-                                let end = end.take().unwrap_or(start);
-                                hunks.push((start, end));
-                            }
-                        }
-                    }
-                    prev_line = Some(line);
-                }
-                if let Some(start) = start.take() {
-                    let end = end.take().unwrap_or(start);
-                    hunks.push((start, end));
-                }
-            }
+            let hunks = Self::hunks(&patch)?;
             result.insert(filename.trim_start_matches("b/").to_string(), hunks);
         }
         Ok(result)
