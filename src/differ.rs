@@ -43,6 +43,12 @@ impl HunksExtractor for DiffyExtractor {
         let mut result = HashMap::new();
         for file_diff in file_diffs {
             let patch = diffy::Patch::from_str(file_diff)?;
+            if patch.modified().is_none()
+                || patch.modified().is_some_and(|f| f.starts_with("/dev/null"))
+            {
+                // The file is deleted.
+                continue;
+            }
             let filename = patch
                 .modified()
                 .context("Modified filename not found in diff")?;
@@ -164,7 +170,7 @@ index e69de29..215ed53 100644
     }
 
     #[test]
-    fn single_new_line_diff_returns_range_for_single_line() -> anyhow::Result<()> {
+    fn single_new_line_diff_returns_single_range() -> anyhow::Result<()> {
         let extractor = create_extractor();
         let hunks = extractor.extract(
             r#"diff --git a/Cargo.toml b/Cargo.toml
@@ -229,6 +235,99 @@ index 8c34c48..23ddd69 100644
 \ No newline at end of file"#,
         )?;
         assert_eq!(hunks["Cargo.toml"], vec![(11, 11), (13, 13)]);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_line_returns_single_range() -> anyhow::Result<()> {
+        let extractor = create_extractor();
+        let hunks = extractor.extract(
+            r#"diff --git a/src/main.rs b/src/main.rs
+index 63c5842..34d1d3f 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,1 +1,1 @@
+-    println!("Hello!");
++    println!("Hello, world!");
+"#,
+        )?;
+        assert_eq!(hunks["src/main.rs"], vec![(1, 1)]);
+        Ok(())
+    }
+
+    #[test]
+    fn deleted_line_returns_single_range() -> anyhow::Result<()> {
+        let extractor = create_extractor();
+        let hunks = extractor.extract(
+            r#"diff --git a/src/main.rs b/src/main.rs
+index 63c5842..34d1d3f 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,2 +1,1 @@
+-    println!("Debug line");
+ println!("Hello, world!");
+"#,
+        )?;
+        assert_eq!(hunks["src/main.rs"], vec![(1, 1)]);
+        Ok(())
+    }
+
+    #[test]
+    fn mixed_changes_returns_correct_ranges() -> anyhow::Result<()> {
+        let extractor = create_extractor();
+        let hunks = extractor.extract(
+            r#"diff --git a/src/main.rs b/src/main.rs
+index 63c5842..34d1d3f 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,3 +1,4 @@
+-    // Old comment
++    // New comment
+ println!("Hello!");
++    println!("World!");
+-    println!("Bye!");
++    println!("Goodbye!");
+"#,
+        )?;
+        assert_eq!(hunks["src/main.rs"], vec![(1, 1), (4, 5)]);
+        Ok(())
+    }
+
+    #[test]
+    fn new_file_diff_returns_single_range_for_entire_file() -> anyhow::Result<()> {
+        let extractor = create_extractor();
+        let hunks = extractor.extract(
+            r#"diff --git a/example.rs b/example.rs
+new file mode 100644
+index 0000000..710d1d9
+--- /dev/null
++++ b/example.rs
+@@ -0,0 +1,3 @@
++fn main() {
++    println!("New file");
++}
+"#,
+        )?;
+        assert_eq!(hunks["example.rs"], vec![(1, 3)]);
+        Ok(())
+    }
+
+    #[test]
+    fn deleted_file_diff_is_ignored() -> anyhow::Result<()> {
+        let extractor = create_extractor();
+        let hunks = extractor.extract(
+            r#"diff --git a/src/deleted_file.rs b/src/deleted_file.rs
+deleted file mode 100644
+index 1234567..0000000
+--- a/src/deleted_file.rs
++++ /dev/null
+@@ -1,3 +0,0 @@
+-fn main() {
+-    println!("Old file");
+-}
+"#,
+        )?;
+        assert!(hunks.is_empty());
         Ok(())
     }
 }
