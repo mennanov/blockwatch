@@ -6,14 +6,6 @@ use quick_xml::events::Event;
 use std::string::ToString;
 use tree_sitter::{Language, Parser, Query, QueryCursor, StreamingIterator};
 
-#[derive(Debug, PartialEq)]
-struct Block {
-    name: Option<String>,
-    starts_at: usize,
-    ends_at: usize,
-    affects: Vec<(Option<String>, String)>,
-}
-
 /// Parses [`Blocks`] from a source code.
 trait BlocksParser {
     /// Returns [`Block`]s extracted from the given `contents` string.
@@ -32,6 +24,166 @@ trait CommentsParser {
     /// language specific symbols like "//", "/**", etc. However, it **should preserve the line
     /// breaks**.
     fn parse(&self, source_code: &str) -> anyhow::Result<Vec<(usize, String)>>;
+}
+
+#[derive(Debug, PartialEq)]
+struct Block {
+    name: Option<String>,
+    starts_at: usize,
+    ends_at: usize,
+    affects: Vec<(Option<String>, String)>,
+}
+
+impl Block {
+    fn intersects(&self, start: usize, end: usize) -> bool {
+        self.ends_at >= start && end >= self.starts_at
+    }
+}
+
+#[cfg(test)]
+mod block_intersection_tests {
+    use super::*;
+
+    #[test]
+    fn non_overlapping_returns_false() {
+        let block = Block {
+            name: None,
+            starts_at: 3,
+            ends_at: 4,
+            affects: vec![],
+        };
+
+        assert!(!block.intersects(1, 2));
+        assert!(!block.intersects(2, 2));
+        assert!(!block.intersects(5, 5));
+        assert!(!block.intersects(5, 6));
+    }
+
+    #[test]
+    fn non_overlapping_single_line_returns_false() {
+        let block = Block {
+            name: None,
+            starts_at: 3,
+            ends_at: 3,
+            affects: vec![],
+        };
+
+        assert!(!block.intersects(1, 2));
+        assert!(!block.intersects(2, 2));
+        assert!(!block.intersects(4, 4));
+        assert!(!block.intersects(4, 5));
+    }
+
+    #[test]
+    fn overlapping_returns_true() {
+        let block = Block {
+            name: None,
+            starts_at: 3,
+            ends_at: 6,
+            affects: vec![],
+        };
+
+        assert!(block.intersects(1, 3));
+        assert!(block.intersects(2, 4));
+        assert!(block.intersects(3, 4));
+        assert!(block.intersects(3, 6));
+        assert!(block.intersects(4, 6));
+        assert!(block.intersects(5, 7));
+        assert!(block.intersects(6, 7));
+    }
+
+    #[test]
+    fn overlapping_single_line_returns_true() {
+        let block = Block {
+            name: None,
+            starts_at: 3,
+            ends_at: 3,
+            affects: vec![],
+        };
+
+        assert!(block.intersects(1, 3));
+        assert!(block.intersects(3, 3));
+        assert!(block.intersects(3, 4));
+    }
+}
+
+trait BlocksExt {
+    /// Finds all intersecting `Block`s with the given range of `start` and `end`.
+    fn find_intersecting(&self, start: usize, end: usize) -> &[Block];
+}
+
+impl BlocksExt for Vec<Block> {
+    fn find_intersecting(&self, start: usize, end: usize) -> &[Block] {
+        let start_idx = self.partition_point(|block| !block.intersects(start, end));
+        let end_idx = self[start_idx..]
+            .iter()
+            .position(|block| !block.intersects(start, end))
+            .map(|idx| idx + start_idx)
+            .unwrap_or(self.len());
+        &self[start_idx..end_idx]
+    }
+}
+
+#[cfg(test)]
+mod blocks_find_intersecting_tests {
+    use super::*;
+
+    #[test]
+    fn returns_overlapping_blocks() {
+        let blocks = vec![
+            Block {
+                name: None,
+                starts_at: 2,
+                ends_at: 2,
+                affects: vec![],
+            },
+            Block {
+                name: None,
+                starts_at: 4,
+                ends_at: 10,
+                affects: vec![],
+            },
+            Block {
+                name: None,
+                starts_at: 4,
+                ends_at: 7,
+                affects: vec![],
+            },
+            Block {
+                name: None,
+                starts_at: 8,
+                ends_at: 9,
+                affects: vec![],
+            },
+            Block {
+                name: None,
+                starts_at: 11,
+                ends_at: 13,
+                affects: vec![],
+            },
+        ];
+
+        let overlapping_blocks = blocks.find_intersecting(1, 1);
+        assert!(overlapping_blocks.is_empty());
+
+        let overlapping_blocks = blocks.find_intersecting(3, 4);
+        assert_eq!(overlapping_blocks, &blocks[1..3]);
+
+        let overlapping_blocks = blocks.find_intersecting(4, 7);
+        assert_eq!(overlapping_blocks, &blocks[1..3]);
+
+        let overlapping_blocks = blocks.find_intersecting(5, 9);
+        assert_eq!(overlapping_blocks, &blocks[1..4]);
+
+        let overlapping_blocks = blocks.find_intersecting(12, 12);
+        assert_eq!(overlapping_blocks, &blocks[4..5]);
+
+        let overlapping_blocks = blocks.find_intersecting(1, 14);
+        assert_eq!(overlapping_blocks, &blocks[..]);
+
+        let overlapping_blocks = blocks.find_intersecting(14, 15);
+        assert!(overlapping_blocks.is_empty());
+    }
 }
 
 struct TreeSitterCommentsParser<F: Fn(&str) -> String> {
