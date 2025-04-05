@@ -1,7 +1,14 @@
-use crate::parsers::{CommentsParser, TreeSitterCommentsParser};
+use crate::parsers::{
+    BlocksFromCommentsParser, BlocksParser, CommentsParser, TreeSitterCommentsParser,
+};
 use tree_sitter::Query;
 
-pub(crate) fn parser() -> anyhow::Result<impl CommentsParser> {
+/// Returns a [`BlockParser`] for Java.
+pub(crate) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
+    Ok(Box::new(BlocksFromCommentsParser::new(comments_parser()?)))
+}
+
+fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let java_language = tree_sitter_java::LANGUAGE.into();
     let line_comment_query = Query::new(&java_language, "(line_comment) @comment")?;
     let block_comment_query = Query::new(&java_language, "(block_comment) @comment")?;
@@ -41,9 +48,9 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let parser = parser()?;
+        let comments_parser = comments_parser()?;
 
-        let blocks = parser.parse(
+        let blocks = comments_parser.parse(
             r#"
         /**
          * This is a simple Java program demonstrating different types of comments.
