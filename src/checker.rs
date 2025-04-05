@@ -30,12 +30,10 @@ impl Block {
         let idx = ranges.binary_search_by(|(start, end)| {
             if self.intersects_with(*start, *end) {
                 Ordering::Equal
+            } else if *end < self.starts_at {
+                Ordering::Less
             } else {
-                if *end < self.starts_at {
-                    Ordering::Less
-                } else {
-                    Ordering::Greater
-                }
+                Ordering::Greater
             }
         });
         idx.is_ok()
@@ -202,8 +200,8 @@ impl fmt::Display for ReferencingBlock {
     }
 }
 
-pub(crate) fn check_blocks(
-    modified_ranges_by_file: &HashMap<String, Vec<(usize, usize)>>,
+pub(crate) fn check_blocks<'a>(
+    modified_ranges_by_file: impl Iterator<Item = (&'a str, &'a [(usize, usize)])>,
     file_reader: impl FileReader,
     parsers: HashMap<String, Rc<Box<dyn BlocksParser>>>,
 ) -> anyhow::Result<()> {
@@ -222,18 +220,18 @@ pub(crate) fn check_blocks(
                         continue;
                     }
                     if let Some(name) = &block.name {
-                        named_modified_blocks.insert((file_path.clone(), name.clone()));
+                        named_modified_blocks.insert((file_path, name.clone()));
                     }
                     for affected_block in block.affects.iter() {
                         let (affected_file_name, affected_name) = affected_block;
                         let affected_file_name = affected_file_name
                             .clone()
-                            .unwrap_or_else(|| file_path.clone());
+                            .unwrap_or_else(|| file_path.to_string());
                         let refs = affected_blocks
                             .entry((affected_file_name, affected_name.clone()))
                             .or_default();
                         refs.push(ReferencingBlock {
-                            file_path: file_path.clone(),
+                            file_path: file_path.to_string(),
                             name: block.name.clone(),
                             starts_at: block.starts_at,
                         });
@@ -244,7 +242,7 @@ pub(crate) fn check_blocks(
     }
     let mut missing_blocks = Vec::new();
     for ((file_path, name), refs) in affected_blocks {
-        if !named_modified_blocks.contains(&(file_path.clone(), name.clone())) {
+        if !named_modified_blocks.contains(&(file_path.as_str(), name.clone())) {
             missing_blocks.push(((file_path, name), refs));
         }
     }
@@ -321,10 +319,10 @@ mod check_blocks_tests {
                 .to_string(),
             ),
         ]));
-        let modified_ranges_by_file = HashMap::from([("main.rs".to_string(), vec![(3, 4)])]);
+        let modified_ranges_by_file = [("main.rs", &[(3usize, 4usize)][..])];
         let parsers = language_parsers()?;
 
-        let error = check_blocks(&modified_ranges_by_file, file_reader, parsers)
+        let error = check_blocks(modified_ranges_by_file.into_iter(), file_reader, parsers)
             .unwrap_err()
             .to_string();
         assert_eq!(
@@ -361,13 +359,13 @@ mod check_blocks_tests {
                 .to_string(),
             ),
         ]));
-        let modified_ranges_by_file = HashMap::from([
-            ("main.rs".to_string(), vec![(3, 4)]),
-            ("other.rs".to_string(), vec![(4, 5)]),
-        ]);
+        let modified_ranges_by_file = [
+            ("main.rs", &[(3usize, 4usize)][..]),
+            ("other.rs", &[(4usize, 5usize)][..]),
+        ];
         let parsers = language_parsers()?;
 
-        let result = check_blocks(&modified_ranges_by_file, file_reader, parsers);
+        let result = check_blocks(modified_ranges_by_file.into_iter(), file_reader, parsers);
         assert!(result.is_ok());
 
         Ok(())
@@ -398,11 +396,10 @@ mod check_blocks_tests {
         "#
             .to_string(),
         )]));
-        let modified_ranges_by_file =
-            HashMap::from([("main.rs".to_string(), vec![(3, 4), (9, 10), (15, 16)])]);
+        let modified_ranges_by_file = [("main.rs", &[(3usize, 4usize), (9, 10), (15, 16)][..])];
         let parsers = language_parsers()?;
 
-        let result = check_blocks(&modified_ranges_by_file, file_reader, parsers);
+        let result = check_blocks(modified_ranges_by_file.into_iter(), file_reader, parsers);
         assert!(result.is_ok());
 
         Ok(())
@@ -433,11 +430,11 @@ mod check_blocks_tests {
         "#
             .to_string(),
         )]));
-        let modified_ranges_by_file =
-            HashMap::from([("main.rs".to_string(), vec![(3, 4), (9, 10)])]);
+
+        let modified_ranges_by_file = [("main.rs", &[(3usize, 4usize), (9, 10)][..])];
         let parsers = language_parsers()?;
 
-        let error = check_blocks(&modified_ranges_by_file, file_reader, parsers)
+        let error = check_blocks(modified_ranges_by_file.into_iter(), file_reader, parsers)
             .unwrap_err()
             .to_string();
         assert_eq!(
@@ -470,13 +467,13 @@ mod check_blocks_tests {
                 .to_string(),
             ),
         ]));
-        let modified_ranges_by_file = HashMap::from([
-            ("a.rs".to_string(), vec![(3, 3)]),
-            ("b.rs".to_string(), vec![(3, 4)]),
-        ]);
+        let modified_ranges_by_file = [
+            ("a.rs", &[(3usize, 3usize)][..]),
+            ("b.rs", &[(3usize, 4usize)][..]),
+        ];
         let parsers = language_parsers()?;
 
-        let result = check_blocks(&modified_ranges_by_file, file_reader, parsers);
+        let result = check_blocks(modified_ranges_by_file.into_iter(), file_reader, parsers);
         assert!(result.is_ok());
 
         Ok(())
@@ -513,13 +510,13 @@ mod check_blocks_tests {
                 .to_string(),
             ),
         ]));
-        let modified_ranges_by_file = HashMap::from([
-            ("a.rs".to_string(), vec![(3, 3)]),
-            ("b.rs".to_string(), vec![(3, 3)]),
-        ]);
+        let modified_ranges_by_file = [
+            ("a.rs", &[(3usize, 3usize)][..]),
+            ("b.rs", &[(3usize, 3usize)][..]),
+        ];
         let parsers = language_parsers()?;
 
-        let error = check_blocks(&modified_ranges_by_file, file_reader, parsers)
+        let error = check_blocks(modified_ranges_by_file.into_iter(), file_reader, parsers)
             .unwrap_err()
             .to_string();
         assert_eq!(
@@ -561,14 +558,14 @@ mod check_blocks_tests {
                 .to_string(),
             ),
         ]));
-        let modified_ranges_by_file = HashMap::from([
-            ("a.rs".to_string(), vec![(3, 3)]),
-            ("b.rs".to_string(), vec![(3, 3)]),
-            ("c.rs".to_string(), vec![(3, 3)]),
-        ]);
+        let modified_ranges_by_file = [
+            ("a.rs", &[(3usize, 3usize)][..]),
+            ("b.rs", &[(3usize, 3usize)][..]),
+            ("c.rs", &[(3usize, 3usize)][..]),
+        ];
         let parsers = language_parsers()?;
 
-        let result = check_blocks(&modified_ranges_by_file, file_reader, parsers);
+        let result = check_blocks(modified_ranges_by_file.into_iter(), file_reader, parsers);
 
         assert!(result.is_ok());
         Ok(())
@@ -577,10 +574,10 @@ mod check_blocks_tests {
     #[test]
     fn empty_input_returns_ok() -> anyhow::Result<()> {
         let file_reader = FakeFileReader::new(HashMap::new());
-        let modified_ranges_by_file = HashMap::new();
+        let modified_ranges_by_file: [(&str, &[(usize, usize)]); 0] = [];
         let parsers = language_parsers()?;
 
-        let result = check_blocks(&modified_ranges_by_file, file_reader, parsers);
+        let result = check_blocks(modified_ranges_by_file.into_iter(), file_reader, parsers);
         assert!(result.is_ok());
 
         Ok(())

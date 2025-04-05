@@ -16,7 +16,9 @@ fn main() -> anyhow::Result<()> {
     let root_path = repository_root_path(fs::canonicalize(env::current_dir()?)?)?;
 
     checker::check_blocks(
-        &modified_ranges_by_file,
+        modified_ranges_by_file
+            .iter()
+            .map(|(file_path, ranges)| (file_path.as_str(), ranges.as_slice())),
         checker::FsReader::new(root_path),
         parsers::language_parsers()?,
     )
