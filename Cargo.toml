@@ -5,6 +5,7 @@ edition = "2024"
 repository = "https://github.com/mennanov/blockwatch"
 description = "Linter that tracks changes between dependent blocks of code"
 homepage = "https://github.com/mennanov/blockwatch"
+license = "MIT"
 
 [dependencies]
 anyhow = "1.0.97"
