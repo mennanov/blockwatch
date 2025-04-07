@@ -2,6 +2,9 @@
 name = "blockwatch"
 version = "0.1.0"
 edition = "2024"
+repository = "https://github.com/mennanov/blockwatch"
+description = "Linter that tracks changes between dependent blocks of code"
+homepage = "https://github.com/mennanov/blockwatch"
 
 [dependencies]
 anyhow = "1.0.97"
@@ -14,3 +17,8 @@ diffy = "0.4.2"
 
 [build-dependencies]
 cc="1.2"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
