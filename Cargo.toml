@@ -6,11 +6,11 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.97"
 tree-sitter = "0.25.3"
-tree-sitter-rust = "0.23"
+tree-sitter-rust = "0.24"
 tree-sitter-java = "0.23.5"
 tree-sitter-md = "0.3.2"
 quick-xml = "0.37.2"
 diffy = "0.4.2"
 
 [build-dependencies]
-cc="1.2.16"
+cc="1.2"
