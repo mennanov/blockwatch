@@ -12,37 +12,41 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let rust_language = tree_sitter_rust::LANGUAGE.into();
     let line_comment_query = Query::new(&rust_language, "(line_comment) @comment")?;
     let block_comment_query = Query::new(&rust_language, "(block_comment) @comment")?;
-    let parser = TreeSitterCommentsParser::<fn(&str) -> String>::new(
+    let parser = TreeSitterCommentsParser::<fn(usize, &str) -> Option<String>>::new(
         rust_language,
         vec![
             (
                 line_comment_query,
-                Some(|comment| {
-                    comment
-                        .strip_prefix("//")
-                        .unwrap()
-                        .trim_start_matches("!")
-                        .trim_start_matches("/")
-                        .trim()
-                        .to_string()
+                Some(|_, comment| {
+                    Some(
+                        comment
+                            .strip_prefix("//")
+                            .unwrap()
+                            .trim_start_matches("!")
+                            .trim_start_matches("/")
+                            .trim()
+                            .to_string(),
+                    )
                 }),
             ),
             (
                 block_comment_query,
-                Some(|comment| {
-                    comment
-                        .strip_prefix("/*")
-                        .expect("Expected a block comment to start with '/*'")
-                        .lines()
-                        .map(|line| {
-                            line.trim_start()
-                                .trim_start_matches("*")
-                                .trim()
-                                .trim_end_matches("/")
-                                .trim_end_matches("*")
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n")
+                Some(|_, comment| {
+                    Some(
+                        comment
+                            .strip_prefix("/*")
+                            .expect("Expected a block comment to start with '/*'")
+                            .lines()
+                            .map(|line| {
+                                line.trim_start()
+                                    .trim_start_matches("*")
+                                    .trim()
+                                    .trim_end_matches("/")
+                                    .trim_end_matches("*")
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    )
                 }),
             ),
         ],

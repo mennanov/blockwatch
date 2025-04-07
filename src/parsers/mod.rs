@@ -1,4 +1,5 @@
 mod java;
+mod markdown;
 mod rust;
 
 use crate::checker::Block;
@@ -33,26 +34,29 @@ trait CommentsParser {
 pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn BlocksParser>>>> {
     let java_parser = Rc::new(java::parser()?);
     let rust_parser = Rc::new(rust::parser()?);
+    let markdown_parser = Rc::new(markdown::parser()?);
     // <block affects="README.md:supported-languages">
     Ok(HashMap::from([
         ("java".into(), java_parser),
+        ("md".into(), Rc::clone(&markdown_parser)),
+        ("markdown".into(), markdown_parser),
         ("rs".into(), rust_parser),
     ]))
     // </block>
 }
 
-struct TreeSitterCommentsParser<F: Fn(&str) -> String> {
+struct TreeSitterCommentsParser<F: Fn(usize, &str) -> Option<String>> {
     language: Language,
     queries: Vec<(Query, Option<F>)>,
 }
 
-impl<F: Fn(&str) -> String> TreeSitterCommentsParser<F> {
+impl<F: Fn(usize, &str) -> Option<String>> TreeSitterCommentsParser<F> {
     fn new(language: Language, queries: Vec<(Query, Option<F>)>) -> Self {
         Self { language, queries }
     }
 }
 
-impl<F: Fn(&str) -> String> CommentsParser for TreeSitterCommentsParser<F> {
+impl<F: Fn(usize, &str) -> Option<String>> CommentsParser for TreeSitterCommentsParser<F> {
     fn parse(&self, source_code: &str) -> anyhow::Result<Vec<(usize, String)>> {
         let mut parser = Parser::new();
         parser
@@ -71,7 +75,9 @@ impl<F: Fn(&str) -> String> CommentsParser for TreeSitterCommentsParser<F> {
                     let start_line = node.start_position().row + 1; // Convert to 1-based indexing
                     let comment_text = &source_code[node.start_byte()..node.end_byte()];
                     if let Some(processor) = post_processor {
-                        blocks.push((start_line, processor(comment_text)));
+                        if let Some(out) = processor(capture.index as usize, comment_text) {
+                            blocks.push((start_line, out));
+                        }
                     } else {
                         blocks.push((start_line, comment_text.to_string()));
                     }

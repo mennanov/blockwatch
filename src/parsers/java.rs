@@ -12,29 +12,31 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let java_language = tree_sitter_java::LANGUAGE.into();
     let line_comment_query = Query::new(&java_language, "(line_comment) @comment")?;
     let block_comment_query = Query::new(&java_language, "(block_comment) @comment")?;
-    let parser = TreeSitterCommentsParser::<fn(&str) -> String>::new(
+    let parser = TreeSitterCommentsParser::<fn(usize, &str) -> Option<String>>::new(
         java_language,
         vec![
             (
                 line_comment_query,
-                Some(|comment| comment.strip_prefix("//").unwrap().trim().to_string()),
+                Some(|_, comment| Some(comment.strip_prefix("//").unwrap().trim().to_string())),
             ),
             (
                 block_comment_query,
-                Some(|comment| {
-                    comment
-                        .strip_prefix("/*")
-                        .unwrap()
-                        .lines()
-                        .map(|line| {
-                            line.trim_start()
-                                .trim_start_matches("*")
-                                .trim()
-                                .trim_end_matches("/")
-                                .trim_end_matches("*")
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n")
+                Some(|_, comment| {
+                    Some(
+                        comment
+                            .strip_prefix("/*")
+                            .unwrap()
+                            .lines()
+                            .map(|line| {
+                                line.trim_start()
+                                    .trim_start_matches("*")
+                                    .trim()
+                                    .trim_end_matches("/")
+                                    .trim_end_matches("*")
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    )
                 }),
             ),
         ],

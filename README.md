@@ -46,6 +46,7 @@ git diff --patch | blockwatch
 [//]: # (<block name="supported-languages">)
 
 - Java
+- Markdown
 - Rust
 
 [//]: # (</block>)
