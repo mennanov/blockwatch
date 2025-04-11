@@ -44,6 +44,20 @@ error:
 git diff --patch | blockwatch
 ```
 
+## Run as a GitHub Action
+
+Add the following to your workflow `.yml` file:
+
+```yaml
+jobs:
+
+  blockwatch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: mennanov/blockwatch@v0
+```
+
 ## Install
 
 ### From source
