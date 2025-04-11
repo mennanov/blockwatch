@@ -41,4 +41,4 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: mennanov/blockwatch@v0.1.5
+      - uses: mennanov/blockwatch@v0.1.6
