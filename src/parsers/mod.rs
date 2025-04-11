@@ -1,7 +1,7 @@
 mod java;
 mod markdown;
-mod rust;
 mod python;
+mod rust;
 
 use crate::checker::Block;
 use anyhow::Context;
