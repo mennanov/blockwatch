@@ -16,5 +16,5 @@ runs:
 
     - name: Run blockwatch
       run: |
-        git diff --patch ${{ github.base_ref }}...${{ github.head_ref }} | blockwatch
+        git diff --patch origin/${{ github.base_ref }}...${{ github.sha }} | blockwatch
       shell: bash
