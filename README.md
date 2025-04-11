@@ -1,4 +1,5 @@
 # blockwatch
+
 [![Build Status](https://github.com/mennanov/blockwatch/actions/workflows/rust.yml/badge.svg)](https://github.com/mennanov/blockwatch/actions)
 [![codecov](https://codecov.io/gh/mennanov/blockwatch/graph/badge.svg?token=LwUfGTZ551)](https://codecov.io/gh/mennanov/blockwatch)
 
@@ -42,6 +43,18 @@ error:
 ```shell
 git diff --patch | blockwatch
 ```
+
+## Install
+
+### From source
+
+```shell
+cargo install blockwatch
+```
+
+### Prebuilt binary
+
+See https://github.com/mennanov/blockwatch/releases
 
 ## Supported languages
 
@@ -113,15 +126,11 @@ fn bar() {
 - blocks declared in unsupported languages are ignored
 - multiple blocks can't be declared in a single line: `<block><block>will not work</block/</block>`
 
-## Install
-
-TODO
-
 ## Contributing
 
 ### Adding a language support
 
-TODO
+Follow the [pull request for Python](https://github.com/mennanov/blockwatch/pull/2) as an example.
 
 ## Run tests
 
