@@ -1,0 +1,20 @@
+name: 'blockwatch linter'
+description: 'Runs the blockwatch linter to analyze diffs'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # ensures that git diff is available for previous commits
+
+    - name: Install blockwatch
+      run: |
+        cargo install blockwatch
+      shell: bash
+
+    - name: Run blockwatch
+      run: |
+        git diff --patch ${{ github.base_ref }}...${{ github.head_ref }} | blockwatch
+      shell: bash
