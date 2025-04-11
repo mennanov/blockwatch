@@ -21,24 +21,15 @@ jobs:
         toolchain: nightly
         components: llvm-tools-preview
     - name: Build
-      run: cargo build --verbose
-      env:
-        CARGO_INCREMENTAL: '0'
-        RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort'
-        RUSTDOCFLAGS: '-Cpanic=abort'
+      run: cargo build
     - name: Run Clippy lint
       run: cargo clippy
     - name: Run tests
-      run: cargo test --verbose
-    - name: Install grcov
-      run: |
-        - curl -L https://github.com/mozilla/grcov/releases/latest/download/grcov-x86_64-unknown-linux-gnu.tar.bz2 | tar jxf -
-    - name: Run grcov
-      run: ./grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore "/*" -o lcov.info
-    - name: Upload coverage reports to Codecov
+      run: cargo llvm-cov --lcov --output-path coverage.lcov
+    - name: Upload coverage report to Codecov
       uses: codecov/codecov-action@v5
       with:
-       files: ./lcov.info
+       files: coverage.lcov
        token: ${{ secrets.CODECOV_TOKEN }}
        verbose: true
        fail_ci_if_error: true
