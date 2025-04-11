@@ -15,24 +15,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
-      with:
-        toolchain: stable
-        components: llvm-tools-preview, clippy, rustfmt
-    - name: Install cargo-llvm-cov
-      run: cargo install cargo-llvm-cov
-    - name: Build
-      run: cargo build
-    - name: Check formatting
-      run: cargo fmt --check
-    - name: Run Clippy lint
-      run: cargo clippy
-    - name: Run tests
-      run: cargo llvm-cov --lcov --output-path coverage.lcov
-    - name: Upload coverage report to Codecov
-      uses: codecov/codecov-action@v5
-      with:
-       files: coverage.lcov
-       token: ${{ secrets.CODECOV_TOKEN }}
-       fail_ci_if_error: true
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: llvm-tools-preview, clippy, rustfmt
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov
+      - name: Build
+        run: cargo build
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Run Clippy lint
+        run: cargo clippy
+      - name: Run tests
+        run: cargo llvm-cov --lcov --output-path coverage.lcov
+      - name: Upload coverage report to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.lcov
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
+
+  blockwatch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: mennanov/blockwatch@v0.1.5
