@@ -49,6 +49,7 @@ git diff --patch | blockwatch
 
 - Java
 - Markdown
+- Python
 - Rust
 
 [//]: # (</block>)

@@ -1,5 +1,6 @@
 mod java;
 mod markdown;
+mod python;
 mod rust;
 
 use crate::checker::Block;
@@ -35,11 +36,14 @@ pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn Bl
     let java_parser = Rc::new(java::parser()?);
     let rust_parser = Rc::new(rust::parser()?);
     let markdown_parser = Rc::new(markdown::parser()?);
+    let python_parser = Rc::new(python::parser()?);
     // <block affects="README.md:supported-languages">
     Ok(HashMap::from([
         ("java".into(), java_parser),
         ("md".into(), Rc::clone(&markdown_parser)),
         ("markdown".into(), markdown_parser),
+        ("py".into(), Rc::clone(&python_parser)),
+        ("pyi".into(), python_parser),
         ("rs".into(), rust_parser),
     ]))
     // </block>
