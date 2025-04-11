@@ -20,6 +20,8 @@ jobs:
       with:
         toolchain: nightly
         components: llvm-tools-preview, clippy
+    - name: Install cargo-llvm-cov
+      run: cargo install cargo-llvm-cov
     - name: Build
       run: cargo build
     - name: Run Clippy lint
