@@ -1,4 +1,5 @@
 # blockwatch
+[![Build Status](https://github.com/mennanov/blockwatch/actions/workflows/rust.yml/badge.svg)](https://github.com/mennanov/blockwatch/actions)
 
 Linter that tracks changes between dependent blocks of code.
 
