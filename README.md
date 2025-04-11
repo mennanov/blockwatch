@@ -55,7 +55,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: mennanov/blockwatch@v0
+      - uses: mennanov/blockwatch-action@v1
 ```
 
 ## Install
