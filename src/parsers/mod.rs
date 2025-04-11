@@ -38,6 +38,7 @@ pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn Bl
     let markdown_parser = Rc::new(markdown::parser()?);
     let python_parser = Rc::new(python::parser()?);
     // <block affects="README.md:supported-languages">
+    // TODO: revert me. Testing the blockwatch action.
     Ok(HashMap::from([
         ("java".into(), java_parser),
         ("md".into(), Rc::clone(&markdown_parser)),
