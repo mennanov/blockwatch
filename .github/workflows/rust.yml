@@ -19,7 +19,7 @@ jobs:
     - uses: dtolnay/rust-toolchain@stable
       with:
         toolchain: stable
-        components: clippy, rustfmt
+        components: llvm-tools-preview, clippy, rustfmt
     - name: Install cargo-llvm-cov
       run: cargo install cargo-llvm-cov
     - name: Build
