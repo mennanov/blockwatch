@@ -19,7 +19,7 @@ jobs:
     - uses: dtolnay/rust-toolchain@stable
       with:
         toolchain: nightly
-        components: llvm-tools-preview
+        components: llvm-tools-preview, clippy
     - name: Build
       run: cargo build
     - name: Run Clippy lint
