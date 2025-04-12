@@ -3,7 +3,7 @@ use crate::parsers::{
 };
 use tree_sitter::Query;
 
-/// Returns a [`BlockParser`] for JavaScript.
+/// Returns a [`BlocksParser`] for JavaScript.
 pub(crate) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
     Ok(Box::new(BlocksFromCommentsParser::new(comments_parser()?)))
 }
