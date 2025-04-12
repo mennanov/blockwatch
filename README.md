@@ -75,6 +75,7 @@ See https://github.com/mennanov/blockwatch/releases
 [//]: # (<block name="supported-languages">)
 
 - Java
+- JavaScript
 - Markdown
 - Python
 - Rust
@@ -88,7 +89,7 @@ See https://github.com/mennanov/blockwatch/releases
 ```rust
 // <block name="foo" affects=":bar, :buzz">
 fn main() {
-    println!("Blocks can affect multiple other blocks in declared in the same file");
+    println!("Blocks can affect multiple other blocks declared in the same file");
     println!("Just omit the file name in the 'affects' attribute");
 }
 // </block>

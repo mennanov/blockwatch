@@ -1,4 +1,5 @@
 mod java;
+mod javascript;
 mod markdown;
 mod python;
 mod rust;
@@ -34,12 +35,15 @@ trait CommentsParser {
 /// Returns a map of all available language parsers by their file extensions.
 pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn BlocksParser>>>> {
     let java_parser = Rc::new(java::parser()?);
+    let js_parser = Rc::new(javascript::parser()?);
     let rust_parser = Rc::new(rust::parser()?);
     let markdown_parser = Rc::new(markdown::parser()?);
     let python_parser = Rc::new(python::parser()?);
     // <block affects="README.md:supported-languages">
     Ok(HashMap::from([
         ("java".into(), java_parser),
+        ("js".into(), Rc::clone(&js_parser)),
+        ("jsx".into(), js_parser),
         ("md".into(), Rc::clone(&markdown_parser)),
         ("markdown".into(), markdown_parser),
         ("py".into(), Rc::clone(&python_parser)),
