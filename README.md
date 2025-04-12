@@ -79,6 +79,9 @@ See https://github.com/mennanov/blockwatch/releases
 - Markdown
 - Python
 - Rust
+- TOML
+- XML
+- YAML
 
 [//]: # (</block>)
 

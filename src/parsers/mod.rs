@@ -3,6 +3,9 @@ mod javascript;
 mod markdown;
 mod python;
 mod rust;
+mod toml;
+mod xml;
+mod yaml;
 
 use crate::checker::Block;
 use anyhow::Context;
@@ -39,6 +42,9 @@ pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn Bl
     let rust_parser = Rc::new(rust::parser()?);
     let markdown_parser = Rc::new(markdown::parser()?);
     let python_parser = Rc::new(python::parser()?);
+    let toml_parser = Rc::new(toml::parser()?);
+    let yaml_parser = Rc::new(yaml::parser()?);
+    let xml_parser = Rc::new(xml::parser()?);
     // <block affects="README.md:supported-languages">
     Ok(HashMap::from([
         ("java".into(), java_parser),
@@ -49,6 +55,10 @@ pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn Bl
         ("py".into(), Rc::clone(&python_parser)),
         ("pyi".into(), python_parser),
         ("rs".into(), rust_parser),
+        ("toml".into(), toml_parser),
+        ("yml".into(), Rc::clone(&yaml_parser)),
+        ("yaml".into(), yaml_parser),
+        ("xml".into(), xml_parser),
     ]))
     // </block>
 }
