@@ -74,6 +74,7 @@ See https://github.com/mennanov/blockwatch/releases
 
 [//]: # (<block name="supported-languages">)
 
+- C/C++
 - Java
 - JavaScript
 - Markdown
