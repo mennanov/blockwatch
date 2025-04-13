@@ -80,6 +80,7 @@ See https://github.com/mennanov/blockwatch/releases
 - Python
 - Rust
 - TOML
+- TypeScript (+TSX)
 - XML
 - YAML
 

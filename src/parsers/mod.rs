@@ -4,6 +4,8 @@ mod markdown;
 mod python;
 mod rust;
 mod toml;
+mod tsx;
+mod typescript;
 mod xml;
 mod yaml;
 
@@ -43,6 +45,8 @@ pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn Bl
     let markdown_parser = Rc::new(markdown::parser()?);
     let python_parser = Rc::new(python::parser()?);
     let toml_parser = Rc::new(toml::parser()?);
+    let typescript_parser = Rc::new(typescript::parser()?);
+    let typescript_tsx_parser = Rc::new(tsx::parser()?);
     let yaml_parser = Rc::new(yaml::parser()?);
     let xml_parser = Rc::new(xml::parser()?);
     // <block affects="README.md:supported-languages">
@@ -56,6 +60,9 @@ pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn Bl
         ("pyi".into(), python_parser),
         ("rs".into(), rust_parser),
         ("toml".into(), toml_parser),
+        ("ts".into(), Rc::clone(&typescript_parser)),
+        ("d.ts".into(), typescript_parser),
+        ("tsx".into(), typescript_tsx_parser),
         ("yml".into(), Rc::clone(&yaml_parser)),
         ("yaml".into(), yaml_parser),
         ("xml".into(), xml_parser),
