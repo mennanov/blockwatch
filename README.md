@@ -75,6 +75,7 @@ See https://github.com/mennanov/blockwatch/releases
 [//]: # (<block name="supported-languages">)
 
 - C/C++
+- C#
 - Golang
 - Java
 - JavaScript
