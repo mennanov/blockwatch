@@ -25,6 +25,11 @@ jobs:
         with:
           toolchain: stable
           components: llvm-tools-preview, clippy, rustfmt
+      - name: Cache ~/.cargo/bin
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/
+          key: ${{ runner.os }}-cargo-bin
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov
       - name: Build
