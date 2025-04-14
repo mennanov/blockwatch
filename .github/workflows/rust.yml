@@ -31,7 +31,12 @@ jobs:
           path: ~/.cargo/bin/
           key: ${{ runner.os }}-cargo-bin
       - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov --force
+        run: |
+          if [ ! -f ~/.cargo/bin/cargo-llvm-cov ]; then
+            cargo install cargo-llvm-cov
+          else
+            echo "cargo-llvm-cov found in cache."
+          fi
       - name: Build
         run: cargo build
       - name: Check formatting
