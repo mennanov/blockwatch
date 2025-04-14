@@ -2,6 +2,7 @@ name: Rust
 
 permissions:
   contents: read
+  id-token: write
   pull-requests: write
 
 on:
