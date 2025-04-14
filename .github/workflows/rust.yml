@@ -31,7 +31,7 @@ jobs:
           path: ~/.cargo/bin/
           key: ${{ runner.os }}-cargo-bin
       - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --force
       - name: Build
         run: cargo build
       - name: Check formatting
