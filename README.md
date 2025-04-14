@@ -58,6 +58,25 @@ jobs:
       - uses: mennanov/blockwatch-action@v1
 ```
 
+## Run as a pre-commit hook
+Ensure `blockwatch` is installed and available in your `PATH`.
+
+### Using [`pre-commit`](https://pre-commit.com/) framework
+
+Add the following to your `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: local
+    hooks:
+      - id: blockwatch
+        name: blockwatch
+        entry: bash -c 'git diff --cached --patch --unified=0 | blockwatch'
+        language: system
+        stages: [ pre-commit ]
+        pass_filenames: false
+```
+
 ## Install
 
 ### From source

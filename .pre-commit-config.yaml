@@ -1,0 +1,16 @@
+repos:
+  - repo: local
+    hooks:
+      - id: blockwatch
+        name: blockwatch
+        entry: bash -c 'git diff --cached --patch --unified=0 | blockwatch'
+        language: system
+        stages: [ pre-commit ]
+        pass_filenames: false
+      - id: cargo-fmt
+        name: cargo fmt
+        description: Format Rust code using cargo fmt.
+        entry: cargo fmt --check
+        language: system
+        types: [ rust ]
+        pass_filenames: false
