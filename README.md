@@ -75,6 +75,7 @@ See https://github.com/mennanov/blockwatch/releases
 [//]: # (<block name="supported-languages">)
 
 - C/C++
+- Golang
 - Java
 - JavaScript
 - Markdown
@@ -107,7 +108,7 @@ fn main() {
 // One more.
 // </block>
 ```
-
+``
 ### Blocks may reference each other
 
 ```rust

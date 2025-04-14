@@ -1,5 +1,6 @@
 mod c;
 mod cpp;
+mod go;
 mod java;
 mod javascript;
 mod markdown;
@@ -43,6 +44,7 @@ trait CommentsParser {
 pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn BlocksParser>>>> {
     let c_parser = Rc::new(c::parser()?);
     let cpp_parser = Rc::new(cpp::parser()?);
+    let go_parser = Rc::new(go::parser()?);
     let java_parser = Rc::new(java::parser()?);
     let js_parser = Rc::new(javascript::parser()?);
     let rust_parser = Rc::new(rust::parser()?);
@@ -59,6 +61,7 @@ pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn Bl
         ("cpp".into(), Rc::clone(&cpp_parser)),
         ("cc".into(), Rc::clone(&cpp_parser)),
         ("h".into(), cpp_parser),
+        ("go".into(), go_parser),
         ("java".into(), java_parser),
         ("js".into(), Rc::clone(&js_parser)),
         ("jsx".into(), js_parser),
