@@ -204,12 +204,17 @@ pub(crate) fn check_blocks<'a>(
     modified_ranges_by_file: impl Iterator<Item = (&'a str, &'a [(usize, usize)])>,
     file_reader: impl FileReader,
     parsers: HashMap<String, Rc<Box<dyn BlocksParser>>>,
+    extra_file_extensions: HashMap<String, String>,
 ) -> anyhow::Result<()> {
     let mut named_modified_blocks = HashSet::new();
     let mut affected_blocks: HashMap<(String, String), Vec<ReferencingBlock>> = HashMap::new();
     for (file_path, modified_ranges) in modified_ranges_by_file {
         let source_code = file_reader.read_to_string(Path::new(&file_path))?;
-        if let Some(ext) = file_name_extension(file_path) {
+        if let Some(mut ext) = file_name_extension(file_path) {
+            ext = extra_file_extensions
+                .get(ext)
+                .map(|e| e.as_str())
+                .unwrap_or(ext);
             if let Some(parser) = parsers.get(ext) {
                 for block in parser
                     .parse(&source_code)
@@ -322,9 +327,14 @@ mod check_blocks_tests {
         let modified_ranges_by_file = [("main.rs", &[(3usize, 4usize)][..])];
         let parsers = language_parsers()?;
 
-        let error = check_blocks(modified_ranges_by_file.into_iter(), file_reader, parsers)
-            .unwrap_err()
-            .to_string();
+        let error = check_blocks(
+            modified_ranges_by_file.into_iter(),
+            file_reader,
+            parsers,
+            HashMap::new(),
+        )
+        .unwrap_err()
+        .to_string();
         assert_eq!(
             "Blocks need to be updated:\nother.rs:foo referenced by main.rs:(unnamed) at line 2",
             error
@@ -365,7 +375,12 @@ mod check_blocks_tests {
         ];
         let parsers = language_parsers()?;
 
-        let result = check_blocks(modified_ranges_by_file.into_iter(), file_reader, parsers);
+        let result = check_blocks(
+            modified_ranges_by_file.into_iter(),
+            file_reader,
+            parsers,
+            HashMap::new(),
+        );
         assert!(result.is_ok());
 
         Ok(())
@@ -399,7 +414,12 @@ mod check_blocks_tests {
         let modified_ranges_by_file = [("main.rs", &[(3usize, 4usize), (9, 10), (15, 16)][..])];
         let parsers = language_parsers()?;
 
-        let result = check_blocks(modified_ranges_by_file.into_iter(), file_reader, parsers);
+        let result = check_blocks(
+            modified_ranges_by_file.into_iter(),
+            file_reader,
+            parsers,
+            HashMap::new(),
+        );
         assert!(result.is_ok());
 
         Ok(())
@@ -434,9 +454,14 @@ mod check_blocks_tests {
         let modified_ranges_by_file = [("main.rs", &[(3usize, 4usize), (9, 10)][..])];
         let parsers = language_parsers()?;
 
-        let error = check_blocks(modified_ranges_by_file.into_iter(), file_reader, parsers)
-            .unwrap_err()
-            .to_string();
+        let error = check_blocks(
+            modified_ranges_by_file.into_iter(),
+            file_reader,
+            parsers,
+            HashMap::new(),
+        )
+        .unwrap_err()
+        .to_string();
         assert_eq!(
             "Blocks need to be updated:\nmain.rs:bar referenced by main.rs:(unnamed) at line 2",
             error
@@ -473,7 +498,12 @@ mod check_blocks_tests {
         ];
         let parsers = language_parsers()?;
 
-        let result = check_blocks(modified_ranges_by_file.into_iter(), file_reader, parsers);
+        let result = check_blocks(
+            modified_ranges_by_file.into_iter(),
+            file_reader,
+            parsers,
+            HashMap::new(),
+        );
         assert!(result.is_ok());
 
         Ok(())
@@ -516,9 +546,14 @@ mod check_blocks_tests {
         ];
         let parsers = language_parsers()?;
 
-        let error = check_blocks(modified_ranges_by_file.into_iter(), file_reader, parsers)
-            .unwrap_err()
-            .to_string();
+        let error = check_blocks(
+            modified_ranges_by_file.into_iter(),
+            file_reader,
+            parsers,
+            HashMap::new(),
+        )
+        .unwrap_err()
+        .to_string();
         assert_eq!(
             "Blocks need to be updated:\nc.rs:target referenced by a.rs:(unnamed) at line 2, b.rs:second at line 2",
             error
@@ -565,7 +600,54 @@ mod check_blocks_tests {
         ];
         let parsers = language_parsers()?;
 
-        let result = check_blocks(modified_ranges_by_file.into_iter(), file_reader, parsers);
+        let result = check_blocks(
+            modified_ranges_by_file.into_iter(),
+            file_reader,
+            parsers,
+            HashMap::new(),
+        );
+
+        assert!(result.is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn with_extra_file_extensions_returns_ok() -> anyhow::Result<()> {
+        let file_reader = FakeFileReader::new(HashMap::from([
+            (
+                "a.custom-rust-extension1".to_string(),
+                r#"
+        // <block affects="b.custom-rust-extension2:foo">
+        fn a() {}
+        // </block>
+        "#
+                .to_string(),
+            ),
+            (
+                "b.custom-rust-extension2".to_string(),
+                r#"
+        // <block name="foo">
+        fn b() {}
+        // </block>
+        "#
+                .to_string(),
+            ),
+        ]));
+        let modified_ranges_by_file = [
+            ("a.custom-rust-extension1", &[(3usize, 3usize)][..]),
+            ("b.custom-rust-extension2", &[(3usize, 3usize)][..]),
+        ];
+        let parsers = language_parsers()?;
+
+        let result = check_blocks(
+            modified_ranges_by_file.into_iter(),
+            file_reader,
+            parsers,
+            HashMap::from([
+                ("custom-rust-extension1".into(), "rs".into()),
+                ("custom-rust-extension2".into(), "rs".into()),
+            ]),
+        );
 
         assert!(result.is_ok());
         Ok(())
@@ -577,7 +659,12 @@ mod check_blocks_tests {
         let modified_ranges_by_file: [(&str, &[(usize, usize)]); 0] = [];
         let parsers = language_parsers()?;
 
-        let result = check_blocks(modified_ranges_by_file.into_iter(), file_reader, parsers);
+        let result = check_blocks(
+            modified_ranges_by_file.into_iter(),
+            file_reader,
+            parsers,
+            HashMap::new(),
+        );
         assert!(result.is_ok());
 
         Ok(())

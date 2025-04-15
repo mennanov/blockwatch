@@ -1,0 +1,11 @@
+"""This is an example of a Python file with a custom file extension."""
+
+def main():
+  # <block affects=":foo">
+  print("Hello world"!)  # Modified.
+  # </block>
+
+def foo():
+  # <block name="foo">
+  print("Print from foo")
+  # </block>

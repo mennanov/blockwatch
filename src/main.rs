@@ -1,13 +1,19 @@
 use crate::differ::HunksExtractor;
+use clap::Parser;
 use std::io::Read;
 use std::path::PathBuf;
 use std::{env, fs, io};
 
 mod checker;
 mod differ;
+mod flags;
 mod parsers;
 
 fn main() -> anyhow::Result<()> {
+    let args = flags::Args::parse();
+    let languages = parsers::language_parsers()?;
+    args.validate(languages.keys().cloned().collect())?;
+
     let mut stdin = io::stdin();
     let mut diff = String::new();
     stdin.read_to_string(&mut diff)?;
@@ -20,7 +26,8 @@ fn main() -> anyhow::Result<()> {
             .iter()
             .map(|(file_path, ranges)| (file_path.as_str(), ranges.as_slice())),
         checker::FsReader::new(root_path),
-        parsers::language_parsers()?,
+        languages,
+        args.extensions(),
     )
 }
 
