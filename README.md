@@ -101,6 +101,7 @@ See https://github.com/mennanov/blockwatch/releases
 - Markdown
 - Python
 - Rust
+- SQL
 - TOML
 - TypeScript (+TSX)
 - XML

@@ -24,6 +24,7 @@ tree-sitter-typescript = "0.23"
 tree-sitter-cpp = "0.23"
 tree-sitter-c = "0.23"
 tree-sitter-xml = "0.7"
+tree-sitter-sequel = "0.3"
 quick-xml = "0.37"
 diffy = "0.4"
 

@@ -7,6 +7,7 @@ mod javascript;
 mod markdown;
 mod python;
 mod rust;
+mod sql;
 mod toml;
 mod tsx;
 mod typescript;
@@ -52,6 +53,7 @@ pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn Bl
     let rust_parser = Rc::new(rust::parser()?);
     let markdown_parser = Rc::new(markdown::parser()?);
     let python_parser = Rc::new(python::parser()?);
+    let sql_parser = Rc::new(sql::parser()?);
     let toml_parser = Rc::new(toml::parser()?);
     let typescript_parser = Rc::new(typescript::parser()?);
     let typescript_tsx_parser = Rc::new(tsx::parser()?);
@@ -73,6 +75,7 @@ pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn Bl
         ("py".into(), Rc::clone(&python_parser)),
         ("pyi".into(), python_parser),
         ("rs".into(), rust_parser),
+        ("sql".into(), sql_parser),
         ("toml".into(), toml_parser),
         ("ts".into(), Rc::clone(&typescript_parser)),
         ("d.ts".into(), typescript_parser),
