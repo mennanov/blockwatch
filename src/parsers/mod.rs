@@ -6,6 +6,7 @@ mod html;
 mod java;
 mod javascript;
 mod markdown;
+mod php;
 mod python;
 mod rust;
 mod sql;
@@ -54,6 +55,7 @@ pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn Bl
     let js_parser = Rc::new(javascript::parser()?);
     let rust_parser = Rc::new(rust::parser()?);
     let markdown_parser = Rc::new(markdown::parser()?);
+    let php_parser = Rc::new(php::parser()?);
     let python_parser = Rc::new(python::parser()?);
     let sql_parser = Rc::new(sql::parser()?);
     let toml_parser = Rc::new(toml::parser()?);
@@ -76,6 +78,8 @@ pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn Bl
         ("jsx".into(), js_parser),
         ("md".into(), Rc::clone(&markdown_parser)),
         ("markdown".into(), markdown_parser),
+        ("php".into(), Rc::clone(&php_parser)),
+        ("phtml".into(), php_parser),
         ("py".into(), Rc::clone(&python_parser)),
         ("pyi".into(), python_parser),
         ("rs".into(), rust_parser),

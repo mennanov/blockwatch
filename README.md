@@ -101,6 +101,7 @@ See https://github.com/mennanov/blockwatch/releases
 - Java (`.java`)
 - JavaScript (`.js`, `.jsx`)
 - Markdown (`.md`, `.markdown`)
+- PHP (`.php`, `.phtml`)
 - Python (`.py`, `.pyi`)
 - Rust (`.rs`)
 - SQL (`.sql`)
