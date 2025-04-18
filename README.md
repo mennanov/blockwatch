@@ -59,6 +59,7 @@ jobs:
 ```
 
 ## Run as a pre-commit hook
+
 Ensure `blockwatch` is installed and available in your `PATH`.
 
 ### Using [`pre-commit`](https://pre-commit.com/) framework
@@ -93,19 +94,28 @@ See https://github.com/mennanov/blockwatch/releases
 
 [//]: # (<block name="supported-languages">)
 
-- C/C++
-- C#
-- Golang
-- Java
-- JavaScript
-- Markdown
-- Python
-- Rust
-- SQL
-- TOML
-- TypeScript (+TSX)
-- XML
-- YAML
+- C/C++ (`.c`, `.cpp`, `.cc`, `.h`)
+- C# (`.cs`)
+- Golang (`.go`)
+- HTML (`.html`, `.htm`)
+- Java (`.java`)
+- JavaScript (`.js`, `.jsx`)
+- Markdown (`.md`, `.markdown`)
+- Python (`.py`, `.pyi`)
+- Rust (`.rs`)
+- SQL (`.sql`)
+- TOML (`.toml`)
+- TypeScript (+TSX) (`.ts`, `.d.ts`, `.tsx`)
+- XML (`.xml`)
+- YAML (`.yaml`, `.yml`)
+
+### Custom file extensions
+
+Map unsupported file extensions to supported ones:
+
+```shell
+git diff --patch | blockwatch -E xhtml=xml -E unsupported=supported
+```
 
 [//]: # (</block>)
 
@@ -129,7 +139,9 @@ fn main() {
 // One more.
 // </block>
 ```
+
 ``
+
 ### Blocks may reference each other
 
 ```rust

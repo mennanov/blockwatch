@@ -2,6 +2,7 @@ mod c;
 mod c_sharp;
 mod cpp;
 mod go;
+mod html;
 mod java;
 mod javascript;
 mod markdown;
@@ -48,6 +49,7 @@ pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn Bl
     let cpp_parser = Rc::new(cpp::parser()?);
     let c_sharp_parser = Rc::new(c_sharp::parser()?);
     let go_parser = Rc::new(go::parser()?);
+    let html_parser = Rc::new(html::parser()?);
     let java_parser = Rc::new(java::parser()?);
     let js_parser = Rc::new(javascript::parser()?);
     let rust_parser = Rc::new(rust::parser()?);
@@ -67,6 +69,8 @@ pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn Bl
         ("h".into(), cpp_parser),
         ("cs".into(), c_sharp_parser),
         ("go".into(), go_parser),
+        ("html".into(), Rc::clone(&html_parser)),
+        ("htm".into(), html_parser),
         ("java".into(), java_parser),
         ("js".into(), Rc::clone(&js_parser)),
         ("jsx".into(), js_parser),
