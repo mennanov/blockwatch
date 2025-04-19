@@ -18,7 +18,7 @@ Whenever some block is modified then all its affected blocks (possibly in differ
 `main.rs`:
 
 ```rust
-// <block affects="README.md:supported-languages">
+// <block affects="README.md:supported-grammar">
 const SUPPORTED_LANGUAGES = ["rust", "java", "python"];
 // </block>
 ```
@@ -26,9 +26,9 @@ const SUPPORTED_LANGUAGES = ["rust", "java", "python"];
 `README.md`:
 
 ```markdown
-## Supported languages
+## Supported grammar
 
-[//]: # (<block name="supported-languages">)
+[//]: # (<block name="supported-grammar">)
 
 - Java
 - Rust
@@ -90,14 +90,17 @@ cargo install blockwatch
 
 See https://github.com/mennanov/blockwatch/releases
 
-## Supported languages
+## Supported grammar
 
-[//]: # (<block name="supported-languages">)
+[//]: # (<block name="supported-grammar">)
 
+- Bash (`.sh`, `.bash`)
 - C/C++ (`.c`, `.cpp`, `.cc`, `.h`)
 - C# (`.cs`)
+- CSS (`.css`)
 - Golang (`.go`)
 - HTML (`.html`, `.htm`)
+- Kotlin (`.kt`, `.kts`)
 - Java (`.java`)
 - JavaScript (`.js`, `.jsx`)
 - Markdown (`.md`, `.markdown`)
@@ -178,12 +181,12 @@ fn bar() {
 ## Known limitations
 
 - deleted blocks are ignored
-- blocks declared in unsupported languages are ignored
+- blocks declared in files with unsupported grammar are ignored
 - multiple blocks can't be declared in a single line: `<block><block>will not work</block/</block>`
 
 ## Contributing
 
-### Adding a language support
+### Adding a grammar support
 
 Follow the [pull request for Python](https://github.com/mennanov/blockwatch/pull/2) as an example.
 

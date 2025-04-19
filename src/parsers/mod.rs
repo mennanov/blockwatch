@@ -1,15 +1,20 @@
+mod bash;
 mod c;
 mod c_sharp;
 mod cpp;
+mod css;
 mod go;
 mod html;
 mod java;
 mod javascript;
+mod kotlin;
 mod markdown;
 mod php;
 mod python;
+mod ruby;
 mod rust;
 mod sql;
+mod swift;
 mod toml;
 mod tsx;
 mod typescript;
@@ -46,33 +51,43 @@ trait CommentsParser {
 
 /// Returns a map of all available language parsers by their file extensions.
 pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn BlocksParser>>>> {
+    let bash_parser = Rc::new(bash::parser()?);
     let c_parser = Rc::new(c::parser()?);
     let cpp_parser = Rc::new(cpp::parser()?);
     let c_sharp_parser = Rc::new(c_sharp::parser()?);
+    let css_parser = Rc::new(css::parser()?);
     let go_parser = Rc::new(go::parser()?);
     let html_parser = Rc::new(html::parser()?);
+    let kotlin_parser = Rc::new(kotlin::parser()?);
     let java_parser = Rc::new(java::parser()?);
     let js_parser = Rc::new(javascript::parser()?);
     let rust_parser = Rc::new(rust::parser()?);
     let markdown_parser = Rc::new(markdown::parser()?);
     let php_parser = Rc::new(php::parser()?);
     let python_parser = Rc::new(python::parser()?);
+    let ruby_parser = Rc::new(ruby::parser()?);
     let sql_parser = Rc::new(sql::parser()?);
+    let swift_parser = Rc::new(swift::parser()?);
     let toml_parser = Rc::new(toml::parser()?);
     let typescript_parser = Rc::new(typescript::parser()?);
     let typescript_tsx_parser = Rc::new(tsx::parser()?);
     let yaml_parser = Rc::new(yaml::parser()?);
     let xml_parser = Rc::new(xml::parser()?);
-    // <block affects="README.md:supported-languages">
+    // <block affects="README.md:supported-grammar">
     Ok(HashMap::from([
+        ("bash".into(), Rc::clone(&bash_parser)),
+        ("sh".into(), bash_parser),
         ("c".into(), c_parser),
         ("cpp".into(), Rc::clone(&cpp_parser)),
         ("cc".into(), Rc::clone(&cpp_parser)),
         ("h".into(), cpp_parser),
+        ("css".into(), css_parser),
         ("cs".into(), c_sharp_parser),
         ("go".into(), go_parser),
         ("html".into(), Rc::clone(&html_parser)),
         ("htm".into(), html_parser),
+        ("kt".into(), Rc::clone(&kotlin_parser)),
+        ("kts".into(), kotlin_parser),
         ("java".into(), java_parser),
         ("js".into(), Rc::clone(&js_parser)),
         ("jsx".into(), js_parser),
@@ -82,8 +97,10 @@ pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn Bl
         ("phtml".into(), php_parser),
         ("py".into(), Rc::clone(&python_parser)),
         ("pyi".into(), python_parser),
+        ("rb".into(), ruby_parser),
         ("rs".into(), rust_parser),
         ("sql".into(), sql_parser),
+        ("swift".into(), swift_parser),
         ("toml".into(), toml_parser),
         ("ts".into(), Rc::clone(&typescript_parser)),
         ("d.ts".into(), typescript_parser),
