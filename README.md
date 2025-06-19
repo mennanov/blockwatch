@@ -135,6 +135,8 @@ See https://github.com/mennanov/blockwatch/releases
 - XML (`.xml`)
 - YAML (`.yaml`, `.yml`)
 
+[//]: # (</block>)
+
 ### Custom file extensions
 
 Map unsupported file extensions to supported ones:
@@ -142,8 +144,6 @@ Map unsupported file extensions to supported ones:
 ```shell
 git diff --patch | blockwatch -E xhtml=xml -E unsupported=supported
 ```
-
-[//]: # (</block>)
 
 ## More examples
 
@@ -165,8 +165,6 @@ fn main() {
 // One more.
 // </block>
 ```
-
-``
 
 ### Blocks may reference each other
 
