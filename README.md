@@ -1,15 +1,37 @@
-# blockwatch
+# BlockWatch
+
+> A powerful code linter for tracking dependencies between documentation and code blocks across multiple files and
+> languages
 
 [![Build Status](https://github.com/mennanov/blockwatch/actions/workflows/rust.yml/badge.svg)](https://github.com/mennanov/blockwatch/actions)
 [![codecov](https://codecov.io/gh/mennanov/blockwatch/graph/badge.svg?token=LwUfGTZ551)](https://codecov.io/gh/mennanov/blockwatch)
+[![Crates.io](https://img.shields.io/crates/v/blockwatch)](https://crates.io/crates/blockwatch)
+[![Downloads](https://img.shields.io/crates/d/blockwatch)](https://crates.io/crates/blockwatch)
 
-Linter that tracks changes between dependent blocks of code.
+🔍 Keep your codebase consistent by automatically tracking and validating dependencies between code blocks and
+documentation.
 
-## How
+## Features
 
-Declare the blocks in the comments of the source file.
+- 📝 Track dependencies between code blocks across files
+- 🔄 Automatic validation on git diff
+- 🛠️ Pre-commit hook support
+- 🚀 GitHub Actions integration
+- 🌍 Support for 20+ programming languages
+- ⚡ Fast and lightweight
 
-Validate by running `git diff --patch | blockwatch`:
+## Usage
+
+BlockWatch validates dependencies between code blocks by monitoring changes in your git diff:
+
+1. Declare dependent blocks in your source files using special comment syntax
+2. Run validation before commits: `git diff --patch | blockwatch`
+3. _Optionally_: install a pre-commit hook
+4. _Optionally_: integrate with CI/CD pipelines for automated checks
+
+### Getting Started
+
+First, mark your code blocks with dependency declarations:
 
 ### Example
 
