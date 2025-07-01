@@ -11,7 +11,7 @@ license = "MIT"
 anyhow = "1.0"
 clap = { version = "4.5", features = ["cargo", "derive"] }
 diffy = "0.4"
-quick-xml = "0.37"
+quick-xml = "0.38"
 tree-sitter = "0.25"
 tree-sitter-bash = "0.23"
 tree-sitter-c = "0.24"
