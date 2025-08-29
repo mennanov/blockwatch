@@ -1,5 +1,3 @@
-#![feature(iter_map_windows)]
-
 use crate::differ::HunksExtractor;
 use crate::validators::Context;
 use clap::Parser;
