@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 fn parse_extensions(s: &str) -> anyhow::Result<(String, String)> {
     s.split_once('=')
         .map(|(key, value)| (key.trim().to_string(), value.trim().to_string()))
-        .with_context(|| format!("Invalid KEY=VALUE format: {}", s))
+        .with_context(|| format!("Invalid KEY=VALUE format: {s}"))
 }
 
 #[derive(Parser, Debug)]

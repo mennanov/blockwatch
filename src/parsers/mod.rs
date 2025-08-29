@@ -21,7 +21,7 @@ mod typescript;
 mod xml;
 mod yaml;
 
-use crate::checker::Block;
+use crate::blocks::{Block, BlockBuilder};
 use anyhow::Context;
 use quick_xml::events::Event;
 use std::collections::HashMap;
@@ -73,43 +73,43 @@ pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn Bl
     let typescript_tsx_parser = Rc::new(tsx::parser()?);
     let yaml_parser = Rc::new(yaml::parser()?);
     let xml_parser = Rc::new(xml::parser()?);
-    // <block affects="README.md:supported-grammar">
     Ok(HashMap::from([
+        // <block affects="README.md:supported-grammar" keep-sorted="asc">
         ("bash".into(), Rc::clone(&bash_parser)),
-        ("sh".into(), bash_parser),
         ("c".into(), c_parser),
-        ("cpp".into(), Rc::clone(&cpp_parser)),
         ("cc".into(), Rc::clone(&cpp_parser)),
-        ("h".into(), cpp_parser),
-        ("css".into(), css_parser),
+        ("cpp".into(), Rc::clone(&cpp_parser)),
         ("cs".into(), c_sharp_parser),
+        ("css".into(), css_parser),
+        ("d.ts".into(), Rc::clone(&typescript_parser)),
         ("go".into(), go_parser),
-        ("html".into(), Rc::clone(&html_parser)),
-        ("htm".into(), html_parser),
-        ("kt".into(), Rc::clone(&kotlin_parser)),
-        ("kts".into(), kotlin_parser),
+        ("h".into(), cpp_parser),
+        ("htm".into(), Rc::clone(&html_parser)),
+        ("html".into(), html_parser),
         ("java".into(), java_parser),
         ("js".into(), Rc::clone(&js_parser)),
         ("jsx".into(), js_parser),
-        ("md".into(), Rc::clone(&markdown_parser)),
-        ("markdown".into(), markdown_parser),
+        ("kt".into(), Rc::clone(&kotlin_parser)),
+        ("kts".into(), kotlin_parser),
+        ("markdown".into(), Rc::clone(&markdown_parser)),
+        ("md".into(), markdown_parser),
         ("php".into(), Rc::clone(&php_parser)),
         ("phtml".into(), php_parser),
         ("py".into(), Rc::clone(&python_parser)),
         ("pyi".into(), python_parser),
         ("rb".into(), ruby_parser),
         ("rs".into(), rust_parser),
+        ("sh".into(), bash_parser),
         ("sql".into(), sql_parser),
         ("swift".into(), swift_parser),
         ("toml".into(), toml_parser),
-        ("ts".into(), Rc::clone(&typescript_parser)),
-        ("d.ts".into(), typescript_parser),
+        ("ts".into(), typescript_parser),
         ("tsx".into(), typescript_tsx_parser),
-        ("yml".into(), Rc::clone(&yaml_parser)),
-        ("yaml".into(), yaml_parser),
         ("xml".into(), xml_parser),
+        ("yaml".into(), Rc::clone(&yaml_parser)),
+        ("yml".into(), yaml_parser),
+        // </block>
     ]))
-    // </block>
 }
 
 struct TreeSitterCommentsParser<F: Fn(usize, &str) -> Option<String>> {
@@ -185,27 +185,6 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
 
         (result, index)
     }
-
-    fn parse_affects_attribute(value: &str) -> anyhow::Result<Vec<(Option<String>, String)>> {
-        let mut result = Vec::new();
-        for block_ref in value.split(",") {
-            let block = block_ref.trim();
-            let (mut filename, block_name) = block.split_once(":").context(format!(
-                "Invalid \"affects\" attribute value: \"{}\"",
-                block
-            ))?;
-            filename = filename.trim();
-            result.push((
-                if filename.is_empty() {
-                    None
-                } else {
-                    Some(filename.to_string())
-                },
-                block_name.trim().to_string(),
-            ));
-        }
-        Ok(result)
-    }
 }
 
 impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
@@ -228,40 +207,42 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
                         })
                         .unwrap_or_else(|e| e)]
                     .1;
-                    let mut name = None;
-                    let mut affects = vec![];
+                    let mut attributes = HashMap::new();
                     for attr in event.attributes() {
                         let attr = attr.context("Failed to parse attribute")?;
-                        let attr_name = attr.key.as_ref();
-                        if attr_name == b"name" {
-                            name = String::from_utf8(attr.value.into())
-                                .map(|v| if v.is_empty() { None } else { Some(v) })?;
-                        } else if attr_name == b"affects" {
-                            affects = Self::parse_affects_attribute(
-                                String::from_utf8(attr.value.into())?.as_str(),
-                            )?;
-                        }
+                        attributes.insert(
+                            String::from_utf8(attr.key.as_ref().into())?,
+                            String::from_utf8(attr.value.into())?,
+                        );
                     }
-                    stack.push(Block {
-                        name,
-                        starts_at,
-                        ends_at: 0,
-                        affects,
-                    });
+                    stack.push(BlockBuilder::new(starts_at, attributes));
                 }
                 Event::End(event) => {
                     if event.name().as_ref() != b"block" {
                         continue;
                     }
+
                     let ends_at = index[index
                         .binary_search_by(|(line_start_position, _)| {
                             line_start_position.cmp(&(reader.buffer_position() as usize))
                         })
                         .unwrap_or_else(|e| e)]
                     .1;
-                    if let Some(mut block) = stack.pop() {
-                        block.ends_at = ends_at;
-                        blocks.push(block);
+                    if let Some(block_builder) = stack.pop() {
+                        let starts_at = block_builder.starts_at;
+                        let content = if ends_at > starts_at {
+                            // TODO: optimize by using `match_indices('\n')`
+                            contents
+                                .lines()
+                                .skip(starts_at)
+                                .take(ends_at - starts_at - 1)
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        } else {
+                            // Block opened and closed at the same line.
+                            String::new()
+                        };
+                        blocks.push(block_builder.build(ends_at, content));
                     } else {
                         return Err(anyhow::anyhow!(
                             "Unexpected closed block at line {}",
@@ -275,12 +256,11 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
         }
         if let Some(unclosed_block) = stack.pop() {
             return Err(anyhow::anyhow!(format!(
-                "Block \"{}\" at line {} is not closed",
-                unclosed_block.name_display(),
+                "Block at line {} is not closed",
                 unclosed_block.starts_at
             )));
         }
-        blocks.sort_by(|a, b| a.starts_at.cmp(&b.starts_at));
+        blocks.sort_by(|a, b| a.starts_at_line.cmp(&b.starts_at_line));
 
         Ok(blocks)
     }
@@ -328,18 +308,24 @@ mod tests {
         assert_eq!(
             blocks,
             vec![
-                Block {
-                    name: Some("foo".into()),
-                    starts_at: 2,
-                    ends_at: 6,
-                    affects: vec![],
-                },
-                Block {
-                    name: Some("bar".into()),
-                    starts_at: 9,
-                    ends_at: 13,
-                    affects: vec![],
-                }
+                Block::new(
+                    2,
+                    6,
+                    HashMap::from([("name".to_string(), "foo".to_string())]),
+                    r#"        fn say_hello_world() {
+          println!("hello world!");
+        }"#
+                    .into()
+                ),
+                Block::new(
+                    9,
+                    13,
+                    HashMap::from([("name".to_string(), "bar".to_string())]),
+                    r#"        fn say_hello_world2() {
+          println!("hello world 2!");
+        }"#
+                    .into()
+                ),
             ]
         );
         Ok(())
@@ -380,36 +366,73 @@ mod tests {
         assert_eq!(
             blocks,
             vec![
-                Block {
-                    name: Some("foo".into()),
-                    starts_at: 2,
-                    ends_at: 25,
-                    affects: vec![],
-                },
-                Block {
-                    name: Some("bar".into()),
-                    starts_at: 7,
-                    ends_at: 17,
-                    affects: vec![],
-                },
-                Block {
-                    name: Some("bar-bar".into()),
-                    starts_at: 11,
-                    ends_at: 15,
-                    affects: vec![],
-                },
-                Block {
-                    name: Some("buzz".into()),
-                    starts_at: 19,
-                    ends_at: 23,
-                    affects: vec![],
-                },
-                Block {
-                    name: Some("fizz".into()),
-                    starts_at: 26,
-                    ends_at: 27,
-                    affects: vec![],
+                Block::new(
+                    2,
+                    25,
+                    HashMap::from([("name".to_string(), "foo".to_string())]),
+                    r#"        fn say_hello_world() {
+          println!("hello world!");
+        }
+
+            // <block name="bar">
+            fn say_hello_world_bar() {
+              println!("hello world bar!");
+            }
+                // <block name="bar-bar">
+                fn say_hello_world_bar_bar() {
+                  println!("hello world bar bar!");
                 }
+                // </block>
+
+            // </block>
+
+            // <block name="buzz">
+            fn say_hello_world_buzz() {
+              println!("hello world buzz!");
+            }
+            // </block>
+"#
+                    .into()
+                ),
+                Block::new(
+                    7,
+                    17,
+                    HashMap::from([("name".to_string(), "bar".to_string())]),
+                    r#"            fn say_hello_world_bar() {
+              println!("hello world bar!");
+            }
+                // <block name="bar-bar">
+                fn say_hello_world_bar_bar() {
+                  println!("hello world bar bar!");
+                }
+                // </block>
+"#
+                    .into()
+                ),
+                Block::new(
+                    11,
+                    15,
+                    HashMap::from([("name".to_string(), "bar-bar".to_string())]),
+                    r#"                fn say_hello_world_bar_bar() {
+                  println!("hello world bar bar!");
+                }"#
+                    .into()
+                ),
+                Block::new(
+                    19,
+                    23,
+                    HashMap::from([("name".to_string(), "buzz".to_string())]),
+                    r#"            fn say_hello_world_buzz() {
+              println!("hello world buzz!");
+            }"#
+                    .into()
+                ),
+                Block::new(
+                    26,
+                    27,
+                    HashMap::from([("name".to_string(), "fizz".to_string())]),
+                    "".into()
+                ),
             ]
         );
         Ok(())
@@ -426,12 +449,15 @@ mod tests {
         let blocks = parser.parse(contents)?;
         assert_eq!(
             blocks,
-            vec![Block {
-                name: Some("foo".into()),
-                starts_at: 1,
-                ends_at: 5,
-                affects: vec![],
-            },]
+            vec![Block::new(
+                1,
+                5,
+                HashMap::from([("name".to_string(), "foo".to_string())]),
+                r#"        fn say_hello_world() {
+          println!("hello world!");
+        }"#
+                .into()
+            )]
         );
         Ok(())
     }
@@ -445,18 +471,18 @@ mod tests {
         assert_eq!(
             blocks,
             vec![
-                Block {
-                    name: Some("foo".into()),
-                    starts_at: 1,
-                    ends_at: 1,
-                    affects: vec![],
-                },
-                Block {
-                    name: Some("bar".into()),
-                    starts_at: 2,
-                    ends_at: 2,
-                    affects: vec![],
-                }
+                Block::new(
+                    1,
+                    1,
+                    HashMap::from([("name".to_string(), "foo".to_string())]),
+                    "".into()
+                ),
+                Block::new(
+                    2,
+                    2,
+                    HashMap::from([("name".to_string(), "bar".to_string())]),
+                    "".into()
+                ),
             ]
         );
         Ok(())
@@ -472,7 +498,7 @@ mod tests {
         }
         "#;
         let error_message = parser.parse(contents).unwrap_err().to_string();
-        assert_eq!(error_message, "Block \"foo\" at line 2 is not closed");
+        assert_eq!(error_message, "Block at line 2 is not closed");
         Ok(())
     }
 
@@ -491,7 +517,7 @@ mod tests {
         // </block>
         "#;
         let error_message = parser.parse(contents).unwrap_err().to_string();
-        assert_eq!(error_message, "Block \"foo\" at line 2 is not closed");
+        assert_eq!(error_message, "Block at line 2 is not closed");
         Ok(())
     }
 
@@ -509,94 +535,10 @@ mod tests {
     }
 
     #[test]
-    fn unnamed_blocks_parsed_correctly() -> anyhow::Result<()> {
+    fn attributes_parsed_correctly() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
-        // <block>
-        fn say_hello_world() {
-          println!("hello world!");
-        }
-        // </block>
-
-        // <block>
-        fn say_hello_world2() {
-          println!("hello world!");
-        }
-        // </block>
-        "#;
-        let blocks = parser.parse(contents)?;
-        assert_eq!(
-            blocks,
-            vec![
-                Block {
-                    name: None,
-                    starts_at: 2,
-                    ends_at: 6,
-                    affects: vec![],
-                },
-                Block {
-                    name: None,
-                    starts_at: 8,
-                    ends_at: 12,
-                    affects: vec![],
-                }
-            ]
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn unnamed_nested_blocks_parsed_correctly() -> anyhow::Result<()> {
-        let parser = create_parser();
-        let contents = r#"
-        // <block>
-        fn say_hello_world() {
-          println!("hello world!");
-        }
-        // <block>
-        fn say_hello_world2() {
-          println!("hello world!");
-        }
-        // <block name="foo">
-        fn say_hello_world2() {
-          println!("hello world!");
-        }
-        // </block>
-        // </block>
-        // </block>
-        "#;
-        let blocks = parser.parse(contents)?;
-        assert_eq!(
-            blocks,
-            vec![
-                Block {
-                    name: None,
-                    starts_at: 2,
-                    ends_at: 16,
-                    affects: vec![],
-                },
-                Block {
-                    name: None,
-                    starts_at: 6,
-                    ends_at: 15,
-                    affects: vec![],
-                },
-                Block {
-                    name: Some("foo".into()),
-                    starts_at: 10,
-                    ends_at: 14,
-                    affects: vec![],
-                }
-            ]
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn affects_attribute_parsed_correctly() -> anyhow::Result<()> {
-        let parser = create_parser();
-        let contents = r#"
-        // <block affects="README.md:foo-docs, tests.py:foo-tests">
+        // <block foo="bar" fizz="buzz">
         fn foo() {
           println!("hello world!");
         }
@@ -605,22 +547,22 @@ mod tests {
         let blocks = parser.parse(contents)?;
         assert_eq!(blocks.len(), 1);
         assert_eq!(
-            blocks[0].affects,
-            vec![
-                (Some("README.md".to_string()), "foo-docs".to_string()),
-                (Some("tests.py".to_string()), "foo-tests".to_string())
-            ]
+            blocks[0].attributes,
+            HashMap::from([
+                ("foo".to_string(), "bar".to_string()),
+                ("fizz".to_string(), "buzz".to_string())
+            ])
         );
         Ok(())
     }
 
     #[test]
-    fn nested_blocks_with_affects_parsed_correctly() -> anyhow::Result<()> {
+    fn nested_blocks_with_attributes_parsed_correctly() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
-        // <block name="outer" affects="outer.rs:test">
+        // <block name="outer" foo="bar">
         fn outer() {
-            // <block name="inner" affects="inner.rs:test">
+            // <block name="inner" fizz="buzz">
             fn inner() {}
             // </block>
         }
@@ -629,75 +571,39 @@ mod tests {
         let blocks = parser.parse(contents)?;
         assert_eq!(blocks.len(), 2);
         assert_eq!(
-            blocks[0].affects,
-            vec![(Some("outer.rs".to_string()), "test".to_string())]
+            blocks[0].attributes,
+            HashMap::from([
+                ("name".to_string(), "outer".to_string()),
+                ("foo".to_string(), "bar".to_string()),
+            ])
         );
         assert_eq!(
-            blocks[1].affects,
-            vec![(Some("inner.rs".to_string()), "test".to_string())]
+            blocks[1].attributes,
+            HashMap::from([
+                ("name".to_string(), "inner".to_string()),
+                ("fizz".to_string(), "buzz".to_string())
+            ])
         );
         Ok(())
     }
 
     #[test]
-    fn empty_affects_attribute_parsed_correctly() -> anyhow::Result<()> {
+    fn empty_attributes_parsed_correctly() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
-        // <block affects="">
-        fn foo() {}
-        // </block>
-        "#;
-        assert_eq!(
-            parser.parse(contents).unwrap_err().to_string(),
-            "Invalid \"affects\" attribute value: \"\""
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn relative_paths_in_affects_parsed_correctly() -> anyhow::Result<()> {
-        let parser = create_parser();
-        let contents = r#"
-        // <block affects="../docs/README.md:docs, ./tests/test_foo.py:tests">
+        // <block name="" foo="" bar="">
         fn foo() {}
         // </block>
         "#;
         let blocks = parser.parse(contents)?;
         assert_eq!(
-            blocks[0].affects,
-            vec![
-                (Some("../docs/README.md".to_string()), "docs".to_string()),
-                (Some("./tests/test_foo.py".to_string()), "tests".to_string())
-            ]
+            blocks[0].attributes,
+            HashMap::from([
+                ("name".to_string(), "".to_string()),
+                ("foo".to_string(), "".to_string()),
+                ("bar".to_string(), "".to_string())
+            ])
         );
-        Ok(())
-    }
-
-    #[test]
-    fn invalid_affects_attribute_returns_error() -> anyhow::Result<()> {
-        let parser = create_parser();
-        let contents = r#"
-        // <block affects="invalid-format">
-        fn foo() {}
-        // </block>
-        "#;
-        assert_eq!(
-            parser.parse(contents).unwrap_err().to_string(),
-            "Invalid \"affects\" attribute value: \"invalid-format\""
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn empty_block_name_parsed_correctly() -> anyhow::Result<()> {
-        let parser = create_parser();
-        let contents = r#"
-        // <block name="">
-        fn foo() {}
-        // </block>
-        "#;
-        let blocks = parser.parse(contents)?;
-        assert!(blocks[0].name.is_none());
         Ok(())
     }
 
@@ -710,34 +616,6 @@ mod tests {
         // </block>
         "#;
         assert!(parser.parse(contents).is_err());
-        Ok(())
-    }
-
-    #[test]
-    fn unknown_tags_are_ignored() -> anyhow::Result<()> {
-        let parser = create_parser();
-        let contents = r#"
-        // <unknown-tag>
-        // <block name="foo" affects="README.md:foo-docs, tests.py:foo-tests">
-        fn foo() {
-          println!("hello world!");
-        }
-        // </block>
-        // </unknown-tag>
-        "#;
-        let blocks = parser.parse(contents)?;
-        assert_eq!(
-            blocks,
-            vec![Block {
-                name: Some("foo".into()),
-                starts_at: 3,
-                ends_at: 7,
-                affects: vec![
-                    (Some("README.md".to_string()), "foo-docs".to_string()),
-                    (Some("tests.py".to_string()), "foo-tests".to_string())
-                ],
-            },]
-        );
         Ok(())
     }
 }
