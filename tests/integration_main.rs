@@ -1,6 +1,7 @@
 use assert_cmd::Command;
-use predicates::boolean::PredicateBooleanExt;
+use assert_cmd::assert::OutputAssertExt;
 use predicates::prelude::predicate;
+use serde_json::json;
 
 fn get_cmd() -> Command {
     Command::cargo_bin(assert_cmd::crate_name!()).expect("Failed to find binary")
@@ -23,15 +24,33 @@ index abc123..def456 100644
 "#;
 
     let mut cmd = get_cmd();
-    cmd.write_stdin(diff_content);
+    let output = cmd.write_stdin(diff_content).output().unwrap();
 
-    cmd.assert()
+    output.assert()
         .failure()
         .code(1)
-        .stderr(predicate::str::contains(
-            "Error: Blocks need to be updated:
-tests/testing_data.md:foo referenced by tests/testing_data.md:(unnamed) at line 3",
-        ));
+        .stderr(predicate::function(|output: &str| {
+            let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
+            let value: serde_json::Value  = json!({
+              "tests/testing_data.md": [
+                {
+                  "violation": "affects",
+                  "error": "Block tests/testing_data.md:(unnamed) at line 3 is modified, but tests/testing_data.md:foo is not",
+                  "details": {
+                    "modified_block": {
+                      "attributes": {
+                        "affects": ":foo"
+                      },
+                      "ends_at_line": 6,
+                      "starts_at_line": 3
+                    }
+                  }
+                }
+              ]
+            });
+            assert_eq!(output_json, value);
+            true
+        }));
 }
 
 #[test]
@@ -58,7 +77,9 @@ index abc123..def456 100644
     let mut cmd = get_cmd();
     cmd.write_stdin(diff_content);
 
-    cmd.assert().success();
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.assert().success();
 }
 
 #[test]
@@ -86,11 +107,13 @@ index abc123..def456 100644
     cmd.current_dir("./tests");
     cmd.write_stdin(diff_content);
 
-    cmd.assert().success();
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.assert().success();
 }
 
 #[test]
-fn with_custom_file_extensions_args_handles_files_with_custom_extensions() {
+fn with_custom_file_extensions_args() {
     let diff_content = r#"
 diff --git a/tests/another_testing_file.javascript b/tests/another_testing_file.javascript
 index 09baa87..33c9660 100644
@@ -125,13 +148,46 @@ index da567bd..5586a8d 100644
     cmd.arg("-E javascript=js");
     cmd.write_stdin(diff_content);
 
-    cmd.assert().failure().code(1).stderr(
-        predicate::str::contains("Blocks need to be updated")
-            .and(predicate::str::contains("tests/testing_file.python:foo"))
-            .and(predicate::str::contains(
-                "tests/another_testing_file.javascript:foo",
-            )),
-    );
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.assert().failure().code(1).stderr(predicate::function(|output: &str| {
+        let output_json: serde_json::Value =
+            serde_json::from_str(output).expect("invalid json");
+        let value: serde_json::Value  = json!({
+              "tests/another_testing_file.javascript": [
+                {
+                  "violation": "affects",
+                  "error": "Block tests/another_testing_file.javascript:(unnamed) at line 4 is modified, but tests/another_testing_file.javascript:foo is not",
+                  "details": {
+                    "modified_block": {
+                      "attributes": {
+                        "affects": ":foo"
+                      },
+                      "ends_at_line": 6,
+                      "starts_at_line": 4
+                    }
+                  }
+                }
+              ],
+              "tests/testing_file.python": [
+                {
+                  "violation": "affects",
+                  "error": "Block tests/testing_file.python:(unnamed) at line 4 is modified, but tests/testing_file.python:foo is not",
+                  "details": {
+                    "modified_block": {
+                      "attributes": {
+                        "affects": ":foo"
+                      },
+                      "ends_at_line": 6,
+                      "starts_at_line": 4
+                    }
+                  }
+                }
+              ]
+            });
+        assert_eq!(output_json, value);
+        true
+    }));
 }
 
 #[test]
@@ -139,5 +195,7 @@ fn empty_diff_succeeds() {
     let mut cmd = get_cmd();
     cmd.write_stdin("");
 
-    cmd.assert().success();
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.assert().success();
 }

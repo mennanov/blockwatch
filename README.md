@@ -36,7 +36,7 @@ In [src/parsers/mod.rs](./src/parsers/mod.rs), we define a list of languages. Th
 
 ```rust
 // src/parsers/mod.rs
-// <block affects="README.md:supported-grammar">
+// <block affects="README.md:supported-grammar-example">
 pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn BlocksParser>>>> {
     Ok(HashMap::from([
         ("rs".into(), rust_parser),
@@ -52,7 +52,7 @@ In `README.md`, we define the block that depends on the code above.
 ```markdown
 ## Supported Languages
 
-[//]: # (<block name="supported-grammar">)
+[//]: # (<block name="supported-grammar-example">)
 
 - Rust
 - JavaScript
@@ -125,7 +125,7 @@ repos:
     hooks:
       - id: blockwatch
         name: blockwatch
-        entry: bash -c 'git diff --cached --patch --unified=0 | blockwatch'
+        entry: bash -c 'git diff --patch --unified=0 | blockwatch'
         language: system
         stages: [ pre-commit ]
         pass_filenames: false
@@ -153,15 +153,16 @@ jobs:
 
 BlockWatch supports a wide range of common languages.
 
+[//]: # (<block name="supported-grammar" keep-sorted="asc">)
 - Bash (`.sh`, `.bash`)
-- C/C++ (`.c`, `.cpp`, `.cc`, `.h`)
 - C# (`.cs`)
+- C/C++ (`.c`, `.cpp`, `.cc`, `.h`)
 - CSS (`.css`)
 - Golang (`.go`)
 - HTML (`.html`, `.htm`)
-- Kotlin (`.kt`, `.kts`)
 - Java (`.java`)
 - JavaScript (`.js`, `.jsx`)
+- Kotlin (`.kt`, `.kts`)
 - Markdown (`.md`, `.markdown`)
 - PHP (`.php`, `.phtml`)
 - Python (`.py`, `.pyi`)
@@ -171,6 +172,8 @@ BlockWatch supports a wide range of common languages.
 - TypeScript (+TSX) (`.ts`, `.d.ts`, `.tsx`)
 - XML (`.xml`)
 - YAML (`.yaml`, `.yml`)
+
+[//]: # (</block>)
 
 **Have a custom file extension?**
 

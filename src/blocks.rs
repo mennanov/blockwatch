@@ -1,0 +1,386 @@
+use crate::parsers::BlocksParser;
+use anyhow::Context;
+use async_trait::async_trait;
+use serde::Serialize;
+use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+
+const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
+
+/// Represents a `block` tag parsed from the source file comments.
+#[derive(Debug, PartialEq, Clone, Serialize)]
+pub(crate) struct Block {
+    // Source line number with the `block` tag.
+    pub(crate) starts_at_line: usize,
+    // Source line number with the corresponding closed `block` tag.
+    pub(crate) ends_at_line: usize,
+    // Optional attributes in the `block` tag.
+    pub(crate) attributes: HashMap<String, String>,
+    // Block's content.
+    #[serde(skip_serializing)]
+    pub(crate) content: String,
+}
+
+impl Block {
+    /// Creates a new `Block` with the given attributes and content.
+    pub(crate) fn new(
+        starts_at: usize,
+        ends_at: usize,
+        attributes: HashMap<String, String>,
+        content: String,
+    ) -> Self {
+        Self {
+            starts_at_line: starts_at,
+            ends_at_line: ends_at,
+            attributes,
+            content,
+        }
+    }
+
+    /// Whether the `Block` intersects with the given closed-closed interval of `start` and `end`.
+    pub(crate) fn intersects_with(&self, start: usize, end: usize) -> bool {
+        self.ends_at_line >= start && end >= self.starts_at_line
+    }
+
+    /// Whether the `Block` intersects with any of the **ordered** `ranges`.
+    pub(crate) fn intersects_with_any(&self, ranges: &[(usize, usize)]) -> bool {
+        let idx = ranges.binary_search_by(|(start, end)| {
+            if self.intersects_with(*start, *end) {
+                Ordering::Equal
+            } else if *end < self.starts_at_line {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            }
+        });
+        idx.is_ok()
+    }
+
+    pub(crate) fn name(&self) -> Option<&str> {
+        self.attributes.get("name").map(String::as_str)
+    }
+
+    pub(crate) fn name_display(&self) -> &str {
+        self.name().unwrap_or(UNNAMED_BLOCK_LABEL)
+    }
+}
+
+pub(crate) struct BlockBuilder {
+    pub(crate) starts_at: usize,
+    attributes: HashMap<String, String>,
+}
+
+impl BlockBuilder {
+    pub(crate) fn new(starts_at: usize, attributes: HashMap<String, String>) -> Self {
+        Self {
+            starts_at,
+            attributes,
+        }
+    }
+
+    pub(crate) fn build(self, ends_at: usize, content: String) -> Block {
+        Block::new(self.starts_at, ends_at, self.attributes, content)
+    }
+}
+
+pub(crate) async fn parse_blocks(
+    modified_ranges_by_file: &HashMap<String, Vec<(usize, usize)>>,
+    file_reader: &impl FileReader,
+    parsers: HashMap<String, Rc<Box<dyn BlocksParser>>>,
+    extra_file_extensions: HashMap<String, String>,
+) -> anyhow::Result<HashMap<String, Vec<Block>>> {
+    let mut blocks = HashMap::new();
+    for (file_path, modified_ranges) in modified_ranges_by_file {
+        let source_code = file_reader.read_to_string(Path::new(&file_path)).await?;
+        if let Some(mut ext) = file_name_extension(file_path) {
+            ext = extra_file_extensions
+                .get(ext)
+                .map(|e| e.as_str())
+                .unwrap_or(ext);
+            if let Some(parser) = parsers.get(ext) {
+                for block in parser
+                    .parse(&source_code)
+                    .context(format!("Failed to parse file \"{file_path}\""))?
+                {
+                    if !block.intersects_with_any(modified_ranges) {
+                        // Skip untouched blocks.
+                        continue;
+                    }
+                    blocks
+                        .entry(file_path.into())
+                        .or_insert_with(Vec::new)
+                        .push(block);
+                }
+            }
+        }
+    }
+    Ok(blocks)
+}
+
+#[async_trait]
+pub(crate) trait FileReader {
+    /// Reads the entire contents of a file into a string.
+    async fn read_to_string(&self, path: &Path) -> anyhow::Result<String>;
+}
+
+pub fn file_name_extension(file_name: &str) -> Option<&str> {
+    file_name.rsplit('.').next()
+}
+
+pub(crate) struct FsReader {
+    root_path: PathBuf,
+}
+
+impl FsReader {
+    pub(crate) fn new(root_path: PathBuf) -> Self {
+        Self { root_path }
+    }
+}
+
+#[async_trait]
+impl FileReader for FsReader {
+    async fn read_to_string(&self, path: &Path) -> anyhow::Result<String> {
+        tokio::fs::read_to_string(self.root_path.join(path))
+            .await
+            .context(format!("Failed to read file \"{}\"", path.display()))
+    }
+}
+
+#[cfg(test)]
+mod test_utils {
+    use crate::blocks::Block;
+    use std::collections::HashMap;
+
+    pub(crate) fn new_empty_block(starts_at: usize, ends_at: usize) -> Block {
+        Block::new(starts_at, ends_at, HashMap::new(), "".to_string())
+    }
+}
+
+#[cfg(test)]
+mod block_intersects_with_tests {
+    use crate::blocks::test_utils::*;
+
+    #[test]
+    fn non_overlapping_returns_false() {
+        let block = new_empty_block(3, 4);
+
+        assert!(!block.intersects_with(1, 2));
+        assert!(!block.intersects_with(2, 2));
+        assert!(!block.intersects_with(5, 5));
+        assert!(!block.intersects_with(5, 6));
+    }
+
+    #[test]
+    fn non_overlapping_single_line_returns_false() {
+        let block = new_empty_block(3, 3);
+
+        assert!(!block.intersects_with(1, 2));
+        assert!(!block.intersects_with(2, 2));
+        assert!(!block.intersects_with(4, 4));
+        assert!(!block.intersects_with(4, 5));
+    }
+
+    #[test]
+    fn overlapping_returns_true() {
+        let block = new_empty_block(3, 6);
+
+        assert!(block.intersects_with(1, 3));
+        assert!(block.intersects_with(1, 7));
+        assert!(block.intersects_with(2, 4));
+        assert!(block.intersects_with(3, 3));
+        assert!(block.intersects_with(3, 4));
+        assert!(block.intersects_with(3, 6));
+        assert!(block.intersects_with(4, 5));
+        assert!(block.intersects_with(4, 6));
+        assert!(block.intersects_with(5, 7));
+        assert!(block.intersects_with(6, 7));
+        assert!(block.intersects_with(6, 6));
+    }
+
+    #[test]
+    fn overlapping_single_line_returns_true() {
+        let block = new_empty_block(3, 3);
+
+        assert!(block.intersects_with(1, 3));
+        assert!(block.intersects_with(3, 3));
+        assert!(block.intersects_with(3, 4));
+    }
+}
+
+#[cfg(test)]
+mod block_intersects_with_any_tests {
+    use crate::blocks::test_utils::*;
+
+    #[test]
+    fn non_overlapping_returns_false() {
+        let block = new_empty_block(3, 4);
+
+        assert!(!block.intersects_with_any(&[(1, 2), (5, 6), (10, 16)]));
+    }
+
+    #[test]
+    fn overlapping_returns_true() {
+        let block = new_empty_block(4, 6);
+
+        // Intersecting range is first.
+        assert!(block.intersects_with_any(&[(1, 5), (6, 8), (10, 16)]));
+        // Intersecting range is second.
+        assert!(block.intersects_with_any(&[(1, 2), (3, 5), (6, 8), (10, 16)]));
+        // Intersecting range is last.
+        assert!(block.intersects_with_any(&[(1, 1), (2, 3), (4, 8)]));
+        // Intersecting range is second from last.
+        assert!(block.intersects_with_any(&[(1, 1), (2, 2), (4, 8), (10, 16)]));
+        // Multiple intersecting ranges in the beginning.
+        assert!(block.intersects_with_any(&[(1, 4), (5, 5), (6, 8), (10, 16)]));
+        // Multiple intersecting ranges in the middle.
+        assert!(block.intersects_with_any(&[(1, 1), (2, 3), (4, 5), (6, 8), (10, 16)]));
+        // Multiple intersecting ranges in the end.
+        assert!(block.intersects_with_any(&[(1, 1), (2, 2), (3, 3), (4, 5), (6, 8)]));
+    }
+}
+
+#[cfg(test)]
+mod parse_blocks_tests {
+    use crate::blocks::*;
+    use crate::parsers::language_parsers;
+
+    struct FakeFileReader {
+        files: HashMap<String, String>,
+    }
+
+    impl FakeFileReader {
+        fn new(files: HashMap<String, String>) -> Self {
+            Self { files }
+        }
+    }
+
+    #[async_trait]
+    impl FileReader for FakeFileReader {
+        async fn read_to_string(&self, path: &Path) -> anyhow::Result<String> {
+            Ok(self.files[&path.display().to_string()].clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn returns_blocks_for_modified_ranges_only() -> anyhow::Result<()> {
+        let file_reader = FakeFileReader::new(HashMap::from([
+            (
+                "a.rs".to_string(),
+                r#"
+        // <block name="first">
+        fn a() {}
+        // </block>
+        // <block name="second">
+        fn b() {
+            println!("hello");
+            println!("world");
+        }
+        // </block>
+        "#
+                .to_string(),
+            ),
+            (
+                "b.rs".to_string(),
+                r#"
+        // <block name="outer">
+        fn outer() {
+            // <block name="inner">
+            println!("hello");
+            println!("world");
+            // </block>
+        }
+        // </block>
+        "#
+                .to_string(),
+            ),
+            (
+                "c.rs".to_string(),
+                r#"
+        // <block name="target">
+        fn c() {}
+        // </block>
+        fn d() {
+            println!("hello");
+        }
+        "#
+                .to_string(),
+            ),
+        ]));
+        let modified_ranges = HashMap::from([
+            ("a.rs".to_string(), vec![(3, 3), (7, 8)]), // Both blocks are modified.
+            ("b.rs".to_string(), vec![(5, 6)]),         // The inner block is modified.
+            ("c.rs".to_string(), vec![(6, 7)]),         // No block is modified.
+        ]);
+        let parsers = language_parsers()?;
+
+        let blocks = parse_blocks(&modified_ranges, &file_reader, parsers, HashMap::new()).await?;
+
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks["a.rs"].len(), 2);
+        assert_eq!(blocks["a.rs"][0].name(), Some("first"));
+        assert_eq!(blocks["a.rs"][1].name(), Some("second"));
+        assert_eq!(blocks["b.rs"].len(), 2);
+        assert_eq!(blocks["b.rs"][0].name(), Some("outer"));
+        assert_eq!(blocks["b.rs"][1].name(), Some("inner"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn uses_remapped_extensions() -> anyhow::Result<()> {
+        let file_reader = FakeFileReader::new(HashMap::from([(
+            "a.rust".to_string(),
+            r#"
+        // <block name="first">
+        fn a() {}
+        // </block>"#
+                .to_string(),
+        )]));
+        let modified_ranges = HashMap::from([("a.rust".to_string(), vec![(3, 3)])]);
+        let parsers = language_parsers()?;
+
+        let blocks = parse_blocks(
+            &modified_ranges,
+            &file_reader,
+            parsers,
+            HashMap::from([("rust".to_string(), "rs".to_string())]),
+        )
+        .await?;
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks["a.rust"].len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn skips_unknown_files() -> anyhow::Result<()> {
+        let files = HashMap::from([("test.unknown".to_string(), "test content".to_string())]);
+        let modified_ranges = HashMap::from([("test.unknown".to_string(), vec![(1, 2)])]);
+
+        let blocks = parse_blocks(
+            &modified_ranges,
+            &FakeFileReader::new(files),
+            HashMap::new(),
+            HashMap::new(),
+        )
+        .await?;
+
+        assert_eq!(blocks.len(), 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn empty_input_returns_ok() -> anyhow::Result<()> {
+        let blocks = parse_blocks(
+            &HashMap::default(),
+            &FakeFileReader::new(HashMap::default()),
+            HashMap::new(),
+            HashMap::new(),
+        )
+        .await?;
+
+        assert_eq!(blocks.len(), 0);
+        Ok(())
+    }
+}
