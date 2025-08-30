@@ -1,6 +1,10 @@
-# BlockWatch: Never Let Your Code and Docs Go Stale Again
+# BlockWatch: Smart language agnostic linter
 
-> Automatically spot inconsistencies in your documentation, configuration, and code whenever they change.
+[//]: # (<block name="validators-list">)
+> - Keep your docs up to date with the code
+> - Enforce formatting rules (sorted lines)
+
+[//]: # (</block>)
 
 [![Build Status](https://github.com/mennanov/blockwatch/actions/workflows/rust.yml/badge.svg)](https://github.com/mennanov/blockwatch/actions)
 [![codecov](https://codecov.io/gh/mennanov/blockwatch/graph/badge.svg?token=LwUfGTZ551)](https://codecov.io/gh/mennanov/blockwatch)
@@ -16,56 +20,82 @@ Keeping everything in sync manually is tedious and error-prone.
 
 ## What
 
-**BlockWatch** is a dependency tracker for your codebase. You declare relationships between blocks of
-code, if a block changes, BlockWatch will require that its dependents are also
-updated, catching inconsistencies before they are committed.
+**BlockWatch** is a language agnostic lint tool that supports multiple types of checks:
 
-It keeps your codebase consistent by making dependencies between code and documentation explicit and verifiable.
+- **Code consistency**: Track dependencies between code blocks - when one block changes, its dependents must be updated
+- **Sorted lines**: Ensure that parts of your codebase stay properly sorted
+- More validators are coming soon!
+
+It keeps your codebase consistent by making dependencies and formatting requirements explicit and automatically
+verifiable.
 
 ## How It Works
 
-It's a simple two-step process:
+Blocks are declared in the source code comments: e.g. `/* <block> */` in C-style languages).
 
-### 1. Declare your blocks
+Every block
+
+### Tracking Dependencies
+
+Use the `affects` attribute to create relationships between blocks:
 
 Mark a "source" block of code and give a name to a "dependent" block in another file (like
 your documentation).
 
-In [src/parsers/mod.rs](./src/parsers/mod.rs), we define a list of languages. This block is marked as
-`affects="README.md:supported-grammar"`, creating a dependency link.
+In `src/parsers/mod.rs`, we define a list of languages. This block is marked as
+`affects="README.md:supported-grammar-example"`, creating a dependency link:
 
 ```rust
-// src/parsers/mod.rs
-// <block affects="README.md:supported-grammar-example">
 pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn BlocksParser>>>> {
     Ok(HashMap::from([
+        // Will report a violation if this list is updated, but the block `README.md:supported-grammar-example` is not,
+        // which helps keeping the docs up-to-date:
+        // <block affects="README.md:supported-grammar-example">
         ("rs".into(), rust_parser),
         ("js".into(), Rc::clone(&js_parser)),
         ("go".into(), go_parser),
+        // </block>
     ]))
 }
-// </block>
 ```
 
-In `README.md`, we define the block that depends on the code above.
+In `README.md`, we define the block that depends on the code above:
 
 ```markdown
 ## Supported Languages
 
-[//]: # (<block name="supported-grammar-example">)
+[//]: # (<block name="supported-grammar-example" keep-sorted="asc">)
 
-- Rust
-- JavaScript
 - Go
+- JavaScript
+- Rust
 
 [//]: # (</block>)
 ```
 
-### 2. Run validation
+### Maintaining Lines Order
 
-When you make a change, BlockWatch checks the git diff. If you modify the
-`SUPPORTED_LANGUAGES` array in `src/parsers/mod.rs` without also modifying the block in `README.md`, BlockWatch will
-exit with an error, helping to prevent a bad commit.
+Use the `keep-sorted` attribute to ensure content stays properly sorted:
+
+```rust
+const MONTHS: [&str; 12] = [
+    // Will report a violation if not sorted:
+    // <block keep-sorted="asc">
+    "April",
+    "August",
+    "December",
+    "February",
+    "January",
+    "July",
+    "June",
+    "March",
+    "May",
+    "November",
+    "October",
+    "September",
+    // </block>
+];
+```
 
 ```shell
 # This command will now fail until README.md is updated
@@ -78,13 +108,13 @@ This simple mechanism ensures your documentation and code never drift apart.
 
 ## Key Features
 
-- 🔗 **Link Code to Docs:** Create explicit, verifiable dependencies between code snippets and your documentation.
-- 🤖 **Automated Git Workflow:** Integrates seamlessly with `git diff` to automatically validate changes before you
-  commit.
-- 🛠️ **Pre-commit & CI/CD Ready:** Includes support for pre-commit hooks and a dedicated GitHub Action for robust CI/CD
-  pipelines.
-- 🌍 **Broad Language Support:** Works with over 20 programming and markup languages out of the box.
-- ⚡ **Fast and Lightweight:** Written in Rust for maximum performance with no runtime dependencies.
+- 🔗 Dependency-aware blocks: declare named blocks and link them to keep code, docs, and configs in sync across files.
+- 🔤 Sorted segments: enforce stable ordering to prevent drift in lists and indexes.
+- 🤖 Git-native workflow: pipe git diff into blockwatch for instant, change-only validation before you commit.
+- 🛠️ Pre-commit & CI/CD ready: first-class support for pre-commit hooks and a dedicated GitHub Action.
+- 🌍 Broad language coverage: works with 20+ programming and markup languages out of the box.
+- 🧩 Flexible extension mapping: map custom file extensions to supported grammars via a simple CLI flag.
+- ⚡ Fast, single-binary tool: written in Rust with no runtime dependencies.
 
 -----
 
@@ -133,10 +163,10 @@ repos:
 
 ### GitHub Action
 
-Add the following job to your workflow file to check for inconsistencies in pull requests.
+Add to `.github/workflows/your_workflow.yml`:
 
 ```yaml
-# .github/workflows/main.yml
+# 
 jobs:
   blockwatch:
     runs-on: ubuntu-latest
@@ -154,6 +184,7 @@ jobs:
 BlockWatch supports a wide range of common languages.
 
 [//]: # (<block name="supported-grammar" keep-sorted="asc">)
+
 - Bash (`.sh`, `.bash`)
 - C# (`.cs`)
 - C/C++ (`.c`, `.cpp`, `.cc`, `.h`)
@@ -166,8 +197,10 @@ BlockWatch supports a wide range of common languages.
 - Markdown (`.md`, `.markdown`)
 - PHP (`.php`, `.phtml`)
 - Python (`.py`, `.pyi`)
+- Ruby (`.rb`)
 - Rust (`.rs`)
 - SQL (`.sql`)
+- Swift (`.swift`)
 - TOML (`.toml`)
 - TypeScript (+TSX) (`.ts`, `.d.ts`, `.tsx`)
 - XML (`.xml`)
@@ -186,7 +219,7 @@ git diff --patch | blockwatch -E xhtml=xml
 
 -----
 
-## Advanced Patterns
+## Examples
 
 ### Same-File Dependencies
 

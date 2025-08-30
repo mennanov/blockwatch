@@ -53,26 +53,26 @@ trait CommentsParser {
 pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn BlocksParser>>>> {
     let bash_parser = Rc::new(bash::parser()?);
     let c_parser = Rc::new(c::parser()?);
-    let cpp_parser = Rc::new(cpp::parser()?);
     let c_sharp_parser = Rc::new(c_sharp::parser()?);
+    let cpp_parser = Rc::new(cpp::parser()?);
     let css_parser = Rc::new(css::parser()?);
     let go_parser = Rc::new(go::parser()?);
     let html_parser = Rc::new(html::parser()?);
-    let kotlin_parser = Rc::new(kotlin::parser()?);
     let java_parser = Rc::new(java::parser()?);
     let js_parser = Rc::new(javascript::parser()?);
-    let rust_parser = Rc::new(rust::parser()?);
+    let kotlin_parser = Rc::new(kotlin::parser()?);
     let markdown_parser = Rc::new(markdown::parser()?);
     let php_parser = Rc::new(php::parser()?);
     let python_parser = Rc::new(python::parser()?);
     let ruby_parser = Rc::new(ruby::parser()?);
+    let rust_parser = Rc::new(rust::parser()?);
     let sql_parser = Rc::new(sql::parser()?);
     let swift_parser = Rc::new(swift::parser()?);
     let toml_parser = Rc::new(toml::parser()?);
     let typescript_parser = Rc::new(typescript::parser()?);
     let typescript_tsx_parser = Rc::new(tsx::parser()?);
-    let yaml_parser = Rc::new(yaml::parser()?);
     let xml_parser = Rc::new(xml::parser()?);
+    let yaml_parser = Rc::new(yaml::parser()?);
     Ok(HashMap::from([
         // <block affects="README.md:supported-grammar" keep-sorted="asc">
         ("bash".into(), Rc::clone(&bash_parser)),

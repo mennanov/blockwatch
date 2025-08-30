@@ -53,8 +53,10 @@ impl Context {
 /// Runs all validators concurrently and returns violations grouped by file paths.
 pub(crate) async fn run(context: Context) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
     let validators: Vec<Box<dyn Validator>> = vec![
+        // <block affects="README.md:validators-list">
         Box::new(AffectsValidator::new()),
         Box::new(KeepSortedValidator::new()),
+        // </block>
     ];
     let context = Arc::new(context);
     let mut violations = HashMap::new();
