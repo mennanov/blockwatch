@@ -3,6 +3,7 @@
 [//]: # (<block name="validators-list">)
 > - Keep your docs up to date with the code
 > - Enforce formatting rules (sorted lines)
+> - Ensure unique lines
 
 [//]: # (</block>)
 
@@ -95,6 +96,20 @@ const MONTHS: [&str; 12] = [
     "September",
     // </block>
 ];
+```
+
+### Ensuring Unique Lines
+
+Use the `keep-unique` attribute to ensure there are no duplicate lines inside a block:
+
+```markdown
+# Contributors
+
+[//]: # (<block name="contributors-unique" keep-unique="">)
+- Alice
+- Bob
+- Carol
+[//]: # (</block>)
 ```
 
 ```shell
