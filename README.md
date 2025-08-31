@@ -4,6 +4,7 @@
 > - Keep your docs up to date with the code
 > - Enforce formatting rules (sorted lines)
 > - Ensure unique lines
+> - Validate each line against a regex pattern
 
 [//]: # (</block>)
 
@@ -109,6 +110,20 @@ Use the `keep-unique` attribute to ensure there are no duplicate lines inside a 
 - Alice
 - Bob
 - Carol
+[//]: # (</block>)
+```
+
+### Validating Line Patterns
+
+Use the `line-pattern` attribute to ensure every line in the block matches a Regular Expression:
+
+```markdown
+# Slugs
+
+[//]: # (<block name="slugs" line-pattern="[a-z0-9-]+">)
+hello-world
+rust-2025
+blockwatch
 [//]: # (</block>)
 ```
 
