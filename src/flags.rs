@@ -12,8 +12,20 @@ fn parse_extensions(s: &str) -> anyhow::Result<(String, String)> {
 #[command(
     author,
     version = crate_version!(),
-    about,
-    long_about = None
+    about = "Validate interdependent code/doc blocks in diffs to prevent drift.",
+    long_about = r"Blockwatch reads a unified git diff from stdin and validates that named blocks, sorted segments, and other constraints remain consistent across files. It is designed for use in pre-commit hooks and CI. Pipe `git diff --patch` to blockwatch.",
+    after_help = r"EXAMPLES:
+    # Validate current unstaged changes
+    git diff --patch | blockwatch
+
+    # Validate staged changes only
+    git diff --cached --patch | blockwatch
+
+    # Provide extra extension mappings (map unknown extensions to supported grammars)
+    git diff --patch | blockwatch -E cxx=cpp -E c++=cpp
+
+    # With zero context for tighter diffs (recommended for hooks)
+    git diff --patch --unified=0 | blockwatch",
 )]
 pub(crate) struct Args {
     /// Additional file extension mappings, e.g. -E c++=cpp -E cxx=cpp
