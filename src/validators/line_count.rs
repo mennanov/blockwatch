@@ -1,0 +1,340 @@
+use crate::validators;
+use crate::validators::{Validator, Violation};
+use anyhow::anyhow;
+use async_trait::async_trait;
+use serde::Serialize;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+pub(crate) struct LineCountValidator {}
+
+impl LineCountValidator {
+    pub(crate) fn new() -> Self {
+        Self {}
+    }
+}
+
+#[derive(Serialize)]
+struct LineCountViolation {
+    actual: usize,
+    op: String,
+    expected: usize,
+}
+
+#[async_trait]
+impl Validator for LineCountValidator {
+    async fn validate(
+        &self,
+        context: Arc<validators::Context>,
+    ) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
+        let mut violations = HashMap::new();
+        for (file_path, blocks) in &context.modified_blocks {
+            for block in blocks {
+                let Some(expr) = block.attributes.get("line-count") else {
+                    continue;
+                };
+                let (op, expected) = parse_constraint(expr).map_err(|e| anyhow!(
+                    "line-count expected a comparator like <N, <=N, ==N, >=N, >N; got \"{}\" in {}:{} at line {} (error: {})",
+                    expr,
+                    file_path,
+                    block.name_display(),
+                    block.starts_at_line,
+                    e
+                ))?;
+                let actual = if block.content.is_empty() {
+                    0
+                } else {
+                    block.content.lines().count()
+                };
+                let ok = match op {
+                    Op::Lt => actual < expected,
+                    Op::Le => actual <= expected,
+                    Op::Eq => actual == expected,
+                    Op::Ge => actual >= expected,
+                    Op::Gt => actual > expected,
+                };
+                if !ok {
+                    let message = format!(
+                        "Block {}:{} defined at line {} has {} lines, which does not satisfy {}{}",
+                        file_path,
+                        block.name_display(),
+                        block.starts_at_line,
+                        actual,
+                        op.as_str(),
+                        expected
+                    );
+                    violations
+                        .entry(file_path.clone())
+                        .or_insert_with(Vec::new)
+                        .push(Violation::new(
+                            "line-count".to_string(),
+                            message,
+                            Some(serde_json::to_value(LineCountViolation {
+                                actual,
+                                op: op.as_str().to_string(),
+                                expected,
+                            })?),
+                        ));
+                }
+            }
+        }
+        Ok(violations)
+    }
+}
+
+#[derive(Copy, Clone)]
+enum Op {
+    Lt,
+    Le,
+    Eq,
+    Ge,
+    Gt,
+}
+impl Op {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Op::Lt => "<",
+            Op::Le => "<=",
+            Op::Eq => "==",
+            Op::Ge => ">=",
+            Op::Gt => ">",
+        }
+    }
+}
+
+fn parse_constraint(s: &str) -> anyhow::Result<(Op, usize)> {
+    let trimmed = s.trim();
+    let (op, rest) = if let Some(r) = trimmed.strip_prefix("<=") {
+        (Op::Le, r)
+    } else if let Some(r) = trimmed.strip_prefix(">=") {
+        (Op::Ge, r)
+    } else if let Some(r) = trimmed.strip_prefix("==") {
+        (Op::Eq, r)
+    } else if let Some(r) = trimmed.strip_prefix("<") {
+        (Op::Lt, r)
+    } else if let Some(r) = trimmed.strip_prefix(">") {
+        (Op::Gt, r)
+    } else {
+        return Err(anyhow!("missing comparator"));
+    };
+    let num_str = rest.trim();
+    if num_str.is_empty() {
+        return Err(anyhow!("missing number"));
+    }
+    let expected: usize = num_str.parse().map_err(|_| anyhow!("invalid number"))?;
+    Ok((op, expected))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blocks::Block;
+    use crate::validators::Validator;
+    use serde_json::json;
+
+    #[test]
+    fn parse_constraint_with_valid_syntax_returns_correct_result() {
+        assert!(matches!(parse_constraint("< 50").unwrap(), (Op::Lt, 50)));
+        assert!(matches!(parse_constraint(">=10").unwrap(), (Op::Ge, 10)));
+        assert!(matches!(parse_constraint("== 0").unwrap(), (Op::Eq, 0)));
+    }
+
+    #[test]
+    fn parse_constraint_with_invalid_syntax_returns_error() {
+        assert!(parse_constraint("50").is_err());
+        assert!(parse_constraint("").is_err());
+        assert!(parse_constraint("> -1").is_err());
+        assert!(parse_constraint("<== 50").is_err());
+    }
+
+    #[tokio::test]
+    async fn validate_with_correct_number_of_lines_returns_no_violations() -> anyhow::Result<()> {
+        let validator = LineCountValidator::new();
+        let context = Arc::new(validators::Context::new(HashMap::from([(
+            "file1".to_string(),
+            vec![
+                Block::new(
+                    1,
+                    4,
+                    HashMap::from([("line-count".to_string(), "<3".to_string())]),
+                    "a\nb".to_string(),
+                ),
+                Block::new(
+                    5,
+                    8,
+                    HashMap::from([("line-count".to_string(), "<=3".to_string())]),
+                    "a\nb".to_string(),
+                ),
+                Block::new(
+                    9,
+                    13,
+                    HashMap::from([("line-count".to_string(), "<=3".to_string())]),
+                    "a\nb\nc".to_string(),
+                ),
+                Block::new(
+                    15,
+                    18,
+                    HashMap::from([("line-count".to_string(), "== 2".to_string())]),
+                    "a\nb".to_string(),
+                ),
+                Block::new(
+                    20,
+                    23,
+                    HashMap::from([("line-count".to_string(), ">= 2".to_string())]),
+                    "a\nb".to_string(),
+                ),
+                Block::new(
+                    30,
+                    34,
+                    HashMap::from([("line-count".to_string(), ">= 2".to_string())]),
+                    "a\nb\nc".to_string(),
+                ),
+                Block::new(
+                    40,
+                    45,
+                    HashMap::from([("line-count".to_string(), "> 3".to_string())]),
+                    "a\nb\nc\nd".to_string(),
+                ),
+            ],
+        )])));
+        let violations = validator.validate(context).await?;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn validate_with_incorrect_number_of_lines_returns_violations() -> anyhow::Result<()> {
+        let validator = LineCountValidator::new();
+        let context = Arc::new(validators::Context::new(HashMap::from([(
+            "file2".to_string(),
+            vec![
+                Block::new(
+                    1,
+                    5,
+                    HashMap::from([("line-count".to_string(), "<3".to_string())]),
+                    "a\nb\nc".to_string(),
+                ),
+                Block::new(
+                    7,
+                    12,
+                    HashMap::from([("line-count".to_string(), "<=3".to_string())]),
+                    "a\nb\nc\nd".to_string(),
+                ),
+                Block::new(
+                    14,
+                    19,
+                    HashMap::from([("line-count".to_string(), "==3".to_string())]),
+                    "a\nb\nc\nd".to_string(),
+                ),
+                Block::new(
+                    20,
+                    23,
+                    HashMap::from([("line-count".to_string(), "==3".to_string())]),
+                    "a\nb".to_string(),
+                ),
+                Block::new(
+                    25,
+                    28,
+                    HashMap::from([("line-count".to_string(), ">=3".to_string())]),
+                    "a\nb".to_string(),
+                ),
+                Block::new(
+                    25,
+                    28,
+                    HashMap::from([("line-count".to_string(), ">3".to_string())]),
+                    "a\nb\nc".to_string(),
+                ),
+            ],
+        )])));
+
+        let violations = validator.validate(context).await?;
+
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations.get("file2").unwrap().len(), 6);
+
+        assert_eq!(violations.get("file2").unwrap()[0].violation, "line-count");
+        assert_eq!(
+            violations.get("file2").unwrap()[0].error,
+            "Block file2:(unnamed) defined at line 1 has 3 lines, which does not satisfy <3"
+        );
+        assert_eq!(
+            violations.get("file2").unwrap()[0].details,
+            Some(json!({
+                "actual": 3,
+                "op": "<",
+                "expected": 3,
+            }))
+        );
+
+        assert_eq!(violations.get("file2").unwrap()[1].violation, "line-count");
+        assert_eq!(
+            violations.get("file2").unwrap()[1].error,
+            "Block file2:(unnamed) defined at line 7 has 4 lines, which does not satisfy <=3"
+        );
+        assert_eq!(
+            violations.get("file2").unwrap()[1].details,
+            Some(json!({
+                "actual": 4,
+                "op": "<=",
+                "expected": 3,
+            }))
+        );
+
+        assert_eq!(violations.get("file2").unwrap()[2].violation, "line-count");
+        assert_eq!(
+            violations.get("file2").unwrap()[2].error,
+            "Block file2:(unnamed) defined at line 14 has 4 lines, which does not satisfy ==3"
+        );
+        assert_eq!(
+            violations.get("file2").unwrap()[2].details,
+            Some(json!({
+                "actual": 4,
+                "op": "==",
+                "expected": 3,
+            }))
+        );
+
+        assert_eq!(violations.get("file2").unwrap()[3].violation, "line-count");
+        assert_eq!(
+            violations.get("file2").unwrap()[3].error,
+            "Block file2:(unnamed) defined at line 20 has 2 lines, which does not satisfy ==3"
+        );
+        assert_eq!(
+            violations.get("file2").unwrap()[3].details,
+            Some(json!({
+                "actual": 2,
+                "op": "==",
+                "expected": 3,
+            }))
+        );
+
+        assert_eq!(violations.get("file2").unwrap()[4].violation, "line-count");
+        assert_eq!(
+            violations.get("file2").unwrap()[4].error,
+            "Block file2:(unnamed) defined at line 25 has 2 lines, which does not satisfy >=3"
+        );
+        assert_eq!(
+            violations.get("file2").unwrap()[4].details,
+            Some(json!({
+                "actual": 2,
+                "op": ">=",
+                "expected": 3,
+            }))
+        );
+
+        assert_eq!(violations.get("file2").unwrap()[5].violation, "line-count");
+        assert_eq!(
+            violations.get("file2").unwrap()[5].error,
+            "Block file2:(unnamed) defined at line 25 has 3 lines, which does not satisfy >3"
+        );
+        assert_eq!(
+            violations.get("file2").unwrap()[5].details,
+            Some(json!({
+                "actual": 3,
+                "op": ">",
+                "expected": 3,
+            }))
+        );
+        Ok(())
+    }
+}

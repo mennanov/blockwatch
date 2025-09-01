@@ -5,6 +5,7 @@
 > - Enforce formatting rules (sorted lines)
 > - Ensure unique lines
 > - Validate each line against a regex pattern
+> - Enforce number of lines in a block
 
 [//]: # (</block>)
 
@@ -130,6 +131,24 @@ blockwatch
 ```shell
 # This command will now fail until README.md is updated
 git diff --patch | blockwatch
+```
+
+### Validating Block Line Count
+
+Use the `line-count` attribute to ensure the total number of lines in a block meets a constraint:
+
+- line-count="<50" — strictly less than 50 lines
+- line-count=">=3" — at least 3 lines
+- line-count="==10" — exactly 10 lines
+
+```markdown
+# Small list
+
+[//]: # (<block name="small-list" line-count="<=3">)
+- a
+- b
+- c
+[//]: # (</block>)
 ```
 
 This simple mechanism ensures your documentation and code never drift apart.

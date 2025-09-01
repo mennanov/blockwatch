@@ -1,12 +1,14 @@
 mod affects;
 mod keep_sorted;
 mod keep_unique;
+mod line_count;
 mod line_pattern;
 
 use crate::blocks::Block;
 use crate::validators::affects::AffectsValidator;
 use crate::validators::keep_sorted::KeepSortedValidator;
 use crate::validators::keep_unique::KeepUniqueValidator;
+use crate::validators::line_count::LineCountValidator;
 use crate::validators::line_pattern::LinePatternValidator;
 use async_trait::async_trait;
 use serde::Serialize;
@@ -62,6 +64,7 @@ pub(crate) async fn run(context: Context) -> anyhow::Result<HashMap<String, Vec<
         Box::new(KeepSortedValidator::new()),
         Box::new(KeepUniqueValidator::new()),
         Box::new(LinePatternValidator::new()),
+        Box::new(LineCountValidator::new()),
         // </block>
     ];
     let context = Arc::new(context);
