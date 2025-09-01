@@ -3,7 +3,7 @@ name = "blockwatch"
 version = "0.2.2"
 edition = "2024"
 repository = "https://github.com/mennanov/blockwatch"
-description = "Linter that tracks changes between dependent blocks of code"
+description = "Language agnostic linter that keeps your code and documentation in sync and valid"
 homepage = "https://github.com/mennanov/blockwatch"
 license = "MIT"
 
