@@ -34,9 +34,23 @@ verifiable.
 
 ## How It Works
 
-Blocks are declared in the source code comments: e.g. `/* <block> */` in C-style languages).
+Blocks are declared as XML tags in the source code comments:
 
-Every block
+```python
+fruits = [
+    # <block keep-sorted="asc">
+    "apple",
+    "banana",
+    "orange"
+    # </block>
+]
+```
+
+Running the following command will validate the changes:
+
+```shell
+git diff --patch | blockwatch
+```
 
 ### Tracking Dependencies
 
@@ -67,7 +81,7 @@ In `README.md`, we define the block that depends on the code above:
 ```markdown
 ## Supported Languages
 
-[//]: # (<block name="supported-grammar-example" keep-sorted="asc">)
+[//]: # (<block name="supported-grammar-example">)
 
 - Go
 - JavaScript
@@ -75,6 +89,8 @@ In `README.md`, we define the block that depends on the code above:
 
 [//]: # (</block>)
 ```
+
+This simple mechanism ensures your documentation and code never drift apart.
 
 ### Maintaining Lines Order
 
@@ -128,11 +144,6 @@ blockwatch
 [//]: # (</block>)
 ```
 
-```shell
-# This command will now fail until README.md is updated
-git diff --patch | blockwatch
-```
-
 ### Validating Block Line Count
 
 Use the `line-count` attribute to ensure the total number of lines in a block meets a constraint:
@@ -151,8 +162,6 @@ Use the `line-count` attribute to ensure the total number of lines in a block me
 [//]: # (</block>)
 ```
 
-This simple mechanism ensures your documentation and code never drift apart.
-
 -----
 
 ## Key Features
@@ -168,6 +177,18 @@ This simple mechanism ensures your documentation and code never drift apart.
 -----
 
 ## Installation
+
+### Homebrew (macOS and Linux)
+
+If you use Homebrew:
+
+```shell
+brew tap mennanov/tap
+brew install blockwatch
+```
+
+- To upgrade later: `brew upgrade blockwatch`
+- To uninstall: `brew uninstall blockwatch`
 
 ### From Source
 
