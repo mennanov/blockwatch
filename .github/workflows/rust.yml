@@ -57,3 +57,5 @@ jobs:
 
     steps:
       - uses: mennanov/blockwatch-action@v1
+        with:
+          diff_pathspec: ":(exclude).github/"
