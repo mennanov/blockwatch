@@ -118,15 +118,36 @@ const MONTHS: [&str; 12] = [
 
 ### Ensuring Unique Lines
 
-Use the `keep-unique` attribute to ensure there are no duplicate lines inside a block:
+Use the `keep-unique` attribute to ensure there are no duplicate lines inside a block.
+
+- Default behavior (empty attribute): uses the entire line as the value to check for uniqueness.
+- Regex behavior (non-empty attribute): treats the attribute as a Regular Expression. If a named capture group "value"
+  is present, that group's text is used; otherwise, the entire match is used. Lines that do not match the regex are
+  ignored.
 
 ```markdown
 # Contributors
 
 [//]: # (<block name="contributors-unique" keep-unique="">)
+
 - Alice
 - Bob
 - Carol
+
+[//]: # (</block>)
+```
+
+Regex example using a named group to only consider the numeric ID for uniqueness and ignore non-matching lines:
+
+```markdown
+# IDs
+
+[//]: # (<block name="ids-unique" keep-unique="^ID:(?P<value>\d+)">)
+ID:1 Alice
+ID:2 Bob
+this line is skipped
+ID:1 Carol  <!-- duplicate by extracted ID -->
+
 [//]: # (</block>)
 ```
 
@@ -141,6 +162,7 @@ Use the `line-pattern` attribute to ensure every line in the block matches a Reg
 hello-world
 rust-2025
 blockwatch
+
 [//]: # (</block>)
 ```
 
@@ -156,9 +178,11 @@ Use the `line-count` attribute to ensure the total number of lines in a block me
 # Small list
 
 [//]: # (<block name="small-list" line-count="<=3">)
+
 - a
 - b
 - c
+
 [//]: # (</block>)
 ```
 

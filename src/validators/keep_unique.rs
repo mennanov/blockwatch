@@ -31,15 +31,51 @@ impl Validator for KeepUniqueValidator {
                 if !block.attributes.contains_key("keep-unique") {
                     continue;
                 }
-                let mut seen: HashSet<&str> = HashSet::new();
+                let pattern = block
+                    .attributes
+                    .get("keep-unique")
+                    .cloned()
+                    .unwrap_or_default();
+                let re = if pattern.is_empty() {
+                    None
+                } else {
+                    Some(regex::Regex::new(&pattern))
+                };
+                let mut seen: HashSet<String> = HashSet::new();
                 for (idx, line) in block.content.lines().enumerate() {
-                    if !seen.insert(line) {
-                        let line_no = block.starts_at_line + idx + 1;
-                        violations
-                            .entry(file_path.clone())
-                            .or_insert_with(Vec::new)
-                            .push(create_violation(file_path, block, line_no)?);
-                        break;
+                    let key_opt = match &re {
+                        None => Some(line.to_string()),
+                        Some(Ok(re)) => {
+                            if let Some(c) = re.captures(line) {
+                                // If named group "value" exists use it, otherwise use whole match
+                                if let Some(m) = c.name("value") {
+                                    Some(m.as_str().to_string())
+                                } else {
+                                    c.get(0).map(|m| m.as_str().to_string())
+                                }
+                            } else {
+                                None // skip line when no match
+                            }
+                        }
+                        Some(Err(_)) => {
+                            // Invalid regex: return an error for the validator
+                            return Err(anyhow::anyhow!(
+                                "Invalid keep-unique regex pattern for block {}:{} defined at line {}",
+                                file_path,
+                                block.name_display(),
+                                block.starts_at_line
+                            ));
+                        }
+                    };
+                    if let Some(key) = key_opt {
+                        if !seen.insert(key) {
+                            let line_no = block.starts_at_line + idx + 1;
+                            violations
+                                .entry(file_path.clone())
+                                .or_insert_with(Vec::new)
+                                .push(create_violation(file_path, block, line_no)?);
+                            break;
+                        }
                     }
                 }
             }
@@ -153,6 +189,65 @@ mod validate_tests {
                 "line_number_duplicated": 5,
             }))
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn regex_with_named_group_detects_duplicates() -> anyhow::Result<()> {
+        let validator = KeepUniqueValidator::new();
+        let attrs = HashMap::from([("keep-unique".to_string(), "^ID:(?P<value>\\d+)".to_string())]);
+        let context = Arc::new(validators::Context::new(HashMap::from([(
+            "file1".to_string(),
+            vec![Block::new(
+                1,
+                6,
+                attrs,
+                "ID:1 A\nID:2 B\nID:1 C".to_string(),
+            )],
+        )])));
+        let violations = validator.validate(context).await?;
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations.get("file1").unwrap().len(), 1);
+        assert_eq!(
+            violations.get("file1").unwrap()[0].details,
+            Some(json!({"line_number_duplicated": 4}))
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn regex_without_named_group_uses_full_match() -> anyhow::Result<()> {
+        let validator = KeepUniqueValidator::new();
+        let attrs = HashMap::from([("keep-unique".to_string(), "^ID:\\d+".to_string())]);
+        let context = Arc::new(validators::Context::new(HashMap::from([(
+            "file1".to_string(),
+            vec![Block::new(
+                1,
+                6,
+                attrs,
+                "ID:1 A\nID:2 B\nID:1 C".to_string(),
+            )],
+        )])));
+        let violations = validator.validate(context).await?;
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations.get("file1").unwrap().len(), 1);
+        assert_eq!(
+            violations.get("file1").unwrap()[0].details,
+            Some(json!({"line_number_duplicated": 4}))
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn regex_non_matching_lines_are_skipped() -> anyhow::Result<()> {
+        let validator = KeepUniqueValidator::new();
+        let attrs = HashMap::from([("keep-unique".to_string(), "^ID:(?P<value>\\d+)".to_string())]);
+        let context = Arc::new(validators::Context::new(HashMap::from([(
+            "file1".to_string(),
+            vec![Block::new(1, 4, attrs, "ID:1\nX:2\nID:2".to_string())],
+        )])));
+        let violations = validator.validate(context).await?;
+        assert!(violations.is_empty());
         Ok(())
     }
 }
