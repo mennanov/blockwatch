@@ -6,6 +6,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 
 const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
 
@@ -90,7 +91,7 @@ pub(crate) async fn parse_blocks(
     file_reader: &impl FileReader,
     parsers: HashMap<String, Rc<Box<dyn BlocksParser>>>,
     extra_file_extensions: HashMap<String, String>,
-) -> anyhow::Result<HashMap<String, Vec<Block>>> {
+) -> anyhow::Result<HashMap<String, Vec<Arc<Block>>>> {
     let mut blocks = HashMap::new();
     for (file_path, modified_ranges) in modified_ranges_by_file {
         let source_code = file_reader.read_to_string(Path::new(&file_path)).await?;
@@ -111,7 +112,7 @@ pub(crate) async fn parse_blocks(
                     blocks
                         .entry(file_path.into())
                         .or_insert_with(Vec::new)
-                        .push(block);
+                        .push(Arc::new(block));
                 }
             }
         }

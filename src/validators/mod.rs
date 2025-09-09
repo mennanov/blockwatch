@@ -1,4 +1,5 @@
 mod affects;
+mod check_ai;
 mod keep_sorted;
 mod keep_unique;
 mod line_count;
@@ -6,6 +7,7 @@ mod line_pattern;
 
 use crate::blocks::Block;
 use crate::validators::affects::AffectsValidator;
+use crate::validators::check_ai::{CheckAiValidator, OpenAiClient};
 use crate::validators::keep_sorted::KeepSortedValidator;
 use crate::validators::keep_unique::KeepUniqueValidator;
 use crate::validators::line_count::LineCountValidator;
@@ -47,11 +49,11 @@ impl Violation {
 
 pub(crate) struct Context {
     // Modified blocks grouped by filename.
-    modified_blocks: HashMap<String, Vec<Block>>,
+    modified_blocks: HashMap<String, Vec<Arc<Block>>>,
 }
 
 impl Context {
-    pub(crate) fn new(modified_blocks: HashMap<String, Vec<Block>>) -> Self {
+    pub(crate) fn new(modified_blocks: HashMap<String, Vec<Arc<Block>>>) -> Self {
         Self { modified_blocks }
     }
 }
@@ -65,6 +67,7 @@ pub(crate) async fn run(context: Context) -> anyhow::Result<HashMap<String, Vec<
         Box::new(KeepUniqueValidator::new()),
         Box::new(LinePatternValidator::new()),
         Box::new(LineCountValidator::new()),
+        Box::new(CheckAiValidator::with_client(OpenAiClient::new_from_env())),
         // </block>
     ];
     let context = Arc::new(context);
@@ -99,13 +102,14 @@ mod run_tests {
     use crate::validators;
     use crate::validators::run;
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn merges_different_violations_correctly() -> anyhow::Result<()> {
         let context = validators::Context::new(HashMap::from([
             (
                 "file1".to_string(),
-                vec![Block::new(
+                vec![Arc::new(Block::new(
                     1,
                     6,
                     HashMap::from([
@@ -113,16 +117,16 @@ mod run_tests {
                         ("keep-sorted".to_string(), "desc".to_string()),
                     ]),
                     "D\nC\nD\nC".to_string(),
-                )],
+                ))],
             ),
             (
                 "file2".to_string(),
-                vec![Block::new(
+                vec![Arc::new(Block::new(
                     1,
                     6,
                     HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
                     "A\nB\nA".to_string(),
-                )],
+                ))],
             ),
         ]));
 
