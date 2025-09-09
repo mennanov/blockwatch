@@ -6,6 +6,7 @@
 > - Ensure unique lines
 > - Validate each line against a regex pattern
 > - Enforce number of lines in a block
+> - Validate a block with an AI condition (LLM)
 
 [//]: # (</block>)
 
@@ -17,17 +18,24 @@
 ## Why
 
 Have you ever updated a function but forgotten to update the `README.md` example that uses it? Or changed a list of
-supported items in your code but forgot to update the corresponding list in the documentation?
+supported items in your configuration but forgot to update the corresponding list in the documentation?
 
 Keeping everything in sync manually is tedious and error-prone.
 
 ## What
 
-**BlockWatch** is a language agnostic lint tool that supports multiple types of checks:
+**BlockWatch** is a language agnostic lint:
 
-- **Code consistency**: Track dependencies between code blocks - when one block changes, its dependents must be updated
-- **Sorted lines**: Ensure that parts of your codebase stay properly sorted
-- More validators are coming soon!
+- 🔗 Dependency-aware blocks: declare named blocks and link them to keep code, docs, and configs in sync across files.
+- 🤖 AI-powered validation: Validate blocks against natural-language conditions using OpenAi-compatible LLMs.
+- 🔤 Sorted segments: enforce stable ordering to prevent drift in lists and indexes.
+- 🤖 Git-native workflow: pipe git diff into blockwatch for instant, change-only validation before you commit.
+- 🛠️ Pre-commit & CI/CD ready: first-class support for pre-commit hooks and a dedicated GitHub Action.
+- 🌍 Broad language coverage: works with 20+ programming and markup languages out of the box.
+- 🧩 Flexible extension mapping: map custom file extensions to supported grammars via a simple CLI flag.
+- ⚡ Fast, single-binary tool: written in Rust with no runtime dependencies.
+
+-----
 
 It keeps your codebase consistent by making dependencies and formatting requirements explicit and automatically
 verifiable.
@@ -118,7 +126,7 @@ const MONTHS: [&str; 12] = [
 
 ### Ensuring Unique Lines
 
-Use the `keep-unique` attribute to ensure there are no duplicate lines inside a block.
+Use the `keep-unique` attribute with an optional RegExp to ensure there are no duplicate lines inside a block.
 
 - Default behavior (empty attribute): uses the entire line as the value to check for uniqueness.
 - Regex behavior (non-empty attribute): treats the attribute as a Regular Expression. If a named capture group "value"
@@ -186,17 +194,34 @@ Use the `line-count` attribute to ensure the total number of lines in a block me
 [//]: # (</block>)
 ```
 
------
+### Validating with AI (LLM)
 
-## Key Features
+Use the `check-ai` attribute to validate a block against a natural-language condition using an LLM.
+The model will return an actionable error message if the condition is not met.
 
-- 🔗 Dependency-aware blocks: declare named blocks and link them to keep code, docs, and configs in sync across files.
-- 🔤 Sorted segments: enforce stable ordering to prevent drift in lists and indexes.
-- 🤖 Git-native workflow: pipe git diff into blockwatch for instant, change-only validation before you commit.
-- 🛠️ Pre-commit & CI/CD ready: first-class support for pre-commit hooks and a dedicated GitHub Action.
-- 🌍 Broad language coverage: works with 20+ programming and markup languages out of the box.
-- 🧩 Flexible extension mapping: map custom file extensions to supported grammars via a simple CLI flag.
-- ⚡ Fast, single-binary tool: written in Rust with no runtime dependencies.
+Example:
+
+```markdown
+# Policy Section
+
+[//]: # (<block name="policy" check-ai="The block must mention the word 'banana' at least once.">)
+We like apples and oranges.
+[//]: # (</block>)
+```
+
+If the content does not satisfy the condition, BlockWatch will report a violation.
+
+#### Configuration
+
+- Set `BLOCKWATCH_AI_API_KEY` env variable to contain an LLM API key.
+- Optional: Set `BLOCKWATCH_AI_API_URL` env variable to point to an OpenAi-compatible LLM API (default:
+  `https://api.openai.com/v1`).
+- Optional: Set `BLOCKWATCH_AI_MODEL` to override the default model (default: `gpt-4o-mini`).
+
+#### Security
+
+When used in CI make sure it can be triggered by trusted users only.
+Otherwise, an API quota may be exhausted.
 
 -----
 

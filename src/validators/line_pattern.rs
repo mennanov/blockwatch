@@ -106,12 +106,12 @@ mod validate_tests {
         let validator = LinePatternValidator::new();
         let context = Arc::new(validators::Context::new(HashMap::from([(
             "file1".to_string(),
-            vec![Block::new(
+            vec![Arc::new(Block::new(
                 1,
                 2,
                 HashMap::from([("line-pattern".to_string(), "[A-Z]+".to_string())]),
                 "".to_string(),
-            )],
+            ))],
         )])));
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());
@@ -123,12 +123,12 @@ mod validate_tests {
         let validator = LinePatternValidator::new();
         let context = Arc::new(validators::Context::new(HashMap::from([(
             "file1".to_string(),
-            vec![Block::new(
+            vec![Arc::new(Block::new(
                 1,
                 5,
                 HashMap::from([("line-pattern".to_string(), "^[A-Z]+$".to_string())]),
                 "FOO\nBAR\nZ".to_string(),
-            )],
+            ))],
         )])));
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());
@@ -140,12 +140,12 @@ mod validate_tests {
         let validator = LinePatternValidator::new();
         let context = Arc::new(validators::Context::new(HashMap::from([(
             "file1".to_string(),
-            vec![Block::new(
+            vec![Arc::new(Block::new(
                 1,
                 6,
                 HashMap::from([("line-pattern".to_string(), "^[A-Z]+$".to_string())]),
                 "OK\nfail\nALSOOK".to_string(),
-            )],
+            ))],
         )])));
         let violations = validator.validate(context).await?;
         assert_eq!(violations.len(), 1);
@@ -173,12 +173,12 @@ mod validate_tests {
         let validator = LinePatternValidator::new();
         let context = Arc::new(validators::Context::new(HashMap::from([(
             "file1".to_string(),
-            vec![Block::new(
+            vec![Arc::new(Block::new(
                 10,
                 15,
                 HashMap::from([("line-pattern".to_string(), "[A-Z+".to_string())]),
                 "FOO".to_string(),
-            )],
+            ))],
         )])));
         let result = validator.validate(context).await;
         assert!(result.is_err());

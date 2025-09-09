@@ -67,15 +67,15 @@ impl Validator for KeepUniqueValidator {
                             ));
                         }
                     };
-                    if let Some(key) = key_opt {
-                        if !seen.insert(key) {
-                            let line_no = block.starts_at_line + idx + 1;
-                            violations
-                                .entry(file_path.clone())
-                                .or_insert_with(Vec::new)
-                                .push(create_violation(file_path, block, line_no)?);
-                            break;
-                        }
+                    if let Some(key) = key_opt
+                        && !seen.insert(key)
+                    {
+                        let line_no = block.starts_at_line + idx + 1;
+                        violations
+                            .entry(file_path.clone())
+                            .or_insert_with(Vec::new)
+                            .push(create_violation(file_path, block, line_no)?);
+                        break;
                     }
                 }
             }
@@ -128,12 +128,12 @@ mod validate_tests {
         let validator = KeepUniqueValidator::new();
         let context = Arc::new(validators::Context::new(HashMap::from([(
             "file1".to_string(),
-            vec![Block::new(
+            vec![Arc::new(Block::new(
                 1,
                 2,
                 HashMap::from([("keep-unique".to_string(), "".to_string())]),
                 "".to_string(),
-            )],
+            ))],
         )])));
 
         let violations = validator.validate(context).await?;
@@ -147,12 +147,12 @@ mod validate_tests {
         let validator = KeepUniqueValidator::new();
         let context = Arc::new(validators::Context::new(HashMap::from([(
             "file1".to_string(),
-            vec![Block::new(
+            vec![Arc::new(Block::new(
                 1,
                 5,
                 HashMap::from([("keep-unique".to_string(), "".to_string())]),
                 "A\nB\nC".to_string(),
-            )],
+            ))],
         )])));
 
         let violations = validator.validate(context).await?;
@@ -166,12 +166,12 @@ mod validate_tests {
         let validator = KeepUniqueValidator::new();
         let context = Arc::new(validators::Context::new(HashMap::from([(
             "file1".to_string(),
-            vec![Block::new(
+            vec![Arc::new(Block::new(
                 1,
                 6,
                 HashMap::from([("keep-unique".to_string(), "".to_string())]),
                 "A\nB\nC\nB\nC".to_string(),
-            )],
+            ))],
         )])));
 
         let violations = validator.validate(context).await?;
@@ -198,12 +198,12 @@ mod validate_tests {
         let attrs = HashMap::from([("keep-unique".to_string(), "^ID:(?P<value>\\d+)".to_string())]);
         let context = Arc::new(validators::Context::new(HashMap::from([(
             "file1".to_string(),
-            vec![Block::new(
+            vec![Arc::new(Block::new(
                 1,
                 6,
                 attrs,
                 "ID:1 A\nID:2 B\nID:1 C".to_string(),
-            )],
+            ))],
         )])));
         let violations = validator.validate(context).await?;
         assert_eq!(violations.len(), 1);
@@ -221,12 +221,12 @@ mod validate_tests {
         let attrs = HashMap::from([("keep-unique".to_string(), "^ID:\\d+".to_string())]);
         let context = Arc::new(validators::Context::new(HashMap::from([(
             "file1".to_string(),
-            vec![Block::new(
+            vec![Arc::new(Block::new(
                 1,
                 6,
                 attrs,
                 "ID:1 A\nID:2 B\nID:1 C".to_string(),
-            )],
+            ))],
         )])));
         let violations = validator.validate(context).await?;
         assert_eq!(violations.len(), 1);
@@ -244,7 +244,12 @@ mod validate_tests {
         let attrs = HashMap::from([("keep-unique".to_string(), "^ID:(?P<value>\\d+)".to_string())]);
         let context = Arc::new(validators::Context::new(HashMap::from([(
             "file1".to_string(),
-            vec![Block::new(1, 4, attrs, "ID:1\nX:2\nID:2".to_string())],
+            vec![Arc::new(Block::new(
+                1,
+                4,
+                attrs,
+                "ID:1\nX:2\nID:2".to_string(),
+            ))],
         )])));
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());
