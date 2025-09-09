@@ -67,15 +67,15 @@ impl Validator for KeepUniqueValidator {
                             ));
                         }
                     };
-                    if let Some(key) = key_opt {
-                        if !seen.insert(key) {
-                            let line_no = block.starts_at_line + idx + 1;
-                            violations
-                                .entry(file_path.clone())
-                                .or_insert_with(Vec::new)
-                                .push(create_violation(file_path, block, line_no)?);
-                            break;
-                        }
+                    if let Some(key) = key_opt
+                        && !seen.insert(key)
+                    {
+                        let line_no = block.starts_at_line + idx + 1;
+                        violations
+                            .entry(file_path.clone())
+                            .or_insert_with(Vec::new)
+                            .push(create_violation(file_path, block, line_no)?);
+                        break;
                     }
                 }
             }
