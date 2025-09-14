@@ -403,7 +403,6 @@ fn bar() {
 
 - Deleted blocks are currently ignored.
 - Files with unsupported grammar are ignored.
-- Multiple blocks cannot be declared on a single line: `<block><block>will not work</block></block>`.
 
 ## Contributing
 
