@@ -41,6 +41,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parsers::Comment;
 
     #[test]
     fn parses_css_comments_correctly() -> anyhow::Result<()> {
@@ -70,15 +71,26 @@ mod tests {
         assert_eq!(
             blocks,
             vec![
-                (6, "This is a CSS comment".to_string()),
-                (
-                    8,
-                    "This is a multi-line\nCSS comment that spans\nmultiple lines\n".to_string()
-                ),
-                (
-                    15,
-                    "Another multi-line\nCSS comment with\ndifferent formatting".to_string()
-                )
+                Comment {
+                    source_line_number: 6,
+                    source_start_position: 81,
+                    source_end_position: 108,
+                    comment_text: "This is a CSS comment".to_string()
+                },
+                Comment {
+                    source_line_number: 8,
+                    source_start_position: 147,
+                    source_end_position: 266,
+                    comment_text: "This is a multi-line\nCSS comment that spans\nmultiple lines\n"
+                        .to_string()
+                },
+                Comment {
+                    source_line_number: 15,
+                    source_start_position: 339,
+                    source_end_position: 431,
+                    comment_text: "Another multi-line\nCSS comment with\ndifferent formatting"
+                        .to_string()
+                },
             ]
         );
 

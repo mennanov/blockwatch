@@ -47,6 +47,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parsers::Comment;
 
     #[test]
     fn parses_markdown_comments_correctly() -> anyhow::Result<()> {
@@ -70,9 +71,24 @@ in it)"#,
         assert_eq!(
             blocks,
             vec![
-                (5, "This is a markdown comment".to_string()),
-                (6, "Another markdown comment".to_string()),
-                (10, "Third comment with\nmultiple lines\nin it".to_string()),
+                Comment {
+                    source_line_number: 5,
+                    source_start_position: 31,
+                    source_end_position: 68,
+                    comment_text: "This is a markdown comment".to_string()
+                },
+                Comment {
+                    source_line_number: 6,
+                    source_start_position: 68,
+                    source_end_position: 104,
+                    comment_text: "Another markdown comment".to_string()
+                },
+                Comment {
+                    source_line_number: 10,
+                    source_start_position: 121,
+                    source_end_position: 170,
+                    comment_text: "Third comment with\nmultiple lines\nin it".to_string()
+                },
             ]
         );
 

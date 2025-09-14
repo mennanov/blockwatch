@@ -57,6 +57,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parsers::Comment;
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
@@ -94,23 +95,55 @@ mod tests {
         assert_eq!(
             blocks,
             vec![
-                (
-                    2,
-                    "This is a crate-level documentation comment.".to_string()
-                ),
-                (
-                    3,
-                    "It provides an overview of the module or library.".to_string()
-                ),
-                (5, "This function adds two numbers.".to_string()),
-                (6, "".to_string()),
-                (7, "Returns the sum of `a` and `b`.".to_string()),
-                (13, "This is a single-line comment.".to_string()),
-                (
-                    16,
-                    "\nThis is a block comment.\nIt can span multiple lines.\n".to_string()
-                ),
-                (24, "Using the add function.".to_string()),
+                Comment {
+                    source_line_number: 2,
+                    source_start_position: 9,
+                    source_end_position: 58,
+                    comment_text: "This is a crate-level documentation comment.".to_string()
+                },
+                Comment {
+                    source_line_number: 3,
+                    source_start_position: 66,
+                    source_end_position: 120,
+                    comment_text: "It provides an overview of the module or library.".to_string()
+                },
+                Comment {
+                    source_line_number: 5,
+                    source_start_position: 137,
+                    source_end_position: 173,
+                    comment_text: "This function adds two numbers.".to_string()
+                },
+                Comment {
+                    source_line_number: 6,
+                    source_start_position: 181,
+                    source_end_position: 185,
+                    comment_text: "".to_string()
+                },
+                Comment {
+                    source_line_number: 7,
+                    source_start_position: 193,
+                    source_end_position: 229,
+                    comment_text: "Returns the sum of `a` and `b`.".to_string()
+                },
+                Comment {
+                    source_line_number: 13,
+                    source_start_position: 338,
+                    source_end_position: 371,
+                    comment_text: "This is a single-line comment.".to_string()
+                },
+                Comment {
+                    source_line_number: 16,
+                    source_start_position: 431,
+                    source_end_position: 532,
+                    comment_text: "\nThis is a block comment.\nIt can span multiple lines.\n"
+                        .to_string()
+                },
+                Comment {
+                    source_line_number: 24,
+                    source_start_position: 662,
+                    source_end_position: 688,
+                    comment_text: "Using the add function.".to_string()
+                }
             ]
         );
 

@@ -45,6 +45,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parsers::Comment;
 
     #[test]
     fn parses_cpp_comments_correctly() -> anyhow::Result<()> {
@@ -76,13 +77,31 @@ mod tests {
         assert_eq!(
             blocks,
             vec![
-                (2, "This is a single-line comment in C++.".to_string()),
-                (
-                    5,
-                    "\nThis is a multi-line comment.\nIt spans multiple lines.\n".to_string()
-                ),
-                (11, "Prints a message to the console.".to_string()),
-                (13, "This is another\nmulti-line\ncomment.\n".to_string())
+                Comment {
+                    source_line_number: 2,
+                    source_start_position: 13,
+                    source_end_position: 53,
+                    comment_text: "This is a single-line comment in C++.".to_string()
+                },
+                Comment {
+                    source_line_number: 5,
+                    source_start_position: 99,
+                    source_end_position: 202,
+                    comment_text: "\nThis is a multi-line comment.\nIt spans multiple lines.\n"
+                        .to_string()
+                },
+                Comment {
+                    source_line_number: 11,
+                    source_start_position: 286,
+                    source_end_position: 321,
+                    comment_text: "Prints a message to the console.".to_string()
+                },
+                Comment {
+                    source_line_number: 13,
+                    source_start_position: 339,
+                    source_end_position: 435,
+                    comment_text: "This is another\nmulti-line\ncomment.\n".to_string()
+                },
             ]
         );
 

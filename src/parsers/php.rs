@@ -47,6 +47,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parsers::Comment;
 
     #[test]
     fn parses_php_comments_correctly() -> anyhow::Result<()> {
@@ -80,18 +81,38 @@ mod tests {
         assert_eq!(
             blocks,
             vec![
-                (2, "This is a single-line comment in PHP".to_string()),
-                (
-                    4,
-                    "\nThis is a multi-line comment.\nIt spans multiple lines in PHP.\n"
-                        .to_string()
-                ),
-                (10, "Prints a message to the console.".to_string()),
-                (
-                    12,
-                    "Another comment\nsplit into\nmultiple lines.\n".to_string()
-                ),
-                (20, "inlined comment".to_string())
+                Comment {
+                    source_line_number: 2,
+                    source_start_position: 18,
+                    source_end_position: 57,
+                    comment_text: "This is a single-line comment in PHP".to_string()
+                },
+                Comment {
+                    source_line_number: 4,
+                    source_start_position: 75,
+                    source_end_position: 185,
+                    comment_text:
+                        "\nThis is a multi-line comment.\nIt spans multiple lines in PHP.\n"
+                            .to_string()
+                },
+                Comment {
+                    source_line_number: 10,
+                    source_start_position: 257,
+                    source_end_position: 291,
+                    comment_text: "Prints a message to the console.".to_string()
+                },
+                Comment {
+                    source_line_number: 12,
+                    source_start_position: 313,
+                    source_end_position: 416,
+                    comment_text: "Another comment\nsplit into\nmultiple lines.\n".to_string()
+                },
+                Comment {
+                    source_line_number: 20,
+                    source_start_position: 523,
+                    source_end_position: 541,
+                    comment_text: "inlined comment".to_string()
+                },
             ]
         );
 

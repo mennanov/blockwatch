@@ -52,6 +52,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parsers::Comment;
 
     #[test]
     fn parses_c_sharp_comments_correctly() -> anyhow::Result<()> {
@@ -84,13 +85,48 @@ namespace HelloWorld
         assert_eq!(
             blocks,
             vec![
-                (2, "Single line comment".to_string()),
-                (7, "Multi-line\ncomment example.\n".to_string()),
-                (12, "<summary>".to_string()), // Note: Current parser logic treats /// like //
-                (13, "XML Doc comment.".to_string()),
-                (14, "</summary>".to_string()),
-                (17, "Another single line".to_string()),
-                (18, "Simple block".to_string())
+                Comment {
+                    source_line_number: 2,
+                    source_start_position: 1,
+                    source_end_position: 23,
+                    comment_text: "Single line comment".to_string()
+                },
+                Comment {
+                    source_line_number: 7,
+                    source_start_position: 66,
+                    source_end_position: 111,
+                    comment_text: "Multi-line\ncomment example.\n".to_string()
+                },
+                Comment {
+                    source_line_number: 12,
+                    source_start_position: 144,
+                    source_end_position: 157,
+                    comment_text: "<summary>".to_string()
+                },
+                Comment {
+                    source_line_number: 13,
+                    source_start_position: 166,
+                    source_end_position: 186,
+                    comment_text: "XML Doc comment.".to_string()
+                },
+                Comment {
+                    source_line_number: 14,
+                    source_start_position: 195,
+                    source_end_position: 209,
+                    comment_text: "</summary>".to_string()
+                },
+                Comment {
+                    source_line_number: 17,
+                    source_start_position: 307,
+                    source_end_position: 329,
+                    comment_text: "Another single line".to_string()
+                },
+                Comment {
+                    source_line_number: 18,
+                    source_start_position: 342,
+                    source_end_position: 360,
+                    comment_text: "Simple block".to_string()
+                }
             ]
         );
 

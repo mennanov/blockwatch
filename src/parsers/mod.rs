@@ -21,7 +21,7 @@ mod typescript;
 mod xml;
 mod yaml;
 
-use crate::blocks::{Block, BlockBuilder};
+use crate::blocks::Block;
 use anyhow::Context;
 use quick_xml::events::Event;
 use std::collections::HashMap;
@@ -39,14 +39,8 @@ pub(crate) trait BlocksParser {
 
 /// Parses comment strings from a source code.
 trait CommentsParser {
-    /// Returns a `Vec` of pairs `(comment_start_line, comment_string)`.
-    ///
-    /// The `comment_start_line` is a 1-based index of the line the comment starts at.
-    ///
-    /// The `comment_string` is expected to be the actual content of the comment without any
-    /// language specific symbols like "//", "/**", etc. However, it **should preserve the line
-    /// breaks**.
-    fn parse(&self, source_code: &str) -> anyhow::Result<Vec<(usize, String)>>;
+    /// Returns a `Vec` of `Comment`s.
+    fn parse(&self, source_code: &str) -> anyhow::Result<Vec<Comment>>;
 }
 
 /// Returns a map of all available language parsers by their file extensions.
@@ -124,7 +118,7 @@ impl<F: Fn(usize, &str) -> Option<String>> TreeSitterCommentsParser<F> {
 }
 
 impl<F: Fn(usize, &str) -> Option<String>> CommentsParser for TreeSitterCommentsParser<F> {
-    fn parse(&self, source_code: &str) -> anyhow::Result<Vec<(usize, String)>> {
+    fn parse(&self, source_code: &str) -> anyhow::Result<Vec<Comment>> {
         let mut parser = Parser::new();
         parser
             .set_language(&self.language)
@@ -140,19 +134,35 @@ impl<F: Fn(usize, &str) -> Option<String>> CommentsParser for TreeSitterComments
                 for capture in query_match.captures {
                     let node = capture.node;
                     let start_line = node.start_position().row + 1; // Convert to 1-based indexing
+                    let start_position = node.start_byte();
+                    let end_position = node.end_byte();
                     let comment_text = &source_code[node.start_byte()..node.end_byte()];
                     if let Some(processor) = post_processor {
                         if let Some(out) = processor(capture.index as usize, comment_text) {
-                            blocks.push((start_line, out));
+                            blocks.push(Comment {
+                                source_line_number: start_line,
+                                source_start_position: start_position,
+                                source_end_position: end_position,
+                                comment_text: out,
+                            });
                         }
                     } else {
-                        blocks.push((start_line, comment_text.to_string()));
+                        blocks.push(Comment {
+                            source_line_number: start_line,
+                            source_start_position: start_position,
+                            source_end_position: end_position,
+                            comment_text: comment_text.to_string(),
+                        });
                     }
                 }
             }
         }
 
-        blocks.sort_by(|(start_line1, _), (start_line2, _)| start_line1.cmp(start_line2));
+        blocks.sort_by(|comment1, comment2| {
+            comment1
+                .source_start_position
+                .cmp(&comment2.source_start_position)
+        });
         Ok(blocks)
     }
 }
@@ -161,33 +171,61 @@ struct BlocksFromCommentsParser<C: CommentsParser> {
     comments_parser: C,
 }
 
+#[derive(Debug, PartialEq)]
+struct Comment {
+    // 1-based line number of the start of this comment in the source.
+    source_line_number: usize,
+    // Byte offset (i.e. position) of the start of this comment in the source.
+    source_start_position: usize,
+    // Byte offset (i.e. position) of the end of this comment in the source.
+    source_end_position: usize,
+    // The `comment_string` is expected to be the actual content of the comment without any
+    // language specific symbols like "//", "/**", etc. However, it **should preserve the line
+    // breaks**.
+    comment_text: String,
+}
+
+/// Represents a comment's metadata.
+#[derive(PartialEq)]
+struct CommentIndex {
+    // Comment's start position in **concatenated** comments (not in original source).
+    start_position: usize,
+    // Comment's end position in **concatenated** comments (not in original source).
+    end_position: usize,
+    // Comment's 1-based line number in the source.
+    source_start_line_number: usize,
+    // Comment's starting position in the source.
+    source_start_position: usize,
+    // Comment's end position in the source.
+    source_end_position: usize,
+}
+
 impl<C: CommentsParser> BlocksFromCommentsParser<C> {
     fn new(comments_parser: C) -> Self {
         Self { comments_parser }
     }
 
-    /// Returns a string of concatenated `comments` and its corresponding index.
-    ///
-    /// The index is represented as a sorted `Vec` of a character position and its corresponding
-    /// line number in the original source code.
-    fn build_index(comments: &[(usize, String)]) -> (String, Vec<(usize, usize)>) {
-        let mut result = String::new();
-        let mut index: Vec<(usize, usize)> = Vec::new();
-        for (comment_start_line, comment) in comments {
-            for (line_number, line) in comment.lines().enumerate() {
-                if !result.is_empty() {
-                    result.push('\n');
-                }
-                index.push((result.len() + line.len(), comment_start_line + line_number));
-                result.push_str(line);
-            }
+    /// Returns a string of concatenated `comments` and its corresponding `CommentIndex`.
+    fn build_index(comments: &[Comment]) -> (String, Vec<CommentIndex>) {
+        let mut concatenated_comments = String::new();
+        let mut index = Vec::new();
+        for comment in comments {
+            index.push(CommentIndex {
+                start_position: concatenated_comments.len(),
+                end_position: concatenated_comments.len() + comment.comment_text.len(),
+                source_start_line_number: comment.source_line_number,
+                source_start_position: comment.source_start_position,
+                source_end_position: comment.source_end_position,
+            });
+            concatenated_comments.push_str(&comment.comment_text);
         }
 
-        (result, index)
+        (concatenated_comments, index)
     }
 }
 
 impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
+    // TODO: refactor into smaller composable functions.
     fn parse(&self, contents: &str) -> anyhow::Result<Vec<Block>> {
         let comments = self.comments_parser.parse(contents)?;
         let (concatenated_comments, index) = Self::build_index(&comments);
@@ -197,56 +235,71 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
         loop {
             let event = reader.read_event()?;
             match event {
-                Event::Start(event) => {
-                    if event.name().as_ref() != b"block" {
+                Event::Start(start) => {
+                    if start.name().as_ref() != b"block" {
                         continue;
                     }
-                    let starts_at = index[index
-                        .binary_search_by(|(line_start_position, _)| {
-                            line_start_position.cmp(&(reader.buffer_position() as usize))
-                        })
-                        .unwrap_or_else(|e| e)]
-                    .1;
+                    let reader_position = reader.buffer_position() as usize;
+                    let comment_index = index
+                        .get(
+                            index
+                                .binary_search_by(|comment_index| {
+                                    comment_index.end_position.cmp(&reader_position)
+                                })
+                                .unwrap_or_else(|e| e),
+                        )
+                        .expect("start comment index out of bounds");
                     let mut attributes = HashMap::new();
-                    for attr in event.attributes() {
+                    for attr in start.attributes() {
                         let attr = attr.context("Failed to parse attribute")?;
                         attributes.insert(
                             String::from_utf8(attr.key.as_ref().into())?,
                             String::from_utf8(attr.value.into())?,
                         );
                     }
-                    stack.push(BlockBuilder::new(starts_at, attributes));
+                    let block_comment = &concatenated_comments
+                        [comment_index.start_position..reader_position - start.len() - 1];
+                    let start_line_number =
+                        comment_index.source_start_line_number + block_comment.lines().count() - 1;
+                    stack.push(BlockBuilder::new(
+                        start_line_number,
+                        comment_index,
+                        attributes,
+                    ));
                 }
-                Event::End(event) => {
-                    if event.name().as_ref() != b"block" {
+                Event::End(end) => {
+                    if end.name().as_ref() != b"block" {
                         continue;
                     }
 
-                    let ends_at = index[index
-                        .binary_search_by(|(line_start_position, _)| {
-                            line_start_position.cmp(&(reader.buffer_position() as usize))
+                    let reader_position = reader.buffer_position() as usize;
+                    let idx = index
+                        .binary_search_by(|comment_index| {
+                            comment_index.end_position.cmp(&reader_position)
                         })
-                        .unwrap_or_else(|e| e)]
-                    .1;
+                        .unwrap_or_else(|e| e);
+                    let comment_index = index.get(idx).expect("end comment index out of bounds");
                     if let Some(block_builder) = stack.pop() {
-                        let starts_at = block_builder.starts_at;
-                        let content = if ends_at > starts_at {
-                            // TODO: optimize by using `match_indices('\n')`
-                            contents
-                                .lines()
-                                .skip(starts_at)
-                                .take(ends_at - starts_at - 1)
-                                .collect::<Vec<_>>()
-                                .join("\n")
+                        let block_content = if comment_index != block_builder.start_index {
+                            &contents[block_builder.start_index.source_end_position
+                                ..comment_index.source_start_position]
                         } else {
-                            // Block opened and closed at the same line.
-                            String::new()
+                            // Block that starts and ends in the same comment can't have any
+                            // content.
+                            ""
                         };
-                        blocks.push(block_builder.build(ends_at, content));
+                        // TODO: get rid of the Block.ends_at_line and use block's source positions instead to compute intersections.
+                        let block_comment =
+                            &concatenated_comments[comment_index.start_position..reader_position];
+                        let end_line_number = comment_index.source_start_line_number
+                            + block_comment.lines().count()
+                            - 1;
+                        blocks
+                            .push(block_builder.build(end_line_number, block_content.to_string()));
                     } else {
                         return Err(anyhow::anyhow!(
                             "Unexpected closed block at line {}",
-                            ends_at
+                            comment_index.source_start_line_number
                         ));
                     }
                 }
@@ -257,12 +310,36 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
         if let Some(unclosed_block) = stack.pop() {
             return Err(anyhow::anyhow!(format!(
                 "Block at line {} is not closed",
-                unclosed_block.starts_at
+                unclosed_block.start_index.source_start_line_number
             )));
         }
         blocks.sort_by(|a, b| a.starts_at_line.cmp(&b.starts_at_line));
 
         Ok(blocks)
+    }
+}
+
+struct BlockBuilder<'a> {
+    starts_at_line: usize,
+    start_index: &'a CommentIndex,
+    attributes: HashMap<String, String>,
+}
+
+impl<'a> BlockBuilder<'a> {
+    fn new(
+        starts_at_line: usize,
+        start_index: &'a CommentIndex,
+        attributes: HashMap<String, String>,
+    ) -> Self {
+        Self {
+            starts_at_line,
+            start_index,
+            attributes,
+        }
+    }
+
+    pub(crate) fn build(self, ends_at: usize, content: String) -> Block {
+        Block::new(self.starts_at_line, ends_at, self.attributes, content)
     }
 }
 
@@ -278,9 +355,9 @@ mod tests {
     fn no_defined_blocks_returns_empty_blocks() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#""
-        fn say_hello_world() {
-          println!("hello world!");
-        }
+            fn say_hello_world() {
+              println!("hello world!");
+            }
         "#;
         let blocks = parser.parse(contents)?;
         assert_eq!(blocks, vec![]);
@@ -288,44 +365,134 @@ mod tests {
     }
 
     #[test]
-    fn unnested_blocks_parsed_correctly() -> anyhow::Result<()> {
+    fn single_block_with_single_line_content() -> anyhow::Result<()> {
         let parser = create_parser();
-        let contents = r#"
-        // <block name="foo">
-        fn say_hello_world() {
-          println!("hello world!");
-        }
-        // </block>
+        let contents = "/* <block> */ let say = \"hi\"; /* </block> */";
+        let blocks = parser.parse(contents)?;
+        assert_eq!(
+            blocks,
+            vec![Block::new(
+                1,
+                1,
+                HashMap::new(),
+                " let say = \"hi\"; ".to_string()
+            ),]
+        );
+        Ok(())
+    }
 
-        /// Doc string for the function below.
-        /// <block name="bar">
-        fn say_hello_world2() {
-          println!("hello world 2!");
-        }
-        /// </block>
-        "#;
+    #[test]
+    fn single_block_with_multiple_lines_content() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = "// <block>\nlet say = \"hi\";\n// </block>";
+        let blocks = parser.parse(contents)?;
+        assert_eq!(
+            blocks,
+            vec![Block::new(
+                1,
+                3,
+                HashMap::new(),
+                "\nlet say = \"hi\";\n".to_string()
+            ),]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn single_block_with_multiline_starting_block_tag() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = "/* <block\n> */ let say = \"hi\"; // </block>";
+        let blocks = parser.parse(contents)?;
+        assert_eq!(
+            blocks,
+            vec![Block::new(
+                1,
+                2,
+                HashMap::new(),
+                " let say = \"hi\"; ".to_string()
+            ),]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn single_block_with_multiline_ending_block_tag() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = "/* <block> */ let say = \"hi\"; /* </block\n> */";
+        let blocks = parser.parse(contents)?;
+        assert_eq!(
+            blocks,
+            vec![Block::new(
+                1,
+                2,
+                HashMap::new(),
+                " let say = \"hi\"; ".to_string()
+            ),]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn multiple_blocks_on_separate_lines() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = "// <block>\nprintln!(\"hello1\");\n// </block>
+            // <block>\nprintln!(\"hello2\");\n// </block>";
         let blocks = parser.parse(contents)?;
         assert_eq!(
             blocks,
             vec![
                 Block::new(
-                    2,
-                    6,
-                    HashMap::from([("name".to_string(), "foo".to_string())]),
-                    r#"        fn say_hello_world() {
-          println!("hello world!");
-        }"#
-                    .into()
+                    1,
+                    3,
+                    HashMap::new(),
+                    "\nprintln!(\"hello1\");\n".to_string()
                 ),
                 Block::new(
-                    9,
-                    13,
-                    HashMap::from([("name".to_string(), "bar".to_string())]),
-                    r#"        fn say_hello_world2() {
-          println!("hello world 2!");
-        }"#
-                    .into()
+                    4,
+                    6,
+                    HashMap::new(),
+                    "\nprintln!(\"hello2\");\n".to_string()
+                )
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn multiple_blocks_on_intersecting_lines() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = "// <block>\nprintln!(\"hello1\");\n/* </block><block> */\nprintln!(\"hello2\");\n// </block>";
+        let blocks = parser.parse(contents)?;
+        assert_eq!(
+            blocks,
+            vec![
+                Block::new(
+                    1,
+                    3,
+                    HashMap::new(),
+                    "\nprintln!(\"hello1\");\n".to_string()
                 ),
+                Block::new(
+                    3,
+                    5,
+                    HashMap::new(),
+                    "\nprintln!(\"hello2\");\n".to_string()
+                )
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn multiple_blocks_on_single_line() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = "/* <block> */println!(\"hello1\");/* </block><block> */println!(\"hello2\");// </block>";
+        let blocks = parser.parse(contents)?;
+        assert_eq!(
+            blocks,
+            vec![
+                Block::new(1, 1, HashMap::new(), "println!(\"hello1\");".to_string()),
+                Block::new(1, 1, HashMap::new(), "println!(\"hello2\");".to_string())
             ]
         );
         Ok(())
@@ -370,7 +537,8 @@ mod tests {
                     2,
                     25,
                     HashMap::from([("name".to_string(), "foo".to_string())]),
-                    r#"        fn say_hello_world() {
+                    r#"
+        fn say_hello_world() {
           println!("hello world!");
         }
 
@@ -391,14 +559,16 @@ mod tests {
               println!("hello world buzz!");
             }
             // </block>
-"#
+
+        "#
                     .into()
                 ),
                 Block::new(
                     7,
                     17,
                     HashMap::from([("name".to_string(), "bar".to_string())]),
-                    r#"            fn say_hello_world_bar() {
+                    r#"
+            fn say_hello_world_bar() {
               println!("hello world bar!");
             }
                 // <block name="bar-bar">
@@ -406,32 +576,37 @@ mod tests {
                   println!("hello world bar bar!");
                 }
                 // </block>
-"#
+
+            "#
                     .into()
                 ),
                 Block::new(
                     11,
                     15,
                     HashMap::from([("name".to_string(), "bar-bar".to_string())]),
-                    r#"                fn say_hello_world_bar_bar() {
+                    r#"
+                fn say_hello_world_bar_bar() {
                   println!("hello world bar bar!");
-                }"#
+                }
+                "#
                     .into()
                 ),
                 Block::new(
                     19,
                     23,
                     HashMap::from([("name".to_string(), "buzz".to_string())]),
-                    r#"            fn say_hello_world_buzz() {
+                    r#"
+            fn say_hello_world_buzz() {
               println!("hello world buzz!");
-            }"#
+            }
+            "#
                     .into()
                 ),
                 Block::new(
                     26,
                     27,
                     HashMap::from([("name".to_string(), "fizz".to_string())]),
-                    "".into()
+                    "\n        ".into()
                 ),
             ]
         );
@@ -439,51 +614,21 @@ mod tests {
     }
 
     #[test]
-    fn block_defined_at_first_and_last_lines_parsed_correctly() -> anyhow::Result<()> {
+    fn block_contents_in_comments_is_ignored() -> anyhow::Result<()> {
         let parser = create_parser();
-        let contents = r#"// <block name="foo">
-        fn say_hello_world() {
-          println!("hello world!");
-        }
-        // </block>"#;
+        let contents = r#"// <block name="foo">This text is ignored
+        let word = "hello";
+        // </block> Some comment.
+        "#;
         let blocks = parser.parse(contents)?;
         assert_eq!(
             blocks,
             vec![Block::new(
                 1,
-                5,
+                3,
                 HashMap::from([("name".to_string(), "foo".to_string())]),
-                r#"        fn say_hello_world() {
-          println!("hello world!");
-        }"#
-                .into()
-            )]
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn one_line_blocks_parsed_correctly() -> anyhow::Result<()> {
-        let parser = create_parser();
-        let contents = r#"/*<block name="foo"></block>
-        <block name="bar"></block>*/"#;
-        let blocks = parser.parse(contents)?;
-        assert_eq!(
-            blocks,
-            vec![
-                Block::new(
-                    1,
-                    1,
-                    HashMap::from([("name".to_string(), "foo".to_string())]),
-                    "".into()
-                ),
-                Block::new(
-                    2,
-                    2,
-                    HashMap::from([("name".to_string(), "bar".to_string())]),
-                    "".into()
-                ),
-            ]
+                "\n        let word = \"hello\";\n        ".into()
+            ),]
         );
         Ok(())
     }
@@ -535,10 +680,34 @@ mod tests {
     }
 
     #[test]
-    fn attributes_parsed_correctly() -> anyhow::Result<()> {
+    fn attributes_on_single_line_parsed_correctly() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
         // <block foo="bar" fizz="buzz">
+        fn foo() {
+          println!("hello world!");
+        }
+        // </block>
+        "#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(
+            blocks[0].attributes,
+            HashMap::from([
+                ("foo".to_string(), "bar".to_string()),
+                ("fizz".to_string(), "buzz".to_string())
+            ])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn attributes_on_multiple_lines_parsed_correctly() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        /* <block
+            foo="bar"
+            fizz="buzz"> */
         fn foo() {
           println!("hello world!");
         }
