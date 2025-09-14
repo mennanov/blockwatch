@@ -45,6 +45,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parsers::Comment;
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
@@ -73,11 +74,38 @@ mod tests {
         assert_eq!(
             blocks,
             vec![
-                (2, "\nThis is a JavaScript function demonstration with comments.\n\n@author Author name\n".to_string()),
-                (8, "This is a single-line comment in JavaScript.".to_string()),
-                (9, "Inline comment after a statement.".to_string()),
-                (11, "\nThis is a multi-line comment.\nIt also spans multiple lines.\n".to_string()),
-                (15, "Inline multi-line comment".to_string())
+                Comment {
+                    source_line_number: 2,
+                    source_start_position: 13,
+                    source_end_position: 156,
+                    comment_text: "\nThis is a JavaScript function demonstration with comments.\n\n@author Author name\n".to_string()
+                },
+                Comment {
+                    source_line_number: 8,
+                    source_start_position: 206,
+                    source_end_position: 253,
+                    comment_text: "This is a single-line comment in JavaScript."
+                        .to_string()
+                },
+                Comment {
+                    source_line_number: 9,
+                    source_start_position: 305,
+                    source_end_position: 341,
+                    comment_text: "Inline comment after a statement.".to_string()
+                },
+                Comment {
+                    source_line_number: 11,
+                    source_start_position: 359,
+                    source_end_position: 479,
+                    comment_text: "\nThis is a multi-line comment.\nIt also spans multiple lines.\n"
+                        .to_string()
+                },
+                Comment {
+                    source_line_number: 15,
+                    source_start_position: 513,
+                    source_end_position: 544,
+                    comment_text: "Inline multi-line comment".to_string()
+                },
             ]
         );
 

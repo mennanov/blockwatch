@@ -47,6 +47,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parsers::Comment;
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
@@ -88,13 +89,48 @@ mod tests {
         assert_eq!(
             blocks,
             vec![
-                (2, "\nThis is a simple Java program demonstrating different types of comments.\n\n@version 1.0\n".to_string()),
-                (10, "This is a single-line comment.".to_string()),
-                (11, "Prints a message to the console.".to_string()),
-                (13, "\nThis is a multi-line comment.\nIt can span multiple lines.\n".to_string()),
-                (17, "Assigning a value to the variable ".to_string()),
-                (19, "This is a single-line doc-comment. ".to_string()),
-                (23, "\nPrints a sample message to the console.\n".to_string())
+                Comment {
+                    source_line_number: 2,
+                    source_start_position: 9,
+                    source_end_position: 144,
+                    comment_text: "\nThis is a simple Java program demonstrating different types of comments.\n\n@version 1.0\n".to_string()
+                },
+                Comment {
+                    source_line_number: 10,
+                    source_start_position: 261,
+                    source_end_position: 294,
+                    comment_text: "This is a single-line comment.".to_string()
+                },
+                Comment {
+                    source_line_number: 11,
+                    source_start_position: 348,
+                    source_end_position: 383,
+                    comment_text: "Prints a message to the console.".to_string()
+                },
+                Comment {
+                    source_line_number: 13,
+                    source_start_position: 409,
+                    source_end_position: 527,
+                    comment_text: "\nThis is a multi-line comment.\nIt can span multiple lines.\n".to_string()
+                },
+                Comment {
+                    source_line_number: 17,
+                    source_start_position: 561,
+                    source_end_position: 600,
+                    comment_text: "Assigning a value to the variable ".to_string()
+                },
+                Comment {
+                    source_line_number: 19,
+                    source_start_position: 626,
+                    source_end_position: 667,
+                    comment_text: "This is a single-line doc-comment. ".to_string()
+                },
+                Comment {
+                    source_line_number: 23,
+                    source_start_position: 735,
+                    source_end_position: 809,
+                    comment_text: "\nPrints a sample message to the console.\n".to_string()
+                }
             ]
         );
 

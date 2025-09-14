@@ -45,6 +45,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parsers::Comment;
 
     #[test]
     fn parses_typescript_comments_correctly() -> anyhow::Result<()> {
@@ -80,23 +81,46 @@ mod tests {
         assert_eq!(
             blocks,
             vec![
-                (
-                    2,
-                    "\nThis is a TypeScript class example with comments.\n\n@class Example\n"
-                        .to_string()
-                ),
-                (
-                    8,
-                    "This is a single-line comment in TypeScript.".to_string()
-                ),
-                (
-                    11,
-                    "\nThis is a multi-line comment\nthat spans across several lines.\n"
-                        .to_string()
-                ),
-                (16, "Inline multi-line comment".to_string()),
-                (19, "Method to get the value".to_string()),
-                (21, "Inline comment next to a return statement".to_string())
+                Comment {
+                    source_line_number: 2,
+                    source_start_position: 13,
+                    source_end_position: 142,
+                    comment_text:
+                        "\nThis is a TypeScript class example with comments.\n\n@class Example\n"
+                            .to_string()
+                },
+                Comment {
+                    source_line_number: 8,
+                    source_start_position: 187,
+                    source_end_position: 234,
+                    comment_text: "This is a single-line comment in TypeScript.".to_string()
+                },
+                Comment {
+                    source_line_number: 11,
+                    source_start_position: 291,
+                    source_end_position: 413,
+                    comment_text:
+                        "\nThis is a multi-line comment\nthat spans across several lines.\n"
+                            .to_string()
+                },
+                Comment {
+                    source_line_number: 16,
+                    source_start_position: 499,
+                    source_end_position: 530,
+                    comment_text: "Inline multi-line comment".to_string()
+                },
+                Comment {
+                    source_line_number: 19,
+                    source_start_position: 566,
+                    source_end_position: 592,
+                    comment_text: "Method to get the value".to_string()
+                },
+                Comment {
+                    source_line_number: 21,
+                    source_start_position: 676,
+                    source_end_position: 720,
+                    comment_text: "Inline comment next to a return statement".to_string()
+                }
             ]
         );
 

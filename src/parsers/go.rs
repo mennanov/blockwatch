@@ -45,6 +45,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parsers::Comment;
 
     #[test]
     fn parses_go_comments_correctly() -> anyhow::Result<()> {
@@ -72,13 +73,31 @@ func main() {
         assert_eq!(
             blocks,
             vec![
-                (2, "This is a single line comment in Go".to_string()),
-                (
-                    5,
-                    "\nThis is a multi-line comment\nspanning several lines\n".to_string()
-                ),
-                (13, "Inline comment".to_string()),
-                (14, "Another single line comment".to_string()),
+                Comment {
+                    source_line_number: 2,
+                    source_start_position: 1,
+                    source_end_position: 39,
+                    comment_text: "This is a single line comment in Go".to_string()
+                },
+                Comment {
+                    source_line_number: 5,
+                    source_start_position: 54,
+                    source_end_position: 111,
+                    comment_text: "\nThis is a multi-line comment\nspanning several lines\n"
+                        .to_string()
+                },
+                Comment {
+                    source_line_number: 13,
+                    source_start_position: 174,
+                    source_end_position: 191,
+                    comment_text: "Inline comment".to_string()
+                },
+                Comment {
+                    source_line_number: 14,
+                    source_start_position: 196,
+                    source_end_position: 226,
+                    comment_text: "Another single line comment".to_string()
+                },
             ]
         );
 

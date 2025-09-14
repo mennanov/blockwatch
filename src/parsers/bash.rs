@@ -32,6 +32,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parsers::Comment;
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
@@ -53,12 +54,42 @@ VALUE=42  # Comment after code
         assert_eq!(
             blocks,
             vec![
-                (2, "This is a single line comment".to_string()),
-                (3, "This is an inline comment".to_string()),
-                (5, "This is a multi-line".to_string()),
-                (6, "comment that spans".to_string()),
-                (7, "several lines".to_string()),
-                (9, "Comment after code".to_string()),
+                Comment {
+                    source_line_number: 2,
+                    source_start_position: 12,
+                    source_end_position: 43,
+                    comment_text: "This is a single line comment".to_string()
+                },
+                Comment {
+                    source_line_number: 3,
+                    source_start_position: 58,
+                    source_end_position: 85,
+                    comment_text: "This is an inline comment".to_string()
+                },
+                Comment {
+                    source_line_number: 5,
+                    source_start_position: 87,
+                    source_end_position: 109,
+                    comment_text: "This is a multi-line".to_string()
+                },
+                Comment {
+                    source_line_number: 6,
+                    source_start_position: 110,
+                    source_end_position: 130,
+                    comment_text: "comment that spans".to_string()
+                },
+                Comment {
+                    source_line_number: 7,
+                    source_start_position: 131,
+                    source_end_position: 146,
+                    comment_text: "several lines".to_string()
+                },
+                Comment {
+                    source_line_number: 9,
+                    source_start_position: 158,
+                    source_end_position: 178,
+                    comment_text: "Comment after code".to_string()
+                },
             ]
         );
 

@@ -68,24 +68,6 @@ impl Block {
     }
 }
 
-pub(crate) struct BlockBuilder {
-    pub(crate) starts_at: usize,
-    attributes: HashMap<String, String>,
-}
-
-impl BlockBuilder {
-    pub(crate) fn new(starts_at: usize, attributes: HashMap<String, String>) -> Self {
-        Self {
-            starts_at,
-            attributes,
-        }
-    }
-
-    pub(crate) fn build(self, ends_at: usize, content: String) -> Block {
-        Block::new(self.starts_at, ends_at, self.attributes, content)
-    }
-}
-
 pub(crate) async fn parse_blocks(
     modified_ranges_by_file: &HashMap<String, Vec<(usize, usize)>>,
     file_reader: &impl FileReader,
