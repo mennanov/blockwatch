@@ -254,7 +254,7 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
                         let attr = attr.context("Failed to parse attribute")?;
                         attributes.insert(
                             String::from_utf8(attr.key.as_ref().into())?,
-                            String::from_utf8(attr.value.into())?,
+                            attr.unescape_value()?.into(),
                         );
                     }
                     let block_comment = &concatenated_comments
@@ -499,7 +499,7 @@ mod tests {
     }
 
     #[test]
-    fn nested_blocks_parsed_correctly() -> anyhow::Result<()> {
+    fn nested_blocks() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
         // <block name="foo">
@@ -614,6 +614,31 @@ mod tests {
     }
 
     #[test]
+    fn multiple_nested_blocks_at_same_level() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <block name="parent">
+            // <block name="child1">
+            fn child1() {}
+            // </block>
+            // <block name="child2">
+            fn child2() {}
+            // </block>
+            // <block name="child3">
+            fn child3() {}
+            // </block>
+        // </block>
+        "#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(blocks.len(), 4);
+        assert_eq!(blocks[0].attributes["name"], "parent");
+        assert_eq!(blocks[1].attributes["name"], "child1");
+        assert_eq!(blocks[2].attributes["name"], "child2");
+        assert_eq!(blocks[3].attributes["name"], "child3");
+        Ok(())
+    }
+
+    #[test]
     fn block_contents_in_comments_is_ignored() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"// <block name="foo">This text is ignored
@@ -680,7 +705,7 @@ mod tests {
     }
 
     #[test]
-    fn attributes_on_single_line_parsed_correctly() -> anyhow::Result<()> {
+    fn attributes_on_single_line() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
         // <block foo="bar" fizz="buzz">
@@ -702,7 +727,7 @@ mod tests {
     }
 
     #[test]
-    fn attributes_on_multiple_lines_parsed_correctly() -> anyhow::Result<()> {
+    fn attributes_on_multiple_lines() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
         /* <block
@@ -726,7 +751,33 @@ mod tests {
     }
 
     #[test]
-    fn nested_blocks_with_attributes_parsed_correctly() -> anyhow::Result<()> {
+    fn attributes_with_single_quotes() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <block text='He said "Hello"'>
+        fn escaped() {}
+        // </block>
+        "#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(blocks[0].attributes["text"], "He said \"Hello\"");
+        Ok(())
+    }
+
+    #[test]
+    fn attributes_with_escaped_quotes() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <block text="He said &quot;Hello&quot;">
+        fn escaped() {}
+        // </block>
+        "#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(blocks[0].attributes["text"], "He said \"Hello\"");
+        Ok(())
+    }
+
+    #[test]
+    fn nested_blocks_with_attributes() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
         // <block name="outer" foo="bar">
@@ -757,7 +808,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_attributes_parsed_correctly() -> anyhow::Result<()> {
+    fn empty_attributes() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
         // <block name="" foo="" bar="">
@@ -785,6 +836,31 @@ mod tests {
         // </block>
         "#;
         assert!(parser.parse(contents).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn blocks_with_unicode_attributes() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <block name="🦀" desc="Rust">
+        fn unicode() {}
+        // </block>
+        "#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(blocks[0].attributes["name"], "🦀");
+        assert_eq!(blocks[0].attributes["desc"], "Rust");
+        Ok(())
+    }
+
+    #[test]
+    fn blocks_with_different_line_endings() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = "// <block>\r\nWindows\r\n// </block>\n// <block>\nUnix\n// </block>";
+        let blocks = parser.parse(contents)?;
+        assert_eq!(blocks.len(), 2);
+        assert!(blocks[0].content.contains("\r\n"));
+        assert!(blocks[1].content.contains("\n"));
         Ok(())
     }
 }
