@@ -958,4 +958,22 @@ mod tests {
         assert!(blocks[1].content.contains("\n"));
         Ok(())
     }
+
+    #[test]
+    #[ignore] // Parsing XML-like symbols (<, >, &&, etc.) in comments is not currently supported
+    fn comments_with_xml_like_symbols() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        /*
+        Some logical condition: a && b
+        Arithmetic condition: a < b, a << b, d > f
+        <block>
+        */
+        fn unicode() {}
+        // </block>
+        "#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(blocks.len(), 1);
+        Ok(())
+    }
 }
