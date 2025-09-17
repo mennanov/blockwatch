@@ -222,91 +222,112 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
 
         (concatenated_comments, index)
     }
+
+    fn process_start_tag<'idx>(
+        stack: &mut Vec<BlockBuilder<'idx>>,
+        concatenated_comments: &str,
+        index: &'idx [CommentIndex],
+        start_position: usize,
+        end_position: usize,
+        attributes: HashMap<String, String>,
+    ) {
+        let comment_index = index
+            .get(
+                index
+                    .binary_search_by(|comment_index| comment_index.end_position.cmp(&end_position))
+                    .unwrap_or_else(|e| e),
+            )
+            .expect("start comment index out of bounds");
+        let block_comment =
+            &concatenated_comments[comment_index.start_position..start_position - 1];
+        let start_line_number =
+            comment_index.source_start_line_number + block_comment.lines().count() - 1;
+        stack.push(BlockBuilder::new(
+            start_line_number,
+            comment_index,
+            attributes,
+        ));
+    }
+
+    fn process_end_tag<'idx>(
+        stack: &mut Vec<BlockBuilder<'idx>>,
+        blocks: &mut Vec<Block>,
+        contents: &str,
+        concatenated_comments: &str,
+        index: &'idx [CommentIndex],
+        start_position: usize,
+        end_position: usize,
+    ) -> anyhow::Result<()> {
+        let idx = index
+            .binary_search_by(|comment_index| comment_index.end_position.cmp(&end_position))
+            .unwrap_or_else(|e| e);
+        let comment_index = index.get(idx).expect("end comment index out of bounds");
+        if let Some(block_builder) = stack.pop() {
+            let block_content = if comment_index != block_builder.start_index {
+                &contents[block_builder.start_index.source_end_position
+                    ..comment_index.source_start_position]
+            } else {
+                // Block that starts and ends in the same comment can't have any
+                // content.
+                ""
+            };
+            // TODO: get rid of the Block.ends_at_line and use block's source positions instead to compute intersections.
+            let block_comment = &concatenated_comments[comment_index.start_position..end_position];
+            let end_line_number =
+                comment_index.source_start_line_number + block_comment.lines().count() - 1;
+            blocks.push(block_builder.build(end_line_number, block_content.to_string()));
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "Unexpected closed block at line {}, position {}",
+                comment_index.source_start_line_number,
+                comment_index.source_start_position + start_position
+            ))
+        }
+    }
 }
 
 impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
-    // TODO: refactor into smaller composable functions.
     fn parse(&self, contents: &str) -> anyhow::Result<Vec<Block>> {
         let comments = self.comments_parser.parse(contents)?;
         let (concatenated_comments, index) = Self::build_index(&comments);
         let mut blocks = Vec::new();
         let mut stack = Vec::new();
-        let mut reader = quick_xml::Reader::from_str(concatenated_comments.as_str());
-        loop {
-            let event = reader.read_event()?;
-            match event {
-                Event::Start(start) => {
-                    if start.name().as_ref() != b"block" {
-                        continue;
-                    }
-                    let reader_position = reader.buffer_position() as usize;
-                    let comment_index = index
-                        .get(
-                            index
-                                .binary_search_by(|comment_index| {
-                                    comment_index.end_position.cmp(&reader_position)
-                                })
-                                .unwrap_or_else(|e| e),
-                        )
-                        .expect("start comment index out of bounds");
-                    let mut attributes = HashMap::new();
-                    for attr in start.attributes() {
-                        let attr = attr.context("Failed to parse attribute")?;
-                        attributes.insert(
-                            String::from_utf8(attr.key.as_ref().into())?,
-                            attr.unescape_value()?.into(),
-                        );
-                    }
-                    let block_comment = &concatenated_comments
-                        [comment_index.start_position..reader_position - start.len() - 1];
-                    let start_line_number =
-                        comment_index.source_start_line_number + block_comment.lines().count() - 1;
-                    stack.push(BlockBuilder::new(
-                        start_line_number,
-                        comment_index,
-                        attributes,
-                    ));
-                }
-                Event::End(end) => {
-                    if end.name().as_ref() != b"block" {
-                        continue;
-                    }
+        let mut parser = QuickXmlBlockParser::new(concatenated_comments.as_str());
 
-                    let reader_position = reader.buffer_position() as usize;
-                    let idx = index
-                        .binary_search_by(|comment_index| {
-                            comment_index.end_position.cmp(&reader_position)
-                        })
-                        .unwrap_or_else(|e| e);
-                    let comment_index = index.get(idx).expect("end comment index out of bounds");
-                    if let Some(block_builder) = stack.pop() {
-                        let block_content = if comment_index != block_builder.start_index {
-                            &contents[block_builder.start_index.source_end_position
-                                ..comment_index.source_start_position]
-                        } else {
-                            // Block that starts and ends in the same comment can't have any
-                            // content.
-                            ""
-                        };
-                        // TODO: get rid of the Block.ends_at_line and use block's source positions instead to compute intersections.
-                        let block_comment =
-                            &concatenated_comments[comment_index.start_position..reader_position];
-                        let end_line_number = comment_index.source_start_line_number
-                            + block_comment.lines().count()
-                            - 1;
-                        blocks
-                            .push(block_builder.build(end_line_number, block_content.to_string()));
-                    } else {
-                        return Err(anyhow::anyhow!(
-                            "Unexpected closed block at line {}",
-                            comment_index.source_start_line_number
-                        ));
-                    }
+        while let Some(tag) = parser.next()? {
+            match tag {
+                BlockTag::Start {
+                    start_position,
+                    end_position,
+                    attributes,
+                } => {
+                    Self::process_start_tag(
+                        &mut stack,
+                        &concatenated_comments,
+                        &index,
+                        start_position,
+                        end_position,
+                        attributes,
+                    );
                 }
-                Event::Eof => break,
-                _ => {}
+                BlockTag::End {
+                    start_position,
+                    end_position,
+                } => {
+                    Self::process_end_tag(
+                        &mut stack,
+                        &mut blocks,
+                        contents,
+                        concatenated_comments.as_str(),
+                        &index,
+                        start_position,
+                        end_position,
+                    )?;
+                }
             }
         }
+
         if let Some(unclosed_block) = stack.pop() {
             return Err(anyhow::anyhow!(format!(
                 "Block at line {} is not closed",
@@ -316,6 +337,80 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
         blocks.sort_by(|a, b| a.starts_at_line.cmp(&b.starts_at_line));
 
         Ok(blocks)
+    }
+}
+
+trait BlockParser {
+    fn next(&mut self) -> anyhow::Result<Option<BlockTag>>;
+}
+
+enum BlockTag {
+    Start {
+        start_position: usize,
+        end_position: usize,
+        attributes: HashMap<String, String>,
+    },
+    End {
+        start_position: usize,
+        end_position: usize,
+    },
+}
+
+struct QuickXmlBlockParser<'a> {
+    reader: quick_xml::Reader<&'a [u8]>,
+}
+
+impl<'a> QuickXmlBlockParser<'a> {
+    fn new(source: &'a str) -> Self {
+        Self {
+            reader: quick_xml::Reader::from_str(source),
+        }
+    }
+}
+
+impl BlockParser for QuickXmlBlockParser<'_> {
+    fn next(&mut self) -> anyhow::Result<Option<BlockTag>> {
+        loop {
+            let event = self.reader.read_event()?;
+            match event {
+                Event::Start(start) => {
+                    if start.name().as_ref() != b"block" {
+                        continue;
+                    }
+                    let reader_position = self.reader.buffer_position() as usize;
+                    let attributes = start
+                        .attributes()
+                        .map(|attr| {
+                            attr.context("Failed to parse attribute").and_then(|attr| {
+                                Ok((
+                                    String::from_utf8(attr.key.as_ref().into())?,
+                                    attr.unescape_value()?.into(),
+                                ))
+                            })
+                        })
+                        .collect::<anyhow::Result<HashMap<_, _>>>()?;
+                    return Ok(Some(BlockTag::Start {
+                        start_position: reader_position - start.len(),
+                        end_position: reader_position,
+                        attributes,
+                    }));
+                }
+                Event::End(end) => {
+                    if end.name().as_ref() != b"block" {
+                        continue;
+                    }
+                    let reader_position = self.reader.buffer_position() as usize;
+                    return Ok(Some(BlockTag::End {
+                        start_position: reader_position - end.len(),
+                        end_position: reader_position,
+                    }));
+                }
+                Event::Eof => {
+                    return Ok(None);
+                }
+                _ => {}
+            }
+        }
     }
 }
 
