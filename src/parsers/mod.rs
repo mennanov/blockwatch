@@ -15,6 +15,7 @@ mod ruby;
 mod rust;
 mod sql;
 mod swift;
+mod tag_parser;
 mod toml;
 mod tsx;
 mod typescript;
@@ -22,11 +23,10 @@ mod xml;
 mod yaml;
 
 use crate::blocks::Block;
-use anyhow::Context;
-use quick_xml::events::Event;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::string::ToString;
+use tag_parser::{BlockTag, BlockTagParser, QuickXmlBlockTagParser};
 use tree_sitter::{Language, Parser, Query, QueryCursor, StreamingIterator};
 
 /// Parses [`Blocks`] from a source code.
@@ -293,7 +293,7 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
         let (concatenated_comments, index) = Self::build_index(&comments);
         let mut blocks = Vec::new();
         let mut stack = Vec::new();
-        let mut parser = QuickXmlBlockParser::new(concatenated_comments.as_str());
+        let mut parser = QuickXmlBlockTagParser::new(concatenated_comments.as_str());
 
         while let Some(tag) = parser.next()? {
             match tag {
@@ -337,80 +337,6 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
         blocks.sort_by(|a, b| a.starts_at_line.cmp(&b.starts_at_line));
 
         Ok(blocks)
-    }
-}
-
-trait BlockParser {
-    fn next(&mut self) -> anyhow::Result<Option<BlockTag>>;
-}
-
-enum BlockTag {
-    Start {
-        start_position: usize,
-        end_position: usize,
-        attributes: HashMap<String, String>,
-    },
-    End {
-        start_position: usize,
-        end_position: usize,
-    },
-}
-
-struct QuickXmlBlockParser<'a> {
-    reader: quick_xml::Reader<&'a [u8]>,
-}
-
-impl<'a> QuickXmlBlockParser<'a> {
-    fn new(source: &'a str) -> Self {
-        Self {
-            reader: quick_xml::Reader::from_str(source),
-        }
-    }
-}
-
-impl BlockParser for QuickXmlBlockParser<'_> {
-    fn next(&mut self) -> anyhow::Result<Option<BlockTag>> {
-        loop {
-            let event = self.reader.read_event()?;
-            match event {
-                Event::Start(start) => {
-                    if start.name().as_ref() != b"block" {
-                        continue;
-                    }
-                    let reader_position = self.reader.buffer_position() as usize;
-                    let attributes = start
-                        .attributes()
-                        .map(|attr| {
-                            attr.context("Failed to parse attribute").and_then(|attr| {
-                                Ok((
-                                    String::from_utf8(attr.key.as_ref().into())?,
-                                    attr.unescape_value()?.into(),
-                                ))
-                            })
-                        })
-                        .collect::<anyhow::Result<HashMap<_, _>>>()?;
-                    return Ok(Some(BlockTag::Start {
-                        start_position: reader_position - start.len(),
-                        end_position: reader_position,
-                        attributes,
-                    }));
-                }
-                Event::End(end) => {
-                    if end.name().as_ref() != b"block" {
-                        continue;
-                    }
-                    let reader_position = self.reader.buffer_position() as usize;
-                    return Ok(Some(BlockTag::End {
-                        start_position: reader_position - end.len(),
-                        end_position: reader_position,
-                    }));
-                }
-                Event::Eof => {
-                    return Ok(None);
-                }
-                _ => {}
-            }
-        }
     }
 }
 
@@ -960,15 +886,40 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Parsing XML-like symbols (<, >, &&, etc.) in comments is not currently supported
     fn comments_with_xml_like_symbols() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
         /*
-        Some logical condition: a && b
-        Arithmetic condition: a < b, a << b, d > f
+        Some logical expressions: a && b, a & b, a ^ b, a || b, a | b, a ^ !b
+        Arithmetic expressions: a < b, a << b, d > f
         <block>
         */
+        fn unicode() {}
+        // </block>
+        "#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(blocks.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn comments_with_unrelated_tags() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <p>Paragraph</p><block><b>bold</b>
+        fn unicode() {}
+        // </block><body>hello</body>
+        "#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(blocks.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn comments_with_unclosed_unrelated_tags() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <p>this tag has no ending tag <block></b> this tag has no starting tag
         fn unicode() {}
         // </block>
         "#;
