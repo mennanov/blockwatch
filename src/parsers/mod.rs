@@ -928,3 +928,37 @@ mod tests {
         Ok(())
     }
 }
+
+fn c_style_comments_parser(
+    language: Language,
+    query: Query,
+) -> TreeSitterCommentsParser<fn(usize, &str) -> Option<String>> {
+    TreeSitterCommentsParser::<fn(usize, &str) -> Option<String>>::new(
+        language,
+        vec![(
+            query,
+            Some(|_, comment| {
+                if comment.starts_with("//") {
+                    Some(comment.strip_prefix("//").unwrap().trim().to_string())
+                } else {
+                    Some(
+                        comment
+                            .strip_prefix("/*")
+                            .unwrap()
+                            .lines()
+                            .map(|line| {
+                                line.trim_start()
+                                    .trim_start_matches('*')
+                                    .trim()
+                                    .trim_end_matches('/')
+                                    .trim_end_matches('*')
+                                    .trim()
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    )
+                }
+            }),
+        )],
+    )
+}

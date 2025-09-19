@@ -1,6 +1,5 @@
-use crate::parsers::{
-    BlocksFromCommentsParser, BlocksParser, CommentsParser, TreeSitterCommentsParser,
-};
+use crate::parsers;
+use crate::parsers::{BlocksFromCommentsParser, BlocksParser, CommentsParser};
 use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for Golang.
@@ -11,34 +10,7 @@ pub(super) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let go_language = tree_sitter_go::LANGUAGE.into();
     let comment_query = Query::new(&go_language, "(comment) @comment")?;
-    let parser = TreeSitterCommentsParser::<fn(usize, &str) -> Option<String>>::new(
-        go_language,
-        vec![(
-            comment_query,
-            Some(|_, comment| {
-                if comment.starts_with("//") {
-                    Some(comment.strip_prefix("//").unwrap().trim().to_string())
-                } else {
-                    Some(
-                        comment
-                            .strip_prefix("/*")
-                            .unwrap()
-                            .lines()
-                            .map(|line| {
-                                line.trim_start()
-                                    .trim_start_matches('*')
-                                    .trim()
-                                    .trim_end_matches('/')
-                                    .trim_end_matches('*')
-                                    .trim()
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    )
-                }
-            }),
-        )],
-    );
+    let parser = parsers::c_style_comments_parser(go_language, comment_query);
     Ok(parser)
 }
 
