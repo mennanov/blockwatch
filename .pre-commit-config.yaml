@@ -14,3 +14,10 @@ repos:
         language: system
         types: [ rust ]
         pass_filenames: false
+      - id: cargo-clippy
+        name: cargo clippy
+        description: Lint Rust code using cargo clippy.
+        entry: cargo clippy --all-targets -- -D warnings
+        language: system
+        types: [ rust ]
+        pass_filenames: false
