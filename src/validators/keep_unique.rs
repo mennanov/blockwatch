@@ -6,7 +6,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-pub(crate) struct KeepUniqueValidator {}
+pub(super) struct KeepUniqueValidator {}
 
 impl KeepUniqueValidator {
     pub(crate) fn new() -> Self {

@@ -97,7 +97,7 @@ impl<C: AiClient + 'static> Validator for CheckAiValidator<C> {
 }
 
 impl<C: AiClient> CheckAiValidator<C> {
-    pub(crate) fn with_client(client: C) -> Self {
+    pub(super) fn with_client(client: C) -> Self {
         Self {
             client: Arc::new(client),
         }
@@ -165,7 +165,7 @@ pub(crate) trait AiClient: Send + Sync {
 }
 
 /// Default OpenAI-based implementation. Uses async-openai crate.
-pub(crate) struct OpenAiClient {
+pub(super) struct OpenAiClient {
     client: Client<OpenAIConfig>,
     model: String,
 }

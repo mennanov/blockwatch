@@ -10,7 +10,7 @@ use std::sync::Arc;
 pub(crate) struct AffectsValidator {}
 
 impl AffectsValidator {
-    pub(crate) fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {}
     }
 }
@@ -411,7 +411,7 @@ fn create_violation(
 
 fn parse_affects_attribute(value: &str) -> anyhow::Result<Vec<(Option<String>, String)>> {
     let mut result = Vec::new();
-    for block_ref in value.split(",") {
+    for block_ref in value.split(',') {
         let block = block_ref.trim();
         let (mut filename, block_name) = block
             .split_once(":")

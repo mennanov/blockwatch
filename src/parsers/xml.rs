@@ -4,7 +4,7 @@ use crate::parsers::{
 use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for Xml.
-pub(crate) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
+pub(super) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
     Ok(Box::new(BlocksFromCommentsParser::new(comments_parser()?)))
 }
 

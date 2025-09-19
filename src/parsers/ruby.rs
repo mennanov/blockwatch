@@ -4,7 +4,7 @@ use crate::parsers::{
 use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for Ruby.
-pub(crate) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
+pub(super) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
     Ok(Box::new(BlocksFromCommentsParser::new(comments_parser()?)))
 }
 
@@ -15,7 +15,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
         ruby_language,
         vec![(
             line_comment_query,
-            Some(|_, comment| Some(comment.strip_prefix("#").unwrap().trim().to_string())),
+            Some(|_, comment| Some(comment.strip_prefix('#').unwrap().trim().to_string())),
         )],
     );
     Ok(parser)

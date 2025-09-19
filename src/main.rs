@@ -41,17 +41,10 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn repository_root_path(mut current_path: PathBuf) -> anyhow::Result<PathBuf> {
-    loop {
-        if current_path.join(".git").is_dir() {
-            return Ok(current_path);
-        }
-        if let Some(parent) = current_path.parent() {
-            current_path = parent.to_path_buf();
-        } else {
-            return Err(anyhow::anyhow!(
-                "Could not find the repository root directory"
-            ));
-        }
-    }
+fn repository_root_path(current_path: PathBuf) -> anyhow::Result<PathBuf> {
+    current_path
+        .ancestors()
+        .find(|path| path.join(".git").is_dir())
+        .map(|path| path.to_path_buf())
+        .ok_or_else(|| anyhow::anyhow!("Could not find the repository root directory"))
 }

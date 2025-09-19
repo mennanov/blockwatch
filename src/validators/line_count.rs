@@ -9,7 +9,7 @@ use std::sync::Arc;
 pub(crate) struct LineCountValidator {}
 
 impl LineCountValidator {
-    pub(crate) fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {}
     }
 }
@@ -110,9 +110,9 @@ fn parse_constraint(s: &str) -> anyhow::Result<(Op, usize)> {
         (Op::Ge, r)
     } else if let Some(r) = trimmed.strip_prefix("==") {
         (Op::Eq, r)
-    } else if let Some(r) = trimmed.strip_prefix("<") {
+    } else if let Some(r) = trimmed.strip_prefix('<') {
         (Op::Lt, r)
-    } else if let Some(r) = trimmed.strip_prefix(">") {
+    } else if let Some(r) = trimmed.strip_prefix('>') {
         (Op::Gt, r)
     } else {
         return Err(anyhow!("missing comparator"));

@@ -108,7 +108,7 @@ pub(crate) trait FileReader {
     async fn read_to_string(&self, path: &Path) -> anyhow::Result<String>;
 }
 
-pub fn file_name_extension(file_name: &str) -> Option<&str> {
+fn file_name_extension(file_name: &str) -> Option<&str> {
     file_name.rsplit('.').next()
 }
 

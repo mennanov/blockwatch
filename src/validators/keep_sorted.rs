@@ -11,7 +11,7 @@ use std::sync::Arc;
 pub(crate) struct KeepSortedValidator {}
 
 impl KeepSortedValidator {
-    pub(crate) fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {}
     }
 }

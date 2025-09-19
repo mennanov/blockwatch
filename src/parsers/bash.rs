@@ -4,7 +4,7 @@ use crate::parsers::{
 use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for Bash.
-pub(crate) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
+pub(super) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
     Ok(Box::new(BlocksFromCommentsParser::new(comments_parser()?)))
 }
 
@@ -16,8 +16,8 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
         vec![(
             line_comment_query,
             Some(|_, comment| {
-                let comment = comment.strip_prefix("#").unwrap();
-                if comment.starts_with("!") {
+                let comment = comment.strip_prefix('#').unwrap();
+                if comment.starts_with('!') {
                     // Skip shebang.
                     None
                 } else {

@@ -4,7 +4,7 @@ use crate::parsers::{
 use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for PHP.
-pub(crate) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
+pub(super) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
     Ok(Box::new(BlocksFromCommentsParser::new(comments_parser()?)))
 }
 
@@ -18,7 +18,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
             Some(|_, comment| {
                 if let Some(comment) = comment.strip_prefix("//") {
                     Some(comment.trim().to_string())
-                } else if let Some(comment) = comment.strip_prefix("#") {
+                } else if let Some(comment) = comment.strip_prefix('#') {
                     Some(comment.trim().to_string())
                 } else {
                     Some(
@@ -28,10 +28,10 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
                             .lines()
                             .map(|line| {
                                 line.trim_start()
-                                    .trim_start_matches("*")
+                                    .trim_start_matches('*')
                                     .trim()
-                                    .trim_end_matches("/")
-                                    .trim_end_matches("*")
+                                    .trim_end_matches('/')
+                                    .trim_end_matches('*')
                                     .trim()
                             })
                             .collect::<Vec<_>>()
