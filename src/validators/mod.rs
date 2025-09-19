@@ -27,7 +27,7 @@ pub(crate) trait Validator: Send + Sync {
 }
 
 #[derive(Serialize, Debug)]
-pub(crate) struct Violation {
+pub struct Violation {
     violation: String,
     error: String,
     details: Option<serde_json::Value>,
@@ -47,19 +47,19 @@ impl Violation {
     }
 }
 
-pub(crate) struct Context {
+pub struct Context {
     // Modified blocks grouped by filename.
     modified_blocks: HashMap<String, Vec<Arc<Block>>>,
 }
 
 impl Context {
-    pub(crate) fn new(modified_blocks: HashMap<String, Vec<Arc<Block>>>) -> Self {
+    pub fn new(modified_blocks: HashMap<String, Vec<Arc<Block>>>) -> Self {
         Self { modified_blocks }
     }
 }
 
 /// Runs all validators concurrently and returns violations grouped by file paths.
-pub(crate) async fn run(context: Context) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
+pub async fn run(context: Context) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
     let validators: Vec<Box<dyn Validator>> = vec![
         // <block affects="README.md:validators-list">
         Box::new(AffectsValidator::new()),

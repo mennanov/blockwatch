@@ -4,18 +4,24 @@ use std::cmp::min;
 use std::collections::HashMap;
 
 /// Extracts hunks from a diff in a patch format (e.g. output of `git diff --patch`).
-pub(crate) trait HunksExtractor {
+pub trait HunksExtractor {
     /// Returns a mapping from the changed filenames to a list of closed-closed ranges of the
     /// changed lines.
     fn extract(&self, patch_diff: &str) -> anyhow::Result<HashMap<String, Vec<(usize, usize)>>>;
 }
 
-pub(crate) struct DiffyExtractor;
+pub struct DiffyExtractor;
 
 const DIFF_FILE_PREFIX: &str = "diff --git";
 
+impl Default for DiffyExtractor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DiffyExtractor {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {}
     }
 

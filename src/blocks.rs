@@ -12,7 +12,7 @@ const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
 
 /// Represents a `block` tag parsed from the source file comments.
 #[derive(Debug, PartialEq, Clone, Serialize)]
-pub(crate) struct Block {
+pub struct Block {
     // Source line number with the `block` tag.
     pub(crate) starts_at_line: usize,
     // Source line number with the corresponding closed `block` tag.
@@ -68,7 +68,7 @@ impl Block {
     }
 }
 
-pub(crate) async fn parse_blocks(
+pub async fn parse_blocks(
     modified_ranges_by_file: &HashMap<String, Vec<(usize, usize)>>,
     file_reader: &impl FileReader,
     parsers: HashMap<String, Rc<Box<dyn BlocksParser>>>,
@@ -103,7 +103,7 @@ pub(crate) async fn parse_blocks(
 }
 
 #[async_trait]
-pub(crate) trait FileReader {
+pub trait FileReader {
     /// Reads the entire contents of a file into a string.
     async fn read_to_string(&self, path: &Path) -> anyhow::Result<String>;
 }
@@ -112,12 +112,12 @@ fn file_name_extension(file_name: &str) -> Option<&str> {
     file_name.rsplit('.').next()
 }
 
-pub(crate) struct FsReader {
+pub struct FsReader {
     root_path: PathBuf,
 }
 
 impl FsReader {
-    pub(crate) fn new(root_path: PathBuf) -> Self {
+    pub fn new(root_path: PathBuf) -> Self {
         Self { root_path }
     }
 }

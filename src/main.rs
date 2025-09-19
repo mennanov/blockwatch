@@ -1,15 +1,13 @@
-use crate::differ::HunksExtractor;
-use crate::validators::Context;
+use blockwatch::blocks;
+use blockwatch::differ;
+use blockwatch::differ::HunksExtractor;
+use blockwatch::flags;
+use blockwatch::parsers;
+use blockwatch::validators;
 use clap::Parser;
 use std::path::PathBuf;
 use std::{env, fs, process};
 use tokio::io::AsyncReadExt;
-
-mod blocks;
-mod differ;
-mod flags;
-mod parsers;
-mod validators;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -32,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
         args.extensions(),
     )
     .await?;
-    let violations = validators::run(Context::new(modified_blocks)).await?;
+    let violations = validators::run(validators::Context::new(modified_blocks)).await?;
     if !violations.is_empty() {
         let json = serde_json::to_string_pretty(&violations)?;
         eprintln!("{json}");

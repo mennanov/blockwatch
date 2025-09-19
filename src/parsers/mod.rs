@@ -30,7 +30,7 @@ use tag_parser::{BlockTag, BlockTagParser, QuickXmlBlockTagParser};
 use tree_sitter::{Language, Parser, Query, QueryCursor, StreamingIterator};
 
 /// Parses [`Blocks`] from a source code.
-pub(crate) trait BlocksParser {
+pub trait BlocksParser {
     /// Returns [`Block`]s extracted from the given `contents` string.
     ///
     /// The blocks are required to be sorted by the `starts_at` field in ascending order.
@@ -44,7 +44,7 @@ trait CommentsParser {
 }
 
 /// Returns a map of all available language parsers by their file extensions.
-pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn BlocksParser>>>> {
+pub fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn BlocksParser>>>> {
     let bash_parser = Rc::new(bash::parser()?);
     let c_parser = Rc::new(c::parser()?);
     let c_sharp_parser = Rc::new(c_sharp::parser()?);

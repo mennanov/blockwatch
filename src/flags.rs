@@ -27,7 +27,7 @@ fn parse_extensions(s: &str) -> anyhow::Result<(String, String)> {
     # With zero context for tighter diffs (recommended for hooks)
     git diff --patch --unified=0 | blockwatch",
 )]
-pub(crate) struct Args {
+pub struct Args {
     /// Additional file extension mappings, e.g. -E c++=cpp -E cxx=cpp
     #[arg(
         short = 'E',
@@ -40,14 +40,14 @@ pub(crate) struct Args {
 }
 
 impl Args {
-    pub(crate) fn extensions(&self) -> HashMap<String, String> {
+    pub fn extensions(&self) -> HashMap<String, String> {
         self.extensions
             .iter()
             .map(|(key, val)| (key.clone(), val.clone()))
             .collect()
     }
 
-    pub(crate) fn validate(&self, supported_extensions: HashSet<String>) -> anyhow::Result<()> {
+    pub fn validate(&self, supported_extensions: HashSet<String>) -> anyhow::Result<()> {
         for (key, val) in &self.extensions {
             if !supported_extensions.contains(val) {
                 anyhow::bail!("Unsupported extension mapping: {}={}", key, val);
