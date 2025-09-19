@@ -364,6 +364,40 @@ impl<'a> BlockBuilder<'a> {
     }
 }
 
+fn c_style_comments_parser(
+    language: Language,
+    query: Query,
+) -> TreeSitterCommentsParser<fn(usize, &str) -> Option<String>> {
+    TreeSitterCommentsParser::<fn(usize, &str) -> Option<String>>::new(
+        language,
+        vec![(
+            query,
+            Some(|_, comment| {
+                if comment.starts_with("//") {
+                    Some(comment.strip_prefix("//").unwrap().trim().to_string())
+                } else {
+                    Some(
+                        comment
+                            .strip_prefix("/*")
+                            .unwrap()
+                            .lines()
+                            .map(|line| {
+                                line.trim_start()
+                                    .trim_start_matches('*')
+                                    .trim()
+                                    .trim_end_matches('/')
+                                    .trim_end_matches('*')
+                                    .trim()
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    )
+                }
+            }),
+        )],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -927,38 +961,18 @@ mod tests {
         assert_eq!(blocks.len(), 1);
         Ok(())
     }
-}
 
-fn c_style_comments_parser(
-    language: Language,
-    query: Query,
-) -> TreeSitterCommentsParser<fn(usize, &str) -> Option<String>> {
-    TreeSitterCommentsParser::<fn(usize, &str) -> Option<String>>::new(
-        language,
-        vec![(
-            query,
-            Some(|_, comment| {
-                if comment.starts_with("//") {
-                    Some(comment.strip_prefix("//").unwrap().trim().to_string())
-                } else {
-                    Some(
-                        comment
-                            .strip_prefix("/*")
-                            .unwrap()
-                            .lines()
-                            .map(|line| {
-                                line.trim_start()
-                                    .trim_start_matches('*')
-                                    .trim()
-                                    .trim_end_matches('/')
-                                    .trim_end_matches('*')
-                                    .trim()
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    )
-                }
-            }),
-        )],
-    )
+    #[test]
+    #[ignore] // Invalid XML-like tags in comments are currently not supported.
+    fn comments_with_invalid_tags() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <invalid tag
+        // <block>
+        fn unicode() {}
+        // </block>"#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(blocks.len(), 1);
+        Ok(())
+    }
 }
