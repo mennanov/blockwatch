@@ -404,6 +404,7 @@ fn bar() {
 - Deleted blocks are currently ignored.
 - Files with unsupported grammar are ignored.
 - Blocks defined on a single line are all treated as modified.
+- Some comments that look like invalid XML may not be parsed correctly (e.g. `// <invalid tag`)
 
 ## Contributing
 
