@@ -403,6 +403,7 @@ fn bar() {
 
 - Deleted blocks are currently ignored.
 - Files with unsupported grammar are ignored.
+- Blocks defined on a single line are all treated as modified.
 
 ## Contributing
 
