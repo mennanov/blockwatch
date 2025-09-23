@@ -34,6 +34,7 @@ pub struct Violation {
 }
 
 impl Violation {
+    /// Constructs a new violation record with a name, error message, and optional machine-readable details.
     pub(crate) fn new(
         name: String,
         error_message: String,
@@ -53,6 +54,7 @@ pub struct Context {
 }
 
 impl Context {
+    /// Creates a new validation context with modified blocks grouped by filename.
     pub fn new(modified_blocks: HashMap<String, Vec<Arc<Block>>>) -> Self {
         Self { modified_blocks }
     }

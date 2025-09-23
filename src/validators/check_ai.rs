@@ -171,6 +171,8 @@ pub(super) struct OpenAiClient {
 }
 
 impl OpenAiClient {
+    /// Creates a new OpenAI client from environment variables (BLOCKWATCH_AI_*),
+    /// falling back to `async-openai` crate defaults when not provided.
     pub(crate) fn new_from_env() -> Self {
         let model = std::env::var("BLOCKWATCH_AI_MODEL").unwrap_or("gpt-4o-mini".to_string());
         let api_base =

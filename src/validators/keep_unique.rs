@@ -9,6 +9,7 @@ use std::sync::Arc;
 pub(super) struct KeepUniqueValidator {}
 
 impl KeepUniqueValidator {
+    /// Creates a validator that ensures lines (or regex matches) within a block are unique.
     pub(crate) fn new() -> Self {
         Self {}
     }

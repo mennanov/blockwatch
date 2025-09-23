@@ -40,6 +40,7 @@ pub struct Args {
 }
 
 impl Args {
+    /// Returns a map of user-provided extension remappings: KEY -> VALUE.
     pub fn extensions(&self) -> HashMap<String, String> {
         self.extensions
             .iter()
@@ -47,6 +48,7 @@ impl Args {
             .collect()
     }
 
+    /// Validates that all user-provided extension values are supported by available parsers.
     pub fn validate(&self, supported_extensions: HashSet<String>) -> anyhow::Result<()> {
         for (key, val) in &self.extensions {
             if !supported_extensions.contains(val) {

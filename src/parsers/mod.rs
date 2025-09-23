@@ -359,6 +359,7 @@ impl<'a> BlockBuilder<'a> {
         }
     }
 
+    /// Finalizes the block with the given end line and captured content, producing a `Block`.
     pub(crate) fn build(self, ends_at: usize, content: String) -> Block {
         Block::new(self.starts_at_line, ends_at, self.attributes, content)
     }

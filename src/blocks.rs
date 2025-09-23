@@ -59,15 +59,25 @@ impl Block {
         idx.is_ok()
     }
 
+    /// Returns the optional value of the `name` attribute for this block.
     pub(crate) fn name(&self) -> Option<&str> {
         self.attributes.get("name").map(String::as_str)
     }
 
+    /// Returns the block's name if present, otherwise a human-friendly placeholder label.
     pub(crate) fn name_display(&self) -> &str {
         self.name().unwrap_or(UNNAMED_BLOCK_LABEL)
     }
 }
 
+/// Parses source files and returns only those blocks that intersect with the provided modified line ranges.
+///
+/// - `modified_ranges_by_file` maps file paths to sorted, non-overlapping closed line ranges that were changed.
+/// - `file_reader` provides async access to file contents within a root path.
+/// - `parsers` maps file extensions to language-specific block parsers.
+/// - `extra_file_extensions` allows remapping unknown extensions to supported ones (e.g., "cxx" -> "cpp").
+///
+/// Returns a map of file paths to the list of intersecting blocks found in that file.
 pub async fn parse_blocks(
     modified_ranges_by_file: &HashMap<String, Vec<(usize, usize)>>,
     file_reader: &impl FileReader,
@@ -117,6 +127,7 @@ pub struct FsReader {
 }
 
 impl FsReader {
+    /// Creates a new filesystem-backed reader rooted at `root_path`.
     pub fn new(root_path: PathBuf) -> Self {
         Self { root_path }
     }

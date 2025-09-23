@@ -21,6 +21,7 @@ impl Default for UnidiffExtractor {
 }
 
 impl UnidiffExtractor {
+    /// Creates a new extractor based on the `unidiff` crate.
     pub fn new() -> Self {
         Self {}
     }
