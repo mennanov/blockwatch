@@ -1,5 +1,5 @@
 use blockwatch::blocks;
-use blockwatch::differ;
+use blockwatch::differ; // test 2
 use blockwatch::differ::HunksExtractor;
 use blockwatch::flags;
 use blockwatch::parsers;
@@ -17,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut diff = String::new();
     tokio::io::stdin().read_to_string(&mut diff).await?;
-    let extractor = differ::DiffyExtractor::new();
+    let extractor = differ::UnidiffExtractor::new();
     let modified_ranges_by_file = extractor.extract(diff.as_str())?;
 
     let file_reader = blocks::FsReader::new(repository_root_path(fs::canonicalize(
