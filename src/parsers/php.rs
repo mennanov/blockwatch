@@ -1,5 +1,6 @@
 use crate::parsers::{
     BlocksFromCommentsParser, BlocksParser, CommentsParser, TreeSitterCommentsParser,
+    c_style_multiline_comment_processor,
 };
 use tree_sitter::Query;
 
@@ -16,28 +17,14 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
         vec![(
             block_comment_query,
             Some(|_, comment| {
-                if let Some(comment) = comment.strip_prefix("//") {
-                    Some(comment.trim().to_string())
+                let stripped_comment = if let Some(comment) = comment.strip_prefix("//") {
+                    comment.trim().to_string()
                 } else if let Some(comment) = comment.strip_prefix('#') {
-                    Some(comment.trim().to_string())
+                    comment.trim().to_string()
                 } else {
-                    Some(
-                        comment
-                            .strip_prefix("/*")
-                            .unwrap()
-                            .lines()
-                            .map(|line| {
-                                line.trim_start()
-                                    .trim_start_matches('*')
-                                    .trim()
-                                    .trim_end_matches('/')
-                                    .trim_end_matches('*')
-                                    .trim()
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    )
-                }
+                    c_style_multiline_comment_processor(comment)
+                };
+                Some(stripped_comment)
             }),
         )],
     );

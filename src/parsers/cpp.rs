@@ -9,8 +9,8 @@ pub(super) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let cpp_language = tree_sitter_cpp::LANGUAGE.into();
-    let block_comment_query = Query::new(&cpp_language, "(comment) @comment")?;
-    let parser = parsers::c_style_comments_parser(cpp_language, block_comment_query);
+    let comment_query = Query::new(&cpp_language, "(comment) @comment")?;
+    let parser = parsers::c_style_comments_parser(cpp_language, comment_query);
     Ok(parser)
 }
 

@@ -364,6 +364,7 @@ impl<'a> BlockBuilder<'a> {
     }
 }
 
+/// C-style comments parser for a query that returns both line and block comments.
 fn c_style_comments_parser(
     language: Language,
     query: Query,
@@ -373,29 +374,90 @@ fn c_style_comments_parser(
         vec![(
             query,
             Some(|_, comment| {
-                if comment.starts_with("//") {
-                    Some(comment.strip_prefix("//").unwrap().trim().to_string())
-                } else {
-                    Some(
-                        comment
-                            .strip_prefix("/*")
-                            .unwrap()
-                            .lines()
-                            .map(|line| {
-                                line.trim_start()
-                                    .trim_start_matches('*')
-                                    .trim()
-                                    .trim_end_matches('/')
-                                    .trim_end_matches('*')
-                                    .trim()
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    )
-                }
+                Some(comment.strip_prefix("//").map_or_else(
+                    || c_style_multiline_comment_processor(comment),
+                    |c| c.trim().to_string(),
+                ))
             }),
         )],
     )
+}
+
+/// C-style comments parser for the separate line and block comment queries.
+fn c_style_line_and_block_comments_parser(
+    language: Language,
+    line_comment_query: Query,
+    block_comment_query: Query,
+) -> TreeSitterCommentsParser<fn(usize, &str) -> Option<String>> {
+    TreeSitterCommentsParser::<fn(usize, &str) -> Option<String>>::new(
+        language,
+        vec![
+            (
+                line_comment_query,
+                Some(|_, comment| Some(comment.strip_prefix("//").unwrap().trim().to_string())),
+            ),
+            (
+                block_comment_query,
+                Some(|_, comment| Some(c_style_multiline_comment_processor(comment))),
+            ),
+        ],
+    )
+}
+
+/// Python-style comments parser.
+fn python_style_comments_parser(
+    language: Language,
+    comment_query: Query,
+) -> TreeSitterCommentsParser<fn(usize, &str) -> Option<String>> {
+    TreeSitterCommentsParser::<fn(usize, &str) -> Option<String>>::new(
+        language,
+        vec![(
+            comment_query,
+            Some(|_, comment| Some(comment.strip_prefix('#').unwrap().trim().to_string())),
+        )],
+    )
+}
+
+/// XML-style comments parser.
+fn xml_style_comments_parser(
+    language: Language,
+    comment_query: Query,
+) -> TreeSitterCommentsParser<fn(usize, &str) -> Option<String>> {
+    TreeSitterCommentsParser::<fn(usize, &str) -> Option<String>>::new(
+        language,
+        vec![(
+            comment_query,
+            Some(|_, comment| {
+                Some(
+                    comment
+                        .strip_prefix("<!--")
+                        .unwrap()
+                        .trim_end_matches("-->")
+                        .lines()
+                        .map(|line| line.trim())
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                )
+            }),
+        )],
+    )
+}
+
+fn c_style_multiline_comment_processor(comment: &str) -> String {
+    comment
+        .strip_prefix("/*")
+        .unwrap()
+        .lines()
+        .map(|line| {
+            line.trim_start()
+                .trim_start_matches('*')
+                .trim()
+                .trim_end_matches('/')
+                .trim_end_matches('*')
+                .trim()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]

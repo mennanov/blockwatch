@@ -1,5 +1,5 @@
 use crate::parsers::{
-    BlocksFromCommentsParser, BlocksParser, CommentsParser, TreeSitterCommentsParser,
+    BlocksFromCommentsParser, BlocksParser, CommentsParser, c_style_line_and_block_comments_parser,
 };
 use tree_sitter::Query;
 
@@ -11,36 +11,11 @@ pub(super) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let kotlin_language = tree_sitter_kotlin_ng::LANGUAGE.into();
     let line_comment_query = Query::new(&kotlin_language, "(line_comment) @comment")?;
-    let multi_line_comment_query = Query::new(&kotlin_language, "(block_comment) @comment")?;
-    let parser = TreeSitterCommentsParser::<fn(usize, &str) -> Option<String>>::new(
+    let block_comment_query = Query::new(&kotlin_language, "(block_comment) @comment")?;
+    let parser = c_style_line_and_block_comments_parser(
         kotlin_language,
-        vec![
-            (
-                line_comment_query,
-                Some(|_, comment| Some(comment.strip_prefix("//").unwrap().trim().to_string())),
-            ),
-            (
-                multi_line_comment_query,
-                Some(|_, comment| {
-                    Some(
-                        comment
-                            .strip_prefix("/*")
-                            .unwrap()
-                            .lines()
-                            .map(|line| {
-                                line.trim_start()
-                                    .trim_start_matches('*')
-                                    .trim()
-                                    .trim_end_matches('/')
-                                    .trim_end_matches('*')
-                                    .trim()
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    )
-                }),
-            ),
-        ],
+        line_comment_query,
+        block_comment_query,
     );
     Ok(parser)
 }

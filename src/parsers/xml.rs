@@ -1,5 +1,5 @@
 use crate::parsers::{
-    BlocksFromCommentsParser, BlocksParser, CommentsParser, TreeSitterCommentsParser,
+    BlocksFromCommentsParser, BlocksParser, CommentsParser, xml_style_comments_parser,
 };
 use tree_sitter::Query;
 
@@ -11,24 +11,7 @@ pub(super) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let xml_language = tree_sitter_xml::LANGUAGE_XML.into();
     let line_comment_query = Query::new(&xml_language, "(Comment) @comment")?;
-    let parser = TreeSitterCommentsParser::<fn(usize, &str) -> Option<String>>::new(
-        xml_language,
-        vec![(
-            line_comment_query,
-            Some(|_, comment| {
-                Some(
-                    comment
-                        .strip_prefix("<!--")
-                        .unwrap()
-                        .trim_end_matches("-->")
-                        .lines()
-                        .map(|line| line.trim())
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                )
-            }),
-        )],
-    );
+    let parser = xml_style_comments_parser(xml_language, line_comment_query);
     Ok(parser)
 }
 

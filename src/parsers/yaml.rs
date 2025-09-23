@@ -1,5 +1,5 @@
 use crate::parsers::{
-    BlocksFromCommentsParser, BlocksParser, CommentsParser, TreeSitterCommentsParser,
+    BlocksFromCommentsParser, BlocksParser, CommentsParser, python_style_comments_parser,
 };
 use tree_sitter::Query;
 
@@ -11,13 +11,7 @@ pub(super) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let yaml_language = tree_sitter_yaml::LANGUAGE.into();
     let line_comment_query = Query::new(&yaml_language, "(comment) @comment")?;
-    let parser = TreeSitterCommentsParser::<fn(usize, &str) -> Option<String>>::new(
-        yaml_language,
-        vec![(
-            line_comment_query,
-            Some(|_, comment| Some(comment.strip_prefix('#').unwrap().trim().to_string())),
-        )],
-    );
+    let parser = python_style_comments_parser(yaml_language, line_comment_query);
     Ok(parser)
 }
 
