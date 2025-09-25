@@ -146,12 +146,11 @@ impl<'source> TreeSitterXmlBlockTagParser<'source> {
                     .utf8_text(self.source.as_bytes())
                     .context("Failed to extract attribute name: invalid utf8")?;
 
-                let value = if let Some(att_value) = child.child(2) {
-                    self.extract_attribute_value(&att_value)?
-                } else {
-                    "".to_string()
-                };
-
+                let value = self.extract_attribute_value(
+                    &child
+                        .child(2)
+                        .context("Failed to extract attribute value: no AttValue node found")?,
+                )?;
                 if !attr_name.is_empty()
                     && attributes.insert(attr_name.to_string(), value).is_some()
                 {

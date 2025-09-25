@@ -861,7 +861,6 @@ mod tests {
         let parser = create_parser();
         let contents = r#"
         // <block text='He said "Hello"'>
-        fn escaped() {}
         // </block>
         "#;
         let blocks = parser.parse(contents)?;
@@ -874,7 +873,6 @@ mod tests {
         let parser = create_parser();
         let contents = r#"
         // <block text="He said &quot;Hello&quot;">
-        fn escaped() {}
         // </block>
         "#;
         let blocks = parser.parse(contents)?;
@@ -883,11 +881,27 @@ mod tests {
     }
 
     #[test]
+    fn attributes_with_no_quotes_returns_error() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <block color=red>
+        // </block>
+        "#;
+        let result = parser.parse(contents);
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid attribute")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn single_invalid_attribute_returns_error() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
         // <block attr>
-        fn escaped() {}
         // </block>
         "#;
         let result = parser.parse(contents);
