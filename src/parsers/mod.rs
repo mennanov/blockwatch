@@ -23,11 +23,10 @@ mod xml;
 mod yaml;
 
 use crate::blocks::Block;
-use crate::parsers::tag_parser::TreeSitterXmlBlockTagParser;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::string::ToString;
-use tag_parser::{BlockTag, BlockTagParser};
+use tag_parser::{BlockTag, BlockTagParser, TreeSitterXmlBlockTagParser};
 use tree_sitter::{Language, Parser, Query, QueryCursor, StreamingIterator};
 
 /// Parses [`Blocks`] from a source code.

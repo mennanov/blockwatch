@@ -26,6 +26,7 @@ pub(crate) enum BlockTag {
 /// Parses the `block` tags using the `quick-xml` crate.
 ///
 /// Deprecated and unused: `TreeSitterXmlBlockTagParser` is used instead as it is superior.
+/// `QuickXmlBlockTagParser` will be deleted in the future.
 #[allow(dead_code)]
 pub(crate) struct QuickXmlBlockTagParser<'a> {
     reader: quick_xml::Reader<&'a [u8]>,
@@ -168,23 +169,14 @@ impl<'source> TreeSitterXmlBlockTagParser<'source> {
     }
 
     fn extract_attribute_value(&self, node: &Node) -> anyhow::Result<String> {
-        let raw = node
+        let quoted_value = node
             .utf8_text(self.source.as_bytes())
             .context("Failed to extract attribute value")?;
-        // Remove surrounding single/double quotes if present
-        let unquoted = if raw.len() >= 2 {
-            let first = raw.as_bytes()[0];
-            let last = raw.as_bytes()[raw.len() - 1];
-            if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
-                &raw[1..raw.len() - 1]
-            } else {
-                raw
-            }
-        } else {
-            raw
-        };
+        // The `quoted_value` is guaranteed to be `"{value}"` or `'{value}'` according to the
+        // tree-sitter XML grammar.
+        let unquoted_value = &quoted_value[1..quoted_value.len() - 1];
         // Unescape common XML entities like &quot;
-        Ok(html_escape::decode_html_entities(unquoted).into())
+        Ok(html_escape::decode_html_entities(unquoted_value).into())
     }
 }
 
