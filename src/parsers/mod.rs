@@ -23,10 +23,11 @@ mod xml;
 mod yaml;
 
 use crate::blocks::Block;
+use crate::parsers::tag_parser::TreeSitterXmlBlockTagParser;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::string::ToString;
-use tag_parser::{BlockTag, BlockTagParser, QuickXmlBlockTagParser};
+use tag_parser::{BlockTag, BlockTagParser};
 use tree_sitter::{Language, Parser, Query, QueryCursor, StreamingIterator};
 
 /// Parses [`Blocks`] from a source code.
@@ -225,9 +226,7 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
 
     fn process_start_tag<'idx>(
         stack: &mut Vec<BlockBuilder<'idx>>,
-        concatenated_comments: &str,
         index: &'idx [CommentIndex],
-        start_position: usize,
         end_position: usize,
         attributes: HashMap<String, String>,
     ) {
@@ -238,12 +237,8 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
                     .unwrap_or_else(|e| e),
             )
             .expect("start comment index out of bounds");
-        let block_comment =
-            &concatenated_comments[comment_index.start_position..start_position - 1];
-        let start_line_number =
-            comment_index.source_start_line_number + block_comment.lines().count() - 1;
         stack.push(BlockBuilder::new(
-            start_line_number,
+            comment_index.source_start_line_number,
             comment_index,
             attributes,
         ));
@@ -293,23 +288,16 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
         let (concatenated_comments, index) = Self::build_index(&comments);
         let mut blocks = Vec::new();
         let mut stack = Vec::new();
-        let mut parser = QuickXmlBlockTagParser::new(concatenated_comments.as_str());
+        let mut parser = TreeSitterXmlBlockTagParser::new(concatenated_comments.as_str());
 
         while let Some(tag) = parser.next()? {
             match tag {
                 BlockTag::Start {
-                    start_position,
+                    start_position: _start_position,
                     end_position,
                     attributes,
                 } => {
-                    Self::process_start_tag(
-                        &mut stack,
-                        &concatenated_comments,
-                        &index,
-                        start_position,
-                        end_position,
-                        attributes,
-                    );
+                    Self::process_start_tag(&mut stack, &index, end_position, attributes);
                 }
                 BlockTag::End {
                     start_position,
@@ -895,6 +883,60 @@ mod tests {
     }
 
     #[test]
+    fn single_invalid_attribute_returns_error() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <block attr>
+        fn escaped() {}
+        // </block>
+        "#;
+        let result = parser.parse(contents);
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid attribute")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn multiple_invalid_attributes_returns_error() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <block color="red" attr1 align="center" attr2>
+        fn escaped() {}
+        // </block>
+        "#;
+        let result = parser.parse(contents);
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid attributes")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn duplicated_attributes_returns_error() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <block color="red" color="blue">
+        fn escaped() {}
+        // </block>
+        "#;
+        let result = parser.parse(contents);
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Duplicate attribute")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn nested_blocks_with_attributes() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
@@ -946,14 +988,14 @@ mod tests {
     }
 
     #[test]
-    fn malformed_block_tag_returns_error() -> anyhow::Result<()> {
+    fn malformed_block_tag_is_ignored() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
-        // <block name="foo" affects="file:block" invalid>
+        // <block name="foo" affects="file:block" invalid-attr=">
         fn foo() {}
         // </block>
         "#;
-        assert!(parser.parse(contents).is_err());
+        assert!(parser.parse(contents)?.is_empty());
         Ok(())
     }
 
@@ -1026,7 +1068,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Invalid XML-like tags in comments are currently not supported.
     fn comments_with_invalid_tags() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
