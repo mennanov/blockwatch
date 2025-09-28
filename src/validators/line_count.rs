@@ -28,7 +28,7 @@ impl Validator for LineCountValidator {
         context: Arc<validators::Context>,
     ) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
         let mut violations = HashMap::new();
-        for (file_path, blocks) in &context.modified_blocks {
+        for (file_path, (file_content, blocks)) in &context.modified_blocks {
             for block in blocks {
                 let Some(expr) = block.attributes.get("line-count") else {
                     continue;
@@ -41,10 +41,10 @@ impl Validator for LineCountValidator {
                     block.starts_at_line,
                     e
                 ))?;
-                let actual = if block.content.is_empty() {
+                let actual = if block.content(file_content).is_empty() {
                     0
                 } else {
-                    block.content.lines().count()
+                    block.content(file_content).lines().count()
                 };
                 let ok = match op {
                     Op::Lt => actual < expected,
@@ -129,6 +129,7 @@ fn parse_constraint(s: &str) -> anyhow::Result<(Op, usize)> {
 mod tests {
     use super::*;
     use crate::blocks::Block;
+    use crate::test_utils;
     use crate::validators::Validator;
     use serde_json::json;
 
@@ -150,52 +151,56 @@ mod tests {
     #[tokio::test]
     async fn validate_with_correct_number_of_lines_returns_no_violations() -> anyhow::Result<()> {
         let validator = LineCountValidator::new();
+        let file1_contents = "blocks content goes here: a\nb\nc\nd";
         let context = Arc::new(validators::Context::new(HashMap::from([(
             "file1".to_string(),
-            vec![
-                Arc::new(Block::new(
-                    1,
-                    4,
-                    HashMap::from([("line-count".to_string(), "<3".to_string())]),
-                    "a\nb".to_string(),
-                )),
-                Arc::new(Block::new(
-                    5,
-                    8,
-                    HashMap::from([("line-count".to_string(), "<=3".to_string())]),
-                    "a\nb".to_string(),
-                )),
-                Arc::new(Block::new(
-                    9,
-                    13,
-                    HashMap::from([("line-count".to_string(), "<=3".to_string())]),
-                    "a\nb\nc".to_string(),
-                )),
-                Arc::new(Block::new(
-                    15,
-                    18,
-                    HashMap::from([("line-count".to_string(), "== 2".to_string())]),
-                    "a\nb".to_string(),
-                )),
-                Arc::new(Block::new(
-                    20,
-                    23,
-                    HashMap::from([("line-count".to_string(), ">= 2".to_string())]),
-                    "a\nb".to_string(),
-                )),
-                Arc::new(Block::new(
-                    30,
-                    34,
-                    HashMap::from([("line-count".to_string(), ">= 2".to_string())]),
-                    "a\nb\nc".to_string(),
-                )),
-                Arc::new(Block::new(
-                    40,
-                    45,
-                    HashMap::from([("line-count".to_string(), "> 3".to_string())]),
-                    "a\nb\nc\nd".to_string(),
-                )),
-            ],
+            (
+                file1_contents.to_string(),
+                vec![
+                    Arc::new(Block::new(
+                        1,
+                        4,
+                        HashMap::from([("line-count".to_string(), "<3".to_string())]),
+                        test_utils::substr_range(file1_contents, "a\nb"),
+                    )),
+                    Arc::new(Block::new(
+                        5,
+                        8,
+                        HashMap::from([("line-count".to_string(), "<=3".to_string())]),
+                        test_utils::substr_range(file1_contents, "a\nb"),
+                    )),
+                    Arc::new(Block::new(
+                        9,
+                        13,
+                        HashMap::from([("line-count".to_string(), "<=3".to_string())]),
+                        test_utils::substr_range(file1_contents, "a\nb\nc"),
+                    )),
+                    Arc::new(Block::new(
+                        15,
+                        18,
+                        HashMap::from([("line-count".to_string(), "== 2".to_string())]),
+                        test_utils::substr_range(file1_contents, "a\nb"),
+                    )),
+                    Arc::new(Block::new(
+                        20,
+                        23,
+                        HashMap::from([("line-count".to_string(), ">= 2".to_string())]),
+                        test_utils::substr_range(file1_contents, "a\nb"),
+                    )),
+                    Arc::new(Block::new(
+                        30,
+                        34,
+                        HashMap::from([("line-count".to_string(), ">= 2".to_string())]),
+                        test_utils::substr_range(file1_contents, "a\nb\nc"),
+                    )),
+                    Arc::new(Block::new(
+                        40,
+                        45,
+                        HashMap::from([("line-count".to_string(), "> 3".to_string())]),
+                        test_utils::substr_range(file1_contents, "a\nb\nc\nd"),
+                    )),
+                ],
+            ),
         )])));
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());
@@ -205,46 +210,50 @@ mod tests {
     #[tokio::test]
     async fn validate_with_incorrect_number_of_lines_returns_violations() -> anyhow::Result<()> {
         let validator = LineCountValidator::new();
+        let file1_contents = "blocks content goes here: a\nb\nc\nd ";
         let context = Arc::new(validators::Context::new(HashMap::from([(
             "file2".to_string(),
-            vec![
-                Arc::new(Block::new(
-                    1,
-                    5,
-                    HashMap::from([("line-count".to_string(), "<3".to_string())]),
-                    "a\nb\nc".to_string(),
-                )),
-                Arc::new(Block::new(
-                    7,
-                    12,
-                    HashMap::from([("line-count".to_string(), "<=3".to_string())]),
-                    "a\nb\nc\nd".to_string(),
-                )),
-                Arc::new(Block::new(
-                    14,
-                    19,
-                    HashMap::from([("line-count".to_string(), "==3".to_string())]),
-                    "a\nb\nc\nd".to_string(),
-                )),
-                Arc::new(Block::new(
-                    20,
-                    23,
-                    HashMap::from([("line-count".to_string(), "==3".to_string())]),
-                    "a\nb".to_string(),
-                )),
-                Arc::new(Block::new(
-                    25,
-                    28,
-                    HashMap::from([("line-count".to_string(), ">=3".to_string())]),
-                    "a\nb".to_string(),
-                )),
-                Arc::new(Block::new(
-                    25,
-                    28,
-                    HashMap::from([("line-count".to_string(), ">3".to_string())]),
-                    "a\nb\nc".to_string(),
-                )),
-            ],
+            (
+                file1_contents.to_string(),
+                vec![
+                    Arc::new(Block::new(
+                        1,
+                        5,
+                        HashMap::from([("line-count".to_string(), "<3".to_string())]),
+                        test_utils::substr_range(file1_contents, "a\nb\nc"),
+                    )),
+                    Arc::new(Block::new(
+                        7,
+                        12,
+                        HashMap::from([("line-count".to_string(), "<=3".to_string())]),
+                        test_utils::substr_range(file1_contents, "a\nb\nc\nd"),
+                    )),
+                    Arc::new(Block::new(
+                        14,
+                        19,
+                        HashMap::from([("line-count".to_string(), "==3".to_string())]),
+                        test_utils::substr_range(file1_contents, "a\nb\nc\nd"),
+                    )),
+                    Arc::new(Block::new(
+                        20,
+                        23,
+                        HashMap::from([("line-count".to_string(), "==3".to_string())]),
+                        test_utils::substr_range(file1_contents, "a\nb"),
+                    )),
+                    Arc::new(Block::new(
+                        25,
+                        28,
+                        HashMap::from([("line-count".to_string(), ">=3".to_string())]),
+                        test_utils::substr_range(file1_contents, "a\nb"),
+                    )),
+                    Arc::new(Block::new(
+                        25,
+                        28,
+                        HashMap::from([("line-count".to_string(), ">3".to_string())]),
+                        test_utils::substr_range(file1_contents, "a\nb\nc"),
+                    )),
+                ],
+            ),
         )])));
 
         let violations = validator.validate(context).await?;

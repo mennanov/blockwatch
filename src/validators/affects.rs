@@ -27,7 +27,7 @@ impl validators::Validator for AffectsValidator {
         context: Arc<validators::Context>,
     ) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
         let mut named_modified_blocks = HashMap::new();
-        for (file_path, blocks) in &context.modified_blocks {
+        for (file_path, (_, blocks)) in &context.modified_blocks {
             for block in blocks {
                 match block.name() {
                     None => continue,
@@ -41,7 +41,7 @@ impl validators::Validator for AffectsValidator {
             }
         }
         let mut violations = HashMap::new();
-        for (modified_block_file_path, blocks) in &context.modified_blocks {
+        for (modified_block_file_path, (_, blocks)) in &context.modified_blocks {
             for modified_block in blocks {
                 match modified_block.attributes.get("affects") {
                     None => continue,
@@ -83,12 +83,15 @@ mod validate_tests {
         let validator = AffectsValidator::new();
         let modified_blocks = HashMap::from([(
             "file1".to_string(),
-            vec![Arc::new(Block::new(
-                1,
-                10,
-                HashMap::from([("name".to_string(), "foo".to_string())]),
+            (
                 "".to_string(),
-            ))],
+                vec![Arc::new(Block::new(
+                    1,
+                    10,
+                    HashMap::from([("name".to_string(), "foo".to_string())]),
+                    0..0,
+                ))],
+            ),
         )]);
 
         let violations = validator
@@ -104,20 +107,23 @@ mod validate_tests {
         let validator = AffectsValidator::new();
         let modified_blocks = HashMap::from([(
             "file1".to_string(),
-            vec![
-                Arc::new(Block::new(
-                    1,
-                    10,
-                    HashMap::from([("affects".to_string(), ":foo".to_string())]),
-                    "".to_string(),
-                )),
-                Arc::new(Block::new(
-                    12,
-                    16,
-                    HashMap::from([("affects".to_string(), ":foo".to_string())]),
-                    "".to_string(),
-                )),
-            ],
+            (
+                "".to_string(),
+                vec![
+                    Arc::new(Block::new(
+                        1,
+                        10,
+                        HashMap::from([("affects".to_string(), ":foo".to_string())]),
+                        0..0,
+                    )),
+                    Arc::new(Block::new(
+                        12,
+                        16,
+                        HashMap::from([("affects".to_string(), ":foo".to_string())]),
+                        0..0,
+                    )),
+                ],
+            ),
         )]);
 
         let violations = validator
@@ -144,38 +150,47 @@ mod validate_tests {
         let modified_blocks = HashMap::from([
             (
                 "file1".to_string(),
-                vec![
-                    Arc::new(Block::new(
-                        1,
-                        10,
-                        HashMap::from([("affects".to_string(), "file2:foo".to_string())]),
-                        "".to_string(),
-                    )),
-                    Arc::new(Block::new(
-                        12,
-                        16,
-                        HashMap::from([("affects".to_string(), "file3:bar".to_string())]),
-                        "".to_string(),
-                    )),
-                ],
+                (
+                    "".to_string(),
+                    vec![
+                        Arc::new(Block::new(
+                            1,
+                            10,
+                            HashMap::from([("affects".to_string(), "file2:foo".to_string())]),
+                            0..0,
+                        )),
+                        Arc::new(Block::new(
+                            12,
+                            16,
+                            HashMap::from([("affects".to_string(), "file3:bar".to_string())]),
+                            0..0,
+                        )),
+                    ],
+                ),
             ),
             (
                 "file2".to_string(),
-                vec![Arc::new(Block::new(
-                    1,
-                    10,
-                    HashMap::from([("name".to_string(), "not-foo".to_string())]),
+                (
                     "".to_string(),
-                ))],
+                    vec![Arc::new(Block::new(
+                        1,
+                        10,
+                        HashMap::from([("name".to_string(), "not-foo".to_string())]),
+                        0..0,
+                    ))],
+                ),
             ),
             (
                 "file3".to_string(),
-                vec![Arc::new(Block::new(
-                    1,
-                    10,
-                    HashMap::from([("name".to_string(), "not-bar".to_string())]),
+                (
                     "".to_string(),
-                ))],
+                    vec![Arc::new(Block::new(
+                        1,
+                        10,
+                        HashMap::from([("name".to_string(), "not-bar".to_string())]),
+                        0..0,
+                    ))],
+                ),
             ),
         ]);
 
@@ -202,26 +217,29 @@ mod validate_tests {
         let validator = AffectsValidator::new();
         let modified_blocks = HashMap::from([(
             "file1".to_string(),
-            vec![
-                Arc::new(Block::new(
-                    1,
-                    10,
-                    HashMap::from([
-                        ("name".to_string(), "foo".to_string()),
-                        ("affects".to_string(), ":bar".to_string()),
-                    ]),
-                    "".to_string(),
-                )),
-                Arc::new(Block::new(
-                    12,
-                    16,
-                    HashMap::from([
-                        ("name".to_string(), "bar".to_string()),
-                        ("affects".to_string(), ":foo".to_string()),
-                    ]),
-                    "".to_string(),
-                )),
-            ],
+            (
+                "".to_string(),
+                vec![
+                    Arc::new(Block::new(
+                        1,
+                        10,
+                        HashMap::from([
+                            ("name".to_string(), "foo".to_string()),
+                            ("affects".to_string(), ":bar".to_string()),
+                        ]),
+                        0..0,
+                    )),
+                    Arc::new(Block::new(
+                        12,
+                        16,
+                        HashMap::from([
+                            ("name".to_string(), "bar".to_string()),
+                            ("affects".to_string(), ":foo".to_string()),
+                        ]),
+                        0..0,
+                    )),
+                ],
+            ),
         )]);
 
         let violations = validator
@@ -238,38 +256,44 @@ mod validate_tests {
         let modified_blocks = HashMap::from([
             (
                 "file1".to_string(),
-                vec![
-                    Arc::new(Block::new(
-                        1,
-                        10,
-                        HashMap::from([
-                            ("name".to_string(), "foo".to_string()),
-                            ("affects".to_string(), ":bar, file2:buzz".to_string()),
-                        ]),
-                        "".to_string(),
-                    )),
-                    Arc::new(Block::new(
-                        12,
-                        16,
-                        HashMap::from([
-                            ("name".to_string(), "bar".to_string()),
-                            ("affects".to_string(), ":foo".to_string()),
-                        ]),
-                        "".to_string(),
-                    )),
-                ],
+                (
+                    "".to_string(),
+                    vec![
+                        Arc::new(Block::new(
+                            1,
+                            10,
+                            HashMap::from([
+                                ("name".to_string(), "foo".to_string()),
+                                ("affects".to_string(), ":bar, file2:buzz".to_string()),
+                            ]),
+                            0..0,
+                        )),
+                        Arc::new(Block::new(
+                            12,
+                            16,
+                            HashMap::from([
+                                ("name".to_string(), "bar".to_string()),
+                                ("affects".to_string(), ":foo".to_string()),
+                            ]),
+                            0..0,
+                        )),
+                    ],
+                ),
             ),
             (
                 "file2".to_string(),
-                vec![Arc::new(Block::new(
-                    1,
-                    10,
-                    HashMap::from([
-                        ("name".to_string(), "buzz".to_string()),
-                        ("affects".to_string(), "file1:bar".to_string()),
-                    ]),
+                (
                     "".to_string(),
-                ))],
+                    vec![Arc::new(Block::new(
+                        1,
+                        10,
+                        HashMap::from([
+                            ("name".to_string(), "buzz".to_string()),
+                            ("affects".to_string(), "file1:bar".to_string()),
+                        ]),
+                        0..0,
+                    ))],
+                ),
             ),
         ]);
 
@@ -287,38 +311,44 @@ mod validate_tests {
         let modified_blocks = HashMap::from([
             (
                 "file1".to_string(),
-                vec![
-                    Arc::new(Block::new(
-                        1,
-                        10,
-                        HashMap::from([
-                            ("name".to_string(), "foo".to_string()),
-                            ("affects".to_string(), ":bar, file2:buzz".to_string()),
-                        ]),
-                        "".to_string(),
-                    )),
-                    Arc::new(Block::new(
-                        12,
-                        16,
-                        HashMap::from([
-                            ("name".to_string(), "bar".to_string()),
-                            ("affects".to_string(), ":foo".to_string()),
-                        ]),
-                        "".to_string(),
-                    )),
-                ],
+                (
+                    "".to_string(),
+                    vec![
+                        Arc::new(Block::new(
+                            1,
+                            10,
+                            HashMap::from([
+                                ("name".to_string(), "foo".to_string()),
+                                ("affects".to_string(), ":bar, file2:buzz".to_string()),
+                            ]),
+                            0..0,
+                        )),
+                        Arc::new(Block::new(
+                            12,
+                            16,
+                            HashMap::from([
+                                ("name".to_string(), "bar".to_string()),
+                                ("affects".to_string(), ":foo".to_string()),
+                            ]),
+                            0..0,
+                        )),
+                    ],
+                ),
             ),
             (
                 "file2".to_string(),
-                vec![Arc::new(Block::new(
-                    1,
-                    10,
-                    HashMap::from([
-                        ("name".to_string(), "not-buzz".to_string()),
-                        ("affects".to_string(), "file1:bar".to_string()),
-                    ]),
+                (
                     "".to_string(),
-                ))],
+                    vec![Arc::new(Block::new(
+                        1,
+                        10,
+                        HashMap::from([
+                            ("name".to_string(), "not-buzz".to_string()),
+                            ("affects".to_string(), "file1:bar".to_string()),
+                        ]),
+                        0..0,
+                    ))],
+                ),
             ),
         ]);
 
@@ -341,38 +371,47 @@ mod validate_tests {
         let modified_blocks = HashMap::from([
             (
                 "file1".to_string(),
-                vec![
-                    Arc::new(Block::new(
-                        1,
-                        10,
-                        HashMap::from([("affects".to_string(), "file2:foo".to_string())]),
-                        "".to_string(),
-                    )),
-                    Arc::new(Block::new(
-                        12,
-                        16,
-                        HashMap::from([("affects".to_string(), "file3:bar".to_string())]),
-                        "".to_string(),
-                    )),
-                ],
+                (
+                    "".to_string(),
+                    vec![
+                        Arc::new(Block::new(
+                            1,
+                            10,
+                            HashMap::from([("affects".to_string(), "file2:foo".to_string())]),
+                            0..0,
+                        )),
+                        Arc::new(Block::new(
+                            12,
+                            16,
+                            HashMap::from([("affects".to_string(), "file3:bar".to_string())]),
+                            0..0,
+                        )),
+                    ],
+                ),
             ),
             (
                 "file2".to_string(),
-                vec![Arc::new(Block::new(
-                    1,
-                    10,
-                    HashMap::from([("name".to_string(), "foo".to_string())]),
+                (
                     "".to_string(),
-                ))],
+                    vec![Arc::new(Block::new(
+                        1,
+                        10,
+                        HashMap::from([("name".to_string(), "foo".to_string())]),
+                        0..0,
+                    ))],
+                ),
             ),
             (
                 "file3".to_string(),
-                vec![Arc::new(Block::new(
-                    1,
-                    10,
-                    HashMap::from([("name".to_string(), "bar".to_string())]),
+                (
                     "".to_string(),
-                ))],
+                    vec![Arc::new(Block::new(
+                        1,
+                        10,
+                        HashMap::from([("name".to_string(), "bar".to_string())]),
+                        0..0,
+                    ))],
+                ),
             ),
         ]);
 

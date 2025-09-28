@@ -49,13 +49,13 @@ impl Violation {
 }
 
 pub struct Context {
-    // Modified blocks grouped by filename.
-    modified_blocks: HashMap<String, Vec<Arc<Block>>>,
+    // Modified blocks with their corresponding source file contents grouped by filename.
+    modified_blocks: HashMap<String, (String, Vec<Arc<Block>>)>,
 }
 
 impl Context {
     /// Creates a new validation context with modified blocks grouped by filename.
-    pub fn new(modified_blocks: HashMap<String, Vec<Arc<Block>>>) -> Self {
+    pub fn new(modified_blocks: HashMap<String, (String, Vec<Arc<Block>>)>) -> Self {
         Self { modified_blocks }
     }
 }
@@ -111,24 +111,30 @@ mod run_tests {
         let context = validators::Context::new(HashMap::from([
             (
                 "file1".to_string(),
-                vec![Arc::new(Block::new(
-                    1,
-                    6,
-                    HashMap::from([
-                        ("affects".to_string(), "file2:foo".to_string()),
-                        ("keep-sorted".to_string(), "desc".to_string()),
-                    ]),
+                (
                     "D\nC\nD\nC".to_string(),
-                ))],
+                    vec![Arc::new(Block::new(
+                        1,
+                        6,
+                        HashMap::from([
+                            ("affects".to_string(), "file2:foo".to_string()),
+                            ("keep-sorted".to_string(), "desc".to_string()),
+                        ]),
+                        0..6,
+                    ))],
+                ),
             ),
             (
                 "file2".to_string(),
-                vec![Arc::new(Block::new(
-                    1,
-                    6,
-                    HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
+                (
                     "A\nB\nA".to_string(),
-                ))],
+                    vec![Arc::new(Block::new(
+                        1,
+                        6,
+                        HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
+                        0..5,
+                    ))],
+                ),
             ),
         ]));
 

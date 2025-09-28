@@ -24,6 +24,7 @@ mod yaml;
 
 use crate::blocks::Block;
 use std::collections::HashMap;
+use std::ops::Range;
 use std::rc::Rc;
 use std::string::ToString;
 use tag_parser::{BlockTag, BlockTagParser, TreeSitterXmlBlockTagParser};
@@ -246,7 +247,6 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
     fn process_end_tag<'idx>(
         stack: &mut Vec<BlockBuilder<'idx>>,
         blocks: &mut Vec<Block>,
-        contents: &str,
         concatenated_comments: &str,
         index: &'idx [CommentIndex],
         start_position: usize,
@@ -257,19 +257,18 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
             .unwrap_or_else(|e| e);
         let comment_index = index.get(idx).expect("end comment index out of bounds");
         if let Some(block_builder) = stack.pop() {
-            let block_content = if comment_index != block_builder.start_index {
-                &contents[block_builder.start_index.source_end_position
-                    ..comment_index.source_start_position]
+            let content_range = if comment_index != block_builder.start_index {
+                block_builder.start_index.source_end_position..comment_index.source_start_position
             } else {
                 // Block that starts and ends in the same comment can't have any
                 // content.
-                ""
+                0..0
             };
             // TODO: get rid of the Block.ends_at_line and use block's source positions instead to compute intersections.
             let block_comment = &concatenated_comments[comment_index.start_position..end_position];
             let end_line_number =
                 comment_index.source_start_line_number + block_comment.lines().count() - 1;
-            blocks.push(block_builder.build(end_line_number, block_content.to_string()));
+            blocks.push(block_builder.build(end_line_number, content_range));
             Ok(())
         } else {
             Err(anyhow::anyhow!(
@@ -305,7 +304,6 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
                     Self::process_end_tag(
                         &mut stack,
                         &mut blocks,
-                        contents,
                         concatenated_comments.as_str(),
                         &index,
                         start_position,
@@ -347,8 +345,8 @@ impl<'a> BlockBuilder<'a> {
     }
 
     /// Finalizes the block with the given end line and captured content, producing a `Block`.
-    pub(crate) fn build(self, ends_at: usize, content: String) -> Block {
-        Block::new(self.starts_at_line, ends_at, self.attributes, content)
+    pub(crate) fn build(self, ends_at: usize, content_range: Range<usize>) -> Block {
+        Block::new(self.starts_at_line, ends_at, self.attributes, content_range)
     }
 }
 
@@ -451,6 +449,7 @@ fn c_style_multiline_comment_processor(comment: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils;
 
     fn create_parser() -> Box<dyn BlocksParser> {
         rust::parser().unwrap()
@@ -480,7 +479,7 @@ mod tests {
                 1,
                 1,
                 HashMap::new(),
-                " let say = \"hi\"; ".to_string()
+                test_utils::substr_range(contents, " let say = \"hi\"; ")
             ),]
         );
         Ok(())
@@ -497,7 +496,7 @@ mod tests {
                 1,
                 3,
                 HashMap::new(),
-                "\nlet say = \"hi\";\n".to_string()
+                test_utils::substr_range(contents, "\nlet say = \"hi\";\n")
             ),]
         );
         Ok(())
@@ -514,7 +513,7 @@ mod tests {
                 1,
                 2,
                 HashMap::new(),
-                " let say = \"hi\"; ".to_string()
+                test_utils::substr_range(contents, " let say = \"hi\"; ")
             ),]
         );
         Ok(())
@@ -531,7 +530,7 @@ mod tests {
                 1,
                 2,
                 HashMap::new(),
-                " let say = \"hi\"; ".to_string()
+                test_utils::substr_range(contents, " let say = \"hi\"; ")
             ),]
         );
         Ok(())
@@ -550,13 +549,13 @@ mod tests {
                     1,
                     3,
                     HashMap::new(),
-                    "\nprintln!(\"hello1\");\n".to_string()
+                    test_utils::substr_range(contents, "\nprintln!(\"hello1\");\n"),
                 ),
                 Block::new(
                     4,
                     6,
                     HashMap::new(),
-                    "\nprintln!(\"hello2\");\n".to_string()
+                    test_utils::substr_range(contents, "\nprintln!(\"hello2\");\n")
                 )
             ]
         );
@@ -575,13 +574,13 @@ mod tests {
                     1,
                     3,
                     HashMap::new(),
-                    "\nprintln!(\"hello1\");\n".to_string()
+                    test_utils::substr_range(contents, "\nprintln!(\"hello1\");\n"),
                 ),
                 Block::new(
                     3,
                     5,
                     HashMap::new(),
-                    "\nprintln!(\"hello2\");\n".to_string()
+                    test_utils::substr_range(contents, "\nprintln!(\"hello2\");\n"),
                 )
             ]
         );
@@ -596,8 +595,18 @@ mod tests {
         assert_eq!(
             blocks,
             vec![
-                Block::new(1, 1, HashMap::new(), "println!(\"hello1\");".to_string()),
-                Block::new(1, 1, HashMap::new(), "println!(\"hello2\");".to_string())
+                Block::new(
+                    1,
+                    1,
+                    HashMap::new(),
+                    test_utils::substr_range(contents, "println!(\"hello1\");")
+                ),
+                Block::new(
+                    1,
+                    1,
+                    HashMap::new(),
+                    test_utils::substr_range(contents, "println!(\"hello2\");")
+                )
             ]
         );
         Ok(())
@@ -642,76 +651,31 @@ mod tests {
                     2,
                     25,
                     HashMap::from([("name".to_string(), "foo".to_string())]),
-                    r#"
-        fn say_hello_world() {
-          println!("hello world!");
-        }
-
-            // <block name="bar">
-            fn say_hello_world_bar() {
-              println!("hello world bar!");
-            }
-                // <block name="bar-bar">
-                fn say_hello_world_bar_bar() {
-                  println!("hello world bar bar!");
-                }
-                // </block>
-
-            // </block>
-
-            // <block name="buzz">
-            fn say_hello_world_buzz() {
-              println!("hello world buzz!");
-            }
-            // </block>
-
-        "#
-                    .into()
+                    30..620
                 ),
                 Block::new(
                     7,
                     17,
                     HashMap::from([("name".to_string(), "bar".to_string())]),
-                    r#"
-            fn say_hello_world_bar() {
-              println!("hello world bar!");
-            }
-                // <block name="bar-bar">
-                fn say_hello_world_bar_bar() {
-                  println!("hello world bar bar!");
-                }
-                // </block>
-
-            "#
-                    .into()
+                    142..440
                 ),
                 Block::new(
                     11,
                     15,
                     HashMap::from([("name".to_string(), "bar-bar".to_string())]),
-                    r#"
-                fn say_hello_world_bar_bar() {
-                  println!("hello world bar bar!");
-                }
-                "#
-                    .into()
+                    281..415
                 ),
                 Block::new(
                     19,
                     23,
                     HashMap::from([("name".to_string(), "buzz".to_string())]),
-                    r#"
-            fn say_hello_world_buzz() {
-              println!("hello world buzz!");
-            }
-            "#
-                    .into()
+                    487..599
                 ),
                 Block::new(
                     26,
                     27,
                     HashMap::from([("name".to_string(), "fizz".to_string())]),
-                    "\n        ".into()
+                    662..671
                 ),
             ]
         );
@@ -757,7 +721,7 @@ mod tests {
                 1,
                 3,
                 HashMap::from([("name".to_string(), "foo".to_string())]),
-                "\n        let word = \"hello\";\n        ".into()
+                test_utils::substr_range(contents, "\n        let word = \"hello\";\n        ")
             ),]
         );
         Ok(())
@@ -1032,8 +996,8 @@ mod tests {
         let contents = "// <block>\r\nWindows\r\n// </block>\n// <block>\nUnix\n// </block>";
         let blocks = parser.parse(contents)?;
         assert_eq!(blocks.len(), 2);
-        assert!(blocks[0].content.contains("\r\n"));
-        assert!(blocks[1].content.contains("\n"));
+        assert!(blocks[0].content(contents).contains("\r\n"));
+        assert!(blocks[1].content(contents).contains("\n"));
         Ok(())
     }
 

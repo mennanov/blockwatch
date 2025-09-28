@@ -29,7 +29,7 @@ impl Validator for LinePatternValidator {
         context: Arc<validators::Context>,
     ) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
         let mut violations = HashMap::new();
-        for (file_path, blocks) in &context.modified_blocks {
+        for (file_path, (file_content, blocks)) in &context.modified_blocks {
             for block in blocks {
                 let Some(pattern) = block.attributes.get("line-pattern") else {
                     continue;
@@ -45,7 +45,7 @@ impl Validator for LinePatternValidator {
                         e
                     )
                 })?;
-                for (idx, line) in block.content.lines().enumerate() {
+                for (idx, line) in block.content(file_content).lines().enumerate() {
                     if !re.is_match(line) {
                         let line_no = block.starts_at_line + idx + 1;
                         violations
@@ -89,6 +89,7 @@ fn create_violation(
 mod validate_tests {
     use super::*;
     use crate::blocks::Block;
+    use crate::test_utils;
     use crate::validators::Validator;
     use serde_json::json;
 
@@ -106,12 +107,15 @@ mod validate_tests {
         let validator = LinePatternValidator::new();
         let context = Arc::new(validators::Context::new(HashMap::from([(
             "file1".to_string(),
-            vec![Arc::new(Block::new(
-                1,
-                2,
-                HashMap::from([("line-pattern".to_string(), "[A-Z]+".to_string())]),
+            (
                 "".to_string(),
-            ))],
+                vec![Arc::new(Block::new(
+                    1,
+                    2,
+                    HashMap::from([("line-pattern".to_string(), "[A-Z]+".to_string())]),
+                    0..0,
+                ))],
+            ),
         )])));
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());
@@ -121,14 +125,18 @@ mod validate_tests {
     #[tokio::test]
     async fn valid_regex_all_lines_match_returns_no_violations() -> anyhow::Result<()> {
         let validator = LinePatternValidator::new();
+        let file1_contents = "block content goes here: FOO\nBAR\nZ";
         let context = Arc::new(validators::Context::new(HashMap::from([(
             "file1".to_string(),
-            vec![Arc::new(Block::new(
-                1,
-                5,
-                HashMap::from([("line-pattern".to_string(), "^[A-Z]+$".to_string())]),
-                "FOO\nBAR\nZ".to_string(),
-            ))],
+            (
+                file1_contents.to_string(),
+                vec![Arc::new(Block::new(
+                    1,
+                    5,
+                    HashMap::from([("line-pattern".to_string(), "^[A-Z]+$".to_string())]),
+                    test_utils::substr_range(file1_contents, "FOO\nBAR\nZ"),
+                ))],
+            ),
         )])));
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());
@@ -138,14 +146,18 @@ mod validate_tests {
     #[tokio::test]
     async fn non_matching_line_reports_first_violation_only() -> anyhow::Result<()> {
         let validator = LinePatternValidator::new();
+        let file1_contents = "block content goes here: OK\nfail\nALSOOK";
         let context = Arc::new(validators::Context::new(HashMap::from([(
             "file1".to_string(),
-            vec![Arc::new(Block::new(
-                1,
-                6,
-                HashMap::from([("line-pattern".to_string(), "^[A-Z]+$".to_string())]),
-                "OK\nfail\nALSOOK".to_string(),
-            ))],
+            (
+                file1_contents.to_string(),
+                vec![Arc::new(Block::new(
+                    1,
+                    6,
+                    HashMap::from([("line-pattern".to_string(), "^[A-Z]+$".to_string())]),
+                    test_utils::substr_range(file1_contents, "OK\nfail\nALSOOK"),
+                ))],
+            ),
         )])));
         let violations = validator.validate(context).await?;
         assert_eq!(violations.len(), 1);
@@ -173,12 +185,15 @@ mod validate_tests {
         let validator = LinePatternValidator::new();
         let context = Arc::new(validators::Context::new(HashMap::from([(
             "file1".to_string(),
-            vec![Arc::new(Block::new(
-                10,
-                15,
-                HashMap::from([("line-pattern".to_string(), "[A-Z+".to_string())]),
-                "FOO".to_string(),
-            ))],
+            (
+                "".to_string(),
+                vec![Arc::new(Block::new(
+                    10,
+                    15,
+                    HashMap::from([("line-pattern".to_string(), "[A-Z+".to_string())]),
+                    0..0,
+                ))],
+            ),
         )])));
         let result = validator.validate(context).await;
         assert!(result.is_err());
