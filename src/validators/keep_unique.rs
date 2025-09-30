@@ -71,9 +71,10 @@ impl ValidatorSync for KeepUniqueValidator {
                         }
                     };
                     if let Some(key) = key_opt
+                        && !key.trim().is_empty()
                         && !seen.insert(key)
                     {
-                        let line_no = block.starts_at_line + idx + 1;
+                        let line_no = block.starts_at_line + idx;
                         violations
                             .entry(file_path.clone())
                             .or_insert_with(Vec::new)
@@ -192,6 +193,29 @@ mod validate_tests {
     }
 
     #[test]
+    fn empty_lines_and_spaces_are_ignored() -> anyhow::Result<()> {
+        let validator = KeepUniqueValidator::new();
+        let file1_contents = "block contents goes here: A\nB\n \n \n  \n  \nC";
+        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
+            "file1".to_string(),
+            FileBlocks {
+                file_contents: file1_contents.to_string(),
+                blocks: vec![Arc::new(Block::new(
+                    1,
+                    5,
+                    HashMap::from([("keep-unique".to_string(), "".to_string())]),
+                    test_utils::substr_range(file1_contents, "A\nB\n \n \n  \n  \nC"),
+                ))],
+            },
+        )])));
+
+        let violations = validator.validate(context)?;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn duplicate_returns_violation_first_dup_line_reported() -> anyhow::Result<()> {
         let validator = KeepUniqueValidator::new();
         let file1_contents = "block contents goes here: A\nB\nC\nB\nC";
@@ -214,13 +238,13 @@ mod validate_tests {
         assert_eq!(violations.get("file1").unwrap().len(), 1);
         assert_eq!(
             violations.get("file1").unwrap()[0].error,
-            "Block file1:(unnamed) defined at line 1 has a duplicated line 5"
+            "Block file1:(unnamed) defined at line 1 has a duplicated line 4"
         );
         assert_eq!(violations.get("file1").unwrap()[0].violation, "keep-unique");
         assert_eq!(
             violations.get("file1").unwrap()[0].details,
             Some(json!({
-                "line_number_duplicated": 5,
+                "line_number_duplicated": 4,
             }))
         );
         Ok(())
@@ -248,7 +272,7 @@ mod validate_tests {
         assert_eq!(violations.get("file1").unwrap().len(), 1);
         assert_eq!(
             violations.get("file1").unwrap()[0].details,
-            Some(json!({"line_number_duplicated": 4}))
+            Some(json!({"line_number_duplicated": 3}))
         );
         Ok(())
     }
@@ -275,7 +299,7 @@ mod validate_tests {
         assert_eq!(violations.get("file1").unwrap().len(), 1);
         assert_eq!(
             violations.get("file1").unwrap()[0].details,
-            Some(json!({"line_number_duplicated": 4}))
+            Some(json!({"line_number_duplicated": 3}))
         );
         Ok(())
     }

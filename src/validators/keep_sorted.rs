@@ -48,11 +48,15 @@ impl ValidatorSync for KeepSortedValidator {
                             Ordering::Less
                         };
                         let mut prev_line: Option<&str> = None;
-                        for (line_number, line) in block
+                        for (line_number, mut line) in block
                             .content(&file_blocks.file_contents)
                             .lines()
                             .enumerate()
                         {
+                            line = line.trim();
+                            if line.is_empty() {
+                                continue;
+                            }
                             if let Some(prev_line) = prev_line {
                                 let cmp = prev_line.cmp(line);
                                 if cmp == ord {
@@ -63,7 +67,7 @@ impl ValidatorSync for KeepSortedValidator {
                                             file_path,
                                             block,
                                             keep_sorted_normalized.as_str(),
-                                            block.starts_at_line + line_number + 1,
+                                            block.starts_at_line + line_number,
                                         )?);
                                     break;
                                 }
@@ -282,6 +286,29 @@ mod validate_tests {
     }
 
     #[test]
+    fn empty_lines_and_spaces_are_ignored() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        let file1_contents = "block contents goes here: A\n\nB\n B\n C ";
+        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
+            "file1".to_string(),
+            FileBlocks {
+                file_contents: file1_contents.to_string(),
+                blocks: vec![Arc::new(Block::new(
+                    1,
+                    6,
+                    HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
+                    test_utils::substr_range(file1_contents, "A\n\nB\n B\n C "),
+                ))],
+            },
+        )])));
+
+        let violations = validator.validate(context)?;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn unsorted_asc_returns_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
         let file1_contents = "block contents goes here: A\nB\nC\nB";
@@ -304,13 +331,13 @@ mod validate_tests {
         assert_eq!(violations.get("file1").unwrap().len(), 1);
         assert_eq!(
             violations.get("file1").unwrap()[0].error,
-            "Block file1:(unnamed) defined at line 1 has an out-of-order line 5 (asc)"
+            "Block file1:(unnamed) defined at line 1 has an out-of-order line 4 (asc)"
         );
         assert_eq!(violations.get("file1").unwrap()[0].violation, "keep-sorted",);
         assert_eq!(
             violations.get("file1").unwrap()[0].details,
             Some(json!({
-                "line_number_out_of_order": 5,
+                "line_number_out_of_order": 4,
                 "order_by": "asc"
             }))
         );
@@ -340,13 +367,13 @@ mod validate_tests {
         assert_eq!(violations.get("file1").unwrap().len(), 1);
         assert_eq!(
             violations.get("file1").unwrap()[0].error,
-            "Block file1:(unnamed) defined at line 1 has an out-of-order line 4 (desc)"
+            "Block file1:(unnamed) defined at line 1 has an out-of-order line 3 (desc)"
         );
         assert_eq!(violations.get("file1").unwrap()[0].violation, "keep-sorted",);
         assert_eq!(
             violations.get("file1").unwrap()[0].details,
             Some(json!({
-                "line_number_out_of_order": 4,
+                "line_number_out_of_order": 3,
                 "order_by": "desc"
             }))
         );

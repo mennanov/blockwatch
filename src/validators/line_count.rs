@@ -43,7 +43,11 @@ impl ValidatorSync for LineCountValidator {
                 let actual = if block.content(&file_blocks.file_contents).is_empty() {
                     0
                 } else {
-                    block.content(&file_blocks.file_contents).lines().count()
+                    block
+                        .content(&file_blocks.file_contents)
+                        .lines()
+                        .filter(|line| !line.trim().is_empty())
+                        .count()
                 };
                 let ok = match op {
                     Op::Lt => actual < expected,
@@ -362,6 +366,27 @@ mod tests {
                 "expected": 3,
             }))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn empty_lines_and_lines_with_spaces_only_are_ignored() -> anyhow::Result<()> {
+        let validator = LineCountValidator::new();
+        let file1_contents = "blocks content goes here: a\n\nb\nc\n \n \nd";
+        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
+            "file1".to_string(),
+            FileBlocks {
+                file_contents: file1_contents.to_string(),
+                blocks: vec![Arc::new(Block::new(
+                    1,
+                    4,
+                    HashMap::from([("line-count".to_string(), "<=4".to_string())]),
+                    test_utils::substr_range(file1_contents, "a\n\nb\nc\n \n \nd"),
+                ))],
+            },
+        )])));
+        let violations = validator.validate(context)?;
+        assert!(violations.is_empty());
         Ok(())
     }
 }

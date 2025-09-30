@@ -43,13 +43,17 @@ impl ValidatorSync for LinePatternValidator {
                         e
                     )
                 })?;
-                for (idx, line) in block
+                for (idx, mut line) in block
                     .content(&file_blocks.file_contents)
                     .lines()
                     .enumerate()
                 {
+                    line = line.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
                     if !re.is_match(line) {
-                        let line_no = block.starts_at_line + idx + 1;
+                        let line_no = block.starts_at_line + idx;
                         violations
                             .entry(file_path.clone())
                             .or_insert_with(Vec::new)
@@ -165,6 +169,27 @@ mod validate_tests {
     }
 
     #[test]
+    fn empty_lines_and_spaces_are_ignored() -> anyhow::Result<()> {
+        let validator = LinePatternValidator::new();
+        let file1_contents = "block content goes here: FOO\n \n\n BAR \nZ ";
+        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
+            "file1".to_string(),
+            FileBlocks {
+                file_contents: file1_contents.to_string(),
+                blocks: vec![Arc::new(Block::new(
+                    1,
+                    5,
+                    HashMap::from([("line-pattern".to_string(), "^[A-Z]+$".to_string())]),
+                    test_utils::substr_range(file1_contents, "FOO\n \n\n BAR \nZ "),
+                ))],
+            },
+        )])));
+        let violations = validator.validate(context)?;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn non_matching_line_reports_first_violation_only() -> anyhow::Result<()> {
         let validator = LinePatternValidator::new();
         let file1_contents = "block content goes here: OK\nfail\nALSOOK";
@@ -185,7 +210,7 @@ mod validate_tests {
         assert_eq!(violations.get("file1").unwrap().len(), 1);
         assert_eq!(
             violations.get("file1").unwrap()[0].error,
-            "Block file1:(unnamed) defined at line 1 has a non-matching line 3 (pattern: /^[A-Z]+$/)"
+            "Block file1:(unnamed) defined at line 1 has a non-matching line 2 (pattern: /^[A-Z]+$/)"
         );
         assert_eq!(
             violations.get("file1").unwrap()[0].violation,
@@ -194,7 +219,7 @@ mod validate_tests {
         assert_eq!(
             violations.get("file1").unwrap()[0].details,
             Some(json!({
-                "line_number_not_matching": 3,
+                "line_number_not_matching": 2,
                 "pattern": "^[A-Z]+$"
             }))
         );
