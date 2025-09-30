@@ -1,6 +1,5 @@
 use crate::parsers::BlocksParser;
 use anyhow::Context;
-use async_trait::async_trait;
 use serde::Serialize;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -76,6 +75,12 @@ impl Block {
     }
 }
 
+/// Represents a source field with its corresponding modified blocks.
+pub struct FileBlocks {
+    pub(crate) file_contents: String,
+    pub(crate) blocks: Vec<Arc<Block>>,
+}
+
 /// Parses source files and returns only those blocks that intersect with the provided modified line ranges.
 ///
 /// - `modified_ranges_by_file` maps file paths to sorted, non-overlapping closed line ranges that were changed.
@@ -84,15 +89,15 @@ impl Block {
 /// - `extra_file_extensions` allows remapping unknown extensions to supported ones (e.g., "cxx" -> "cpp").
 ///
 /// Returns a map of file paths to the list of intersecting blocks found in that file.
-pub async fn parse_blocks(
+pub fn parse_blocks(
     modified_ranges_by_file: &HashMap<String, Vec<(usize, usize)>>,
     file_reader: &impl FileReader,
     parsers: HashMap<String, Rc<Box<dyn BlocksParser>>>,
     extra_file_extensions: HashMap<String, String>,
-) -> anyhow::Result<HashMap<String, (String, Vec<Arc<Block>>)>> {
+) -> anyhow::Result<HashMap<String, FileBlocks>> {
     let mut blocks = HashMap::new();
     for (file_path, modified_ranges) in modified_ranges_by_file {
-        let source_code = file_reader.read_to_string(Path::new(&file_path)).await?;
+        let source_code = file_reader.read_to_string(Path::new(&file_path))?;
         let mut file_blocks = Vec::new();
         if let Some(mut ext) = file_name_extension(file_path) {
             ext = extra_file_extensions
@@ -113,16 +118,21 @@ pub async fn parse_blocks(
             }
         }
         if !file_blocks.is_empty() {
-            blocks.insert(file_path.to_string(), (source_code, file_blocks));
+            blocks.insert(
+                file_path.to_string(),
+                FileBlocks {
+                    file_contents: source_code,
+                    blocks: file_blocks,
+                },
+            );
         }
     }
     Ok(blocks)
 }
 
-#[async_trait]
 pub trait FileReader {
     /// Reads the entire contents of a file into a string.
-    async fn read_to_string(&self, path: &Path) -> anyhow::Result<String>;
+    fn read_to_string(&self, path: &Path) -> anyhow::Result<String>;
 }
 
 fn file_name_extension(file_name: &str) -> Option<&str> {
@@ -140,11 +150,9 @@ impl FsReader {
     }
 }
 
-#[async_trait]
 impl FileReader for FsReader {
-    async fn read_to_string(&self, path: &Path) -> anyhow::Result<String> {
-        tokio::fs::read_to_string(self.root_path.join(path))
-            .await
+    fn read_to_string(&self, path: &Path) -> anyhow::Result<String> {
+        std::fs::read_to_string(self.root_path.join(path))
             .context(format!("Failed to read file \"{}\"", path.display()))
     }
 }
@@ -257,15 +265,14 @@ mod parse_blocks_tests {
         }
     }
 
-    #[async_trait]
     impl FileReader for FakeFileReader {
-        async fn read_to_string(&self, path: &Path) -> anyhow::Result<String> {
+        fn read_to_string(&self, path: &Path) -> anyhow::Result<String> {
             Ok(self.files[&path.display().to_string()].clone())
         }
     }
 
-    #[tokio::test]
-    async fn returns_blocks_for_modified_ranges_only() -> anyhow::Result<()> {
+    #[test]
+    fn returns_blocks_for_modified_ranges_only() -> anyhow::Result<()> {
         let file_reader = FakeFileReader::new(HashMap::from([
             (
                 "a.rs".to_string(),
@@ -316,23 +323,22 @@ mod parse_blocks_tests {
         ]);
         let parsers = language_parsers()?;
 
-        let blocks_by_file =
-            parse_blocks(&modified_ranges, &file_reader, parsers, HashMap::new()).await?;
+        let blocks_by_file = parse_blocks(&modified_ranges, &file_reader, parsers, HashMap::new())?;
 
         assert_eq!(blocks_by_file.len(), 2);
-        let (_, blocks_a) = &blocks_by_file["a.rs"];
+        let blocks_a = &blocks_by_file["a.rs"].blocks;
         assert_eq!(blocks_a.len(), 2);
         assert_eq!(blocks_a[0].name(), Some("first"));
         assert_eq!(blocks_a[1].name(), Some("second"));
-        let (_, blocks_b) = &blocks_by_file["b.rs"];
+        let blocks_b = &blocks_by_file["b.rs"].blocks;
         assert_eq!(blocks_b.len(), 2);
         assert_eq!(blocks_b[0].name(), Some("outer"));
         assert_eq!(blocks_b[1].name(), Some("inner"));
         Ok(())
     }
 
-    #[tokio::test]
-    async fn returns_file_contents_correctly() -> anyhow::Result<()> {
+    #[test]
+    fn returns_file_contents_correctly() -> anyhow::Result<()> {
         let file_a_contents = r#"
         // <block name="first">
         fn a() {}
@@ -353,16 +359,15 @@ mod parse_blocks_tests {
         ]);
         let parsers = language_parsers()?;
 
-        let blocks_by_file =
-            parse_blocks(&modified_ranges, &file_reader, parsers, HashMap::new()).await?;
+        let blocks_by_file = parse_blocks(&modified_ranges, &file_reader, parsers, HashMap::new())?;
 
-        let (content_a, _) = &blocks_by_file["a.rs"];
+        let content_a = &blocks_by_file["a.rs"].file_contents;
         assert_eq!(content_a, file_a_contents);
         Ok(())
     }
 
-    #[tokio::test]
-    async fn uses_remapped_extensions() -> anyhow::Result<()> {
+    #[test]
+    fn uses_remapped_extensions() -> anyhow::Result<()> {
         let file_reader = FakeFileReader::new(HashMap::from([(
             "a.rust".to_string(),
             r#"
@@ -379,16 +384,15 @@ mod parse_blocks_tests {
             &file_reader,
             parsers,
             HashMap::from([("rust".to_string(), "rs".to_string())]),
-        )
-        .await?;
+        )?;
 
         assert_eq!(blocks_by_file.len(), 1);
-        assert_eq!(blocks_by_file["a.rust"].1.len(), 1);
+        assert_eq!(blocks_by_file["a.rust"].blocks.len(), 1);
         Ok(())
     }
 
-    #[tokio::test]
-    async fn skips_unknown_files() -> anyhow::Result<()> {
+    #[test]
+    fn skips_unknown_files() -> anyhow::Result<()> {
         let files = HashMap::from([("test.unknown".to_string(), "test content".to_string())]);
         let modified_ranges = HashMap::from([("test.unknown".to_string(), vec![(1, 2)])]);
 
@@ -397,22 +401,20 @@ mod parse_blocks_tests {
             &FakeFileReader::new(files),
             HashMap::new(),
             HashMap::new(),
-        )
-        .await?;
+        )?;
 
         assert_eq!(blocks.len(), 0);
         Ok(())
     }
 
-    #[tokio::test]
-    async fn empty_input_returns_ok() -> anyhow::Result<()> {
+    #[test]
+    fn empty_input_returns_ok() -> anyhow::Result<()> {
         let blocks = parse_blocks(
             &HashMap::default(),
             &FakeFileReader::new(HashMap::default()),
             HashMap::new(),
             HashMap::new(),
-        )
-        .await?;
+        )?;
 
         assert_eq!(blocks.len(), 0);
         Ok(())

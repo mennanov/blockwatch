@@ -1,8 +1,7 @@
 use crate::blocks::Block;
 use crate::validators;
-use crate::validators::Violation;
+use crate::validators::{ValidatorType, Violation};
 use anyhow::Context;
-use async_trait::async_trait;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,15 +19,14 @@ struct AffectsViolation<'a> {
     modified_block: &'a Block,
 }
 
-#[async_trait]
-impl validators::Validator for AffectsValidator {
-    async fn validate(
+impl validators::ValidatorSync for AffectsValidator {
+    fn validate(
         &self,
-        context: Arc<validators::Context>,
+        context: Arc<validators::ValidationContext>,
     ) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
         let mut named_modified_blocks = HashMap::new();
-        for (file_path, (_, blocks)) in &context.modified_blocks {
-            for block in blocks {
+        for (file_path, file_blocks) in &context.modified_blocks {
+            for block in &file_blocks.blocks {
                 match block.name() {
                     None => continue,
                     Some(name) => {
@@ -41,8 +39,8 @@ impl validators::Validator for AffectsValidator {
             }
         }
         let mut violations = HashMap::new();
-        for (modified_block_file_path, (_, blocks)) in &context.modified_blocks {
-            for modified_block in blocks {
+        for (modified_block_file_path, file_blocks) in &context.modified_blocks {
+            for modified_block in &file_blocks.blocks {
                 match modified_block.attributes.get("affects") {
                     None => continue,
                     Some(affects) => {
@@ -73,43 +71,62 @@ impl validators::Validator for AffectsValidator {
     }
 }
 
+pub(crate) struct AffectsValidatorDetector();
+
+impl AffectsValidatorDetector {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl validators::ValidatorDetector for AffectsValidatorDetector {
+    fn detect(&self, block: &Block) -> anyhow::Result<Option<ValidatorType>> {
+        if block.attributes.contains_key("affects") {
+            Ok(Some(ValidatorType::Sync(Box::new(AffectsValidator::new()))))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
 #[cfg(test)]
 mod validate_tests {
     use super::*;
-    use crate::validators::Validator;
+    use crate::blocks::FileBlocks;
+    use crate::validators::ValidatorSync;
 
-    #[tokio::test]
-    async fn no_blocks_with_affects_attr_returns_ok() -> anyhow::Result<()> {
+    #[test]
+    fn no_blocks_with_affects_attr_returns_ok() -> anyhow::Result<()> {
         let validator = AffectsValidator::new();
         let modified_blocks = HashMap::from([(
             "file1".to_string(),
-            (
-                "".to_string(),
-                vec![Arc::new(Block::new(
+            FileBlocks {
+                file_contents: "".to_string(),
+                blocks: vec![Arc::new(Block::new(
                     1,
                     10,
                     HashMap::from([("name".to_string(), "foo".to_string())]),
                     0..0,
                 ))],
-            ),
+            },
         )]);
 
-        let violations = validator
-            .validate(Arc::new(validators::Context::new(modified_blocks)))
-            .await?;
+        let violations = validator.validate(Arc::new(validators::ValidationContext::new(
+            modified_blocks,
+        )))?;
 
         assert!(violations.is_empty());
         Ok(())
     }
 
-    #[tokio::test]
-    async fn with_missing_blocks_in_same_file_returns_violations() -> anyhow::Result<()> {
+    #[test]
+    fn with_missing_blocks_in_same_file_returns_violations() -> anyhow::Result<()> {
         let validator = AffectsValidator::new();
         let modified_blocks = HashMap::from([(
             "file1".to_string(),
-            (
-                "".to_string(),
-                vec![
+            FileBlocks {
+                file_contents: "".to_string(),
+                blocks: vec![
                     Arc::new(Block::new(
                         1,
                         10,
@@ -123,12 +140,12 @@ mod validate_tests {
                         0..0,
                     )),
                 ],
-            ),
+            },
         )]);
 
-        let violations = validator
-            .validate(Arc::new(validators::Context::new(modified_blocks)))
-            .await?;
+        let violations = validator.validate(Arc::new(validators::ValidationContext::new(
+            modified_blocks,
+        )))?;
 
         assert_eq!(violations.len(), 1);
         assert_eq!(violations.get("file1").unwrap().len(), 2);
@@ -144,15 +161,15 @@ mod validate_tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn with_missing_blocks_in_different_files_returns_violations() -> anyhow::Result<()> {
+    #[test]
+    fn with_missing_blocks_in_different_files_returns_violations() -> anyhow::Result<()> {
         let validator = AffectsValidator::new();
         let modified_blocks = HashMap::from([
             (
                 "file1".to_string(),
-                (
-                    "".to_string(),
-                    vec![
+                FileBlocks {
+                    file_contents: "".to_string(),
+                    blocks: vec![
                         Arc::new(Block::new(
                             1,
                             10,
@@ -166,37 +183,37 @@ mod validate_tests {
                             0..0,
                         )),
                     ],
-                ),
+                },
             ),
             (
                 "file2".to_string(),
-                (
-                    "".to_string(),
-                    vec![Arc::new(Block::new(
+                FileBlocks {
+                    file_contents: "".to_string(),
+                    blocks: vec![Arc::new(Block::new(
                         1,
                         10,
                         HashMap::from([("name".to_string(), "not-foo".to_string())]),
                         0..0,
                     ))],
-                ),
+                },
             ),
             (
                 "file3".to_string(),
-                (
-                    "".to_string(),
-                    vec![Arc::new(Block::new(
+                FileBlocks {
+                    file_contents: "".to_string(),
+                    blocks: vec![Arc::new(Block::new(
                         1,
                         10,
                         HashMap::from([("name".to_string(), "not-bar".to_string())]),
                         0..0,
                     ))],
-                ),
+                },
             ),
         ]);
 
-        let violations = validator
-            .validate(Arc::new(validators::Context::new(modified_blocks)))
-            .await?;
+        let violations = validator.validate(Arc::new(validators::ValidationContext::new(
+            modified_blocks,
+        )))?;
 
         assert_eq!(violations.len(), 1);
         assert_eq!(violations.get("file1").unwrap().len(), 2);
@@ -212,14 +229,14 @@ mod validate_tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn with_cyclic_references_returns_ok() -> anyhow::Result<()> {
+    #[test]
+    fn with_cyclic_references_returns_ok() -> anyhow::Result<()> {
         let validator = AffectsValidator::new();
         let modified_blocks = HashMap::from([(
             "file1".to_string(),
-            (
-                "".to_string(),
-                vec![
+            FileBlocks {
+                file_contents: "".to_string(),
+                blocks: vec![
                     Arc::new(Block::new(
                         1,
                         10,
@@ -239,26 +256,26 @@ mod validate_tests {
                         0..0,
                     )),
                 ],
-            ),
+            },
         )]);
 
-        let violations = validator
-            .validate(Arc::new(validators::Context::new(modified_blocks)))
-            .await?;
+        let violations = validator.validate(Arc::new(validators::ValidationContext::new(
+            modified_blocks,
+        )))?;
 
         assert!(violations.is_empty());
         Ok(())
     }
 
-    #[tokio::test]
-    async fn with_multiple_references_returns_ok() -> anyhow::Result<()> {
+    #[test]
+    fn with_multiple_references_returns_ok() -> anyhow::Result<()> {
         let validator = AffectsValidator::new();
         let modified_blocks = HashMap::from([
             (
                 "file1".to_string(),
-                (
-                    "".to_string(),
-                    vec![
+                FileBlocks {
+                    file_contents: "".to_string(),
+                    blocks: vec![
                         Arc::new(Block::new(
                             1,
                             10,
@@ -278,13 +295,13 @@ mod validate_tests {
                             0..0,
                         )),
                     ],
-                ),
+                },
             ),
             (
                 "file2".to_string(),
-                (
-                    "".to_string(),
-                    vec![Arc::new(Block::new(
+                FileBlocks {
+                    file_contents: "".to_string(),
+                    blocks: vec![Arc::new(Block::new(
                         1,
                         10,
                         HashMap::from([
@@ -293,27 +310,27 @@ mod validate_tests {
                         ]),
                         0..0,
                     ))],
-                ),
+                },
             ),
         ]);
 
-        let violations = validator
-            .validate(Arc::new(validators::Context::new(modified_blocks)))
-            .await?;
+        let violations = validator.validate(Arc::new(validators::ValidationContext::new(
+            modified_blocks,
+        )))?;
 
         assert!(violations.is_empty());
         Ok(())
     }
 
-    #[tokio::test]
-    async fn with_multiple_references_and_some_missing_returns_violations() -> anyhow::Result<()> {
+    #[test]
+    fn with_multiple_references_and_some_missing_returns_violations() -> anyhow::Result<()> {
         let validator = AffectsValidator::new();
         let modified_blocks = HashMap::from([
             (
                 "file1".to_string(),
-                (
-                    "".to_string(),
-                    vec![
+                FileBlocks {
+                    file_contents: "".to_string(),
+                    blocks: vec![
                         Arc::new(Block::new(
                             1,
                             10,
@@ -333,13 +350,13 @@ mod validate_tests {
                             0..0,
                         )),
                     ],
-                ),
+                },
             ),
             (
                 "file2".to_string(),
-                (
-                    "".to_string(),
-                    vec![Arc::new(Block::new(
+                FileBlocks {
+                    file_contents: "".to_string(),
+                    blocks: vec![Arc::new(Block::new(
                         1,
                         10,
                         HashMap::from([
@@ -348,13 +365,13 @@ mod validate_tests {
                         ]),
                         0..0,
                     ))],
-                ),
+                },
             ),
         ]);
 
-        let violations = validator
-            .validate(Arc::new(validators::Context::new(modified_blocks)))
-            .await?;
+        let violations = validator.validate(Arc::new(validators::ValidationContext::new(
+            modified_blocks,
+        )))?;
 
         assert_eq!(violations.len(), 1);
         assert_eq!(violations.get("file1").unwrap().len(), 1);
@@ -365,15 +382,15 @@ mod validate_tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn with_no_missing_blocks_returns_ok() -> anyhow::Result<()> {
+    #[test]
+    fn with_no_missing_blocks_returns_ok() -> anyhow::Result<()> {
         let validator = AffectsValidator::new();
         let modified_blocks = HashMap::from([
             (
                 "file1".to_string(),
-                (
-                    "".to_string(),
-                    vec![
+                FileBlocks {
+                    file_contents: "".to_string(),
+                    blocks: vec![
                         Arc::new(Block::new(
                             1,
                             10,
@@ -387,37 +404,37 @@ mod validate_tests {
                             0..0,
                         )),
                     ],
-                ),
+                },
             ),
             (
                 "file2".to_string(),
-                (
-                    "".to_string(),
-                    vec![Arc::new(Block::new(
+                FileBlocks {
+                    file_contents: "".to_string(),
+                    blocks: vec![Arc::new(Block::new(
                         1,
                         10,
                         HashMap::from([("name".to_string(), "foo".to_string())]),
                         0..0,
                     ))],
-                ),
+                },
             ),
             (
                 "file3".to_string(),
-                (
-                    "".to_string(),
-                    vec![Arc::new(Block::new(
+                FileBlocks {
+                    file_contents: "".to_string(),
+                    blocks: vec![Arc::new(Block::new(
                         1,
                         10,
                         HashMap::from([("name".to_string(), "bar".to_string())]),
                         0..0,
                     ))],
-                ),
+                },
             ),
         ]);
 
-        let violations = validator
-            .validate(Arc::new(validators::Context::new(modified_blocks)))
-            .await?;
+        let violations = validator.validate(Arc::new(validators::ValidationContext::new(
+            modified_blocks,
+        )))?;
 
         assert!(violations.is_empty());
         Ok(())

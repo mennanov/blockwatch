@@ -1,7 +1,7 @@
+use crate::blocks::Block;
 use crate::validators;
-use crate::validators::{Validator, Violation};
+use crate::validators::{ValidatorDetector, ValidatorSync, ValidatorType, Violation};
 use anyhow::anyhow;
-use async_trait::async_trait;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,15 +21,14 @@ struct LineCountViolation {
     expected: usize,
 }
 
-#[async_trait]
-impl Validator for LineCountValidator {
-    async fn validate(
+impl ValidatorSync for LineCountValidator {
+    fn validate(
         &self,
-        context: Arc<validators::Context>,
+        context: Arc<validators::ValidationContext>,
     ) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
         let mut violations = HashMap::new();
-        for (file_path, (file_content, blocks)) in &context.modified_blocks {
-            for block in blocks {
+        for (file_path, file_blocks) in &context.modified_blocks {
+            for block in &file_blocks.blocks {
                 let Some(expr) = block.attributes.get("line-count") else {
                     continue;
                 };
@@ -41,10 +40,10 @@ impl Validator for LineCountValidator {
                     block.starts_at_line,
                     e
                 ))?;
-                let actual = if block.content(file_content).is_empty() {
+                let actual = if block.content(&file_blocks.file_contents).is_empty() {
                     0
                 } else {
-                    block.content(file_content).lines().count()
+                    block.content(&file_blocks.file_contents).lines().count()
                 };
                 let ok = match op {
                     Op::Lt => actual < expected,
@@ -79,6 +78,26 @@ impl Validator for LineCountValidator {
             }
         }
         Ok(violations)
+    }
+}
+
+pub(crate) struct LineCountValidatorDetector();
+
+impl LineCountValidatorDetector {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl ValidatorDetector for LineCountValidatorDetector {
+    fn detect(&self, block: &Block) -> anyhow::Result<Option<ValidatorType>> {
+        if block.attributes.contains_key("line-count") {
+            Ok(Some(ValidatorType::Sync(Box::new(
+                LineCountValidator::new(),
+            ))))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -128,9 +147,8 @@ fn parse_constraint(s: &str) -> anyhow::Result<(Op, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blocks::Block;
+    use crate::blocks::{Block, FileBlocks};
     use crate::test_utils;
-    use crate::validators::Validator;
     use serde_json::json;
 
     #[test]
@@ -148,15 +166,15 @@ mod tests {
         assert!(parse_constraint("<== 50").is_err());
     }
 
-    #[tokio::test]
-    async fn validate_with_correct_number_of_lines_returns_no_violations() -> anyhow::Result<()> {
+    #[test]
+    fn validate_with_correct_number_of_lines_returns_no_violations() -> anyhow::Result<()> {
         let validator = LineCountValidator::new();
         let file1_contents = "blocks content goes here: a\nb\nc\nd";
-        let context = Arc::new(validators::Context::new(HashMap::from([(
+        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
-            (
-                file1_contents.to_string(),
-                vec![
+            FileBlocks {
+                file_contents: file1_contents.to_string(),
+                blocks: vec![
                     Arc::new(Block::new(
                         1,
                         4,
@@ -200,22 +218,22 @@ mod tests {
                         test_utils::substr_range(file1_contents, "a\nb\nc\nd"),
                     )),
                 ],
-            ),
+            },
         )])));
-        let violations = validator.validate(context).await?;
+        let violations = validator.validate(context)?;
         assert!(violations.is_empty());
         Ok(())
     }
 
-    #[tokio::test]
-    async fn validate_with_incorrect_number_of_lines_returns_violations() -> anyhow::Result<()> {
+    #[test]
+    fn validate_with_incorrect_number_of_lines_returns_violations() -> anyhow::Result<()> {
         let validator = LineCountValidator::new();
         let file1_contents = "blocks content goes here: a\nb\nc\nd ";
-        let context = Arc::new(validators::Context::new(HashMap::from([(
+        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file2".to_string(),
-            (
-                file1_contents.to_string(),
-                vec![
+            FileBlocks {
+                file_contents: file1_contents.to_string(),
+                blocks: vec![
                     Arc::new(Block::new(
                         1,
                         5,
@@ -253,10 +271,10 @@ mod tests {
                         test_utils::substr_range(file1_contents, "a\nb\nc"),
                     )),
                 ],
-            ),
+            },
         )])));
 
-        let violations = validator.validate(context).await?;
+        let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
         assert_eq!(violations.get("file2").unwrap().len(), 6);

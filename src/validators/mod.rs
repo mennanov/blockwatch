@@ -5,13 +5,13 @@ mod keep_unique;
 mod line_count;
 mod line_pattern;
 
-use crate::blocks::Block;
-use crate::validators::affects::AffectsValidator;
-use crate::validators::check_ai::{CheckAiValidator, OpenAiClient};
-use crate::validators::keep_sorted::KeepSortedValidator;
-use crate::validators::keep_unique::KeepUniqueValidator;
-use crate::validators::line_count::LineCountValidator;
-use crate::validators::line_pattern::LinePatternValidator;
+use crate::blocks::{Block, FileBlocks};
+use crate::validators::affects::AffectsValidatorDetector;
+use crate::validators::check_ai::CheckAiValidatorDetector;
+use crate::validators::keep_sorted::KeepSortedValidatorDetector;
+use crate::validators::keep_unique::KeepUniqueValidatorDetector;
+use crate::validators::line_count::LineCountValidatorDetector;
+use crate::validators::line_pattern::LinePatternValidatorDetector;
 use async_trait::async_trait;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -19,11 +19,31 @@ use std::sync::Arc;
 
 /// Validates the given `Context` and returns a list of the violations grouped by filename.
 #[async_trait]
-pub(crate) trait Validator: Send + Sync {
+pub trait ValidatorAsync: Send + Sync {
     async fn validate(
         &self,
-        context: Arc<Context>,
+        context: Arc<ValidationContext>,
     ) -> anyhow::Result<HashMap<String, Vec<Violation>>>;
+}
+
+pub trait ValidatorSync: Send + Sync {
+    fn validate(
+        &self,
+        context: Arc<ValidationContext>,
+    ) -> anyhow::Result<HashMap<String, Vec<Violation>>>;
+}
+
+/// Detects a [`ValidatorType`] for the given `block` (if any).
+///
+/// This is used to determine whether an async runtime (e.g. Tokio) is needed to run the validators.
+pub trait ValidatorDetector {
+    fn detect(&self, block: &Block) -> anyhow::Result<Option<ValidatorType>>;
+}
+
+/// Validator type (sync or async).
+pub enum ValidatorType {
+    Sync(Box<dyn ValidatorSync>),
+    Async(Box<dyn ValidatorAsync>),
 }
 
 #[derive(Serialize, Debug)]
@@ -48,39 +68,33 @@ impl Violation {
     }
 }
 
-pub struct Context {
+pub struct ValidationContext {
     // Modified blocks with their corresponding source file contents grouped by filename.
-    modified_blocks: HashMap<String, (String, Vec<Arc<Block>>)>,
+    modified_blocks: HashMap<String, FileBlocks>,
 }
 
-impl Context {
+impl ValidationContext {
     /// Creates a new validation context with modified blocks grouped by filename.
-    pub fn new(modified_blocks: HashMap<String, (String, Vec<Arc<Block>>)>) -> Self {
+    pub fn new(modified_blocks: HashMap<String, FileBlocks>) -> Self {
         Self { modified_blocks }
     }
 }
 
-/// Runs all validators concurrently and returns violations grouped by file paths.
-pub async fn run(context: Context) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
-    let validators: Vec<Box<dyn Validator>> = vec![
-        // <block affects="README.md:validators-list">
-        Box::new(AffectsValidator::new()),
-        Box::new(KeepSortedValidator::new()),
-        Box::new(KeepUniqueValidator::new()),
-        Box::new(LinePatternValidator::new()),
-        Box::new(LineCountValidator::new()),
-        Box::new(CheckAiValidator::with_client(OpenAiClient::new_from_env())),
-        // </block>
-    ];
-    let context = Arc::new(context);
-    let mut violations = HashMap::new();
-    let mut tasks = tokio::task::JoinSet::new();
+/// Runs all sync validators concurrently each in a separate thread and returns violations grouped
+/// by file paths.
+fn run_sync_validators(
+    context: Arc<ValidationContext>,
+    validators: Vec<Box<dyn ValidatorSync>>,
+) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
+    let mut handles = Vec::new();
     for validator in validators {
         let context = Arc::clone(&context);
-        tasks.spawn(async move { validator.validate(context).await });
+        handles.push(std::thread::spawn(move || validator.validate(context)));
     }
 
-    while let Some(result) = tasks.join_next().await {
+    let mut violations = HashMap::new();
+    for handle in handles {
+        let result = handle.join();
         match result {
             Ok(Ok(file_violations)) => {
                 for (file_path, file_violations) in file_violations {
@@ -91,54 +105,257 @@ pub async fn run(context: Context) -> anyhow::Result<HashMap<String, Vec<Violati
                 }
             }
             Ok(Err(e)) => return Err(e),
-            Err(e) => return Err(anyhow::anyhow!("Failed to run validation: {}", e)),
+            Err(e) => return Err(anyhow::anyhow!("Failed to run validation: {:?}", e)),
         }
     }
 
     Ok(violations)
 }
 
+/// Runs all async validators concurrently via Tokio and returns violations grouped by file paths.
+fn run_async_validators(
+    context: Arc<ValidationContext>,
+    validators: Vec<Box<dyn ValidatorAsync>>,
+) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
+    let tokio_runtime = tokio::runtime::Runtime::new()?;
+    tokio_runtime.block_on(async move {
+        let mut tasks = tokio::task::JoinSet::new();
+        for validator in validators {
+            let context = Arc::clone(&context);
+            tasks.spawn(async move { validator.validate(context).await });
+        }
+
+        let mut violations = HashMap::new();
+        while let Some(result) = tasks.join_next().await {
+            match result {
+                Ok(Ok(file_violations)) => {
+                    for (file_path, file_violations) in file_violations {
+                        violations
+                            .entry(file_path)
+                            .or_insert_with(Vec::new)
+                            .extend(file_violations);
+                    }
+                }
+                Ok(Err(e)) => return Err(e),
+                Err(e) => return Err(anyhow::anyhow!("Failed to run validation: {}", e)),
+            }
+        }
+
+        Ok(violations)
+    })
+}
+
+/// Run the given sync and async validators in separate threads in parallel.
+pub fn run(
+    context: Arc<ValidationContext>,
+    sync_validators: Vec<Box<dyn ValidatorSync>>,
+    async_validators: Vec<Box<dyn ValidatorAsync>>,
+) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
+    if async_validators.is_empty() {
+        return run_sync_validators(context, sync_validators);
+    }
+    // Run sync and async validators concurrently.
+    let sync_context = Arc::clone(&context);
+    let sync_violations_handle =
+        std::thread::spawn(move || run_sync_validators(sync_context, sync_validators));
+    let async_violations_handle =
+        std::thread::spawn(move || run_async_validators(context, async_validators));
+    let sync_violations_result = sync_violations_handle
+        .join()
+        .map_err(|e| anyhow::anyhow!("Failed to join sync violations thread: {:?}", e))?;
+    let mut violations = sync_violations_result?;
+
+    let async_violations_result = async_violations_handle
+        .join()
+        .map_err(|e| anyhow::anyhow!("Failed to join async violations thread: {:?}", e))?;
+    let async_violations = async_violations_result?;
+
+    for (file_path, file_violations) in async_violations {
+        violations
+            .entry(file_path)
+            .or_insert_with(Vec::new)
+            .extend(file_violations);
+    }
+
+    Ok(violations)
+}
+
+type SyncValidators = Vec<Box<dyn ValidatorSync>>;
+type AsyncValidators = Vec<Box<dyn ValidatorAsync>>;
+
+type DetectorFactory = fn() -> Box<dyn ValidatorDetector>;
+
+pub const DETECTOR_FACTORIES: &[DetectorFactory] = &[
+    // <block affects="README.md:validators-list">
+    || Box::new(AffectsValidatorDetector::new()),
+    || Box::new(KeepSortedValidatorDetector::new()),
+    || Box::new(KeepUniqueValidatorDetector::new()),
+    || Box::new(LinePatternValidatorDetector::new()),
+    || Box::new(LineCountValidatorDetector::new()),
+    || Box::new(CheckAiValidatorDetector::new()),
+    // </block>
+];
+
+pub fn detect_validators(
+    context: &ValidationContext,
+    detectors: &[DetectorFactory],
+) -> anyhow::Result<(SyncValidators, AsyncValidators)> {
+    let mut validator_detectors: Vec<Box<dyn ValidatorDetector>> =
+        detectors.iter().map(|f| f()).collect();
+    let mut sync_validators = Vec::new();
+    let mut async_validators = Vec::new();
+    'outer: for file_blocks in context.modified_blocks.values() {
+        for block in &file_blocks.blocks {
+            let mut undetected = Vec::new();
+            while let Some(detector) = validator_detectors.pop() {
+                match detector.detect(block)? {
+                    Some(ValidatorType::Sync(validator)) => {
+                        sync_validators.push(validator);
+                    }
+                    Some(ValidatorType::Async(validator)) => {
+                        async_validators.push(validator);
+                    }
+                    None => {
+                        undetected.push(detector);
+                    }
+                }
+            }
+            if undetected.is_empty() {
+                // All validators have been detected.
+                break 'outer;
+            }
+            validator_detectors.extend(undetected);
+        }
+    }
+    Ok((sync_validators, async_validators))
+}
+
 #[cfg(test)]
-mod run_tests {
-    use crate::blocks::Block;
+mod tests {
+    use crate::blocks::{Block, FileBlocks};
     use crate::validators;
-    use crate::validators::run;
+    use crate::validators::{
+        DetectorFactory, ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorSync,
+        ValidatorType, Violation, detect_validators,
+    };
+    use async_trait::async_trait;
     use std::collections::HashMap;
     use std::sync::Arc;
 
-    #[tokio::test]
-    async fn merges_different_violations_correctly() -> anyhow::Result<()> {
-        let context = validators::Context::new(HashMap::from([
+    struct FakeAsyncValidator();
+
+    #[async_trait]
+    impl ValidatorAsync for FakeAsyncValidator {
+        async fn validate(
+            &self,
+            context: Arc<ValidationContext>,
+        ) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
+            Ok(context
+                .modified_blocks
+                .keys()
+                .map(|file_name| {
+                    (
+                        file_name.clone(),
+                        vec![Violation::new(
+                            "fake-async".to_string(),
+                            "fake-async error message".to_string(),
+                            None,
+                        )],
+                    )
+                })
+                .collect())
+        }
+    }
+
+    struct FakeSyncValidator();
+    impl ValidatorSync for FakeSyncValidator {
+        fn validate(
+            &self,
+            context: Arc<ValidationContext>,
+        ) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
+            Ok(context
+                .modified_blocks
+                .keys()
+                .map(|file_name| {
+                    (
+                        file_name.clone(),
+                        vec![Violation::new(
+                            "fake-sync".to_string(),
+                            "fake-sync error message".to_string(),
+                            None,
+                        )],
+                    )
+                })
+                .collect())
+        }
+    }
+
+    struct FakeAsyncValidatorDetector();
+
+    impl ValidatorDetector for FakeAsyncValidatorDetector {
+        fn detect(&self, block: &Block) -> anyhow::Result<Option<ValidatorType>> {
+            if block.attributes.contains_key("fake-async") {
+                Ok(Some(ValidatorType::Async(Box::new(FakeAsyncValidator {}))))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+
+    struct FakeSyncValidatorDetector();
+    impl ValidatorDetector for FakeSyncValidatorDetector {
+        fn detect(&self, block: &Block) -> anyhow::Result<Option<ValidatorType>> {
+            if block.attributes.contains_key("fake-sync") {
+                Ok(Some(ValidatorType::Sync(Box::new(FakeSyncValidator {}))))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+
+    const DETECTOR_FACTORIES: &[DetectorFactory] = &[
+        || Box::new(FakeSyncValidatorDetector {}),
+        || Box::new(FakeAsyncValidatorDetector {}),
+    ];
+
+    #[test]
+    fn detect_and_run_with_sync_and_async_validators_returns_correct_violations()
+    -> anyhow::Result<()> {
+        let context = ValidationContext::new(HashMap::from([
             (
                 "file1".to_string(),
-                (
-                    "D\nC\nD\nC".to_string(),
-                    vec![Arc::new(Block::new(
+                FileBlocks {
+                    file_contents: "".to_string(),
+                    blocks: vec![Arc::new(Block::new(
                         1,
                         6,
                         HashMap::from([
-                            ("affects".to_string(), "file2:foo".to_string()),
-                            ("keep-sorted".to_string(), "desc".to_string()),
+                            ("fake-sync".to_string(), "condition A".to_string()),
+                            ("fake-async".to_string(), "condition B".to_string()),
                         ]),
-                        0..6,
+                        0..0,
                     ))],
-                ),
+                },
             ),
             (
                 "file2".to_string(),
-                (
-                    "A\nB\nA".to_string(),
-                    vec![Arc::new(Block::new(
+                FileBlocks {
+                    file_contents: "".to_string(),
+                    blocks: vec![Arc::new(Block::new(
                         1,
                         6,
-                        HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
-                        0..5,
+                        HashMap::from([
+                            ("fake-sync".to_string(), "condition C".to_string()),
+                            ("fake-async".to_string(), "condition D".to_string()),
+                        ]),
+                        0..0,
                     ))],
-                ),
+                },
             ),
         ]));
 
-        let violations = run(context).await?;
+        let (sync_validators, async_validators) = detect_validators(&context, DETECTOR_FACTORIES)?;
+        let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 2);
         assert_eq!(violations["file1"].len(), 2);
@@ -147,9 +364,95 @@ mod run_tests {
             .map(|v| v.violation.as_str())
             .collect::<Vec<_>>();
         file1_violations.sort();
-        assert_eq!(file1_violations, vec!["affects", "keep-sorted"]);
+        assert_eq!(file1_violations, vec!["fake-async", "fake-sync"]);
+        assert_eq!(violations["file2"].len(), 2);
+        let mut file2_violations = violations["file2"]
+            .iter()
+            .map(|v| v.violation.as_str())
+            .collect::<Vec<_>>();
+        file2_violations.sort();
+        assert_eq!(file2_violations, vec!["fake-async", "fake-sync"]);
+        Ok(())
+    }
+
+    #[test]
+    fn detect_and_run_with_sync_only_validators_returns_correct_violations() -> anyhow::Result<()> {
+        let context = ValidationContext::new(HashMap::from([
+            (
+                "file1".to_string(),
+                FileBlocks {
+                    file_contents: "".to_string(),
+                    blocks: vec![Arc::new(Block::new(
+                        1,
+                        6,
+                        HashMap::from([("fake-sync".to_string(), "condition A".to_string())]),
+                        0..0,
+                    ))],
+                },
+            ),
+            (
+                "file2".to_string(),
+                FileBlocks {
+                    file_contents: "".to_string(),
+                    blocks: vec![Arc::new(Block::new(
+                        1,
+                        6,
+                        HashMap::from([("fake-sync".to_string(), "condition B".to_string())]),
+                        0..0,
+                    ))],
+                },
+            ),
+        ]));
+
+        let (sync_validators, async_validators) = detect_validators(&context, DETECTOR_FACTORIES)?;
+        let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
+
+        assert_eq!(violations.len(), 2);
+        assert_eq!(violations["file1"].len(), 1);
+        assert_eq!(violations["file1"][0].violation, "fake-sync");
         assert_eq!(violations["file2"].len(), 1);
-        assert_eq!(violations["file2"][0].violation, "keep-sorted");
+        assert_eq!(violations["file2"][0].violation, "fake-sync");
+        Ok(())
+    }
+
+    #[test]
+    fn detect_and_run_with_async_only_validators_returns_correct_violations() -> anyhow::Result<()>
+    {
+        let context = ValidationContext::new(HashMap::from([
+            (
+                "file1".to_string(),
+                FileBlocks {
+                    file_contents: "".to_string(),
+                    blocks: vec![Arc::new(Block::new(
+                        1,
+                        6,
+                        HashMap::from([("fake-async".to_string(), "condition A".to_string())]),
+                        0..0,
+                    ))],
+                },
+            ),
+            (
+                "file2".to_string(),
+                FileBlocks {
+                    file_contents: "".to_string(),
+                    blocks: vec![Arc::new(Block::new(
+                        1,
+                        6,
+                        HashMap::from([("fake-async".to_string(), "condition B".to_string())]),
+                        0..0,
+                    ))],
+                },
+            ),
+        ]));
+
+        let (sync_validators, async_validators) = detect_validators(&context, DETECTOR_FACTORIES)?;
+        let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
+
+        assert_eq!(violations.len(), 2);
+        assert_eq!(violations["file1"].len(), 1);
+        assert_eq!(violations["file1"][0].violation, "fake-async");
+        assert_eq!(violations["file2"].len(), 1);
+        assert_eq!(violations["file2"][0].violation, "fake-async");
         Ok(())
     }
 }
