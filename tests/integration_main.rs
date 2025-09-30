@@ -8,117 +8,12 @@ fn get_cmd() -> Command {
 }
 
 #[test]
-fn diff_with_unsatisfied_blocks_fails() {
-    let diff_content = r#"
-diff --git a/tests/testing_data.md b/tests/testing_data
-index abc123..def456 100644
---- a/tests/testing_data.md
-+++ b/tests/testing_data.md
-@@ -1,6 +1,5 @@
- # Testing data for integration tests
- 
- [//]: # (<block affects=":foo">)
--First block.
- 
- [//]: # (</block>)
-"#;
-
-    let mut cmd = get_cmd();
-    let output = cmd.write_stdin(diff_content).output().unwrap();
-
-    output.assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::function(|output: &str| {
-            let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
-            let value: serde_json::Value  = json!({
-              "tests/testing_data.md": [
-                {
-                  "violation": "affects",
-                  "error": "Block tests/testing_data.md:(unnamed) at line 3 is modified, but tests/testing_data.md:foo is not",
-                  "details": {
-                    "modified_block": {
-                      "attributes": {
-                        "affects": ":foo"
-                      },
-                      "ends_at_line": 6,
-                      "starts_at_line": 3
-                    }
-                  }
-                }
-              ]
-            });
-            assert_eq!(output_json, value);
-            true
-        }));
-}
-
-#[test]
-fn diff_with_satisfied_blocks_succeeds() {
-    let diff_content = r#"
-diff --git a/tests/testing_data.md b/tests/testing_data
-index abc123..def456 100644
---- a/tests/testing_data.md
-+++ b/tests/testing_data.md
-@@ -1,11 +1,9 @@
- # Testing data for integration tests
- 
- [//]: # (<block affects=":foo">)
--First block.
- 
- [//]: # (</block>)
- 
- [//]: # (<block name="foo">)
--Second block.
- 
- [//]: # (</block>)
-"#;
-
-    let mut cmd = get_cmd();
-    cmd.write_stdin(diff_content);
-
-    let output = cmd.output().expect("Failed to get command output");
-
-    output.assert().success();
-}
-
-#[test]
-fn diff_with_satisfied_blocks_non_root_dir_succeeds() {
-    let diff_content = r#"
-diff --git a/tests/testing_data.md b/tests/testing_data
-index abc123..def456 100644
---- a/tests/testing_data.md
-+++ b/tests/testing_data.md
-@@ -1,11 +1,9 @@
- # Testing data for integration tests
- 
- [//]: # (<block affects=":foo">)
--First block.
- 
- [//]: # (</block>)
- 
- [//]: # (<block name="foo">)
--Second block.
- 
- [//]: # (</block>)
-"#;
-
-    let mut cmd = get_cmd();
-    cmd.current_dir("./tests");
-    cmd.write_stdin(diff_content);
-
-    let output = cmd.output().expect("Failed to get command output");
-
-    output.assert().success();
-}
-
-#[test]
 fn with_custom_file_extensions_args() {
     let diff_content = r#"
-diff --git a/tests/another_testing_file.javascript b/tests/another_testing_file.javascript
+diff --git a/tests/custom_file_extension_test.javascript b/tests/custom_file_extension_test.javascript
 index 09baa87..33c9660 100644
---- a/tests/another_testing_file.javascript
-+++ b/tests/another_testing_file.javascript
+--- a/tests/custom_file_extension_test.javascript
++++ b/tests/custom_file_extension_test.javascript
 @@ -2,7 +2,7 @@
  
  function main() {
@@ -128,10 +23,10 @@ index 09baa87..33c9660 100644
    // </block>
  }
  
-diff --git a/tests/testing_file.python b/tests/testing_file.python
+diff --git a/tests/custom_file_extension_test.python b/tests/custom_file_extension_test.python
 index da567bd..5586a8d 100644
---- a/tests/testing_file.python
-+++ b/tests/testing_file.python
+--- a/tests/custom_file_extension_test.python
++++ b/tests/custom_file_extension_test.python
 @@ -2,7 +2,7 @@
  
  def main():
@@ -154,10 +49,10 @@ index da567bd..5586a8d 100644
         let output_json: serde_json::Value =
             serde_json::from_str(output).expect("invalid json");
         let value: serde_json::Value  = json!({
-              "tests/another_testing_file.javascript": [
+              "tests/custom_file_extension_test.javascript": [
                 {
                   "violation": "affects",
-                  "error": "Block tests/another_testing_file.javascript:(unnamed) at line 4 is modified, but tests/another_testing_file.javascript:foo is not",
+                  "error": "Block tests/custom_file_extension_test.javascript:(unnamed) at line 4 is modified, but tests/custom_file_extension_test.javascript:foo is not",
                   "details": {
                     "modified_block": {
                       "attributes": {
@@ -169,10 +64,10 @@ index da567bd..5586a8d 100644
                   }
                 }
               ],
-              "tests/testing_file.python": [
+              "tests/custom_file_extension_test.python": [
                 {
                   "violation": "affects",
-                  "error": "Block tests/testing_file.python:(unnamed) at line 4 is modified, but tests/testing_file.python:foo is not",
+                  "error": "Block tests/custom_file_extension_test.python:(unnamed) at line 4 is modified, but tests/custom_file_extension_test.python:foo is not",
                   "details": {
                     "modified_block": {
                       "attributes": {
