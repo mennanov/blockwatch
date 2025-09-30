@@ -1,6 +1,6 @@
 use crate::blocks::Block;
 use crate::validators;
-use crate::validators::{Validator, Violation};
+use crate::validators::{ValidatorAsync, ValidatorDetector, ValidatorType, Violation};
 use anyhow::{Context, anyhow};
 use async_openai::Client;
 use async_openai::config::{Config, OPENAI_API_BASE, OpenAIConfig};
@@ -25,15 +25,15 @@ pub(crate) struct CheckAiValidator<C: AiClient> {
 }
 
 #[async_trait]
-impl<C: AiClient + 'static> Validator for CheckAiValidator<C> {
+impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
     async fn validate(
         &self,
-        context: Arc<validators::Context>,
+        context: Arc<validators::ValidationContext>,
     ) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
         let mut violations = HashMap::new();
         let mut tasks = JoinSet::new();
-        for (file_path, (file_content, blocks)) in &context.modified_blocks {
-            for block in blocks {
+        for (file_path, file_blocks) in &context.modified_blocks {
+            for block in &file_blocks.blocks {
                 let condition = match block.attributes.get("check-ai") {
                     None => continue,
                     Some(v) => v,
@@ -51,7 +51,7 @@ impl<C: AiClient + 'static> Validator for CheckAiValidator<C> {
                 {
                     let re = regex::Regex::new(pattern)
                         .context("check-ai-pattern is not a valid regex")?;
-                    if let Some(c) = re.captures(block.content(file_content)) {
+                    if let Some(c) = re.captures(block.content(&file_blocks.file_contents)) {
                         // If named group "value" exists use it, otherwise use the whole match
                         if let Some(m) = c.name("value") {
                             m.as_str()
@@ -62,7 +62,7 @@ impl<C: AiClient + 'static> Validator for CheckAiValidator<C> {
                         ""
                     }
                 } else {
-                    block.content(file_content).trim()
+                    block.content(&file_blocks.file_contents).trim()
                 };
                 // Skip blocks with empty content.
                 if block_content.is_empty() {
@@ -93,6 +93,26 @@ impl<C: AiClient + 'static> Validator for CheckAiValidator<C> {
             }
         }
         Ok(violations)
+    }
+}
+
+pub(crate) struct CheckAiValidatorDetector();
+
+impl CheckAiValidatorDetector {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl ValidatorDetector for CheckAiValidatorDetector {
+    fn detect(&self, block: &Block) -> anyhow::Result<Option<ValidatorType>> {
+        if block.attributes.contains_key("check-ai") {
+            Ok(Some(ValidatorType::Async(Box::new(
+                CheckAiValidator::with_client(OpenAiClient::new_from_env()),
+            ))))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -242,7 +262,7 @@ impl AiClient for OpenAiClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blocks::Block;
+    use crate::blocks::{Block, FileBlocks};
     use crate::test_utils;
     use serde_json::json;
 
@@ -297,17 +317,17 @@ mod tests {
             FakeAiResponse::None,
         )])));
         let file1_contents = "block content goes here: I like banana";
-        let context = Arc::new(validators::Context::new(HashMap::from([(
+        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
-            (
-                file1_contents.to_string(),
-                vec![Arc::new(Block::new(
+            FileBlocks {
+                file_contents: file1_contents.to_string(),
+                blocks: vec![Arc::new(Block::new(
                     1,
                     3,
                     HashMap::from([("check-ai".to_string(), "must mention banana".to_string())]),
                     test_utils::substr_range(file1_contents, "I like banana"),
                 ))],
-            ),
+            },
         )])));
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());
@@ -321,11 +341,11 @@ mod tests {
             FakeAiResponse::None,
         )])));
         let file1_contents = "block content goes here: I like banana and apples";
-        let context = Arc::new(validators::Context::new(HashMap::from([(
+        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
-            (
-                file1_contents.to_string(),
-                vec![Arc::new(Block::new(
+            FileBlocks {
+                file_contents: file1_contents.to_string(),
+                blocks: vec![Arc::new(Block::new(
                     1,
                     3,
                     HashMap::from([
@@ -335,7 +355,7 @@ mod tests {
                     ]),
                     test_utils::substr_range(file1_contents, "I like banana and apples"),
                 ))],
-            ),
+            },
         )])));
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());
@@ -349,11 +369,11 @@ mod tests {
             FakeAiResponse::None,
         )])));
         let file1_contents = "block content goes here: I like banana and apples";
-        let context = Arc::new(validators::Context::new(HashMap::from([(
+        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
-            (
-                file1_contents.to_string(),
-                vec![Arc::new(Block::new(
+            FileBlocks {
+                file_contents: file1_contents.to_string(),
+                blocks: vec![Arc::new(Block::new(
                     1,
                     3,
                     HashMap::from([
@@ -366,7 +386,7 @@ mod tests {
                     ]),
                     test_utils::substr_range(file1_contents, "I like banana and apples"),
                 ))],
-            ),
+            },
         )])));
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());
@@ -380,17 +400,17 @@ mod tests {
             FakeAiResponse::Some("The block does not mention 'banana'. Add it.".into()),
         )])));
         let file1_contents = "block content goes here: I like apples";
-        let context = Arc::new(validators::Context::new(HashMap::from([(
+        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
-            (
-                file1_contents.to_string(),
-                vec![Arc::new(Block::new(
+            FileBlocks {
+                file_contents: file1_contents.to_string(),
+                blocks: vec![Arc::new(Block::new(
                     10,
                     14,
                     HashMap::from([("check-ai".to_string(), "must mention banana".to_string())]),
                     test_utils::substr_range(file1_contents, "I like apples"),
                 ))],
-            ),
+            },
         )])));
         let violations = validator.validate(context).await?;
         assert_eq!(violations.len(), 1);
@@ -418,17 +438,17 @@ mod tests {
             FakeAiResponse::Err("API error".into()),
         )])));
         let file1_contents = "block content goes here: text";
-        let context = Arc::new(validators::Context::new(HashMap::from([(
+        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
-            (
-                file1_contents.to_string(),
-                vec![Arc::new(Block::new(
+            FileBlocks {
+                file_contents: file1_contents.to_string(),
+                blocks: vec![Arc::new(Block::new(
                     2,
                     4,
                     HashMap::from([("check-ai".to_string(), "condition".to_string())]),
                     test_utils::substr_range(file1_contents, "text"),
                 ))],
-            ),
+            },
         )])));
         let err = validator.validate(context).await.unwrap_err();
         assert!(err.to_string().contains("check-ai API error"));
@@ -439,17 +459,17 @@ mod tests {
     async fn empty_condition_returns_error() -> anyhow::Result<()> {
         let validator = CheckAiValidator::with_client(FakeClient::default());
         let file1_contents = "block content goes here: text";
-        let context = Arc::new(validators::Context::new(HashMap::from([(
+        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
-            (
-                file1_contents.to_string(),
-                vec![Arc::new(Block::new(
+            FileBlocks {
+                file_contents: file1_contents.to_string(),
+                blocks: vec![Arc::new(Block::new(
                     5,
                     7,
                     HashMap::from([("check-ai".to_string(), " ".to_string())]),
                     test_utils::substr_range(file1_contents, "text"),
                 ))],
-            ),
+            },
         )])));
         let err = validator.validate(context).await.unwrap_err();
         assert!(
@@ -463,17 +483,17 @@ mod tests {
     async fn empty_content_skips_api_call_returns_no_violations() -> anyhow::Result<()> {
         let validator = CheckAiValidator::with_client(FakeClient::default());
         let file1_contents = "block content goes here:  \n\n";
-        let context = Arc::new(validators::Context::new(HashMap::from([(
+        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
-            (
-                file1_contents.to_string(),
-                vec![Arc::new(Block::new(
+            FileBlocks {
+                file_contents: file1_contents.to_string(),
+                blocks: vec![Arc::new(Block::new(
                     1,
                     1,
                     HashMap::from([("check-ai".to_string(), "condition".to_string())]),
                     test_utils::substr_range(file1_contents, "  \n\n"),
                 ))],
-            ),
+            },
         )])));
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());

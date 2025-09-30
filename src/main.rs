@@ -1,22 +1,22 @@
 use blockwatch::blocks;
-use blockwatch::differ; // test 2
+use blockwatch::differ;
 use blockwatch::differ::HunksExtractor;
 use blockwatch::flags;
 use blockwatch::parsers;
 use blockwatch::validators;
 use clap::Parser;
+use std::io::Read;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::{env, fs, process};
-use tokio::io::AsyncReadExt;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let args = flags::Args::parse();
     let languages = parsers::language_parsers()?;
     args.validate(languages.keys().cloned().collect())?;
 
     let mut diff = String::new();
-    tokio::io::stdin().read_to_string(&mut diff).await?;
+    std::io::stdin().read_to_string(&mut diff)?;
     let extractor = differ::UnidiffExtractor::new();
     let modified_ranges_by_file = extractor.extract(diff.as_str())?;
 
@@ -28,9 +28,11 @@ async fn main() -> anyhow::Result<()> {
         &file_reader,
         languages,
         args.extensions(),
-    )
-    .await?;
-    let violations = validators::run(validators::Context::new(modified_blocks)).await?;
+    )?;
+    let context = validators::ValidationContext::new(modified_blocks);
+    let (sync_validators, async_validators) =
+        validators::detect_validators(&context, validators::DETECTOR_FACTORIES)?;
+    let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
     if !violations.is_empty() {
         let json = serde_json::to_string_pretty(&violations)?;
         eprintln!("{json}");
