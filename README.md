@@ -124,6 +124,8 @@ const MONTHS: [&str; 12] = [
 ];
 ```
 
+Empty lines and spaces are ignored.
+
 ### Ensuring Unique Lines
 
 Use the `keep-unique` attribute with an optional RegExp to ensure there are no duplicate lines inside a block.
@@ -147,10 +149,13 @@ Use the `keep-unique` attribute with an optional RegExp to ensure there are no d
 
 Regex example using a named group to only consider the numeric ID for uniqueness and ignore non-matching lines:
 
+> NOTE: `(?P<value>...)` currently needs to be escaped like `(?P&lt;value&gt;...)`. This may be fixed in future
+> versions.
+
 ```markdown
 # IDs
 
-[//]: # (<block name="ids-unique" keep-unique="^ID:(?P<value>\d+)">)
+[//]: # (<block name="ids-unique" keep-unique="^ID:(?P&amp;lt;value&amp;gt;\d+)">)
 ID:1 Alice
 ID:2 Bob
 this line is skipped
@@ -158,6 +163,8 @@ ID:1 Carol  <!-- duplicate by extracted ID -->
 
 [//]: # (</block>)
 ```
+
+Empty lines and spaces are ignored.
 
 ### Validating Line Patterns
 
@@ -173,6 +180,8 @@ blockwatch
 
 [//]: # (</block>)
 ```
+
+Empty lines and spaces are ignored.
 
 ### Validating Block Line Count
 
@@ -193,6 +202,8 @@ Use the `line-count` attribute to ensure the total number of lines in a block me
 
 [//]: # (</block>)
 ```
+
+Empty lines are ignored.
 
 ### Validating with AI (LLM)
 
