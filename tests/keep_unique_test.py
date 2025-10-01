@@ -1,5 +1,5 @@
 fruits = [
-    # <block keep-unique="">
+    # <block keep-unique>
     'apple',
     'banana',
     'cherry',
@@ -7,7 +7,7 @@ fruits = [
 ]
 
 unique_prefixes = [
-    # <block keep-unique="ID:(?P&lt;value&gt;\d+)">
+    # <block keep-unique="ID:(?P<value>\d+)">
     'ID:1 A',
     'ID:2 B',
     'ID:1 C',

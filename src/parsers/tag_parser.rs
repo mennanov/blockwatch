@@ -22,32 +22,32 @@ pub(crate) enum BlockTag {
     },
 }
 
-pub(crate) struct TreeSitterXmlBlockTagParser<'source> {
+pub(crate) struct TreeSitterHtmlBlockTagParser<'source> {
     source: &'source str,
     query: Query,
     tree: tree_sitter::Tree,
     last_searched_byte: usize,
 }
 
-impl<'source> TreeSitterXmlBlockTagParser<'source> {
+impl<'source> TreeSitterHtmlBlockTagParser<'source> {
     pub(crate) fn new(source: &'source str) -> Self {
-        let xml_language = tree_sitter_xml::LANGUAGE_XML.into();
+        let html_language = tree_sitter_html::LANGUAGE.into();
         let query = Query::new(
-            &xml_language,
+            &html_language,
             r#"
             [
-              (STag
-                (Name) @tag_name
+              (start_tag
+                (tag_name) @tag_name
                 (#eq? @tag_name "block")) @start_tag
-              (ETag
-                (Name) @tag_name
+              (end_tag
+                (tag_name) @tag_name
                 (#eq? @tag_name "block")) @end_tag
               (ERROR) @error_tag
             ]"#,
         )
         .unwrap();
         let mut parser = Parser::new();
-        parser.set_language(&xml_language).unwrap();
+        parser.set_language(&html_language).unwrap();
         let tree = parser.parse(source, None).unwrap();
         Self {
             source,
@@ -62,38 +62,35 @@ impl<'source> TreeSitterXmlBlockTagParser<'source> {
         let mut cursor = node.walk();
 
         for child in node.children(&mut cursor) {
-            if child.kind() == "Attribute" {
-                if child.child_count() != 3 {
-                    return Err(anyhow!(
-                        "Invalid attributes: {}",
-                        child
-                            .utf8_text(self.source.as_bytes())
-                            .context("Failed to read attributes")?
-                    ));
-                }
-                // Attribute: child(0) = Name, child(1) = _Eq, child(2) = AttValue
+            if child.is_error() {
+                let node_text = child
+                    .utf8_text(self.source.as_bytes())
+                    .context("Failed to read error node text")?;
+                return Err(anyhow!("Invalid token inside tag: {node_text}"));
+            }
+            if child.kind() == "attribute" {
+                // 1. Get attribute name (named child 0)
                 let name_node = child
-                    .child(0)
-                    .context("Failed to extract attribute name: no Name node found")?;
+                    .named_child(0)
+                    .context("Failed to find attribute name node")?;
+
                 let attr_name = name_node
                     .utf8_text(self.source.as_bytes())
                     .context("Failed to extract attribute name: invalid utf8")?;
 
-                let value = self.extract_attribute_value(
-                    &child
-                        .child(2)
-                        .context("Failed to extract attribute value: no AttValue node found")?,
-                )?;
+                // 2. Get attribute value (named child 1, optional)
+                let value_node_option = child.named_child(1);
+
+                let value = match value_node_option {
+                    Some(value_node) => self.extract_attribute_value(&value_node)?,
+                    None => "".to_string(), // Handle attributes with no values.
+                };
+
                 if !attr_name.is_empty()
                     && attributes.insert(attr_name.to_string(), value).is_some()
                 {
                     return Err(anyhow!("Duplicate attribute: {attr_name}"));
                 }
-            } else if child.is_error() {
-                let attr_name = child
-                    .utf8_text(self.source.as_bytes())
-                    .context("Failed to extract attribute name from ERROR node")?;
-                return Err(anyhow!("Invalid attribute: {attr_name}"));
             }
         }
 
@@ -101,18 +98,34 @@ impl<'source> TreeSitterXmlBlockTagParser<'source> {
     }
 
     fn extract_attribute_value(&self, node: &Node) -> anyhow::Result<String> {
-        let quoted_value = node
-            .utf8_text(self.source.as_bytes())
-            .context("Failed to extract attribute value")?;
-        // The `quoted_value` is guaranteed to be `"{value}"` or `'{value}'` according to the
-        // tree-sitter XML grammar.
-        let unquoted_value = &quoted_value[1..quoted_value.len() - 1];
-        // Unescape common XML entities like &quot;
-        Ok(html_escape::decode_html_entities(unquoted_value).into())
+        let value = match node.kind() {
+            "attribute_value" => {
+                // Unquoted value
+                node.utf8_text(self.source.as_bytes())
+                    .context("Failed to extract attribute value content")?
+            }
+            "quoted_attribute_value" => {
+                // For quoted attribute values, the actual content is the named child (attribute_value).
+                if let Some(content_node) = node.named_child(0) {
+                    content_node
+                        .utf8_text(self.source.as_bytes())
+                        .context("Failed to extract quoted attribute value content")?
+                } else {
+                    // Empty string attribute value, e.g. foo="" or foo=''
+                    ""
+                }
+            }
+            kind => {
+                return Err(anyhow!("Unexpected node kind for attribute value: {kind}"));
+            }
+        };
+
+        // Unescape common HTML/XML entities
+        Ok(html_escape::decode_html_entities(&value).into())
     }
 }
 
-impl<'source> BlockTagParser for TreeSitterXmlBlockTagParser<'source> {
+impl<'source> BlockTagParser for TreeSitterHtmlBlockTagParser<'source> {
     fn next(&mut self) -> anyhow::Result<Option<BlockTag>> {
         let mut cursor = QueryCursor::new();
         cursor.set_byte_range(self.last_searched_byte..self.source.len());

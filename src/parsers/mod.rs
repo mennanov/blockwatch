@@ -27,7 +27,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
 use std::string::ToString;
-use tag_parser::{BlockTag, BlockTagParser, TreeSitterXmlBlockTagParser};
+use tag_parser::{BlockTag, BlockTagParser, TreeSitterHtmlBlockTagParser};
 use tree_sitter::{Language, Parser, Query, QueryCursor, StreamingIterator};
 
 /// Parses [`Blocks`] from a source code.
@@ -286,7 +286,7 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
         let (concatenated_comments, index) = Self::build_index(&comments);
         let mut blocks = Vec::new();
         let mut stack = Vec::new();
-        let mut parser = TreeSitterXmlBlockTagParser::new(concatenated_comments.as_str());
+        let mut parser = TreeSitterHtmlBlockTagParser::new(concatenated_comments.as_str());
 
         while let Some(tag) = parser.next()? {
             match tag {
@@ -769,7 +769,8 @@ mod tests {
         }
         // </block>
         "#;
-        assert!(parser.parse(contents).is_err());
+        let result = parser.parse(contents);
+        assert!(result.is_err());
         Ok(())
     }
 
@@ -844,54 +845,104 @@ mod tests {
     }
 
     #[test]
-    fn attributes_with_no_quotes_returns_error() -> anyhow::Result<()> {
+    fn attributes_with_no_quotes() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
-        // <block color=red>
+        // <block color=red flavor=sweet>
         // </block>
         "#;
-        let result = parser.parse(contents);
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Invalid attribute")
+        let blocks = parser.parse(contents)?;
+        assert_eq!(blocks[0].attributes["color"], "red");
+        assert_eq!(blocks[0].attributes["flavor"], "sweet");
+        Ok(())
+    }
+
+    #[test]
+    fn attributes_with_no_value() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <block attr1 attr2>
+        // </block>
+        "#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(blocks[0].attributes["attr1"], "");
+        assert_eq!(blocks[0].attributes["attr2"], "");
+        Ok(())
+    }
+
+    #[test]
+    fn attributes_with_empty_string_value() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <block name="" foo="" bar=''>
+        fn foo() {}
+        // </block>
+        "#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(
+            blocks[0].attributes,
+            HashMap::from([
+                ("name".to_string(), "".to_string()),
+                ("foo".to_string(), "".to_string()),
+                ("bar".to_string(), "".to_string())
+            ])
         );
         Ok(())
     }
 
     #[test]
-    fn single_invalid_attribute_returns_error() -> anyhow::Result<()> {
+    fn attributes_with_html_symbols() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
-        // <block attr>
+        // <block keep-unique="(?P<value>\w+)">
         // </block>
         "#;
-        let result = parser.parse(contents);
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Invalid attribute")
-        );
+        let blocks = parser.parse(contents)?;
+        assert_eq!(blocks[0].attributes["keep-unique"], r"(?P<value>\w+)");
         Ok(())
     }
 
     #[test]
-    fn multiple_invalid_attributes_returns_error() -> anyhow::Result<()> {
+    fn attributes_with_unicode_value() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <block name="🦀" desc="Rust">
+        fn unicode() {}
+        // </block>
+        "#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(blocks[0].attributes["name"], "🦀");
+        assert_eq!(blocks[0].attributes["desc"], "Rust");
+        Ok(())
+    }
+
+    #[test]
+    fn attributes_with_spaces_around_values() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+        // <block name = "foo" desc = 'bar'>
+        fn unicode() {}
+        // </block>
+        "#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(blocks[0].attributes["name"], "foo");
+        assert_eq!(blocks[0].attributes["desc"], "bar");
+        Ok(())
+    }
+
+    #[test]
+    fn multiple_mixed_attributes() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
         // <block color="red" attr1 align="center" attr2>
         fn escaped() {}
         // </block>
         "#;
-        let result = parser.parse(contents);
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Invalid attributes")
-        );
+        let blocks = parser.parse(contents)?;
+        assert_eq!(blocks[0].attributes["color"], "red");
+        assert_eq!(blocks[0].attributes["attr1"], "");
+        assert_eq!(blocks[0].attributes["align"], "center");
+        assert_eq!(blocks[0].attributes["attr2"], "");
         Ok(())
     }
 
@@ -945,26 +996,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_attributes() -> anyhow::Result<()> {
-        let parser = create_parser();
-        let contents = r#"
-        // <block name="" foo="" bar="">
-        fn foo() {}
-        // </block>
-        "#;
-        let blocks = parser.parse(contents)?;
-        assert_eq!(
-            blocks[0].attributes,
-            HashMap::from([
-                ("name".to_string(), "".to_string()),
-                ("foo".to_string(), "".to_string()),
-                ("bar".to_string(), "".to_string())
-            ])
-        );
-        Ok(())
-    }
-
-    #[test]
     fn malformed_block_tag_is_ignored() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
@@ -973,20 +1004,6 @@ mod tests {
         // </block>
         "#;
         assert!(parser.parse(contents)?.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn blocks_with_unicode_attributes() -> anyhow::Result<()> {
-        let parser = create_parser();
-        let contents = r#"
-        // <block name="🦀" desc="Rust">
-        fn unicode() {}
-        // </block>
-        "#;
-        let blocks = parser.parse(contents)?;
-        assert_eq!(blocks[0].attributes["name"], "🦀");
-        assert_eq!(blocks[0].attributes["desc"], "Rust");
         Ok(())
     }
 

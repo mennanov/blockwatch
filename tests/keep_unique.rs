@@ -15,7 +15,7 @@ index d69398d..c5cbb7f 100644
 --- a/tests/keep_unique_test.py
 +++ b/tests/keep_unique_test.py
 @@ -2,7 +2,7 @@ fruits = [
-     # <block keep-unique="">
+     # <block keep-unique=>
      'apple',
      'banana',
 -    'orange',
@@ -37,7 +37,7 @@ index d69398d..9b29f11 100644
 --- a/tests/keep_unique_test.py
 +++ b/tests/keep_unique_test.py
 @@ -10,6 +10,6 @@ unique_prefixes = [
-     # <block keep-unique="ID:(?P&lt;value&gt;\d+)">
+     # <block keep-unique="ID:(?P<value>\d+)">
      'ID:1 A',
      'ID:2 B',
 -    'ID:3 C',

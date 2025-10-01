@@ -138,7 +138,7 @@ Use the `keep-unique` attribute with an optional RegExp to ensure there are no d
 ```markdown
 # Contributors
 
-[//]: # (<block name="contributors-unique" keep-unique="">)
+[//]: # (<block name="contributors-unique" keep-unique>)
 
 - Alice
 - Bob
@@ -149,13 +149,10 @@ Use the `keep-unique` attribute with an optional RegExp to ensure there are no d
 
 Regex example using a named group to only consider the numeric ID for uniqueness and ignore non-matching lines:
 
-> NOTE: `(?P<value>...)` currently needs to be escaped like `(?P&lt;value&gt;...)`. This may be fixed in future
-> versions.
-
 ```markdown
 # IDs
 
-[//]: # (<block name="ids-unique" keep-unique="^ID:(?P&amp;lt;value&amp;gt;\d+)">)
+[//]: # (<block name="ids-unique" keep-unique="^ID:(?P<value>\d+)">)
 ID:1 Alice
 ID:2 Bob
 this line is skipped
