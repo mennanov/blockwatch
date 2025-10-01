@@ -76,6 +76,7 @@ impl Block {
 }
 
 /// Represents a source field with its corresponding modified blocks.
+#[derive(Debug)]
 pub struct FileBlocks {
     pub(crate) file_contents: String,
     pub(crate) blocks: Vec<Arc<Block>>,

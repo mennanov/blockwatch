@@ -40,33 +40,34 @@ impl ValidatorSync for KeepUniqueValidator {
                 } else {
                     Some(regex::Regex::new(&pattern))
                 };
-                let mut seen: HashSet<String> = HashSet::new();
+                let mut seen: HashSet<&str> = HashSet::new();
                 for (idx, line) in block
                     .content(&file_blocks.file_contents)
                     .lines()
                     .enumerate()
                 {
                     let key_opt = match &re {
-                        None => Some(line.to_string()),
+                        None => Some(line),
                         Some(Ok(re)) => {
                             if let Some(c) = re.captures(line) {
                                 // If named group "value" exists use it, otherwise use whole match
                                 if let Some(m) = c.name("value") {
-                                    Some(m.as_str().to_string())
+                                    Some(m.as_str())
                                 } else {
-                                    c.get(0).map(|m| m.as_str().to_string())
+                                    c.get(0).map(|m| m.as_str())
                                 }
                             } else {
                                 None // skip line when no match
                             }
                         }
-                        Some(Err(_)) => {
+                        Some(Err(e)) => {
                             // Invalid regex: return an error for the validator
                             return Err(anyhow::anyhow!(
-                                "Invalid keep-unique regex pattern for block {}:{} defined at line {}",
+                                "Invalid keep-unique regex pattern for block {}:{} defined at line {}: {}",
                                 file_path,
                                 block.name_display(),
-                                block.starts_at_line
+                                block.starts_at_line,
+                                e
                             ));
                         }
                     };
