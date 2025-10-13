@@ -1,6 +1,6 @@
 [package]
 name = "blockwatch"
-version = "0.2.10"
+version = "0.2.11"
 edition = "2024"
 repository = "https://github.com/mennanov/blockwatch"
 description = "Language agnostic linter that keeps your code and documentation in sync and valid"
