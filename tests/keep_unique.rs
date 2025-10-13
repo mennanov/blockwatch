@@ -56,11 +56,19 @@ index d69398d..9b29f11 100644
             let value: serde_json::Value  = json!({
               "tests/keep_unique_test.py": [
                 {
-                  "violation": "keep-unique",
-                  "error": "Block tests/keep_unique_test.py:(unnamed) defined at line 10 has a duplicated line 13",
-                  "details": {
-                    "line_number_duplicated": 13,
-                  }
+                  "range": {
+                    "start": {
+                        "line": 13,
+                        "character": 9
+                    },
+                    "end": {
+                        "line": 13,
+                        "character": 9
+                    }
+                  },
+                  "code": "keep-unique",
+                  "message": "Block tests/keep_unique_test.py:(unnamed) defined at line 10 has a duplicated line 13",
+                  "severity": 1,
                 }
               ]
             });

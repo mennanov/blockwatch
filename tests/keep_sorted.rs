@@ -57,10 +57,20 @@ index 366590e..82c1f16 100644
             let value: serde_json::Value  = json!({
               "tests/keep_sorted_test.py": [
                 {
-                  "violation": "keep-sorted",
-                  "error": "Block tests/keep_sorted_test.py:(unnamed) defined at line 10 has an out-of-order line 13 (desc)",
-                  "details": {
-                    "line_number_out_of_order": 13,
+                  "range": {
+                    "start": {
+                        "line": 13,
+                        "character": 5
+                    },
+                    "end": {
+                        "line": 13,
+                        "character": 13
+                    }
+                  },
+                  "code": "keep-sorted",
+                  "message": "Block tests/keep_sorted_test.py:(unnamed) defined at line 10 has an out-of-order line 13 (desc)",
+                  "severity": 1,
+                  "data": {
                     "order_by": "desc",
                   }
                 }

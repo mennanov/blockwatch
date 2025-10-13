@@ -1,7 +1,8 @@
 use crate::blocks::Block;
 use crate::validators;
-use crate::validators::{ValidatorDetector, ValidatorSync, ValidatorType, Violation};
-use serde::Serialize;
+use crate::validators::{
+    ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
+};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -12,11 +13,6 @@ impl KeepUniqueValidator {
     pub(crate) fn new() -> Self {
         Self {}
     }
-}
-
-#[derive(Serialize)]
-struct KeepUniqueViolation {
-    line_number_duplicated: usize,
 }
 
 impl ValidatorSync for KeepUniqueValidator {
@@ -41,23 +37,38 @@ impl ValidatorSync for KeepUniqueValidator {
                     Some(regex::Regex::new(&pattern))
                 };
                 let mut seen: HashSet<&str> = HashSet::new();
-                for (idx, line) in block
+                for (line_number, line) in block
                     .content(&file_blocks.file_contents)
                     .lines()
                     .enumerate()
                 {
-                    let key_opt = match &re {
-                        None => Some(line),
+                    let line_match = match &re {
+                        None => {
+                            let trimmed_line = line.trim();
+                            if trimmed_line.is_empty() {
+                                None
+                            } else {
+                                let line_character_start =
+                                    trimmed_line.as_ptr() as usize - line.as_ptr() as usize + 1;
+                                let line_character_end =
+                                    line_character_start + trimmed_line.len() - 1;
+                                Some((trimmed_line, line_character_start..=line_character_end))
+                            }
+                        }
                         Some(Ok(re)) => {
                             if let Some(c) = re.captures(line) {
                                 // If named group "value" exists use it, otherwise use whole match
                                 if let Some(m) = c.name("value") {
-                                    Some(m.as_str())
+                                    let range = m.range();
+                                    Some((m.as_str(), range.start + 1..=range.end))
                                 } else {
-                                    c.get(0).map(|m| m.as_str())
+                                    c.get(0).map(|m| {
+                                        let range = m.range();
+                                        (m.as_str(), range.start + 1..=range.end)
+                                    })
                                 }
                             } else {
-                                None // skip line when no match
+                                None // Skip line when no match
                             }
                         }
                         Some(Err(e)) => {
@@ -71,15 +82,22 @@ impl ValidatorSync for KeepUniqueValidator {
                             ));
                         }
                     };
-                    if let Some(key) = key_opt
-                        && !key.trim().is_empty()
-                        && !seen.insert(key)
+                    if let Some((matched_line, line_range)) = line_match
+                        && !seen.insert(matched_line)
                     {
-                        let line_no = block.starts_at_line + idx;
+                        let violation_line_number = block.starts_at_line + line_number;
+                        let line_character_start = *line_range.start(); // Start position is 1-based.
+                        let line_character_end = *line_range.end(); // End position is 1-based and inclusive.
                         violations
                             .entry(file_path.clone())
                             .or_insert_with(Vec::new)
-                            .push(create_violation(file_path, block, line_no)?);
+                            .push(create_violation(
+                                file_path,
+                                Arc::clone(block),
+                                violation_line_number,
+                                line_character_start,
+                                line_character_end,
+                            )?);
                         break;
                     }
                 }
@@ -111,22 +129,29 @@ impl ValidatorDetector for KeepUniqueValidatorDetector {
 
 fn create_violation(
     block_file_path: &str,
-    block: &Block,
-    line_number_duplicated: usize,
+    block: Arc<Block>,
+    violation_line_number: usize,
+    violation_character_start: usize,
+    violation_character_end: usize,
 ) -> anyhow::Result<Violation> {
     let message = format!(
         "Block {}:{} defined at line {} has a duplicated line {}",
         block_file_path,
         block.name_display(),
         block.starts_at_line,
-        line_number_duplicated,
+        violation_line_number,
     );
     Ok(Violation::new(
+        ViolationRange::new(
+            violation_line_number,
+            violation_character_start,
+            violation_line_number,
+            violation_character_end,
+        ),
         "keep-unique".to_string(),
         message,
-        Some(serde_json::to_value(KeepUniqueViolation {
-            line_number_duplicated,
-        })?),
+        block,
+        None,
     ))
 }
 
@@ -135,7 +160,6 @@ mod validate_tests {
     use super::*;
     use crate::blocks::{Block, FileBlocks};
     use crate::test_utils;
-    use serde_json::json;
 
     #[test]
     fn empty_blocks_returns_no_violations() -> anyhow::Result<()> {
@@ -217,9 +241,36 @@ mod validate_tests {
     }
 
     #[test]
+    fn spaces_in_regex_are_not_ignored() -> anyhow::Result<()> {
+        let validator = KeepUniqueValidator::new();
+        let file1_contents = "block contents goes here:  1 \n 2 \n1\n 1 ";
+        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
+            "file1".to_string(),
+            FileBlocks {
+                file_contents: file1_contents.to_string(),
+                blocks: vec![Arc::new(Block::new(
+                    1,
+                    5,
+                    HashMap::from([("keep-unique".to_string(), " \\d+ ".to_string())]),
+                    test_utils::substr_range(file1_contents, " 1 \n 2 \n1\n 1 "),
+                ))],
+            },
+        )])));
+
+        let violations = validator.validate(context)?;
+
+        assert_eq!(violations.len(), 1);
+        let file1_violations = violations.get("file1").unwrap();
+        assert_eq!(file1_violations.len(), 1);
+        // The last line ` 1 ` is the only duplicate.
+        assert_eq!(file1_violations[0].range, ViolationRange::new(4, 1, 4, 3));
+        Ok(())
+    }
+
+    #[test]
     fn duplicate_returns_violation_first_dup_line_reported() -> anyhow::Result<()> {
         let validator = KeepUniqueValidator::new();
-        let file1_contents = "block contents goes here: A\nB\nC\nB\nC";
+        let file1_contents = "block contents goes here: A\nBB\nC\nBB\nC\nBB";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
@@ -228,7 +279,7 @@ mod validate_tests {
                     1,
                     6,
                     HashMap::from([("keep-unique".to_string(), "".to_string())]),
-                    test_utils::substr_range(file1_contents, "A\nB\nC\nB\nC"),
+                    test_utils::substr_range(file1_contents, "A\nBB\nC\nBB\nC\nBB"),
                 ))],
             },
         )])));
@@ -236,18 +287,15 @@ mod validate_tests {
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations.get("file1").unwrap().len(), 1);
+        let file1_violations = violations.get("file1").unwrap();
+        assert_eq!(file1_violations.len(), 1);
         assert_eq!(
-            violations.get("file1").unwrap()[0].error,
+            file1_violations[0].message,
             "Block file1:(unnamed) defined at line 1 has a duplicated line 4"
         );
-        assert_eq!(violations.get("file1").unwrap()[0].violation, "keep-unique");
-        assert_eq!(
-            violations.get("file1").unwrap()[0].details,
-            Some(json!({
-                "line_number_duplicated": 4,
-            }))
-        );
+        assert_eq!(file1_violations[0].code, "keep-unique");
+        // Entire line is in the range.
+        assert_eq!(file1_violations[0].range, ViolationRange::new(4, 1, 4, 2));
         Ok(())
     }
 
@@ -270,11 +318,10 @@ mod validate_tests {
         )])));
         let violations = validator.validate(context)?;
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations.get("file1").unwrap().len(), 1);
-        assert_eq!(
-            violations.get("file1").unwrap()[0].details,
-            Some(json!({"line_number_duplicated": 3}))
-        );
+        let file1_violations = violations.get("file1").unwrap();
+        assert_eq!(file1_violations.len(), 1);
+        // Only the matched value group is in the range.
+        assert_eq!(file1_violations[0].range, ViolationRange::new(3, 4, 3, 4));
         Ok(())
     }
 
@@ -297,11 +344,10 @@ mod validate_tests {
         )])));
         let violations = validator.validate(context)?;
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations.get("file1").unwrap().len(), 1);
-        assert_eq!(
-            violations.get("file1").unwrap()[0].details,
-            Some(json!({"line_number_duplicated": 3}))
-        );
+        let file1_violations = violations.get("file1").unwrap();
+        assert_eq!(file1_violations.len(), 1);
+        // Full regex match is in the range.
+        assert_eq!(file1_violations[0].range, ViolationRange::new(3, 1, 3, 4));
         Ok(())
     }
 

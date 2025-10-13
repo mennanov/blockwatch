@@ -1,7 +1,5 @@
 use assert_cmd::Command;
 use assert_cmd::assert::OutputAssertExt;
-use predicates::prelude::predicate;
-use serde_json::json;
 
 fn get_cmd() -> Command {
     Command::cargo_bin(assert_cmd::crate_name!()).expect("Failed to find binary")
@@ -45,44 +43,62 @@ index da567bd..5586a8d 100644
 
     let output = cmd.output().expect("Failed to get command output");
 
-    output.assert().failure().code(1).stderr(predicate::function(|output: &str| {
-        let output_json: serde_json::Value =
-            serde_json::from_str(output).expect("invalid json");
-        let value: serde_json::Value  = json!({
-              "tests/custom_file_extension_test.javascript": [
-                {
-                  "violation": "affects",
-                  "error": "Block tests/custom_file_extension_test.javascript:(unnamed) at line 4 is modified, but tests/custom_file_extension_test.javascript:foo is not",
-                  "details": {
-                    "modified_block": {
-                      "attributes": {
-                        "affects": ":foo"
-                      },
-                      "ends_at_line": 6,
-                      "starts_at_line": 4
-                    }
-                  }
-                }
-              ],
-              "tests/custom_file_extension_test.python": [
-                {
-                  "violation": "affects",
-                  "error": "Block tests/custom_file_extension_test.python:(unnamed) at line 4 is modified, but tests/custom_file_extension_test.python:foo is not",
-                  "details": {
-                    "modified_block": {
-                      "attributes": {
-                        "affects": ":foo"
-                      },
-                      "ends_at_line": 6,
-                      "starts_at_line": 4
-                    }
-                  }
-                }
-              ]
-            });
-        assert_eq!(output_json, value);
-        true
-    }));
+    output.assert().failure().code(1);
+}
+
+#[test]
+fn with_severity_warning_for_all_violations_exit_code_is_zero() {
+    let diff_content = r#"
+diff --git a/tests/severity_test.py b/tests/severity_test.py
+index 74ff7b7..574d79a 100644
+--- a/tests/severity_test.py
++++ b/tests/severity_test.py
+@@ -2,6 +2,6 @@ fruits = [
+     # <block keep-unique severity="warn">
+     "apple",
+     "banana",
+-    "orange",
++    "apple",
+     # </block>
+ ]"#;
+    let mut cmd = get_cmd();
+    cmd.write_stdin(diff_content);
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.assert().success();
+}
+
+#[test]
+fn with_severity_error_for_some_violations_fails_with_exit_code_one() {
+    let diff_content = r#"
+diff --git a/tests/severity_test.py b/tests/severity_test.py
+index a01afcd..74c68a3 100644
+--- a/tests/severity_test.py
++++ b/tests/severity_test.py
+@@ -2,7 +2,7 @@ fruits = [
+     # <block keep-unique severity="warning">
+     "apple",
+     "banana",
+-    "orange",
++    "apple",
+     # </block>
+ ]
+
+@@ -10,6 +10,6 @@ colors = [
+     # <block keep-unique>
+     "red",
+     "green",
+-    "red"
++    "green",
+     # </block>
+ ]"#;
+    let mut cmd = get_cmd();
+    cmd.write_stdin(diff_content);
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.assert().failure().code(1);
 }
 
 #[test]

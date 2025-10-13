@@ -57,9 +57,20 @@ index 6781fec..4ce6a3b 100644
             let value: serde_json::Value  = json!({
               "tests/line_count_test.py": [
                 {
-                  "violation": "line-count",
-                  "error": "Block tests/line_count_test.py:(unnamed) defined at line 12 has 3 lines, which does not satisfy >3",
-                  "details": {
+                  "range": {
+                    "start": {
+                        "line": 12,
+                        "character": 0
+                    },
+                    "end": {
+                        "line": 16,
+                        "character": 0
+                    }
+                  },
+                  "code": "line-count",
+                  "message": "Block tests/line_count_test.py:(unnamed) defined at line 12 has 3 lines, which does not satisfy >3",
+                  "severity": 1,
+                  "data": {
                     "actual": 3,
                     "expected": 3,
                     "op": ">"

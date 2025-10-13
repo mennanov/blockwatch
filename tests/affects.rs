@@ -34,16 +34,22 @@ index abc123..def456 100644
             let value: serde_json::Value  = json!({
               "tests/affects_test.md": [
                 {
-                  "violation": "affects",
-                  "error": "Block tests/affects_test.md:(unnamed) at line 3 is modified, but tests/affects_test.md:foo is not",
-                  "details": {
-                    "modified_block": {
-                      "attributes": {
-                        "affects": ":foo"
-                      },
-                      "ends_at_line": 6,
-                      "starts_at_line": 3
+                  "range": {
+                    "start": {
+                        "line": 3,
+                        "character": 0
+                    },
+                    "end": {
+                        "line": 6,
+                        "character": 0
                     }
+                  },
+                  "code": "affects",
+                  "message": "Block tests/affects_test.md:(unnamed) at line 3 is modified, but tests/affects_test.md:foo is not",
+                  "severity": 1,
+                  "data": {
+                    "affected_block_file_path": "tests/affects_test.md",
+                    "affected_block_name": "foo",
                   }
                 }
               ]

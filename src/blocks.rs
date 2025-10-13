@@ -1,6 +1,7 @@
 use crate::parsers::BlocksParser;
 use anyhow::Context;
 use serde::Serialize;
+use serde_repr::Serialize_repr;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::Range;
@@ -27,14 +28,14 @@ pub struct Block {
 impl Block {
     /// Creates a new `Block` with the given attributes and content indexes.
     pub(crate) fn new(
-        starts_at: usize,
-        ends_at: usize,
+        starts_at_line: usize,
+        ends_at_line: usize,
         attributes: HashMap<String, String>,
         content_range: Range<usize>,
     ) -> Self {
         Self {
-            starts_at_line: starts_at,
-            ends_at_line: ends_at,
+            starts_at_line,
+            ends_at_line,
             attributes,
             content_range,
         }
@@ -72,6 +73,42 @@ impl Block {
     /// Returns the block's content from the given `source`.
     pub(crate) fn content<'source>(&self, source: &'source str) -> &'source str {
         &source[self.content_range.clone()]
+    }
+
+    /// Returns the block's severity.
+    pub(crate) fn severity(&self) -> anyhow::Result<BlockSeverity> {
+        self.attributes
+            .get("severity")
+            .map_or(Ok(BlockSeverity::Error), |s| {
+                BlockSeverity::try_from(s.as_str())
+            })
+    }
+}
+
+/// Block's severity.
+///
+/// Mirrors [LSP DiagnosticSeverity](https://github.com/microsoft/vscode-languageserver-node/blob/3412a17149850f445bf35b4ad71148cfe5f8411e/types/src/main.ts#L614)
+#[derive(Clone, Copy, Serialize_repr, Debug, PartialEq)]
+#[repr(u8)]
+pub enum BlockSeverity {
+    Error = 1,
+    Warning = 2,
+    Info = 3,
+    Hint = 4,
+}
+
+impl TryFrom<&str> for BlockSeverity {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, <BlockSeverity as TryFrom<&str>>::Error> {
+        match value.to_lowercase().as_str() {
+            "error" => Ok(BlockSeverity::Error),
+            "warning" => Ok(BlockSeverity::Warning),
+            "info" => Ok(BlockSeverity::Info),
+            "hint" => Ok(BlockSeverity::Hint),
+            "" => Ok(BlockSeverity::Error),
+            _ => Err(anyhow::anyhow!("unrecognized block severity: {value}")),
+        }
     }
 }
 

@@ -58,10 +58,20 @@ index ca94c7e..8a99694 100644
             let value: serde_json::Value  = json!({
               "tests/line_pattern_test.py": [
                 {
-                  "violation": "line-pattern",
-                  "error": "Block tests/line_pattern_test.py:(unnamed) defined at line 11 has a non-matching line 13 (pattern: /'[A-Z]+'/)",
-                  "details": {
-                    "line_number_not_matching": 13,
+                  "range": {
+                    "start": {
+                        "line": 13,
+                        "character": 5
+                    },
+                    "end": {
+                        "line": 13,
+                        "character": 11
+                    }
+                  },
+                  "code": "line-pattern",
+                  "message": "Block tests/line_pattern_test.py:(unnamed) defined at line 11 has a non-matching line 13 (pattern: /'[A-Z]+'/)",
+                  "severity": 1,
+                  "data": {
                     "pattern": "'[A-Z]+'"
                   }
                 }
