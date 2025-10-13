@@ -7,7 +7,9 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::str::FromStr;
 use std::sync::Arc;
+use strum_macros::EnumString;
 
 const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
 
@@ -80,7 +82,8 @@ impl Block {
         self.attributes
             .get("severity")
             .map_or(Ok(BlockSeverity::Error), |s| {
-                BlockSeverity::try_from(s.as_str())
+                BlockSeverity::from_str(s.as_str())
+                    .context("Failed to parse \"severity\" attribute")
             })
     }
 }
@@ -88,28 +91,14 @@ impl Block {
 /// Block's severity.
 ///
 /// Mirrors [LSP DiagnosticSeverity](https://github.com/microsoft/vscode-languageserver-node/blob/3412a17149850f445bf35b4ad71148cfe5f8411e/types/src/main.ts#L614)
-#[derive(Clone, Copy, Serialize_repr, Debug, PartialEq)]
+#[derive(Clone, Copy, Serialize_repr, EnumString, Debug, PartialEq)]
+#[strum(ascii_case_insensitive)]
 #[repr(u8)]
 pub enum BlockSeverity {
     Error = 1,
     Warning = 2,
     Info = 3,
     Hint = 4,
-}
-
-impl TryFrom<&str> for BlockSeverity {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &str) -> Result<Self, <BlockSeverity as TryFrom<&str>>::Error> {
-        match value.to_lowercase().as_str() {
-            "error" => Ok(BlockSeverity::Error),
-            "warning" => Ok(BlockSeverity::Warning),
-            "info" => Ok(BlockSeverity::Info),
-            "hint" => Ok(BlockSeverity::Hint),
-            "" => Ok(BlockSeverity::Error),
-            _ => Err(anyhow::anyhow!("unrecognized block severity: {value}")),
-        }
-    }
 }
 
 /// Represents a source field with its corresponding modified blocks.
@@ -202,6 +191,49 @@ mod test_utils {
 
     pub(crate) fn new_empty_block(starts_at: usize, ends_at: usize) -> Block {
         Block::new(starts_at, ends_at, HashMap::new(), 0..0)
+    }
+}
+
+#[cfg(test)]
+mod block_severity_from_str_tests {
+    use crate::blocks::{Block, BlockSeverity};
+    use std::collections::HashMap;
+
+    pub(crate) fn new_empty_block_with_severity(severity: &str) -> Block {
+        Block::new(
+            0,
+            0,
+            HashMap::from([("severity".into(), severity.into())]),
+            0..0,
+        )
+    }
+
+    #[test]
+    fn with_valid_value_returns_corresponding_severity() {
+        let block = new_empty_block_with_severity("warning");
+
+        assert_eq!(block.severity().unwrap(), BlockSeverity::Warning);
+    }
+
+    #[test]
+    fn severity_is_case_insensitive() {
+        let block = new_empty_block_with_severity("InFo");
+
+        assert_eq!(block.severity().unwrap(), BlockSeverity::Info);
+    }
+
+    #[test]
+    fn block_with_no_severity_returns_error_severity_by_default() {
+        let block = Block::new(0, 0, HashMap::new(), 0..0);
+
+        assert_eq!(block.severity().unwrap(), BlockSeverity::Error);
+    }
+
+    #[test]
+    fn with_invalid_value_returns_error() {
+        let block = new_empty_block_with_severity("warn");
+
+        assert!(block.severity().is_err());
     }
 }
 
