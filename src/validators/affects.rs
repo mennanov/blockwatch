@@ -1,6 +1,6 @@
 use crate::blocks::Block;
 use crate::validators;
-use crate::validators::{ValidatorType, Violation};
+use crate::validators::{ValidatorType, Violation, ViolationRange};
 use anyhow::Context;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -16,7 +16,8 @@ impl AffectsValidator {
 
 #[derive(Serialize)]
 struct AffectsViolation<'a> {
-    modified_block: &'a Block,
+    affected_block_file_path: &'a str,
+    affected_block_name: &'a str,
 }
 
 impl validators::ValidatorSync for AffectsValidator {
@@ -57,7 +58,7 @@ impl validators::ValidatorSync for AffectsValidator {
                                     .or_insert_with(Vec::new)
                                     .push(create_violation(
                                         modified_block_file_path,
-                                        modified_block,
+                                        Arc::clone(modified_block),
                                         affected_file_path.as_str(),
                                         affected_block_name.as_str(),
                                     )?);
@@ -87,6 +88,59 @@ impl validators::ValidatorDetector for AffectsValidatorDetector {
             Ok(None)
         }
     }
+}
+
+fn create_violation(
+    modified_block_file_path: &str,
+    modified_block: Arc<Block>,
+    affected_block_file_path: &str,
+    affected_block_name: &str,
+) -> anyhow::Result<Violation> {
+    let message = format!(
+        "Block {}:{} at line {} is modified, but {}:{} is not",
+        modified_block_file_path,
+        modified_block.name_display(),
+        modified_block.starts_at_line,
+        affected_block_file_path,
+        affected_block_name
+    );
+    let details = serde_json::to_value(AffectsViolation {
+        affected_block_file_path,
+        affected_block_name,
+    })
+    .context("failed to serialize AffectsViolation block")?;
+    Ok(Violation::new(
+        ViolationRange::new(
+            modified_block.starts_at_line,
+            0, // TODO: The block's start position is not known. See issue #46.
+            modified_block.ends_at_line,
+            0, // TODO: The block's end position is not known. See issue #46.
+        ),
+        "affects".to_string(),
+        message,
+        modified_block,
+        Some(details),
+    ))
+}
+
+fn parse_affects_attribute(value: &str) -> anyhow::Result<Vec<(Option<String>, String)>> {
+    let mut result = Vec::new();
+    for block_ref in value.split(',') {
+        let block = block_ref.trim();
+        let (mut filename, block_name) = block
+            .split_once(":")
+            .context(format!("Invalid \"affects\" attribute value: \"{block}\"",))?;
+        filename = filename.trim();
+        result.push((
+            if filename.is_empty() {
+                None
+            } else {
+                Some(filename.to_string())
+            },
+            block_name.trim().to_string(),
+        ));
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -148,15 +202,20 @@ mod validate_tests {
         )))?;
 
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations.get("file1").unwrap().len(), 2);
+        let file1_violations = violations.get("file1").unwrap();
+        assert_eq!(file1_violations.len(), 2);
         assert_eq!(
-            violations.get("file1").unwrap()[0].error,
+            file1_violations[0].message,
             "Block file1:(unnamed) at line 1 is modified, but file1:foo is not"
         );
+        // TODO: The block's start & end character position is not known. See issue #46.
+        assert_eq!(file1_violations[0].range, ViolationRange::new(1, 0, 10, 0));
         assert_eq!(
-            violations.get("file1").unwrap()[1].error,
+            file1_violations[1].message,
             "Block file1:(unnamed) at line 12 is modified, but file1:foo is not"
         );
+        // TODO: The block's start & end character position is not known. See issue #46.
+        assert_eq!(file1_violations[1].range, ViolationRange::new(12, 0, 16, 0));
 
         Ok(())
     }
@@ -216,15 +275,20 @@ mod validate_tests {
         )))?;
 
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations.get("file1").unwrap().len(), 2);
+        let file1_violations = violations.get("file1").unwrap();
+        assert_eq!(file1_violations.len(), 2);
         assert_eq!(
-            violations.get("file1").unwrap()[0].error,
+            file1_violations[0].message,
             "Block file1:(unnamed) at line 1 is modified, but file2:foo is not"
         );
+        // TODO: The block's start & end character position is not known. See issue #46.
+        assert_eq!(file1_violations[0].range, ViolationRange::new(1, 0, 10, 0));
         assert_eq!(
-            violations.get("file1").unwrap()[1].error,
+            file1_violations[1].message,
             "Block file1:(unnamed) at line 12 is modified, but file3:bar is not"
         );
+        // TODO: The block's start & end character position is not known. See issue #46.
+        assert_eq!(file1_violations[1].range, ViolationRange::new(12, 0, 16, 0));
 
         Ok(())
     }
@@ -374,11 +438,14 @@ mod validate_tests {
         )))?;
 
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations.get("file1").unwrap().len(), 1);
+        let file1_violations = violations.get("file1").unwrap();
+        assert_eq!(file1_violations.len(), 1);
         assert_eq!(
-            violations.get("file1").unwrap()[0].error,
+            file1_violations[0].message,
             "Block file1:foo at line 1 is modified, but file2:buzz is not"
         );
+        // TODO: The block's start & end character position is not known. See issue #46.
+        assert_eq!(file1_violations[0].range, ViolationRange::new(1, 0, 10, 0));
         Ok(())
     }
 
@@ -439,50 +506,6 @@ mod validate_tests {
         assert!(violations.is_empty());
         Ok(())
     }
-}
-
-fn create_violation(
-    modified_block_file_path: &str,
-    modified_block: &Block,
-    affected_block_file_path: &str,
-    affected_block_name: &str,
-) -> anyhow::Result<Violation> {
-    let message = format!(
-        "Block {}:{} at line {} is modified, but {}:{} is not",
-        modified_block_file_path,
-        modified_block.name_display(),
-        modified_block.starts_at_line,
-        affected_block_file_path,
-        affected_block_name
-    );
-    Ok(Violation::new(
-        "affects".to_string(),
-        message,
-        Some(
-            serde_json::to_value(AffectsViolation { modified_block })
-                .context("failed to serialize AffectsViolation block")?,
-        ),
-    ))
-}
-
-fn parse_affects_attribute(value: &str) -> anyhow::Result<Vec<(Option<String>, String)>> {
-    let mut result = Vec::new();
-    for block_ref in value.split(',') {
-        let block = block_ref.trim();
-        let (mut filename, block_name) = block
-            .split_once(":")
-            .context(format!("Invalid \"affects\" attribute value: \"{block}\"",))?;
-        filename = filename.trim();
-        result.push((
-            if filename.is_empty() {
-                None
-            } else {
-                Some(filename.to_string())
-            },
-            block_name.trim().to_string(),
-        ));
-    }
-    Ok(result)
 }
 
 #[cfg(test)]

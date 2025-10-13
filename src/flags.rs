@@ -52,7 +52,7 @@ impl Args {
     pub fn validate(&self, supported_extensions: HashSet<String>) -> anyhow::Result<()> {
         for (key, val) in &self.extensions {
             if !supported_extensions.contains(val) {
-                anyhow::bail!("Unsupported extension mapping: {}={}", key, val);
+                anyhow::bail!("Unsupported extension mapping: {key}={val}");
             }
         }
 

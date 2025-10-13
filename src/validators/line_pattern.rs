@@ -1,6 +1,8 @@
 use crate::blocks::Block;
 use crate::validators;
-use crate::validators::{ValidatorDetector, ValidatorSync, ValidatorType, Violation};
+use crate::validators::{
+    ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
+};
 use anyhow::anyhow;
 use regex::Regex;
 use serde::Serialize;
@@ -17,7 +19,6 @@ impl LinePatternValidator {
 
 #[derive(Serialize)]
 struct LinePatternViolation {
-    line_number_not_matching: usize,
     pattern: String,
 }
 
@@ -43,21 +44,31 @@ impl ValidatorSync for LinePatternValidator {
                         e
                     )
                 })?;
-                for (idx, mut line) in block
+                for (line_number, line) in block
                     .content(&file_blocks.file_contents)
                     .lines()
                     .enumerate()
                 {
-                    line = line.trim();
-                    if line.is_empty() {
+                    let trimmed_line = line.trim();
+                    if trimmed_line.is_empty() {
                         continue;
                     }
-                    if !re.is_match(line) {
-                        let line_no = block.starts_at_line + idx;
+                    if !re.is_match(trimmed_line) {
+                        let violation_line_number = block.starts_at_line + line_number;
+                        let line_character_start =
+                            trimmed_line.as_ptr() as usize - line.as_ptr() as usize + 1; // Start position is 1-based.
+                        let line_character_end = line_character_start + trimmed_line.len() - 1; // End position is 1-based and inclusive.
                         violations
                             .entry(file_path.clone())
                             .or_insert_with(Vec::new)
-                            .push(create_violation(file_path, block, pattern, line_no)?);
+                            .push(create_violation(
+                                file_path,
+                                Arc::clone(block),
+                                pattern,
+                                violation_line_number,
+                                line_character_start,
+                                line_character_end,
+                            )?);
                         break;
                     }
                 }
@@ -89,23 +100,31 @@ impl ValidatorDetector for LinePatternValidatorDetector {
 
 fn create_violation(
     block_file_path: &str,
-    block: &Block,
+    block: Arc<Block>,
     pattern: &str,
-    line_number_not_matching: usize,
+    violation_line_number: usize,
+    violation_character_start: usize,
+    violation_character_end: usize,
 ) -> anyhow::Result<Violation> {
     let message = format!(
         "Block {}:{} defined at line {} has a non-matching line {} (pattern: /{}/)",
         block_file_path,
         block.name_display(),
         block.starts_at_line,
-        line_number_not_matching,
+        violation_line_number,
         pattern
     );
     Ok(Violation::new(
+        ViolationRange::new(
+            violation_line_number,
+            violation_character_start,
+            violation_line_number,
+            violation_character_end,
+        ),
         "line-pattern".to_string(),
         message,
+        block,
         Some(serde_json::to_value(LinePatternViolation {
-            line_number_not_matching,
             pattern: pattern.to_string(),
         })?),
     ))
@@ -192,7 +211,7 @@ mod validate_tests {
     #[test]
     fn non_matching_line_reports_first_violation_only() -> anyhow::Result<()> {
         let validator = LinePatternValidator::new();
-        let file1_contents = "block content goes here: OK\nfail\nALSOOK";
+        let file1_contents = "block content goes here: OK\n fail \nALSOOK";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
@@ -201,25 +220,23 @@ mod validate_tests {
                     1,
                     6,
                     HashMap::from([("line-pattern".to_string(), "^[A-Z]+$".to_string())]),
-                    test_utils::substr_range(file1_contents, "OK\nfail\nALSOOK"),
+                    test_utils::substr_range(file1_contents, "OK\n fail \nALSOOK"),
                 ))],
             },
         )])));
         let violations = validator.validate(context)?;
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations.get("file1").unwrap().len(), 1);
+        let file1_violations = violations.get("file1").unwrap();
+        assert_eq!(file1_violations.len(), 1);
         assert_eq!(
-            violations.get("file1").unwrap()[0].error,
+            file1_violations[0].message,
             "Block file1:(unnamed) defined at line 1 has a non-matching line 2 (pattern: /^[A-Z]+$/)"
         );
+        assert_eq!(file1_violations[0].code, "line-pattern");
+        assert_eq!(file1_violations[0].range, ViolationRange::new(2, 2, 2, 5));
         assert_eq!(
-            violations.get("file1").unwrap()[0].violation,
-            "line-pattern"
-        );
-        assert_eq!(
-            violations.get("file1").unwrap()[0].details,
+            file1_violations[0].data,
             Some(json!({
-                "line_number_not_matching": 2,
                 "pattern": "^[A-Z]+$"
             }))
         );

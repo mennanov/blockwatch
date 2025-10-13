@@ -1,6 +1,8 @@
 use crate::blocks::Block;
 use crate::validators;
-use crate::validators::{ValidatorDetector, ValidatorSync, ValidatorType, Violation};
+use crate::validators::{
+    ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
+};
 use anyhow::anyhow;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -57,32 +59,51 @@ impl ValidatorSync for LineCountValidator {
                     Op::Gt => actual > expected,
                 };
                 if !ok {
-                    let message = format!(
-                        "Block {}:{} defined at line {} has {} lines, which does not satisfy {}{}",
-                        file_path,
-                        block.name_display(),
-                        block.starts_at_line,
-                        actual,
-                        op.as_str(),
-                        expected
-                    );
                     violations
                         .entry(file_path.clone())
                         .or_insert_with(Vec::new)
-                        .push(Violation::new(
-                            "line-count".to_string(),
-                            message,
-                            Some(serde_json::to_value(LineCountViolation {
-                                actual,
-                                op: op.as_str().to_string(),
-                                expected,
-                            })?),
-                        ));
+                        .push(create_violation(
+                            file_path,
+                            Arc::clone(block),
+                            op,
+                            expected,
+                            actual,
+                        )?);
                 }
             }
         }
         Ok(violations)
     }
+}
+
+fn create_violation(
+    block_file_path: &str,
+    block: Arc<Block>,
+    operation: Op,
+    expected: usize,
+    actual: usize,
+) -> anyhow::Result<Violation> {
+    let message = format!(
+        "Block {}:{} defined at line {} has {} lines, which does not satisfy {}{}",
+        block_file_path,
+        block.name_display(),
+        block.starts_at_line,
+        actual,
+        operation.as_str(),
+        expected
+    );
+    Ok(Violation::new(
+        // TODO: The block's start and end positions are unavailable. See issue #46.
+        ViolationRange::new(block.starts_at_line, 0, block.ends_at_line, 0),
+        "line-count".to_string(),
+        message,
+        block,
+        Some(serde_json::to_value(LineCountViolation {
+            actual,
+            op: operation.as_str().to_string(),
+            expected,
+        })?),
+    ))
 }
 
 pub(crate) struct LineCountValidatorDetector();
@@ -281,15 +302,17 @@ mod tests {
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations.get("file2").unwrap().len(), 6);
-
-        assert_eq!(violations.get("file2").unwrap()[0].violation, "line-count");
+        let file2_violations = violations.get("file2").unwrap();
+        assert_eq!(file2_violations.len(), 6);
+        assert_eq!(file2_violations[0].code, "line-count");
         assert_eq!(
-            violations.get("file2").unwrap()[0].error,
+            file2_violations[0].message,
             "Block file2:(unnamed) defined at line 1 has 3 lines, which does not satisfy <3"
         );
+        // TODO: The block's start and end positions are unavailable. See issue #46.
+        assert_eq!(file2_violations[0].range, ViolationRange::new(1, 0, 5, 0));
         assert_eq!(
-            violations.get("file2").unwrap()[0].details,
+            file2_violations[0].data,
             Some(json!({
                 "actual": 3,
                 "op": "<",
@@ -297,13 +320,13 @@ mod tests {
             }))
         );
 
-        assert_eq!(violations.get("file2").unwrap()[1].violation, "line-count");
+        assert_eq!(file2_violations[1].code, "line-count");
         assert_eq!(
-            violations.get("file2").unwrap()[1].error,
+            file2_violations[1].message,
             "Block file2:(unnamed) defined at line 7 has 4 lines, which does not satisfy <=3"
         );
         assert_eq!(
-            violations.get("file2").unwrap()[1].details,
+            file2_violations[1].data,
             Some(json!({
                 "actual": 4,
                 "op": "<=",
@@ -311,13 +334,13 @@ mod tests {
             }))
         );
 
-        assert_eq!(violations.get("file2").unwrap()[2].violation, "line-count");
+        assert_eq!(file2_violations[2].code, "line-count");
         assert_eq!(
-            violations.get("file2").unwrap()[2].error,
+            file2_violations[2].message,
             "Block file2:(unnamed) defined at line 14 has 4 lines, which does not satisfy ==3"
         );
         assert_eq!(
-            violations.get("file2").unwrap()[2].details,
+            file2_violations[2].data,
             Some(json!({
                 "actual": 4,
                 "op": "==",
@@ -325,13 +348,13 @@ mod tests {
             }))
         );
 
-        assert_eq!(violations.get("file2").unwrap()[3].violation, "line-count");
+        assert_eq!(file2_violations[3].code, "line-count");
         assert_eq!(
-            violations.get("file2").unwrap()[3].error,
+            file2_violations[3].message,
             "Block file2:(unnamed) defined at line 20 has 2 lines, which does not satisfy ==3"
         );
         assert_eq!(
-            violations.get("file2").unwrap()[3].details,
+            file2_violations[3].data,
             Some(json!({
                 "actual": 2,
                 "op": "==",
@@ -339,13 +362,13 @@ mod tests {
             }))
         );
 
-        assert_eq!(violations.get("file2").unwrap()[4].violation, "line-count");
+        assert_eq!(file2_violations[4].code, "line-count");
         assert_eq!(
-            violations.get("file2").unwrap()[4].error,
+            file2_violations[4].message,
             "Block file2:(unnamed) defined at line 25 has 2 lines, which does not satisfy >=3"
         );
         assert_eq!(
-            violations.get("file2").unwrap()[4].details,
+            file2_violations[4].data,
             Some(json!({
                 "actual": 2,
                 "op": ">=",
@@ -353,13 +376,13 @@ mod tests {
             }))
         );
 
-        assert_eq!(violations.get("file2").unwrap()[5].violation, "line-count");
+        assert_eq!(file2_violations[5].code, "line-count");
         assert_eq!(
-            violations.get("file2").unwrap()[5].error,
+            file2_violations[5].message,
             "Block file2:(unnamed) defined at line 25 has 3 lines, which does not satisfy >3"
         );
         assert_eq!(
-            violations.get("file2").unwrap()[5].details,
+            file2_violations[5].data,
             Some(json!({
                 "actual": 3,
                 "op": ">",

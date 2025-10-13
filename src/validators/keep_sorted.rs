@@ -1,6 +1,8 @@
 use crate::blocks::Block;
 use crate::validators;
-use crate::validators::{ValidatorDetector, ValidatorSync, ValidatorType, Violation};
+use crate::validators::{
+    ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
+};
 use anyhow::{Context, anyhow};
 use serde::Serialize;
 use std::cmp::Ordering;
@@ -17,7 +19,6 @@ impl KeepSortedValidator {
 
 #[derive(Serialize)]
 struct KeepSortedViolation<'a> {
-    line_number_out_of_order: usize,
     order_by: &'a str,
 }
 
@@ -48,31 +49,38 @@ impl ValidatorSync for KeepSortedValidator {
                             Ordering::Less
                         };
                         let mut prev_line: Option<&str> = None;
-                        for (line_number, mut line) in block
+                        for (line_number, line) in block
                             .content(&file_blocks.file_contents)
                             .lines()
                             .enumerate()
                         {
-                            line = line.trim();
-                            if line.is_empty() {
+                            let trimmed_line = line.trim();
+                            if trimmed_line.is_empty() {
                                 continue;
                             }
                             if let Some(prev_line) = prev_line {
-                                let cmp = prev_line.cmp(line);
+                                let cmp = prev_line.cmp(trimmed_line);
                                 if cmp == ord {
+                                    let violation_line_number = block.starts_at_line + line_number;
+                                    let line_character_start =
+                                        trimmed_line.as_ptr() as usize - line.as_ptr() as usize + 1; // Start position is 1-based.
+                                    let line_character_end =
+                                        line_character_start + trimmed_line.len() - 1; // End position is 1-based and inclusive.
                                     violations
                                         .entry(file_path.clone())
                                         .or_insert_with(Vec::new)
                                         .push(create_violation(
                                             file_path,
-                                            block,
+                                            Arc::clone(block),
                                             keep_sorted_normalized.as_str(),
-                                            block.starts_at_line + line_number,
+                                            violation_line_number,
+                                            line_character_start,
+                                            line_character_end,
                                         )?);
                                     break;
                                 }
                             }
-                            prev_line = Some(line);
+                            prev_line = Some(trimmed_line);
                         }
                     }
                 }
@@ -105,24 +113,29 @@ impl ValidatorDetector for KeepSortedValidatorDetector {
 
 fn create_violation(
     block_file_path: &str,
-    block: &Block,
+    block: Arc<Block>,
     keep_sorted_value: &str,
-    line_number_out_of_order: usize,
+    violation_line_number: usize,
+    violation_character_start: usize,
+    violation_character_end: usize,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {}:{} defined at line {} has an out-of-order line {} ({})",
-        block_file_path,
+        "Block {block_file_path}:{} defined at line {} has an out-of-order line {violation_line_number} ({keep_sorted_value})",
         block.name_display(),
         block.starts_at_line,
-        line_number_out_of_order,
-        keep_sorted_value
     );
     Ok(Violation::new(
+        ViolationRange::new(
+            violation_line_number,
+            violation_character_start,
+            violation_line_number,
+            violation_character_end,
+        ),
         "keep-sorted".to_string(),
         message,
+        block,
         Some(
             serde_json::to_value(KeepSortedViolation {
-                line_number_out_of_order,
                 order_by: keep_sorted_value,
             })
             .context("failed to serialize AffectsViolation block")?,
@@ -311,7 +324,7 @@ mod validate_tests {
     #[test]
     fn unsorted_asc_returns_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "block contents goes here: A\nB\nC\nB";
+        let file1_contents = "block contents goes here: A\nB\nC\nBB";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
@@ -320,7 +333,7 @@ mod validate_tests {
                     1,
                     6,
                     HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
-                    test_utils::substr_range(file1_contents, "A\nB\nC\nB"),
+                    test_utils::substr_range(file1_contents, "A\nB\nC\nBB"),
                 ))],
             },
         )])));
@@ -328,16 +341,17 @@ mod validate_tests {
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations.get("file1").unwrap().len(), 1);
+        let file1_violations = violations.get("file1").unwrap();
+        assert_eq!(file1_violations.len(), 1);
         assert_eq!(
-            violations.get("file1").unwrap()[0].error,
+            file1_violations[0].message,
             "Block file1:(unnamed) defined at line 1 has an out-of-order line 4 (asc)"
         );
-        assert_eq!(violations.get("file1").unwrap()[0].violation, "keep-sorted",);
+        assert_eq!(file1_violations[0].code, "keep-sorted");
+        assert_eq!(file1_violations[0].range, ViolationRange::new(4, 1, 4, 2));
         assert_eq!(
-            violations.get("file1").unwrap()[0].details,
+            file1_violations[0].data,
             Some(json!({
-                "line_number_out_of_order": 4,
                 "order_by": "asc"
             }))
         );
@@ -364,16 +378,17 @@ mod validate_tests {
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations.get("file1").unwrap().len(), 1);
+        let file1_violations = violations.get("file1").unwrap();
+        assert_eq!(file1_violations.len(), 1);
         assert_eq!(
-            violations.get("file1").unwrap()[0].error,
+            file1_violations[0].message,
             "Block file1:(unnamed) defined at line 1 has an out-of-order line 3 (desc)"
         );
-        assert_eq!(violations.get("file1").unwrap()[0].violation, "keep-sorted",);
+        assert_eq!(file1_violations[0].code, "keep-sorted",);
+        assert_eq!(file1_violations[0].range, ViolationRange::new(3, 1, 3, 1));
         assert_eq!(
-            violations.get("file1").unwrap()[0].details,
+            file1_violations[0].data,
             Some(json!({
-                "line_number_out_of_order": 3,
                 "order_by": "desc"
             }))
         );

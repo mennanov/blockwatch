@@ -1,11 +1,13 @@
 use blockwatch::blocks;
+use blockwatch::blocks::BlockSeverity;
 use blockwatch::differ;
 use blockwatch::differ::HunksExtractor;
 use blockwatch::flags;
 use blockwatch::parsers;
 use blockwatch::validators;
 use clap::Parser;
-use std::io::Read;
+use std::collections::HashMap;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::{env, fs, process};
@@ -34,9 +36,27 @@ fn main() -> anyhow::Result<()> {
         validators::detect_validators(&context, validators::DETECTOR_FACTORIES)?;
     let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
     if !violations.is_empty() {
-        let json = serde_json::to_string_pretty(&violations)?;
-        eprintln!("{json}");
-        process::exit(1);
+        let mut has_error_severity = false;
+        let mut diagnostics: HashMap<String, Vec<serde_json::Value>> =
+            HashMap::with_capacity(violations.len());
+        for (file_path, file_violations) in violations {
+            let mut file_diagnostics = Vec::with_capacity(file_violations.len());
+            for violation in file_violations {
+                let diagnostic = violation.as_simple_diagnostic()?;
+                if diagnostic.severity() == BlockSeverity::Error {
+                    has_error_severity = true;
+                }
+                file_diagnostics.push(serde_json::to_value(diagnostic)?);
+            }
+            diagnostics.insert(file_path, file_diagnostics);
+        }
+
+        let mut stderr = std::io::stderr().lock();
+        serde_json::to_writer_pretty(&mut stderr, &diagnostics)?;
+        writeln!(&mut stderr)?;
+        if has_error_severity {
+            process::exit(1);
+        }
     }
     Ok(())
 }

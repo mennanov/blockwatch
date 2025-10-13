@@ -1,6 +1,8 @@
 use crate::blocks::Block;
 use crate::validators;
-use crate::validators::{ValidatorAsync, ValidatorDetector, ValidatorType, Violation};
+use crate::validators::{
+    ValidatorAsync, ValidatorDetector, ValidatorType, Violation, ViolationRange,
+};
 use anyhow::{Context, anyhow};
 use async_openai::Client;
 use async_openai::config::{Config, OPENAI_API_BASE, OpenAIConfig};
@@ -76,7 +78,7 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
                 let block = Arc::clone(block);
                 tasks.spawn(async move {
                     let result = client.check_block(condition, block_content).await;
-                    Self::process_ai_response(file_path, &block, result)
+                    Self::process_ai_response(file_path, block, result)
                 });
             }
         }
@@ -116,6 +118,36 @@ impl ValidatorDetector for CheckAiValidatorDetector {
     }
 }
 
+fn create_violation(
+    block_file_path: &str,
+    block: Arc<Block>,
+    ai_message: &str,
+) -> anyhow::Result<Violation> {
+    let details = serde_json::to_value(CheckAiViolation {
+        condition: block
+            .attributes
+            .get("check-ai")
+            .expect("check-ai attribute must be present")
+            .trim(),
+        ai_message: Some(ai_message),
+    })
+    .context("failed to serialize CheckAiDetails")?;
+    let error_message = format!(
+        "Block {}:{} defined at line {} failed AI check: {ai_message}",
+        block_file_path,
+        block.name_display(),
+        block.starts_at_line,
+    );
+    Ok(Violation::new(
+        // TODO: The block's start & end character position is not known. See issue #46.
+        ViolationRange::new(block.starts_at_line, 0, block.ends_at_line, 0),
+        "check-ai".to_string(),
+        error_message,
+        block,
+        Some(details),
+    ))
+}
+
 impl<C: AiClient> CheckAiValidator<C> {
     pub(super) fn with_client(client: C) -> Self {
         Self {
@@ -125,7 +157,7 @@ impl<C: AiClient> CheckAiValidator<C> {
 
     fn process_ai_response(
         file_path: String,
-        block: &Block,
+        block: Arc<Block>,
         result: anyhow::Result<Option<String>>,
     ) -> anyhow::Result<Option<(String, Violation)>> {
         match result.context(format!(
@@ -136,32 +168,8 @@ impl<C: AiClient> CheckAiValidator<C> {
         ))? {
             None => Ok(None),
             Some(msg) => {
-                let details = CheckAiViolation {
-                    condition: block
-                        .attributes
-                        .get("check-ai")
-                        .expect("check-ai attribute must be present")
-                        .trim(),
-                    ai_message: Some(&msg),
-                };
-                let error_message = format!(
-                    "Block {}:{} defined at line {} failed AI check: {}",
-                    file_path,
-                    block.name_display(),
-                    block.starts_at_line,
-                    msg
-                );
-                Ok(Some((
-                    file_path,
-                    Violation::new(
-                        "check-ai".to_string(),
-                        error_message,
-                        Some(
-                            serde_json::to_value(details)
-                                .context("failed to serialize CheckAiDetails")?,
-                        ),
-                    ),
-                )))
+                let violation = create_violation(&file_path, block, &msg)?;
+                Ok(Some((file_path, violation)))
             }
         }
     }
@@ -415,19 +423,20 @@ mod tests {
         let violations = validator.validate(context).await?;
         assert_eq!(violations.len(), 1);
         assert_eq!(violations["file1"].len(), 1);
-        let v = &violations["file1"][0];
-        assert_eq!(v.violation, "check-ai");
+        let violation = &violations["file1"][0];
+        assert_eq!(violation.code, "check-ai");
         assert_eq!(
-            v.error,
+            violation.message,
             "Block file1:(unnamed) defined at line 10 failed AI check: The block does not mention 'banana'. Add it."
         );
         assert_eq!(
-            v.details,
+            violation.data,
             Some(json!({
                 "condition": "must mention banana",
                 "ai_message": "The block does not mention 'banana'. Add it."
             }))
         );
+        assert_eq!(violation.range, ViolationRange::new(10, 0, 14, 0));
         Ok(())
     }
 

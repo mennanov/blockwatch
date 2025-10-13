@@ -122,12 +122,23 @@ index 1111111..2222222 100644
         .stderr(predicates::prelude::predicate::function(|output: &str| {
             let output_json: Value =
                 serde_json::from_str(output).expect("invalid json");
-            let value: Value  = json!({
+            let value: Value = json!({
               "tests/check_ai_test.py": [
                 {
-                  "violation": "check-ai",
-                  "error": "Block tests/check_ai_test.py:(unnamed) defined at line 7 failed AI check: The block does not mention 'banana'. Add it.",
-                  "details": {
+                  "range": {
+                    "start": {
+                        "line": 7,
+                        "character": 0
+                    },
+                    "end": {
+                        "line": 9,
+                        "character": 0
+                    }
+                  },
+                  "code": "check-ai",
+                  "message": "Block tests/check_ai_test.py:(unnamed) defined at line 7 failed AI check: The block does not mention 'banana'. Add it.",
+                  "severity": 1,
+                  "data": {
                     "condition": "must mention banana",
                     "ai_message": "The block does not mention 'banana'. Add it."
                   }

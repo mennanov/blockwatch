@@ -5,7 +5,7 @@ mod keep_unique;
 mod line_count;
 mod line_pattern;
 
-use crate::blocks::{Block, FileBlocks};
+use crate::blocks::{Block, BlockSeverity, FileBlocks};
 use crate::validators::affects::AffectsValidatorDetector;
 use crate::validators::check_ai::CheckAiValidatorDetector;
 use crate::validators::keep_sorted::KeepSortedValidatorDetector;
@@ -46,25 +46,93 @@ pub enum ValidatorType {
     Async(Box<dyn ValidatorAsync>),
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Debug)]
 pub struct Violation {
-    violation: String,
-    error: String,
-    details: Option<serde_json::Value>,
+    range: ViolationRange,
+    code: String,
+    message: String,
+    block: Arc<Block>,
+    data: Option<serde_json::Value>,
 }
 
 impl Violation {
     /// Constructs a new violation record with a name, error message, and optional machine-readable details.
-    pub(crate) fn new(
-        name: String,
-        error_message: String,
-        metadata: Option<serde_json::Value>,
+    pub fn new(
+        range: ViolationRange,
+        code: String,
+        message: String,
+        block: Arc<Block>,
+        data: Option<serde_json::Value>,
     ) -> Self {
         Self {
-            violation: name,
-            error: error_message,
-            details: metadata,
+            range,
+            code,
+            message,
+            block,
+            data,
         }
+    }
+
+    pub fn as_simple_diagnostic(&self) -> anyhow::Result<SimpleDiagnostic<'_>> {
+        Ok(SimpleDiagnostic {
+            range: &self.range,
+            code: self.code.as_str(),
+            message: self.message.as_str(),
+            severity: self.block.severity()?,
+            data: &self.data,
+        })
+    }
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+pub struct ViolationRange {
+    start: Position,
+    end: Position,
+}
+
+impl ViolationRange {
+    pub fn new(
+        start_line: usize,
+        start_character: usize,
+        end_line: usize,
+        end_character: usize,
+    ) -> Self {
+        Self {
+            start: Position {
+                line: start_line,
+                character: start_character,
+            },
+            end: Position {
+                line: end_line,
+                character: end_character,
+            },
+        }
+    }
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+struct Position {
+    line: usize,
+    character: usize,
+}
+
+/// Represents a simplified, serializable diagnostic message.
+///
+/// It mimics the [Diagnostic](https://github.com/microsoft/vscode-languageserver-node/blob/3412a17149850f445bf35b4ad71148cfe5f8411e/types/src/main.ts#L688)
+/// object but omits some redundant fields and keeps all line numbers 1-based instead of zero-based.
+#[derive(Serialize, Debug)]
+pub struct SimpleDiagnostic<'a> {
+    range: &'a ViolationRange,
+    code: &'a str,
+    message: &'a str,
+    severity: BlockSeverity,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: &'a Option<serde_json::Value>,
+}
+
+impl SimpleDiagnostic<'_> {
+    pub fn severity(&self) -> BlockSeverity {
+        self.severity
     }
 }
 
@@ -105,7 +173,7 @@ fn run_sync_validators(
                 }
             }
             Ok(Err(e)) => return Err(e),
-            Err(e) => return Err(anyhow::anyhow!("Failed to run validation: {:?}", e)),
+            Err(e) => return Err(anyhow::anyhow!("Failed to run validation: {e:?}")),
         }
     }
 
@@ -137,7 +205,7 @@ fn run_async_validators(
                     }
                 }
                 Ok(Err(e)) => return Err(e),
-                Err(e) => return Err(anyhow::anyhow!("Failed to run validation: {}", e)),
+                Err(e) => return Err(anyhow::anyhow!("Failed to run validation: {e}")),
             }
         }
 
@@ -162,12 +230,12 @@ pub fn run(
         std::thread::spawn(move || run_async_validators(context, async_validators));
     let sync_violations_result = sync_violations_handle
         .join()
-        .map_err(|e| anyhow::anyhow!("Failed to join sync violations thread: {:?}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to join sync violations thread: {e:?}"))?;
     let mut violations = sync_violations_result?;
 
     let async_violations_result = async_violations_handle
         .join()
-        .map_err(|e| anyhow::anyhow!("Failed to join async violations thread: {:?}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to join async violations thread: {e:?}"))?;
     let async_violations = async_violations_result?;
 
     for (file_path, file_violations) in async_violations {
@@ -232,17 +300,27 @@ pub fn detect_validators(
 
 #[cfg(test)]
 mod tests {
-    use crate::blocks::{Block, FileBlocks};
+    use crate::blocks::{Block, BlockSeverity, FileBlocks};
     use crate::validators;
     use crate::validators::{
         DetectorFactory, ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorSync,
-        ValidatorType, Violation, detect_validators,
+        ValidatorType, Violation, ViolationRange, detect_validators,
     };
     use async_trait::async_trait;
     use std::collections::HashMap;
     use std::sync::Arc;
 
-    struct FakeAsyncValidator();
+    fn empty_testing_block() -> Block {
+        Block::new(0, 0, HashMap::new(), 0..0)
+    }
+
+    fn empty_testing_violation_range() -> ViolationRange {
+        ViolationRange::new(0, 0, 0, 0)
+    }
+
+    struct FakeAsyncValidator {
+        testing_block: Arc<Block>,
+    }
 
     #[async_trait]
     impl ValidatorAsync for FakeAsyncValidator {
@@ -257,8 +335,10 @@ mod tests {
                     (
                         file_name.clone(),
                         vec![Violation::new(
+                            empty_testing_violation_range(),
                             "fake-async".to_string(),
                             "fake-async error message".to_string(),
+                            Arc::clone(&self.testing_block),
                             None,
                         )],
                     )
@@ -267,7 +347,10 @@ mod tests {
         }
     }
 
-    struct FakeSyncValidator();
+    struct FakeSyncValidator {
+        testing_block: Arc<Block>,
+    }
+
     impl ValidatorSync for FakeSyncValidator {
         fn validate(
             &self,
@@ -280,8 +363,10 @@ mod tests {
                     (
                         file_name.clone(),
                         vec![Violation::new(
+                            empty_testing_violation_range(),
                             "fake-sync".to_string(),
                             "fake-sync error message".to_string(),
+                            Arc::clone(&self.testing_block),
                             None,
                         )],
                     )
@@ -295,7 +380,9 @@ mod tests {
     impl ValidatorDetector for FakeAsyncValidatorDetector {
         fn detect(&self, block: &Block) -> anyhow::Result<Option<ValidatorType>> {
             if block.attributes.contains_key("fake-async") {
-                Ok(Some(ValidatorType::Async(Box::new(FakeAsyncValidator {}))))
+                Ok(Some(ValidatorType::Async(Box::new(FakeAsyncValidator {
+                    testing_block: Arc::new(empty_testing_block()),
+                }))))
             } else {
                 Ok(None)
             }
@@ -306,7 +393,9 @@ mod tests {
     impl ValidatorDetector for FakeSyncValidatorDetector {
         fn detect(&self, block: &Block) -> anyhow::Result<Option<ValidatorType>> {
             if block.attributes.contains_key("fake-sync") {
-                Ok(Some(ValidatorType::Sync(Box::new(FakeSyncValidator {}))))
+                Ok(Some(ValidatorType::Sync(Box::new(FakeSyncValidator {
+                    testing_block: Arc::new(empty_testing_block()),
+                }))))
             } else {
                 Ok(None)
             }
@@ -361,14 +450,14 @@ mod tests {
         assert_eq!(violations["file1"].len(), 2);
         let mut file1_violations = violations["file1"]
             .iter()
-            .map(|v| v.violation.as_str())
+            .map(|v| v.code.as_str())
             .collect::<Vec<_>>();
         file1_violations.sort();
         assert_eq!(file1_violations, vec!["fake-async", "fake-sync"]);
         assert_eq!(violations["file2"].len(), 2);
         let mut file2_violations = violations["file2"]
             .iter()
-            .map(|v| v.violation.as_str())
+            .map(|v| v.code.as_str())
             .collect::<Vec<_>>();
         file2_violations.sort();
         assert_eq!(file2_violations, vec!["fake-async", "fake-sync"]);
@@ -409,9 +498,9 @@ mod tests {
 
         assert_eq!(violations.len(), 2);
         assert_eq!(violations["file1"].len(), 1);
-        assert_eq!(violations["file1"][0].violation, "fake-sync");
+        assert_eq!(violations["file1"][0].code, "fake-sync");
         assert_eq!(violations["file2"].len(), 1);
-        assert_eq!(violations["file2"][0].violation, "fake-sync");
+        assert_eq!(violations["file2"][0].code, "fake-sync");
         Ok(())
     }
 
@@ -450,9 +539,33 @@ mod tests {
 
         assert_eq!(violations.len(), 2);
         assert_eq!(violations["file1"].len(), 1);
-        assert_eq!(violations["file1"][0].violation, "fake-async");
+        assert_eq!(violations["file1"][0].code, "fake-async");
         assert_eq!(violations["file2"].len(), 1);
-        assert_eq!(violations["file2"][0].violation, "fake-async");
+        assert_eq!(violations["file2"][0].code, "fake-async");
+        Ok(())
+    }
+
+    #[test]
+    fn block_without_severity_attr_has_default_error_severity() -> anyhow::Result<()> {
+        let block_without_severity = Arc::new(Block::new(0, 0, HashMap::new(), 0..0));
+        let context = ValidationContext::new(HashMap::from([(
+            "file1".to_string(),
+            FileBlocks {
+                file_contents: "".to_string(),
+                blocks: vec![Arc::clone(&block_without_severity)],
+            },
+        )]));
+        let validator = FakeSyncValidator {
+            testing_block: block_without_severity,
+        };
+        let violations = validators::run(Arc::new(context), vec![Box::new(validator)], vec![])?;
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations["file1"].len(), 1);
+        assert_eq!(
+            violations["file1"][0].as_simple_diagnostic()?.severity,
+            BlockSeverity::Error
+        );
+
         Ok(())
     }
 }
