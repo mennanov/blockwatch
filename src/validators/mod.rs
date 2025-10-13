@@ -73,7 +73,7 @@ impl Violation {
         }
     }
 
-    pub fn as_simple_diagnostic(&self) -> anyhow::Result<SimpleDiagnostic> {
+    pub fn as_simple_diagnostic(&self) -> anyhow::Result<SimpleDiagnostic<'_>> {
         Ok(SimpleDiagnostic {
             range: &self.range,
             code: self.code.as_str(),
