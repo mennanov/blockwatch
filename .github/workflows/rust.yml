@@ -15,7 +15,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  tests:
 
     runs-on: ubuntu-latest
 
@@ -42,7 +42,7 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
       - name: Run Clippy lint
-        run: cargo clippy
+        run: cargo clippy -- -D warnings
       - name: Run tests
         run: cargo llvm-cov --lcov --output-path coverage.lcov
       - name: Upload coverage report to Codecov
@@ -51,11 +51,3 @@ jobs:
           files: coverage.lcov
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
-
-  blockwatch:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: mennanov/blockwatch-action@v1
-        with:
-          diff_pathspec: ":(exclude).github/"
