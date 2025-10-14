@@ -32,8 +32,11 @@ fn main() -> anyhow::Result<()> {
         args.extensions(),
     )?;
     let context = validators::ValidationContext::new(modified_blocks);
-    let (sync_validators, async_validators) =
-        validators::detect_validators(&context, validators::DETECTOR_FACTORIES)?;
+    let (sync_validators, async_validators) = validators::detect_validators(
+        &context,
+        validators::DETECTOR_FACTORIES,
+        &args.disabled_validators(),
+    )?;
     let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
     if !violations.is_empty() {
         let mut has_error_severity = false;

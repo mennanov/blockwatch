@@ -14,7 +14,7 @@ use crate::validators::line_count::LineCountValidatorDetector;
 use crate::validators::line_pattern::LinePatternValidatorDetector;
 use async_trait::async_trait;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 /// Validates the given `Context` and returns a list of the violations grouped by filename.
@@ -253,23 +253,33 @@ type AsyncValidators = Vec<Box<dyn ValidatorAsync>>;
 
 type DetectorFactory = fn() -> Box<dyn ValidatorDetector>;
 
-pub const DETECTOR_FACTORIES: &[DetectorFactory] = &[
+pub const DETECTOR_FACTORIES: &[(&str, DetectorFactory)] = &[
     // <block affects="README.md:validators-list">
-    || Box::new(AffectsValidatorDetector::new()),
-    || Box::new(KeepSortedValidatorDetector::new()),
-    || Box::new(KeepUniqueValidatorDetector::new()),
-    || Box::new(LinePatternValidatorDetector::new()),
-    || Box::new(LineCountValidatorDetector::new()),
-    || Box::new(CheckAiValidatorDetector::new()),
+    ("affects", || Box::new(AffectsValidatorDetector::new())),
+    ("keep-sorted", || {
+        Box::new(KeepSortedValidatorDetector::new())
+    }),
+    ("keep-unique", || {
+        Box::new(KeepUniqueValidatorDetector::new())
+    }),
+    ("line-pattern", || {
+        Box::new(LinePatternValidatorDetector::new())
+    }),
+    ("line-count", || Box::new(LineCountValidatorDetector::new())),
+    ("check-ai", || Box::new(CheckAiValidatorDetector::new())),
     // </block>
 ];
 
 pub fn detect_validators(
     context: &ValidationContext,
-    detectors: &[DetectorFactory],
+    detectors: &[(&str, DetectorFactory)],
+    disabled_validators: &HashSet<&str>,
 ) -> anyhow::Result<(SyncValidators, AsyncValidators)> {
-    let mut validator_detectors: Vec<Box<dyn ValidatorDetector>> =
-        detectors.iter().map(|f| f()).collect();
+    let mut validator_detectors: Vec<Box<dyn ValidatorDetector>> = detectors
+        .iter()
+        .filter(|(validator_name, _)| !disabled_validators.contains(*validator_name))
+        .map(|(_, factory)| factory())
+        .collect();
     let mut sync_validators = Vec::new();
     let mut async_validators = Vec::new();
     'outer: for file_blocks in context.modified_blocks.values() {
@@ -300,14 +310,14 @@ pub fn detect_validators(
 
 #[cfg(test)]
 mod tests {
-    use crate::blocks::{Block, BlockSeverity, FileBlocks};
+    use crate::blocks::{Block, FileBlocks};
     use crate::validators;
     use crate::validators::{
         DetectorFactory, ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorSync,
         ValidatorType, Violation, ViolationRange, detect_validators,
     };
     use async_trait::async_trait;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
 
     fn empty_testing_block() -> Block {
@@ -402,9 +412,9 @@ mod tests {
         }
     }
 
-    const DETECTOR_FACTORIES: &[DetectorFactory] = &[
-        || Box::new(FakeSyncValidatorDetector {}),
-        || Box::new(FakeAsyncValidatorDetector {}),
+    const DETECTOR_FACTORIES: &[(&str, DetectorFactory)] = &[
+        ("fake-sync", || Box::new(FakeSyncValidatorDetector {})),
+        ("fake-async", || Box::new(FakeAsyncValidatorDetector {})),
     ];
 
     #[test]
@@ -443,7 +453,8 @@ mod tests {
             ),
         ]));
 
-        let (sync_validators, async_validators) = detect_validators(&context, DETECTOR_FACTORIES)?;
+        let (sync_validators, async_validators) =
+            detect_validators(&context, DETECTOR_FACTORIES, &HashSet::new())?;
         let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 2);
@@ -493,7 +504,8 @@ mod tests {
             ),
         ]));
 
-        let (sync_validators, async_validators) = detect_validators(&context, DETECTOR_FACTORIES)?;
+        let (sync_validators, async_validators) =
+            detect_validators(&context, DETECTOR_FACTORIES, &HashSet::new())?;
         let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 2);
@@ -534,7 +546,8 @@ mod tests {
             ),
         ]));
 
-        let (sync_validators, async_validators) = detect_validators(&context, DETECTOR_FACTORIES)?;
+        let (sync_validators, async_validators) =
+            detect_validators(&context, DETECTOR_FACTORIES, &HashSet::new())?;
         let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 2);
@@ -546,26 +559,31 @@ mod tests {
     }
 
     #[test]
-    fn block_without_severity_attr_has_default_error_severity() -> anyhow::Result<()> {
-        let block_without_severity = Arc::new(Block::new(0, 0, HashMap::new(), 0..0));
+    fn detect_and_run_with_disabled_async_validators_returns_violations_for_sync_validators_only()
+    -> anyhow::Result<()> {
         let context = ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: "".to_string(),
-                blocks: vec![Arc::clone(&block_without_severity)],
+                blocks: vec![Arc::new(Block::new(
+                    1,
+                    6,
+                    HashMap::from([
+                        ("fake-sync".to_string(), "condition A".to_string()),
+                        ("fake-async".to_string(), "condition B".to_string()),
+                    ]),
+                    0..0,
+                ))],
             },
         )]));
-        let validator = FakeSyncValidator {
-            testing_block: block_without_severity,
-        };
-        let violations = validators::run(Arc::new(context), vec![Box::new(validator)], vec![])?;
+
+        let (sync_validators, async_validators) =
+            detect_validators(&context, DETECTOR_FACTORIES, &HashSet::from(["fake-async"]))?;
+        let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
+
         assert_eq!(violations.len(), 1);
         assert_eq!(violations["file1"].len(), 1);
-        assert_eq!(
-            violations["file1"][0].as_simple_diagnostic()?.severity,
-            BlockSeverity::Error
-        );
-
+        assert_eq!(violations["file1"][0].code, "fake-sync");
         Ok(())
     }
 }

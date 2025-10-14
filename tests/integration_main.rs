@@ -1,5 +1,6 @@
 use assert_cmd::Command;
 use assert_cmd::assert::OutputAssertExt;
+use predicates::prelude::{PredicateBooleanExt, predicate};
 
 fn get_cmd() -> Command {
     Command::cargo_bin(assert_cmd::crate_name!()).expect("Failed to find binary")
@@ -37,13 +38,53 @@ index da567bd..5586a8d 100644
 "#;
 
     let mut cmd = get_cmd();
-    cmd.arg("-E python=py");
-    cmd.arg("-E javascript=js");
+    cmd.arg("-E").arg("python=py");
+    cmd.arg("-E").arg("javascript=js");
     cmd.write_stdin(diff_content);
 
     let output = cmd.output().expect("Failed to get command output");
 
     output.assert().failure().code(1);
+}
+
+#[test]
+fn with_disable_args() {
+    let diff_content = r#"
+diff --git a/tests/disabled_test.py b/tests/disabled_test.py
+index 6739b09..a8464fb 100644
+--- a/tests/isabled_test.py
++++ b/tests/disabled_test.py
+@@ -2,7 +2,7 @@ fruits = [
+     # <block keep-unique>
+     "apple",
+     "banana",
+-    "pear",
++    "apple",
+     # </block>
+ ]
+
+@@ -10,6 +10,6 @@ colors = [
+     # <block keep-sorted>
+     "blue",
+     "red",
+-    "yellow",
++    "green",
+     # </block>
+ ]
+"#;
+
+    let mut cmd = get_cmd();
+    cmd.arg("--disable=keep-sorted");
+    cmd.write_stdin(diff_content);
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("keep-unique"))
+        .stderr(predicate::str::contains("keep-sorted").not());
 }
 
 #[test]

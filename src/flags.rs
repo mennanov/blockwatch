@@ -1,12 +1,7 @@
+use crate::validators;
 use anyhow::Context;
 use clap::{Parser, builder::ValueParser, crate_version};
 use std::collections::{HashMap, HashSet};
-
-fn parse_extensions(s: &str) -> anyhow::Result<(String, String)> {
-    s.split_once('=')
-        .map(|(key, value)| (key.trim().to_string(), value.trim().to_string()))
-        .with_context(|| format!("Invalid KEY=VALUE format: {s}"))
-}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -37,6 +32,16 @@ pub struct Args {
         value_parser = ValueParser::new(parse_extensions),
     )]
     extensions: Vec<(String, String)>,
+
+    /// Disable a validator, e.g. -D check-ai -D line-count
+    #[arg(
+        short = 'D',
+        long = "disable",
+        value_name = "VALIDATOR",
+        action = clap::ArgAction::Append,
+        value_parser = ValueParser::new(parse_disable),
+    )]
+    disabled_validators: Vec<String>,
 }
 
 impl Args {
@@ -46,6 +51,11 @@ impl Args {
             .iter()
             .map(|(key, val)| (key.clone(), val.clone()))
             .collect()
+    }
+
+    /// Disabled validator names.
+    pub fn disabled_validators(&self) -> HashSet<&str> {
+        self.disabled_validators.iter().map(AsRef::as_ref).collect()
     }
 
     /// Validates that all user-provided extension values are supported by available parsers.
@@ -58,4 +68,27 @@ impl Args {
 
         Ok(())
     }
+}
+
+fn parse_extensions(s: &str) -> anyhow::Result<(String, String)> {
+    s.split_once('=')
+        .map(|(key, value)| (key.trim().to_string(), value.trim().to_string()))
+        .with_context(|| format!("Invalid KEY=VALUE format: {s}"))
+}
+
+fn parse_disable(value: &str) -> anyhow::Result<String> {
+    let validators: Vec<&str> = validators::DETECTOR_FACTORIES
+        .iter()
+        .map(|(validator_name, _)| *validator_name)
+        .collect();
+
+    validators
+        .contains(&value)
+        .then(|| value.trim().to_string())
+        .with_context(|| {
+            format!(
+                "Unknown validator: {value}. Available validators: {}",
+                validators.join(", ")
+            )
+        })
 }
