@@ -19,10 +19,14 @@ use std::collections::{HashMap, HashSet};
     # Provide extra extension mappings (map unknown extensions to supported grammars)
     git diff --patch | blockwatch -E cxx=cpp -E c++=cpp
 
+    # Disable specific validators
+    git diff --patch | blockwatch -D keep-sorted -D line-count
+
     # With zero context for tighter diffs (recommended for hooks)
     git diff --patch --unified=0 | blockwatch",
 )]
 pub struct Args {
+    // <block affects="README.md:cli-docs">
     /// Additional file extension mappings, e.g. -E c++=cpp -E cxx=cpp
     #[arg(
         short = 'E',
@@ -42,6 +46,7 @@ pub struct Args {
         value_parser = ValueParser::new(parse_disable),
     )]
     disabled_validators: Vec<String>,
+    // </block>
 }
 
 impl Args {

@@ -264,12 +264,42 @@ Download a pre-built binary for your platform from the [Releases page](https://g
 ## Usage & Integration
 
 ### Command Line
+[//]: # (<block name="cli-docs">)
 
 The simplest way to run it is by piping a git diff into the command:
 
 ```shell
 git diff --patch | blockwatch
 ```
+
+#### Disabling Validators
+
+You can selectively disable specific validators using the `-D` or `--disable` flag.
+
+**Available validators:**
+
+[//]: # (<block name="available-validators">)
+
+- [`affects`](#tracking-dependencies)
+- [`check-ai`](#validating-with-ai-llm)
+- [`keep-sorted`](#maintaining-lines-order)
+- [`keep-unique`](#ensuring-unique-lines)
+- [`line-count`](#validating-block-line-count)
+- [`line-pattern`](#validating-line-patterns)
+
+[//]: # (</block>)
+
+**Examples:**
+
+```shell
+# Disable a single validator
+git diff --patch | blockwatch --disable=keep-sorted
+
+# Disable multiple validators (use multiple -D flags)
+git diff --patch | blockwatch -D keep-sorted -D line-count
+```
+
+[//]: # (</block>)
 
 ### Pre-commit Hook
 
