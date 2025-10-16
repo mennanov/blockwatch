@@ -274,10 +274,17 @@ pub fn detect_validators(
     context: &ValidationContext,
     detectors: &[(&str, DetectorFactory)],
     disabled_validators: &HashSet<&str>,
+    enabled_validators: &HashSet<&str>,
 ) -> anyhow::Result<(SyncValidators, AsyncValidators)> {
     let mut validator_detectors: Vec<Box<dyn ValidatorDetector>> = detectors
         .iter()
-        .filter(|(validator_name, _)| !disabled_validators.contains(*validator_name))
+        .filter(|(validator_name, _)| {
+            if !enabled_validators.is_empty() {
+                enabled_validators.contains(validator_name)
+            } else {
+                !disabled_validators.contains(validator_name)
+            }
+        })
         .map(|(_, factory)| factory())
         .collect();
     let mut sync_validators = Vec::new();
@@ -453,8 +460,12 @@ mod tests {
             ),
         ]));
 
-        let (sync_validators, async_validators) =
-            detect_validators(&context, DETECTOR_FACTORIES, &HashSet::new())?;
+        let (sync_validators, async_validators) = detect_validators(
+            &context,
+            DETECTOR_FACTORIES,
+            &HashSet::new(),
+            &HashSet::new(),
+        )?;
         let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 2);
@@ -504,8 +515,12 @@ mod tests {
             ),
         ]));
 
-        let (sync_validators, async_validators) =
-            detect_validators(&context, DETECTOR_FACTORIES, &HashSet::new())?;
+        let (sync_validators, async_validators) = detect_validators(
+            &context,
+            DETECTOR_FACTORIES,
+            &HashSet::new(),
+            &HashSet::new(),
+        )?;
         let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 2);
@@ -546,8 +561,12 @@ mod tests {
             ),
         ]));
 
-        let (sync_validators, async_validators) =
-            detect_validators(&context, DETECTOR_FACTORIES, &HashSet::new())?;
+        let (sync_validators, async_validators) = detect_validators(
+            &context,
+            DETECTOR_FACTORIES,
+            &HashSet::new(),
+            &HashSet::new(),
+        )?;
         let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 2);
@@ -577,13 +596,50 @@ mod tests {
             },
         )]));
 
-        let (sync_validators, async_validators) =
-            detect_validators(&context, DETECTOR_FACTORIES, &HashSet::from(["fake-async"]))?;
+        let (sync_validators, async_validators) = detect_validators(
+            &context,
+            DETECTOR_FACTORIES,
+            &HashSet::from(["fake-async"]),
+            &HashSet::new(),
+        )?;
         let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 1);
         assert_eq!(violations["file1"].len(), 1);
         assert_eq!(violations["file1"][0].code, "fake-sync");
+        Ok(())
+    }
+
+    #[test]
+    fn detect_and_run_with_enabled_async_validators_returns_violations_for_async_validators_only()
+    -> anyhow::Result<()> {
+        let context = ValidationContext::new(HashMap::from([(
+            "file1".to_string(),
+            FileBlocks {
+                file_contents: "".to_string(),
+                blocks: vec![Arc::new(Block::new(
+                    1,
+                    6,
+                    HashMap::from([
+                        ("fake-sync".to_string(), "condition A".to_string()),
+                        ("fake-async".to_string(), "condition B".to_string()),
+                    ]),
+                    0..0,
+                ))],
+            },
+        )]));
+
+        let (sync_validators, async_validators) = detect_validators(
+            &context,
+            DETECTOR_FACTORIES,
+            &HashSet::new(),
+            &HashSet::from(["fake-async"]),
+        )?;
+        let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
+
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations["file1"].len(), 1);
+        assert_eq!(violations["file1"][0].code, "fake-async");
         Ok(())
     }
 }

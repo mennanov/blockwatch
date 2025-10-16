@@ -36,6 +36,7 @@ fn main() -> anyhow::Result<()> {
         &context,
         validators::DETECTOR_FACTORIES,
         &args.disabled_validators(),
+        &args.enabled_validators(),
     )?;
     let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
     if !violations.is_empty() {

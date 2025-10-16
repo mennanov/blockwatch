@@ -274,9 +274,39 @@ git diff --patch | blockwatch
 
 #### Disabling Validators
 
-You can selectively disable specific validators using the `-D` or `--disable` flag.
+You can selectively disable specific validators using the `-d` or `--disable` flag.
 
-**Available validators:**
+> NOTE: `--disable` flag can't be used together with the `--enable` flag.
+
+**Examples:**
+
+```shell
+# Disable a single validator
+git diff --patch | blockwatch --disable=keep-sorted
+
+# Disable multiple validators (use multiple -d flags)
+git diff --patch | blockwatch -d keep-sorted -d line-count
+```
+
+#### Enabling Validators
+
+You can selectively enable specific validators using the `-e` or `--enable` flag.
+
+Only the enabled validators will run the checks.
+
+> NOTE: `--enable` flag can't be used together with the `--disable` flag.
+
+**Examples:**
+
+```shell
+# Enable a single validator, other validators will not run
+git diff --patch | blockwatch --enable=keep-sorted
+
+# Enable multiple validators (use multiple -e flags)
+git diff --patch | blockwatch -e keep-sorted -e line-count
+```
+
+##### Available validators
 
 [//]: # (<block name="available-validators">)
 
@@ -288,16 +318,6 @@ You can selectively disable specific validators using the `-D` or `--disable` fl
 - [`line-pattern`](#validating-line-patterns)
 
 [//]: # (</block>)
-
-**Examples:**
-
-```shell
-# Disable a single validator
-git diff --patch | blockwatch --disable=keep-sorted
-
-# Disable multiple validators (use multiple -D flags)
-git diff --patch | blockwatch -D keep-sorted -D line-count
-```
 
 [//]: # (</block>)
 

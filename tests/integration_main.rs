@@ -50,10 +50,10 @@ index da567bd..5586a8d 100644
 #[test]
 fn with_disable_args() {
     let diff_content = r#"
-diff --git a/tests/disabled_test.py b/tests/disabled_test.py
+diff --git a/tests/disable_enable_test.py b/tests/disable_enable_test.py
 index 6739b09..a8464fb 100644
---- a/tests/isabled_test.py
-+++ b/tests/disabled_test.py
+--- a/tests/disable_enable_test.py
++++ b/tests/disable_enable_test.py
 @@ -2,7 +2,7 @@ fruits = [
      # <block keep-unique>
      "apple",
@@ -85,6 +85,58 @@ index 6739b09..a8464fb 100644
         .code(1)
         .stderr(predicate::str::contains("keep-unique"))
         .stderr(predicate::str::contains("keep-sorted").not());
+}
+
+#[test]
+fn with_enable_args() {
+    let diff_content = r#"
+diff --git a/tests/disable_enable_test.py b/tests/disable_enable_test.py
+index 6739b09..a8464fb 100644
+--- a/tests/disable_enable_test.py
++++ b/tests/disable_enable_test.py
+@@ -2,7 +2,7 @@ fruits = [
+     # <block keep-unique>
+     "apple",
+     "banana",
+-    "pear",
++    "apple",
+     # </block>
+ ]
+
+@@ -10,6 +10,6 @@ colors = [
+     # <block keep-sorted>
+     "blue",
+     "red",
+-    "yellow",
++    "green",
+     # </block>
+ ]
+"#;
+
+    let mut cmd = get_cmd();
+    cmd.arg("--enable=keep-sorted");
+    cmd.write_stdin(diff_content);
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("keep-sorted"))
+        .stderr(predicate::str::contains("keep-unique").not());
+}
+
+#[test]
+fn disable_and_enable_flags_used_together_fails_with_error() {
+    let mut cmd = get_cmd();
+    cmd.arg("--enable=keep-sorted");
+    cmd.arg("--disable=keep-unique");
+    cmd.write_stdin("");
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.assert().failure();
 }
 
 #[test]

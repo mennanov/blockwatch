@@ -20,7 +20,7 @@ use std::collections::{HashMap, HashSet};
     git diff --patch | blockwatch -E cxx=cpp -E c++=cpp
 
     # Disable specific validators
-    git diff --patch | blockwatch -D keep-sorted -D line-count
+    git diff --patch | blockwatch -d keep-sorted -d line-count
 
     # With zero context for tighter diffs (recommended for hooks)
     git diff --patch --unified=0 | blockwatch",
@@ -37,15 +37,25 @@ pub struct Args {
     )]
     extensions: Vec<(String, String)>,
 
-    /// Disable a validator, e.g. -D check-ai -D line-count
+    /// Disable a validator, e.g. -d check-ai -d line-count
     #[arg(
-        short = 'D',
+        short = 'd',
         long = "disable",
         value_name = "VALIDATOR",
         action = clap::ArgAction::Append,
-        value_parser = ValueParser::new(parse_disable),
+        value_parser = ValueParser::new(parse_validator),
     )]
     disabled_validators: Vec<String>,
+
+    /// Enable a validator, e.g. -e check-ai -e line-count
+    #[arg(
+        short = 'e',
+        long = "enable",
+        value_name = "VALIDATOR",
+        action = clap::ArgAction::Append,
+        value_parser = ValueParser::new(parse_validator),
+    )]
+    enabled_validators: Vec<String>,
     // </block>
 }
 
@@ -63,12 +73,22 @@ impl Args {
         self.disabled_validators.iter().map(AsRef::as_ref).collect()
     }
 
-    /// Validates that all user-provided extension values are supported by available parsers.
+    /// Enabled validator names.
+    pub fn enabled_validators(&self) -> HashSet<&str> {
+        self.enabled_validators.iter().map(AsRef::as_ref).collect()
+    }
+
+    /// Validates all arguments.
     pub fn validate(&self, supported_extensions: HashSet<String>) -> anyhow::Result<()> {
+        // Check custom extensions.
         for (key, val) in &self.extensions {
             if !supported_extensions.contains(val) {
                 anyhow::bail!("Unsupported extension mapping: {key}={val}");
             }
+        }
+        // Check that "--enable" and "--disable" flags are not used together.
+        if !self.disabled_validators.is_empty() && !self.enabled_validators.is_empty() {
+            anyhow::bail!("--enable and --disable flags must not be set at the same time");
         }
 
         Ok(())
@@ -81,7 +101,7 @@ fn parse_extensions(s: &str) -> anyhow::Result<(String, String)> {
         .with_context(|| format!("Invalid KEY=VALUE format: {s}"))
 }
 
-fn parse_disable(value: &str) -> anyhow::Result<String> {
+fn parse_validator(value: &str) -> anyhow::Result<String> {
     let validators: Vec<&str> = validators::DETECTOR_FACTORIES
         .iter()
         .map(|(validator_name, _)| *validator_name)
