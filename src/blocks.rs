@@ -1,3 +1,4 @@
+use crate::differ::LineChange;
 use crate::parsers::BlocksParser;
 use anyhow::Context;
 use serde::Serialize;
@@ -43,17 +44,73 @@ impl Block {
         }
     }
 
-    /// Whether the `Block` intersects with the given closed-closed interval of `start` and `end`.
-    pub(crate) fn intersects_with(&self, start: usize, end: usize) -> bool {
-        self.ends_at_line >= start && end >= self.starts_at_line
+    /// Whether the `Block` intersects with the given `line_change`.
+    fn intersects_with(&self, line_change: &LineChange, new_line_positions: &[usize]) -> bool {
+        if line_change.line < self.starts_at_line || line_change.line > self.ends_at_line {
+            // `line_change` is outside the block's start and end tags.
+            return false;
+        }
+        let block_content_start_line_idx = new_line_positions
+            .binary_search(&self.content_range.start)
+            .unwrap_or_else(|i| i);
+        let block_content_start_line_number = block_content_start_line_idx + 1;
+        if line_change.line < block_content_start_line_number {
+            // `line_change` is before the block's content start line.
+            return false;
+        }
+        let block_content_end_line_idx = new_line_positions
+            .binary_search(&self.content_range.end)
+            .unwrap_or_else(|i| i);
+        let block_content_end_line_number = block_content_end_line_idx + 1;
+        if line_change.line > block_content_end_line_number {
+            // `line_change` is after the block's content end line.
+            return false;
+        }
+
+        if let Some(ranges) = &line_change.ranges {
+            let content_line_start_pos = if line_change.line == block_content_start_line_number {
+                let content_start_line_pos = if block_content_start_line_idx > 0 {
+                    new_line_positions[block_content_start_line_idx - 1]
+                } else {
+                    0
+                };
+                self.content_range.start - content_start_line_pos
+            } else {
+                0
+            };
+            let content_line_end_pos = if line_change.line < block_content_end_line_number {
+                usize::MAX
+            } else {
+                let source_line_end_pos = if block_content_end_line_idx > 0 {
+                    new_line_positions[block_content_end_line_idx - 1]
+                } else {
+                    0
+                };
+                self.content_range.end - source_line_end_pos
+            };
+
+            // TODO: make sure `ranges` is sorted and use binary search here instead.
+            ranges.iter().any(|range| {
+                // Whether the closed-open `block_line_range` intersects with closed-closed `range`.
+                content_line_end_pos > *range.start() && content_line_start_pos <= *range.end()
+            })
+        } else {
+            true
+        }
     }
 
-    /// Whether the `Block` intersects with any of the **ordered** `ranges`.
-    pub(crate) fn intersects_with_any(&self, ranges: &[(usize, usize)]) -> bool {
-        let idx = ranges.binary_search_by(|(start, end)| {
-            if self.intersects_with(*start, *end) {
+    /// Whether the `Block` intersects with any of the **ordered** `line_changes`.
+    ///
+    /// `new_line_positions` is used for locating a starting position of a line in the source code.
+    fn intersects_with_any(
+        &self,
+        line_changes: &[LineChange],
+        new_line_positions: &[usize],
+    ) -> bool {
+        let idx = line_changes.binary_search_by(|line_change: &LineChange| {
+            if self.intersects_with(line_change, new_line_positions) {
                 Ordering::Equal
-            } else if *end < self.starts_at_line {
+            } else if line_change.line < self.starts_at_line {
                 Ordering::Less
             } else {
                 Ordering::Greater
@@ -110,21 +167,25 @@ pub struct FileBlocks {
 
 /// Parses source files and returns only those blocks that intersect with the provided modified line ranges.
 ///
-/// - `modified_ranges_by_file` maps file paths to sorted, non-overlapping closed line ranges that were changed.
+/// - `modified_lines_by_file` maps file paths to sorted modified lines.
 /// - `file_reader` provides async access to file contents within a root path.
 /// - `parsers` maps file extensions to language-specific block parsers.
 /// - `extra_file_extensions` allows remapping unknown extensions to supported ones (e.g., "cxx" -> "cpp").
 ///
 /// Returns a map of file paths to the list of intersecting blocks found in that file.
 pub fn parse_blocks(
-    modified_ranges_by_file: &HashMap<String, Vec<(usize, usize)>>,
+    modified_lines_by_file: &HashMap<String, Vec<LineChange>>,
     file_reader: &impl FileReader,
     parsers: HashMap<String, Rc<Box<dyn BlocksParser>>>,
     extra_file_extensions: HashMap<String, String>,
 ) -> anyhow::Result<HashMap<String, FileBlocks>> {
     let mut blocks = HashMap::new();
-    for (file_path, modified_ranges) in modified_ranges_by_file {
+    for (file_path, line_changes) in modified_lines_by_file {
         let source_code = file_reader.read_to_string(Path::new(&file_path))?;
+        let new_line_positions: Vec<usize> = source_code
+            .match_indices('\n')
+            .map(|(idx, _)| idx)
+            .collect();
         let mut file_blocks = Vec::new();
         if let Some(mut ext) = file_name_extension(file_path) {
             ext = extra_file_extensions
@@ -136,7 +197,7 @@ pub fn parse_blocks(
                     .parse(&source_code)
                     .context(format!("Failed to parse file \"{file_path}\""))?
                 {
-                    if !block.intersects_with_any(modified_ranges) {
+                    if !block.intersects_with_any(line_changes, &new_line_positions) {
                         // Skip untouched blocks.
                         continue;
                     }
@@ -185,16 +246,6 @@ impl FileReader for FsReader {
 }
 
 #[cfg(test)]
-mod test_utils {
-    use crate::blocks::Block;
-    use std::collections::HashMap;
-
-    pub(crate) fn new_empty_block(starts_at: usize, ends_at: usize) -> Block {
-        Block::new(starts_at, ends_at, HashMap::new(), 0..0)
-    }
-}
-
-#[cfg(test)]
 mod block_severity_from_str_tests {
     use crate::blocks::{Block, BlockSeverity};
     use std::collections::HashMap;
@@ -238,92 +289,10 @@ mod block_severity_from_str_tests {
 }
 
 #[cfg(test)]
-mod block_intersects_with_tests {
-    use crate::blocks::test_utils::*;
-
-    #[test]
-    fn non_overlapping_returns_false() {
-        let block = new_empty_block(3, 4);
-
-        assert!(!block.intersects_with(1, 2));
-        assert!(!block.intersects_with(2, 2));
-        assert!(!block.intersects_with(5, 5));
-        assert!(!block.intersects_with(5, 6));
-    }
-
-    #[test]
-    fn non_overlapping_single_line_returns_false() {
-        let block = new_empty_block(3, 3);
-
-        assert!(!block.intersects_with(1, 2));
-        assert!(!block.intersects_with(2, 2));
-        assert!(!block.intersects_with(4, 4));
-        assert!(!block.intersects_with(4, 5));
-    }
-
-    #[test]
-    fn overlapping_returns_true() {
-        let block = new_empty_block(3, 6);
-
-        assert!(block.intersects_with(1, 3));
-        assert!(block.intersects_with(1, 7));
-        assert!(block.intersects_with(2, 4));
-        assert!(block.intersects_with(3, 3));
-        assert!(block.intersects_with(3, 4));
-        assert!(block.intersects_with(3, 6));
-        assert!(block.intersects_with(4, 5));
-        assert!(block.intersects_with(4, 6));
-        assert!(block.intersects_with(5, 7));
-        assert!(block.intersects_with(6, 7));
-        assert!(block.intersects_with(6, 6));
-    }
-
-    #[test]
-    fn overlapping_single_line_returns_true() {
-        let block = new_empty_block(3, 3);
-
-        assert!(block.intersects_with(1, 3));
-        assert!(block.intersects_with(3, 3));
-        assert!(block.intersects_with(3, 4));
-    }
-}
-
-#[cfg(test)]
-mod block_intersects_with_any_tests {
-    use crate::blocks::test_utils::*;
-
-    #[test]
-    fn non_overlapping_returns_false() {
-        let block = new_empty_block(3, 4);
-
-        assert!(!block.intersects_with_any(&[(1, 2), (5, 6), (10, 16)]));
-    }
-
-    #[test]
-    fn overlapping_returns_true() {
-        let block = new_empty_block(4, 6);
-
-        // Intersecting range is first.
-        assert!(block.intersects_with_any(&[(1, 5), (6, 8), (10, 16)]));
-        // Intersecting range is second.
-        assert!(block.intersects_with_any(&[(1, 2), (3, 5), (6, 8), (10, 16)]));
-        // Intersecting range is last.
-        assert!(block.intersects_with_any(&[(1, 1), (2, 3), (4, 8)]));
-        // Intersecting range is second from last.
-        assert!(block.intersects_with_any(&[(1, 1), (2, 2), (4, 8), (10, 16)]));
-        // Multiple intersecting ranges in the beginning.
-        assert!(block.intersects_with_any(&[(1, 4), (5, 5), (6, 8), (10, 16)]));
-        // Multiple intersecting ranges in the middle.
-        assert!(block.intersects_with_any(&[(1, 1), (2, 3), (4, 5), (6, 8), (10, 16)]));
-        // Multiple intersecting ranges in the end.
-        assert!(block.intersects_with_any(&[(1, 1), (2, 2), (3, 3), (4, 5), (6, 8)]));
-    }
-}
-
-#[cfg(test)]
 mod parse_blocks_tests {
     use crate::blocks::*;
     use crate::parsers::language_parsers;
+    use crate::test_utils;
 
     struct FakeFileReader {
         files: HashMap<String, String>,
@@ -341,8 +310,13 @@ mod parse_blocks_tests {
         }
     }
 
+    /// Creates a whole line change (either added or deleted line).
+    fn line_change(line: usize) -> LineChange {
+        LineChange { line, ranges: None }
+    }
+
     #[test]
-    fn returns_blocks_for_modified_ranges_only() -> anyhow::Result<()> {
+    fn returns_modified_blocks_from_multiple_files() -> anyhow::Result<()> {
         let file_reader = FakeFileReader::new(HashMap::from([
             (
                 "a.rs".to_string(),
@@ -387,9 +361,12 @@ mod parse_blocks_tests {
             ),
         ]));
         let modified_ranges = HashMap::from([
-            ("a.rs".to_string(), vec![(3, 3), (7, 8)]), // Both blocks are modified.
-            ("b.rs".to_string(), vec![(5, 6)]),         // The inner block is modified.
-            ("c.rs".to_string(), vec![(6, 7)]),         // No block is modified.
+            (
+                "a.rs".to_string(),
+                vec![line_change(3), line_change(7), line_change(8)],
+            ), // Both blocks are modified.
+            ("b.rs".to_string(), vec![line_change(5), line_change(6)]), // The inner block is modified.
+            ("c.rs".to_string(), vec![line_change(6), line_change(7)]), // No block is modified.
         ]);
         let parsers = language_parsers()?;
 
@@ -404,6 +381,186 @@ mod parse_blocks_tests {
         assert_eq!(blocks_b.len(), 2);
         assert_eq!(blocks_b[0].name(), Some("outer"));
         assert_eq!(blocks_b[1].name(), Some("inner"));
+        Ok(())
+    }
+
+    #[test]
+    fn returns_blocks_with_modified_contents_only() -> anyhow::Result<()> {
+        let content_a = r#"
+        /* <block name="first"> */ let foo = "bar"; // </block>
+        /* <block name="second"> */ let foo = "baz"; // </block>
+        /* <block name="third"> */ third block /* </block> */
+        /* <block name="fourth"> */ fourth block // </block>
+        /* <block name="fifth"> */ let foo="boo"; // </block>
+        /* <block
+            name="sixth"
+            keep-sorted="asc"> */ block six // </block>
+        /* <block name="seventh"
+            keep-sorted="asc"> */ block seven
+        // </block>
+        /* <block name="eighth"
+            keep-sorted="asc"> */ block eight
+        // </block>
+        // <block name="nineth">
+        block nine
+        // </block>
+        // <block name="tenth">
+        block ten // </block>
+        // <block name="eleventh">
+        block eleven // </block>
+        // <block name="twelfth">
+        twelve /*
+        Some comment.
+        </block> */
+        "#;
+        let content_b = "/* <block name=\"first\"> */let foo = \"bar\"; // </block>";
+        let file_reader = FakeFileReader::new(HashMap::from([
+            ("a.rs".to_string(), content_a.to_string()),
+            ("b.rs".to_string(), content_b.to_string()),
+        ]));
+        let line_changes = HashMap::from([
+            (
+                "a.rs".to_string(),
+                vec![
+                    line_change(1), // No blocks on this line.
+                    LineChange {
+                        // "first" block.
+                        line: 2,
+                        ranges: Some(vec![
+                            test_utils::substr_range_inclusive(
+                                content_a.lines().nth(1).unwrap(),
+                                "/* <block ",
+                            ),
+                            test_utils::substr_range_inclusive(
+                                content_a.lines().nth(1).unwrap(),
+                                "name=\"first\"> */",
+                            ),
+                        ]), // The start tag is modified, not the contents.
+                    },
+                    LineChange {
+                        // "second" block.
+                        line: 3,
+                        ranges: Some(vec![
+                            test_utils::substr_range_inclusive(
+                                content_a.lines().nth(2).unwrap(),
+                                "/* <block name=\"second\"> */ let foo ",
+                            ), /* tag and contents*/
+                            test_utils::substr_range_inclusive(
+                                content_a.lines().nth(2).unwrap(),
+                                " = \"baz\"; ",
+                            ), /* contents only */
+                        ]),
+                    },
+                    LineChange {
+                        // "third" block.
+                        line: 4,
+                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                            content_a.lines().nth(3).unwrap(),
+                            " third block ",
+                        )]), // Only the content is modified.
+                    },
+                    LineChange {
+                        // "fourth" block.
+                        line: 5,
+                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                            content_a.lines().nth(4).unwrap(),
+                            " fourth block // </block>",
+                        )]), // The content and end tag are modified.
+                    },
+                    LineChange {
+                        // "fifth" block.
+                        line: 6,
+                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                            content_a.lines().nth(5).unwrap(),
+                            " </block>",
+                        )]), // Only the end tag is modified.
+                    },
+                    LineChange {
+                        // "sixth" block.
+                        line: 8,
+                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                            content_a.lines().nth(7).unwrap(),
+                            "name=\"sixth\"",
+                        )]), // Only the start tag is modified.
+                    },
+                    LineChange {
+                        // "seventh" block.
+                        line: 11,
+                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                            content_a.lines().nth(10).unwrap(),
+                            "keep-sorted=\"asc\"> */",
+                        )]), // Only the start tag is modified.
+                    },
+                    LineChange {
+                        // "eighth" block.
+                        line: 14,
+                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                            content_a.lines().nth(13).unwrap(),
+                            " block eight",
+                        )]), // Only the content on the same line as start tag is modified.
+                    },
+                    LineChange {
+                        // "nineth" block.
+                        line: 17,
+                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                            content_a.lines().nth(16).unwrap(),
+                            "block nine",
+                        )]), // Only the content on a line between start and end tags is modified.
+                    },
+                    LineChange {
+                        // "tenth" block.
+                        line: 20,
+                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                            content_a.lines().nth(19).unwrap(),
+                            "block ten ",
+                        )]), // Only the content on the same line as end tag is modified.
+                    },
+                    LineChange {
+                        // "eleventh" block.
+                        line: 22,
+                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                            content_a.lines().nth(21).unwrap(),
+                            " </block>",
+                        )]), // End tag is modified.
+                    },
+                    LineChange {
+                        // "twelfth" block.
+                        line: 25,
+                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                            content_a.lines().nth(24).unwrap(),
+                            "Some comment.",
+                        )]), // Multiline end tag is modified.
+                    },
+                ],
+            ),
+            (
+                "b.rs".to_string(),
+                vec![LineChange {
+                    line: 1,
+                    ranges: Some(vec![test_utils::substr_range_inclusive(
+                        content_b.lines().next().unwrap(),
+                        "let foo = \"bar\"; ",
+                    )]), // Block's content is modified in a single line file.
+                }],
+            ),
+        ]);
+        let parsers = language_parsers()?;
+
+        let blocks_by_file = parse_blocks(&line_changes, &file_reader, parsers, HashMap::new())?;
+
+        assert_eq!(blocks_by_file.len(), 2);
+        let blocks_a = &blocks_by_file["a.rs"].blocks;
+        assert_eq!(blocks_a.len(), 6);
+        assert_eq!(blocks_a[0].name(), Some("second"));
+        assert_eq!(blocks_a[1].name(), Some("third"));
+        assert_eq!(blocks_a[2].name(), Some("fourth"));
+        assert_eq!(blocks_a[3].name(), Some("eighth"));
+        assert_eq!(blocks_a[4].name(), Some("nineth"));
+        assert_eq!(blocks_a[5].name(), Some("tenth"));
+        let blocks_b = &blocks_by_file["b.rs"].blocks;
+        assert_eq!(blocks_b.len(), 1);
+        assert_eq!(blocks_b[0].name(), Some("first"));
+
         Ok(())
     }
 
@@ -425,7 +582,10 @@ mod parse_blocks_tests {
             file_a_contents.to_string(),
         )]));
         let modified_ranges = HashMap::from([
-            ("a.rs".to_string(), vec![(3, 3), (7, 8)]), // Both blocks are modified.
+            (
+                "a.rs".to_string(),
+                vec![line_change(3), line_change(7), line_change(8)],
+            ), // Both blocks are modified.
         ]);
         let parsers = language_parsers()?;
 
@@ -446,7 +606,7 @@ mod parse_blocks_tests {
         // </block>"#
                 .to_string(),
         )]));
-        let modified_ranges = HashMap::from([("a.rust".to_string(), vec![(3, 3)])]);
+        let modified_ranges = HashMap::from([("a.rust".to_string(), vec![line_change(3)])]);
         let parsers = language_parsers()?;
 
         let blocks_by_file = parse_blocks(
@@ -464,7 +624,10 @@ mod parse_blocks_tests {
     #[test]
     fn skips_unknown_files() -> anyhow::Result<()> {
         let files = HashMap::from([("test.unknown".to_string(), "test content".to_string())]);
-        let modified_ranges = HashMap::from([("test.unknown".to_string(), vec![(1, 2)])]);
+        let modified_ranges = HashMap::from([(
+            "test.unknown".to_string(),
+            vec![line_change(1), line_change(2)],
+        )]);
 
         let blocks = parse_blocks(
             &modified_ranges,
