@@ -18,8 +18,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut diff = String::new();
     std::io::stdin().read_to_string(&mut diff)?;
-    let extractor = differ::ChangeExtractor::new();
-    let modified_lines_by_file = extractor.extract(diff.as_str())?;
+    let modified_lines_by_file = differ::extract(diff.as_str())?;
 
     let file_reader = blocks::FsReader::new(repository_root_path(fs::canonicalize(
         env::current_dir()?,
