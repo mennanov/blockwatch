@@ -91,8 +91,9 @@ impl Block {
 
             // TODO: make sure `ranges` is sorted and use binary search here instead.
             ranges.iter().any(|range| {
-                // Whether the closed-open `block_line_range` intersects with closed-closed `range`.
-                content_line_end_pos > *range.start() && content_line_start_pos <= *range.end()
+                // Intersection between [content_line_start_pos, content_line_end_pos] (inclusive)
+                // and half-open [range.start, range.end).
+                range.end > content_line_start_pos && range.start <= content_line_end_pos
             })
         } else {
             true
@@ -427,11 +428,11 @@ mod parse_blocks_tests {
                         // "first" block.
                         line: 2,
                         ranges: Some(vec![
-                            test_utils::substr_range_inclusive(
+                            test_utils::substr_range(
                                 content_a.lines().nth(1).unwrap(),
                                 "/* <block ",
                             ),
-                            test_utils::substr_range_inclusive(
+                            test_utils::substr_range(
                                 content_a.lines().nth(1).unwrap(),
                                 "name=\"first\"> */",
                             ),
@@ -441,11 +442,11 @@ mod parse_blocks_tests {
                         // "second" block.
                         line: 3,
                         ranges: Some(vec![
-                            test_utils::substr_range_inclusive(
+                            test_utils::substr_range(
                                 content_a.lines().nth(2).unwrap(),
                                 "/* <block name=\"second\"> */ let foo ",
                             ), /* tag and contents*/
-                            test_utils::substr_range_inclusive(
+                            test_utils::substr_range(
                                 content_a.lines().nth(2).unwrap(),
                                 " = \"baz\"; ",
                             ), /* contents only */
@@ -454,7 +455,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "third" block.
                         line: 4,
-                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                        ranges: Some(vec![test_utils::substr_range(
                             content_a.lines().nth(3).unwrap(),
                             " third block ",
                         )]), // Only the content is modified.
@@ -462,7 +463,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "fourth" block.
                         line: 5,
-                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                        ranges: Some(vec![test_utils::substr_range(
                             content_a.lines().nth(4).unwrap(),
                             " fourth block // </block>",
                         )]), // The content and end tag are modified.
@@ -470,7 +471,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "fifth" block.
                         line: 6,
-                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                        ranges: Some(vec![test_utils::substr_range(
                             content_a.lines().nth(5).unwrap(),
                             " </block>",
                         )]), // Only the end tag is modified.
@@ -478,7 +479,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "sixth" block.
                         line: 8,
-                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                        ranges: Some(vec![test_utils::substr_range(
                             content_a.lines().nth(7).unwrap(),
                             "name=\"sixth\"",
                         )]), // Only the start tag is modified.
@@ -486,7 +487,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "seventh" block.
                         line: 11,
-                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                        ranges: Some(vec![test_utils::substr_range(
                             content_a.lines().nth(10).unwrap(),
                             "keep-sorted=\"asc\"> */",
                         )]), // Only the start tag is modified.
@@ -494,7 +495,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "eighth" block.
                         line: 14,
-                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                        ranges: Some(vec![test_utils::substr_range(
                             content_a.lines().nth(13).unwrap(),
                             " block eight",
                         )]), // Only the content on the same line as start tag is modified.
@@ -502,7 +503,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "nineth" block.
                         line: 17,
-                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                        ranges: Some(vec![test_utils::substr_range(
                             content_a.lines().nth(16).unwrap(),
                             "block nine",
                         )]), // Only the content on a line between start and end tags is modified.
@@ -510,7 +511,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "tenth" block.
                         line: 20,
-                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                        ranges: Some(vec![test_utils::substr_range(
                             content_a.lines().nth(19).unwrap(),
                             "block ten ",
                         )]), // Only the content on the same line as end tag is modified.
@@ -518,7 +519,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "eleventh" block.
                         line: 22,
-                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                        ranges: Some(vec![test_utils::substr_range(
                             content_a.lines().nth(21).unwrap(),
                             " </block>",
                         )]), // End tag is modified.
@@ -526,7 +527,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "twelfth" block.
                         line: 25,
-                        ranges: Some(vec![test_utils::substr_range_inclusive(
+                        ranges: Some(vec![test_utils::substr_range(
                             content_a.lines().nth(24).unwrap(),
                             "Some comment.",
                         )]), // Multiline end tag is modified.
@@ -537,7 +538,7 @@ mod parse_blocks_tests {
                 "b.rs".to_string(),
                 vec![LineChange {
                     line: 1,
-                    ranges: Some(vec![test_utils::substr_range_inclusive(
+                    ranges: Some(vec![test_utils::substr_range(
                         content_b.lines().next().unwrap(),
                         "let foo = \"bar\"; ",
                     )]), // Block's content is modified in a single line file.

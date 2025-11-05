@@ -1,6 +1,6 @@
 use similar::DiffOp;
 use std::collections::{HashMap, VecDeque};
-use std::ops::RangeInclusive;
+use std::ops::Range;
 use std::str::FromStr;
 use unidiff::{Line, PatchSet, PatchedFile};
 
@@ -9,7 +9,7 @@ use unidiff::{Line, PatchSet, PatchedFile};
 pub struct LineChange {
     pub line: usize,
     // Modified ranges in this line. Can only be `Some` for modified lines, not added or deleted.
-    pub ranges: Option<Vec<RangeInclusive<usize>>>,
+    pub ranges: Option<Vec<Range<usize>>>,
 }
 
 /// Extracts line changes from a unified diff patch string.
@@ -68,7 +68,7 @@ fn line_changes(patched_file: &PatchedFile) -> Vec<LineChange> {
     line_changes
 }
 
-fn line_diff(old: &str, new: &str) -> Vec<RangeInclusive<usize>> {
+fn line_diff(old: &str, new: &str) -> Vec<Range<usize>> {
     let mut result = Vec::new();
     let diff = similar::TextDiff::from_chars(old, new);
     let mut prev_op = None;
@@ -76,19 +76,19 @@ fn line_diff(old: &str, new: &str) -> Vec<RangeInclusive<usize>> {
         match op {
             DiffOp::Delete { new_index, .. } => {
                 if prev_op.is_none_or(|c: &DiffOp| !matches!(c, DiffOp::Delete { .. })) {
-                    let idx = (new.len() - 1).min(*new_index);
-                    push_or_merge_range(&mut result, idx..=idx);
+                    let idx = new.len().saturating_sub(1).min(*new_index);
+                    push_or_merge_range(&mut result, idx..idx + 1);
                 }
             }
             DiffOp::Insert {
                 new_index, new_len, ..
             } => {
-                push_or_merge_range(&mut result, *new_index..=new_index + new_len - 1);
+                push_or_merge_range(&mut result, *new_index..(new_index + new_len));
             }
             DiffOp::Replace {
                 new_index, new_len, ..
             } => {
-                push_or_merge_range(&mut result, *new_index..=new_index + new_len - 1);
+                push_or_merge_range(&mut result, *new_index..(new_index + new_len));
             }
             DiffOp::Equal { .. } => {}
         }
@@ -97,12 +97,14 @@ fn line_diff(old: &str, new: &str) -> Vec<RangeInclusive<usize>> {
     result
 }
 
-fn push_or_merge_range(ranges: &mut Vec<RangeInclusive<usize>>, mut new: RangeInclusive<usize>) {
+fn push_or_merge_range(ranges: &mut Vec<Range<usize>>, mut new: Range<usize>) {
     if let Some(overlapping) =
-        // Contiguous ranges are also merged (e.g. [6, 7] and [8, 9] -> [6, 9]).
-        ranges.pop_if(|range| new.end() >= range.start() && new.start() - 1 <= *range.end())
+        // Contiguous ranges are also merged (e.g. [6, 8) and [8, 10) -> [6, 10)).
+        ranges.pop_if(|range| new.start <= range.end && new.end >= range.start)
     {
-        new = *new.start().min(overlapping.start())..=*new.end().max(overlapping.end());
+        let start = new.start.min(overlapping.start);
+        let end = new.end.max(overlapping.end);
+        new = start..end;
     }
     ranges.push(new);
 }
@@ -148,60 +150,61 @@ mod modified_line_ranges_tests {
     fn replaced_nonconsecutive_characters_returns_separate_ranges() {
         let ranges = line_diff("box", "for");
 
-        assert_eq!(ranges, vec![0..=0, 2..=2]);
+        assert_eq!(ranges, vec![0..1, 2..3]);
     }
 
     #[test]
     fn replaced_consecutive_characters_returns_merged_ranges() {
         let ranges = line_diff("boxes", "faxed");
 
-        assert_eq!(ranges, vec![0..=1, 4..=4]);
+        assert_eq!(ranges, vec![0..2, 4..5]);
     }
 
     #[test]
     fn inserted_nonconsecutive_characters_returns_separate_ranges() {
         let ranges = line_diff("box", "aboxa");
 
-        assert_eq!(ranges, vec![0..=0, 4..=4]);
+        assert_eq!(ranges, vec![0..1, 4..5]);
     }
 
     #[test]
     fn inserted_consecutive_characters_returns_merged_ranges() {
         let ranges = line_diff("box", "2 boxes");
 
-        assert_eq!(ranges, vec![0..=1, 5..=6]);
+        assert_eq!(ranges, vec![0..2, 5..7]);
     }
 
     #[test]
     fn deleted_consecutive_characters_in_the_beginning_are_treated_as_single() {
         let ranges = line_diff("abracadabra", "cadabra");
 
-        assert_eq!(ranges, vec![0..=0]);
+        assert_eq!(ranges, vec![0..1]);
     }
 
     #[test]
     fn deleted_consecutive_characters_in_the_end_are_treated_as_single() {
         let ranges = line_diff("abracadabra", "abra");
 
-        assert_eq!(ranges, vec![3..=3]);
+        assert_eq!(ranges, vec![3..4]);
     }
 
     #[test]
     fn deleted_consecutive_characters_are_treated_as_single() {
         let ranges = line_diff("abracadabra", "cdar");
 
-        assert_eq!(ranges, vec![0..=1, 3..=3]);
+        assert_eq!(ranges, vec![0..2, 3..4]);
     }
 
     #[test]
     fn mixed_ops_returns_correct_ranges() {
         let ranges = line_diff("there was three", "there is thora");
 
-        assert_eq!(ranges, vec![6..=6, 11..=11, 13..=13]);
+        assert_eq!(ranges, vec![6..7, 11..12, 13..14]);
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use super::*;
     use std::collections::HashSet;
@@ -415,7 +418,7 @@ index f384549..e4c2829 100644
             vec![LineChange {
                 line: 3,
                 // "i" in "is" was modified, "o" and "a" in "thora" were modified.
-                ranges: Some(vec![6..=6, 11..=11, 13..=13])
+                ranges: Some(vec![6..7, 11..12, 13..14])
             }]
         );
         Ok(())
@@ -446,17 +449,17 @@ index f384549..46c7533 100644
                 LineChange {
                     line: 1,
                     // "modified " was inserted.
-                    ranges: Some(vec![0..=8])
+                    ranges: Some(vec![0..9])
                 },
                 LineChange {
                     line: 3,
                     // "white " was deleted. Consecutive deletions are treated as single.
-                    ranges: Some(vec![6..=6])
+                    ranges: Some(vec![6..7])
                 },
                 LineChange {
                     line: 5,
                     // "br" from "brown" was deleted. "b" in "boxes" was modified.
-                    ranges: Some(vec![5..=5, 9..=9])
+                    ranges: Some(vec![5..6, 9..10])
                 }
             ]
         );
@@ -484,11 +487,11 @@ index f384549..676cbb7 100644
             vec![
                 LineChange {
                     line: 2,
-                    ranges: Some(vec![0..=8])
+                    ranges: Some(vec![0..9])
                 },
                 LineChange {
                     line: 3,
-                    ranges: Some(vec![0..=8])
+                    ranges: Some(vec![0..9])
                 }
             ]
         );
@@ -515,11 +518,11 @@ index f384549..676cbb7 100644
             vec![
                 LineChange {
                     line: 1,
-                    ranges: Some(vec![0..=8])
+                    ranges: Some(vec![0..9])
                 },
                 LineChange {
                     line: 2,
-                    ranges: Some(vec![0..=8])
+                    ranges: Some(vec![0..9])
                 }
             ]
         );
@@ -653,15 +656,15 @@ index f384549..58a279e 100644
             vec![
                 LineChange {
                     line: 1,
-                    ranges: Some(vec![0..=8])
+                    ranges: Some(vec![0..9])
                 },
                 LineChange {
                     line: 3,
-                    ranges: Some(vec![0..=8])
+                    ranges: Some(vec![0..9])
                 },
                 LineChange {
                     line: 4,
-                    ranges: Some(vec![0..=8])
+                    ranges: Some(vec![0..9])
                 },
                 line_change(5)
             ]
