@@ -1,7 +1,6 @@
 use blockwatch::blocks;
 use blockwatch::blocks::BlockSeverity;
 use blockwatch::differ;
-use blockwatch::differ::HunksExtractor;
 use blockwatch::flags;
 use blockwatch::parsers;
 use blockwatch::validators;
@@ -19,14 +18,13 @@ fn main() -> anyhow::Result<()> {
 
     let mut diff = String::new();
     std::io::stdin().read_to_string(&mut diff)?;
-    let extractor = differ::UnidiffExtractor::new();
-    let modified_ranges_by_file = extractor.extract(diff.as_str())?;
+    let modified_lines_by_file = differ::extract(diff.as_str())?;
 
     let file_reader = blocks::FsReader::new(repository_root_path(fs::canonicalize(
         env::current_dir()?,
     )?)?);
     let modified_blocks = blocks::parse_blocks(
-        &modified_ranges_by_file,
+        &modified_lines_by_file,
         &file_reader,
         languages,
         args.extensions(),
