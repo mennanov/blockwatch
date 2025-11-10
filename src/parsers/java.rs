@@ -1,5 +1,5 @@
 use crate::parsers::{
-    BlocksFromCommentsParser, BlocksParser, CommentsParser, TreeSitterCommentsParser,
+    BlocksFromCommentsParser, BlocksParser, CommentsParser, c_style_line_and_block_comments_parser,
 };
 use tree_sitter::Query;
 
@@ -12,34 +12,10 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let java_language = tree_sitter_java::LANGUAGE.into();
     let line_comment_query = Query::new(&java_language, "(line_comment) @comment")?;
     let block_comment_query = Query::new(&java_language, "(block_comment) @comment")?;
-    let parser = TreeSitterCommentsParser::<fn(usize, &str) -> Option<String>>::new(
+    let parser = c_style_line_and_block_comments_parser(
         java_language,
-        vec![
-            (
-                line_comment_query,
-                Some(|_, comment| Some(comment.strip_prefix("//").unwrap().trim().to_string())),
-            ),
-            (
-                block_comment_query,
-                Some(|_, comment| {
-                    Some(
-                        comment
-                            .strip_prefix("/*")
-                            .unwrap()
-                            .lines()
-                            .map(|line| {
-                                line.trim_start()
-                                    .trim_start_matches('*')
-                                    .trim()
-                                    .trim_end_matches('/')
-                                    .trim_end_matches('*')
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    )
-                }),
-            ),
-        ],
+        line_comment_query,
+        block_comment_query,
     );
     Ok(parser)
 }
@@ -93,43 +69,43 @@ mod tests {
                     source_line_number: 2,
                     source_start_position: 9,
                     source_end_position: 144,
-                    comment_text: "\nThis is a simple Java program demonstrating different types of comments.\n\n@version 1.0\n".to_string()
+                    comment_text: "   \n           This is a simple Java program demonstrating different types of comments.\n           \n           @version 1.0\n           ".to_string()
                 },
                 Comment {
                     source_line_number: 10,
                     source_start_position: 261,
                     source_end_position: 294,
-                    comment_text: "This is a single-line comment.".to_string()
+                    comment_text: "   This is a single-line comment.".to_string()
                 },
                 Comment {
                     source_line_number: 11,
                     source_start_position: 348,
                     source_end_position: 383,
-                    comment_text: "Prints a message to the console.".to_string()
+                    comment_text: "   Prints a message to the console.".to_string()
                 },
                 Comment {
                     source_line_number: 13,
                     source_start_position: 409,
                     source_end_position: 527,
-                    comment_text: "\nThis is a multi-line comment.\nIt can span multiple lines.\n".to_string()
+                    comment_text: "  \n                   This is a multi-line comment.\n                   It can span multiple lines.\n                   ".to_string()
                 },
                 Comment {
                     source_line_number: 17,
                     source_start_position: 561,
                     source_end_position: 600,
-                    comment_text: "Assigning a value to the variable ".to_string()
+                    comment_text: "   Assigning a value to the variable   ".to_string()
                 },
                 Comment {
                     source_line_number: 19,
                     source_start_position: 626,
                     source_end_position: 667,
-                    comment_text: "This is a single-line doc-comment. ".to_string()
+                    comment_text: "    This is a single-line doc-comment.   ".to_string()
                 },
                 Comment {
                     source_line_number: 23,
                     source_start_position: 735,
                     source_end_position: 809,
-                    comment_text: "\nPrints a sample message to the console.\n".to_string()
+                    comment_text: "   \n               Prints a sample message to the console.\n               ".to_string()
                 }
             ]
         );

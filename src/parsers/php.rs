@@ -17,14 +17,13 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
         vec![(
             block_comment_query,
             Some(|_, comment| {
-                let stripped_comment = if let Some(comment) = comment.strip_prefix("//") {
-                    comment.trim().to_string()
-                } else if let Some(comment) = comment.strip_prefix('#') {
-                    comment.trim().to_string()
+                Some(if comment.starts_with("//") {
+                    comment.replacen("//", "  ", 1)
+                } else if comment.starts_with("#") {
+                    comment.replacen("#", " ", 1)
                 } else {
                     c_style_multiline_comment_processor(comment)
-                };
-                Some(stripped_comment)
+                })
             }),
         )],
     );
@@ -72,33 +71,33 @@ mod tests {
                     source_line_number: 2,
                     source_start_position: 18,
                     source_end_position: 57,
-                    comment_text: "This is a single-line comment in PHP".to_string()
+                    comment_text: "   This is a single-line comment in PHP".to_string()
                 },
                 Comment {
                     source_line_number: 4,
                     source_start_position: 75,
                     source_end_position: 185,
                     comment_text:
-                        "\nThis is a multi-line comment.\nIt spans multiple lines in PHP.\n"
+                        "  \n               This is a multi-line comment.\n               It spans multiple lines in PHP.\n               "
                             .to_string()
                 },
                 Comment {
                     source_line_number: 10,
                     source_start_position: 257,
                     source_end_position: 291,
-                    comment_text: "Prints a message to the console.".to_string()
+                    comment_text: "  Prints a message to the console.".to_string()
                 },
                 Comment {
                     source_line_number: 12,
                     source_start_position: 313,
                     source_end_position: 416,
-                    comment_text: "Another comment\nsplit into\nmultiple lines.\n".to_string()
+                    comment_text: "   Another comment\n                   split into\n                   multiple lines.\n                   ".to_string()
                 },
                 Comment {
                     source_line_number: 20,
                     source_start_position: 523,
                     source_end_position: 541,
-                    comment_text: "inlined comment".to_string()
+                    comment_text: "  inlined comment ".to_string()
                 },
             ]
         );

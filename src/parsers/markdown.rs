@@ -25,19 +25,29 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
                 if capture_idx != 1 {
                     return None;
                 }
-                Some(
-                    comment
-                        .trim_start()
-                        .strip_prefix("[//]:")
-                        .expect("Expected a block comment to start with '[//]:'")
-                        .trim()
-                        .trim_start_matches('#')
-                        .trim_start()
-                        .trim_start_matches('(')
-                        .trim_end_matches(')')
-                        .trim()
-                        .to_string(),
-                )
+                let mut result = String::with_capacity(comment.len());
+                let prefix_idx = comment
+                    .find("[//]:")
+                    .expect("comment is expected to start with '[//]:'");
+                let open_idx = comment
+                    .find("(")
+                    .expect("comment is expected to start with '('");
+                let close_idx = comment
+                    .rfind(")")
+                    .expect("comment is expected to end with ')'");
+                result.push_str(&comment[..prefix_idx]);
+                // Replace "[//]:" with spaces.
+                result.push_str("     ");
+                // Replace everything before "(" with spaces (including the "(").
+                result.push_str(" ".repeat(open_idx - (prefix_idx + 5) + 1).as_str());
+                // Copy the comment's content.
+                result.push_str(&comment[open_idx + 1..close_idx]);
+                // Replace ")" with a space.
+                result.push(' ');
+                if close_idx + 1 < comment.len() {
+                    result.push_str(&comment[close_idx + 1..]);
+                }
+                Some(result)
             }),
         )],
     );
@@ -75,19 +85,19 @@ in it)"#,
                     source_line_number: 5,
                     source_start_position: 31,
                     source_end_position: 68,
-                    comment_text: "This is a markdown comment".to_string()
+                    comment_text: "         This is a markdown comment \n".to_string()
                 },
                 Comment {
                     source_line_number: 6,
                     source_start_position: 68,
                     source_end_position: 104,
-                    comment_text: "Another markdown comment".to_string()
+                    comment_text: "         Another markdown comment  \n".to_string()
                 },
                 Comment {
                     source_line_number: 10,
                     source_start_position: 121,
                     source_end_position: 170,
-                    comment_text: "Third comment with\nmultiple lines\nin it".to_string()
+                    comment_text: "         Third comment with\nmultiple lines\nin it ".to_string()
                 },
             ]
         );

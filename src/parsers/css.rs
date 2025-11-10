@@ -59,20 +59,20 @@ mod tests {
                     source_line_number: 6,
                     source_start_position: 81,
                     source_end_position: 108,
-                    comment_text: "This is a CSS comment".to_string()
+                    comment_text: "   This is a CSS comment   ".to_string()
                 },
                 Comment {
                     source_line_number: 8,
                     source_start_position: 147,
                     source_end_position: 266,
-                    comment_text: "This is a multi-line\nCSS comment that spans\nmultiple lines\n"
+                    comment_text: "   This is a multi-line\n                   CSS comment that spans\n                   multiple lines\n                   "
                         .to_string()
                 },
                 Comment {
                     source_line_number: 15,
                     source_start_position: 339,
                     source_end_position: 431,
-                    comment_text: "Another multi-line\nCSS comment with\ndifferent formatting"
+                    comment_text: "   Another multi-line\n               CSS comment with\n               different formatting   "
                         .to_string()
                 },
             ]

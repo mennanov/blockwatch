@@ -59,27 +59,27 @@ mod tests {
                     source_line_number: 2,
                     source_start_position: 13,
                     source_end_position: 55,
-                    comment_text: "This is a single-line comment in Swift.".to_string()
+                    comment_text: "   This is a single-line comment in Swift.".to_string()
                 },
                 Comment {
                     source_line_number: 5,
                     source_start_position: 103,
                     source_end_position: 215,
                     comment_text:
-                        "\nThis is a multi-line comment.\nIt spans multiple lines in Swift.\n"
+                        "  \n               This is a multi-line comment.\n               It spans multiple lines in Swift.\n               "
                             .to_string()
                 },
                 Comment {
                     source_line_number: 11,
                     source_start_position: 286,
                     source_end_position: 321,
-                    comment_text: "Prints a message to the console.".to_string()
+                    comment_text: "   Prints a message to the console.".to_string()
                 },
                 Comment {
                     source_line_number: 13,
                     source_start_position: 343,
                     source_end_position: 446,
-                    comment_text: "Another comment\nsplit into\nmultiple lines.\n".to_string()
+                    comment_text: "   Another comment\n                   split into\n                   multiple lines.\n                   ".to_string()
                 }
             ]
         );

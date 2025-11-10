@@ -53,27 +53,27 @@ mod tests {
                     source_line_number: 2,
                     source_start_position: 13,
                     source_end_position: 51,
-                    comment_text: "This is a single-line comment in C.".to_string()
+                    comment_text: "   This is a single-line comment in C.".to_string()
                 },
                 Comment {
                     source_line_number: 5,
                     source_start_position: 96,
                     source_end_position: 204,
                     comment_text:
-                        "\nThis is a multi-line comment.\nIt spans multiple lines in C.\n"
+                        "  \n               This is a multi-line comment.\n               It spans multiple lines in C.\n               "
                             .to_string()
                 },
                 Comment {
                     source_line_number: 11,
                     source_start_position: 270,
                     source_end_position: 305,
-                    comment_text: "Prints a message to the console.".to_string()
+                    comment_text: "   Prints a message to the console.".to_string()
                 },
                 Comment {
                     source_line_number: 13,
                     source_start_position: 323,
                     source_end_position: 426,
-                    comment_text: "Another comment\nsplit into\nmultiple lines.\n".to_string()
+                    comment_text: "   Another comment\n                   split into\n                   multiple lines.\n                   ".to_string()
                 },
             ]
         );

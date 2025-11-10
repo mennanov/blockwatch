@@ -64,46 +64,46 @@ mod tests {
                     source_start_position: 17,
                     source_end_position: 158,
                     comment_text:
-                        "\nThis is a TSX component with comments.\n\n@component TSXExample\n"
+                        "   \n                   This is a TSX component with comments.\n                  \n                   @component TSXExample\n                   "
                             .to_string()
                 },
                 Comment {
                     source_line_number: 8,
                     source_start_position: 222,
                     source_end_position: 262,
-                    comment_text: "This is a single-line comment in TSX.".to_string()
+                    comment_text: "   This is a single-line comment in TSX.".to_string()
                 },
                 Comment {
                     source_line_number: 11,
                     source_start_position: 343,
                     source_end_position: 476,
                     comment_text:
-                        "\nThis is a multi-line comment\nused in a functional component.\n"
+                        "  \n                       This is a multi-line comment\n                       used in a functional component.\n                       "
                             .to_string()
                 },
                 Comment {
                     source_line_number: 16,
                     source_start_position: 568,
                     source_end_position: 599,
-                    comment_text: "Inline multi-line comment".to_string()
+                    comment_text: "   Inline multi-line comment   ".to_string()
                 },
                 Comment {
                     source_line_number: 19,
                     source_start_position: 644,
                     source_end_position: 667,
-                    comment_text: "Render the component".to_string()
+                    comment_text: "   Render the component".to_string()
                 },
                 Comment {
                     source_line_number: 22,
                     source_start_position: 756,
                     source_end_position: 785,
-                    comment_text: "JSX single-line comment".to_string()
+                    comment_text: "   JSX single-line comment   ".to_string()
                 },
                 Comment {
                     source_line_number: 24,
                     source_start_position: 874,
                     source_end_position: 931,
-                    comment_text: "JSX multi-line\ncomment".to_string()
+                    comment_text: "   JSX multi-line \n                            comment   ".to_string()
                 }
             ]
         );

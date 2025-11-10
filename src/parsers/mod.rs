@@ -180,9 +180,10 @@ struct Comment {
     source_start_position: usize,
     // Byte offset (i.e. position) of the end of this comment in the source.
     source_end_position: usize,
-    // The `comment_string` is expected to be the actual content of the comment without any
-    // language specific symbols like "//", "/**", etc. However, it **should preserve the line
-    // breaks**.
+    // The `comment_string` is expected to be the content of the comment with all language specific
+    // comment symbols like "//", "/**", "#", etc replaced with the corresponding number of
+    // whitespaces ("  " for "//", "   " for "/**", etc.) so that the length of the comment is
+    // preserved.
     comment_text: String,
 }
 
@@ -360,10 +361,12 @@ fn c_style_comments_parser(
         vec![(
             query,
             Some(|_, comment| {
-                Some(comment.strip_prefix("//").map_or_else(
-                    || c_style_multiline_comment_processor(comment),
-                    |c| c.trim().to_string(),
-                ))
+                let result = if comment.starts_with("//") {
+                    comment.replacen("//", "  ", 1)
+                } else {
+                    c_style_multiline_comment_processor(comment)
+                };
+                Some(result)
             }),
         )],
     )
@@ -380,7 +383,7 @@ fn c_style_line_and_block_comments_parser(
         vec![
             (
                 line_comment_query,
-                Some(|_, comment| Some(comment.strip_prefix("//").unwrap().trim().to_string())),
+                Some(|_, comment| Some(comment.replacen("//", "  ", 1))),
             ),
             (
                 block_comment_query,
@@ -399,7 +402,7 @@ fn python_style_comments_parser(
         language,
         vec![(
             comment_query,
-            Some(|_, comment| Some(comment.strip_prefix('#').unwrap().trim().to_string())),
+            Some(|_, comment| Some(comment.replacen("#", " ", 1))),
         )],
     )
 }
@@ -414,36 +417,58 @@ fn xml_style_comments_parser(
         vec![(
             comment_query,
             Some(|_, comment| {
-                Some(
-                    comment
-                        .strip_prefix("<!--")
-                        .unwrap()
-                        .trim_end_matches("-->")
-                        .lines()
-                        .map(|line| line.trim())
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                )
+                let open_idx = comment.find("<!--").expect("open comment tag is expected");
+                let close_idx = comment.rfind("-->").expect("close comment tag is expected");
+                let mut result = String::with_capacity(comment.len());
+                result.push_str(&comment[..open_idx]);
+                // Replace "<!--" with spaces.
+                result.push_str("    ");
+                result.push_str(&comment[open_idx + 4..close_idx]);
+                // Replace "-->" with spaces.
+                result.push_str("   ");
+                result.push_str(&comment[close_idx + 3..]);
+                Some(result)
             }),
         )],
     )
 }
 
 fn c_style_multiline_comment_processor(comment: &str) -> String {
-    comment
-        .strip_prefix("/*")
-        .unwrap()
-        .lines()
-        .map(|line| {
-            line.trim_start()
-                .trim_start_matches('*')
-                .trim()
-                .trim_end_matches('/')
-                .trim_end_matches('*')
-                .trim()
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    let mut result = String::with_capacity(comment.len());
+    let open_idx = comment.find("/*").expect("expected '/*' in a comment");
+    let close_idx = comment.rfind("*/").expect("expected '*/' in a comment");
+    // Add everything before the "/*"
+    result.push_str(&comment[..open_idx]);
+    // Replace "/*" with spaces.
+    result.push_str("  ");
+    let content = &comment[open_idx + 2..close_idx];
+    for line in content.split_inclusive('\n') {
+        let mut decorative_star_found = false;
+
+        // Find the index of the first non-whitespace character
+        if let Some(first_non_whitespace_idx) = line.find(|c: char| !c.is_whitespace()) {
+            // Check if that first non-whitespace character is a '*'
+            if line[first_non_whitespace_idx..].starts_with('*') {
+                decorative_star_found = true;
+                // Add leading whitespace.
+                result.push_str(&line[..first_non_whitespace_idx]);
+                // Replace "*" with a space.
+                result.push(' ');
+                // Add the rest of the line.
+                result.push_str(&line[first_non_whitespace_idx + 1..]);
+            }
+        }
+        if !decorative_star_found {
+            // Not a decorative '*', or all whitespace. Add unchanged.
+            result.push_str(line);
+        }
+    }
+    // Replace "*/" with spaces.
+    result.push_str("  ");
+    // Add everything after the "*/".
+    result.push_str(&comment[close_idx + 2..]);
+
+    result
 }
 
 #[cfg(test)]

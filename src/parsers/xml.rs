@@ -46,25 +46,25 @@ mod tests {
                     source_line_number: 2,
                     source_start_position: 13,
                     source_end_position: 39,
-                    comment_text: "This is a comment".to_string()
+                    comment_text: "     This is a comment    ".to_string()
                 },
                 Comment {
                     source_line_number: 4,
                     source_start_position: 75,
                     source_end_position: 99,
-                    comment_text: "Another comment".to_string()
+                    comment_text: "     Another comment    ".to_string()
                 },
                 Comment {
                     source_line_number: 6,
                     source_start_position: 153,
                     source_end_position: 244,
-                    comment_text: "\nMultiline comment\n<foo>bar</foo>\n".to_string()
+                    comment_text: "     \n                Multiline comment \n                <foo>bar</foo>\n                   ".to_string()
                 },
                 Comment {
                     source_line_number: 11,
                     source_start_position: 277,
                     source_end_position: 299,
-                    comment_text: "Final comment".to_string()
+                    comment_text: "     Final comment    ".to_string()
                 }
             ]
         );

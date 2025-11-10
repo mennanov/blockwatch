@@ -18,7 +18,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
         vec![
             (
                 line_comment_query,
-                Some(|_, comment| Some(comment.strip_prefix("--").unwrap().trim().to_string())),
+                Some(|_, comment| Some(comment.replacen("--", "  ", 1))),
             ),
             (
                 block_comment_query,
@@ -63,44 +63,44 @@ SELECT COUNT(*) FROM orders; /* Inline block comment */
                     source_line_number: 3,
                     source_start_position: 21,
                     source_end_position: 53,
-                    comment_text: "This is a single line comment".to_string()
+                    comment_text: "   This is a single line comment".to_string()
                 },
                 Comment {
                     source_line_number: 4,
                     source_start_position: 69,
                     source_end_position: 97,
-                    comment_text: "This is an inline comment".to_string()
+                    comment_text: "   This is an inline comment".to_string()
                 },
                 Comment {
                     source_line_number: 6,
                     source_start_position: 99,
                     source_end_position: 122,
-                    comment_text: "This is a multi-line".to_string()
+                    comment_text: "   This is a multi-line".to_string()
                 },
                 Comment {
                     source_line_number: 7,
                     source_start_position: 123,
                     source_end_position: 144,
-                    comment_text: "comment that spans".to_string()
+                    comment_text: "   comment that spans".to_string()
                 },
                 Comment {
                     source_line_number: 8,
                     source_start_position: 145,
                     source_end_position: 161,
-                    comment_text: "several lines".to_string()
+                    comment_text: "   several lines".to_string()
                 },
                 Comment {
                     source_line_number: 10,
                     source_start_position: 163,
                     source_end_position: 219,
-                    comment_text: "This is a block comment\nthat spans multiple lines\n"
+                    comment_text: "   This is a block comment \nthat spans multiple lines\n  "
                         .to_string()
                 },
                 Comment {
                     source_line_number: 14,
                     source_start_position: 250,
                     source_end_position: 276,
-                    comment_text: "Inline block comment".to_string()
+                    comment_text: "   Inline block comment   ".to_string()
                 }
             ]
         );
