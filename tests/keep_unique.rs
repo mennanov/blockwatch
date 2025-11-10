@@ -1,11 +1,7 @@
-use assert_cmd::Command;
 use assert_cmd::assert::OutputAssertExt;
+use assert_cmd::cargo_bin_cmd;
 use predicates::prelude::predicate;
 use serde_json::json;
-
-fn get_cmd() -> Command {
-    Command::cargo_bin(assert_cmd::crate_name!()).expect("Failed to find binary")
-}
 
 #[test]
 fn with_all_lines_unique_succeeds() {
@@ -23,7 +19,7 @@ index d69398d..c5cbb7f 100644
      # </block>
  ]"#;
 
-    let mut cmd = get_cmd();
+    let mut cmd = cargo_bin_cmd!();
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
     output.assert().success();
@@ -45,7 +41,7 @@ index d69398d..9b29f11 100644
      # </block>
  ]"#;
 
-    let mut cmd = get_cmd();
+    let mut cmd = cargo_bin_cmd!();
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
     output.assert()

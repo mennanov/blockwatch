@@ -1,10 +1,6 @@
-use assert_cmd::Command;
 use assert_cmd::assert::OutputAssertExt;
+use assert_cmd::cargo_bin_cmd;
 use predicates::prelude::{PredicateBooleanExt, predicate};
-
-fn get_cmd() -> Command {
-    Command::cargo_bin(assert_cmd::crate_name!()).expect("Failed to find binary")
-}
 
 #[test]
 fn with_custom_file_extensions_args() {
@@ -37,7 +33,7 @@ index da567bd..5586a8d 100644
  def foo():
 "#;
 
-    let mut cmd = get_cmd();
+    let mut cmd = cargo_bin_cmd!();
     cmd.arg("-E").arg("python=py");
     cmd.arg("-E").arg("javascript=js");
     cmd.write_stdin(diff_content);
@@ -73,7 +69,7 @@ index 6739b09..a8464fb 100644
  ]
 "#;
 
-    let mut cmd = get_cmd();
+    let mut cmd = cargo_bin_cmd!();
     cmd.arg("--disable=keep-sorted");
     cmd.write_stdin(diff_content);
 
@@ -113,7 +109,7 @@ index 6739b09..a8464fb 100644
  ]
 "#;
 
-    let mut cmd = get_cmd();
+    let mut cmd = cargo_bin_cmd!();
     cmd.arg("--enable=keep-sorted");
     cmd.write_stdin(diff_content);
 
@@ -129,7 +125,7 @@ index 6739b09..a8464fb 100644
 
 #[test]
 fn disable_and_enable_flags_used_together_fails_with_error() {
-    let mut cmd = get_cmd();
+    let mut cmd = cargo_bin_cmd!();
     cmd.arg("--enable=keep-sorted");
     cmd.arg("--disable=keep-unique");
     cmd.write_stdin("");
@@ -154,7 +150,7 @@ index 74ff7b7..574d79a 100644
 +    "apple",
      # </block>
  ]"#;
-    let mut cmd = get_cmd();
+    let mut cmd = cargo_bin_cmd!();
     cmd.write_stdin(diff_content);
 
     let output = cmd.output().expect("Failed to get command output");
@@ -186,7 +182,7 @@ index a01afcd..74c68a3 100644
 +    "green",
      # </block>
  ]"#;
-    let mut cmd = get_cmd();
+    let mut cmd = cargo_bin_cmd!();
     cmd.write_stdin(diff_content);
 
     let output = cmd.output().expect("Failed to get command output");
@@ -196,7 +192,7 @@ index a01afcd..74c68a3 100644
 
 #[test]
 fn empty_diff_succeeds() {
-    let mut cmd = get_cmd();
+    let mut cmd = cargo_bin_cmd!();
     cmd.write_stdin("");
 
     let output = cmd.output().expect("Failed to get command output");

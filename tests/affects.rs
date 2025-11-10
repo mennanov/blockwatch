@@ -1,11 +1,7 @@
-use assert_cmd::Command;
 use assert_cmd::assert::OutputAssertExt;
+use assert_cmd::cargo_bin_cmd;
 use predicates::prelude::predicate;
 use serde_json::json;
-
-fn get_cmd() -> Command {
-    Command::cargo_bin(assert_cmd::crate_name!()).expect("Failed to find binary")
-}
 
 #[test]
 fn diff_with_unsatisfied_blocks_fails() {
@@ -23,7 +19,7 @@ index abc123..def456 100644
  [//]: # (</block>)
 "#;
 
-    let mut cmd = get_cmd();
+    let mut cmd = cargo_bin_cmd!();
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
     output.assert()
@@ -80,7 +76,7 @@ index abc123..def456 100644
  [//]: # (</block>)
 "#;
 
-    let mut cmd = get_cmd();
+    let mut cmd = cargo_bin_cmd!();
     cmd.write_stdin(diff_content);
 
     let output = cmd.output().expect("Failed to get command output");
@@ -109,7 +105,7 @@ index abc123..def456 100644
  [//]: # (</block>)
 "#;
 
-    let mut cmd = get_cmd();
+    let mut cmd = cargo_bin_cmd!();
     cmd.current_dir("./tests");
     cmd.write_stdin(diff_content);
 

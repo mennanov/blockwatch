@@ -1,13 +1,9 @@
-use assert_cmd::Command;
 use assert_cmd::assert::OutputAssertExt;
+use assert_cmd::cargo_bin_cmd;
 use axum::{Json, Router, routing::post};
 use serde_json::{Value, json};
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
-
-fn get_cmd() -> Command {
-    Command::cargo_bin(assert_cmd::crate_name!()).expect("Failed to find binary")
-}
 
 async fn start_fake_openai() -> (SocketAddr, tokio::task::JoinHandle<()>) {
     async fn chat_completions(Json(payload): Json<Value>) -> Json<Value> {
@@ -69,7 +65,7 @@ async fn check_ai_ok_succeeds() {
     let (addr, _handle) = start_fake_openai().await;
 
     // Configure client to use fake server for this command only
-    let mut cmd = get_cmd();
+    let mut cmd = cargo_bin_cmd!();
     cmd.env("BLOCKWATCH_AI_API_URL", format!("http://{addr}/v1"));
     cmd.env("BLOCKWATCH_AI_API_KEY", "test-key");
 
@@ -95,7 +91,7 @@ index 54d1d99..a95a452 100644
 async fn check_ai_violation_fails_and_reports_message() {
     let (addr, _handle) = start_fake_openai().await;
 
-    let mut cmd = get_cmd();
+    let mut cmd = cargo_bin_cmd!();
     cmd.env("BLOCKWATCH_AI_API_URL", format!("http://{addr}/v1"));
     cmd.env("BLOCKWATCH_AI_API_KEY", "test-key");
 
@@ -155,7 +151,7 @@ async fn when_api_key_is_empty_error_is_printed() {
     let (addr, _handle) = start_fake_openai().await;
 
     // Configure client to use fake server for this command only
-    let mut cmd = get_cmd();
+    let mut cmd = cargo_bin_cmd!();
     cmd.env("BLOCKWATCH_AI_API_URL", format!("http://{addr}/v1"));
 
     let diff_content = r#"
