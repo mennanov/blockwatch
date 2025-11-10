@@ -1,4 +1,4 @@
-use crate::blocks::Block;
+use crate::blocks::{Block, BlockWithContext};
 use crate::validators;
 use crate::validators::{
     ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
@@ -29,59 +29,58 @@ impl ValidatorSync for KeepSortedValidator {
     ) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
         let mut violations = HashMap::new();
         for (file_path, file_blocks) in &context.modified_blocks {
-            for block in &file_blocks.blocks {
-                match block.attributes.get("keep-sorted") {
-                    None => continue,
-                    Some(keep_sorted) => {
-                        let keep_sorted_normalized = keep_sorted.to_lowercase();
-                        if keep_sorted_normalized != "asc" && keep_sorted_normalized != "desc" {
-                            return Err(anyhow!(
-                                "keep-sorted expected values are \"asc\" or \"desc\", got \"{}\" in {}:{} at line {}",
-                                keep_sorted,
-                                file_path,
-                                block.name_display(),
-                                block.starts_at_line
-                            ));
+            for block_with_context in &file_blocks.blocks_with_context {
+                if let Some(keep_sorted) = block_with_context.block.attributes.get("keep-sorted") {
+                    let keep_sorted_normalized = keep_sorted.to_lowercase();
+                    if keep_sorted_normalized != "asc" && keep_sorted_normalized != "desc" {
+                        return Err(anyhow!(
+                            "keep-sorted expected values are \"asc\" or \"desc\", got \"{}\" in {}:{} at line {}",
+                            keep_sorted,
+                            file_path,
+                            block_with_context.block.name_display(),
+                            block_with_context.block.starts_at_line
+                        ));
+                    }
+                    let ord = if keep_sorted_normalized == "asc" {
+                        Ordering::Greater
+                    } else {
+                        Ordering::Less
+                    };
+                    let mut prev_line: Option<&str> = None;
+                    for (line_number, line) in block_with_context
+                        .block
+                        .content(&file_blocks.file_contents)
+                        .lines()
+                        .enumerate()
+                    {
+                        let trimmed_line = line.trim();
+                        if trimmed_line.is_empty() {
+                            continue;
                         }
-                        let ord = if keep_sorted_normalized == "asc" {
-                            Ordering::Greater
-                        } else {
-                            Ordering::Less
-                        };
-                        let mut prev_line: Option<&str> = None;
-                        for (line_number, line) in block
-                            .content(&file_blocks.file_contents)
-                            .lines()
-                            .enumerate()
-                        {
-                            let trimmed_line = line.trim();
-                            if trimmed_line.is_empty() {
-                                continue;
+                        if let Some(prev_line) = prev_line {
+                            let cmp = prev_line.cmp(trimmed_line);
+                            if cmp == ord {
+                                let violation_line_number =
+                                    block_with_context.block.starts_at_line + line_number;
+                                let line_character_start =
+                                    trimmed_line.as_ptr() as usize - line.as_ptr() as usize + 1; // Start position is 1-based.
+                                let line_character_end =
+                                    line_character_start + trimmed_line.len() - 1; // End position is 1-based and inclusive.
+                                violations
+                                    .entry(file_path.clone())
+                                    .or_insert_with(Vec::new)
+                                    .push(create_violation(
+                                        file_path,
+                                        Arc::clone(&block_with_context.block),
+                                        keep_sorted_normalized.as_str(),
+                                        violation_line_number,
+                                        line_character_start,
+                                        line_character_end,
+                                    )?);
+                                break;
                             }
-                            if let Some(prev_line) = prev_line {
-                                let cmp = prev_line.cmp(trimmed_line);
-                                if cmp == ord {
-                                    let violation_line_number = block.starts_at_line + line_number;
-                                    let line_character_start =
-                                        trimmed_line.as_ptr() as usize - line.as_ptr() as usize + 1; // Start position is 1-based.
-                                    let line_character_end =
-                                        line_character_start + trimmed_line.len() - 1; // End position is 1-based and inclusive.
-                                    violations
-                                        .entry(file_path.clone())
-                                        .or_insert_with(Vec::new)
-                                        .push(create_violation(
-                                            file_path,
-                                            Arc::clone(block),
-                                            keep_sorted_normalized.as_str(),
-                                            violation_line_number,
-                                            line_character_start,
-                                            line_character_end,
-                                        )?);
-                                    break;
-                                }
-                            }
-                            prev_line = Some(trimmed_line);
                         }
+                        prev_line = Some(trimmed_line);
                     }
                 }
             }
@@ -100,8 +99,15 @@ impl KeepSortedValidatorDetector {
 }
 
 impl ValidatorDetector for KeepSortedValidatorDetector {
-    fn detect(&self, block: &Block) -> anyhow::Result<Option<ValidatorType>> {
-        if block.attributes.contains_key("keep-sorted") {
+    fn detect(
+        &self,
+        block_with_context: &BlockWithContext,
+    ) -> anyhow::Result<Option<ValidatorType>> {
+        if block_with_context
+            .block
+            .attributes
+            .contains_key("keep-sorted")
+        {
             Ok(Some(ValidatorType::Sync(Box::new(
                 KeepSortedValidator::new(),
             ))))
@@ -148,6 +154,7 @@ mod validate_tests {
     use super::*;
     use crate::blocks::FileBlocks;
     use crate::test_utils;
+    use crate::test_utils::block_with_context;
     use serde_json::json;
     use std::collections::HashMap;
 
@@ -169,10 +176,11 @@ mod validate_tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: "".to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context(Block::new(
                     1,
                     2,
                     HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
+                    0..0,
                     0..0,
                 ))],
             },
@@ -191,10 +199,11 @@ mod validate_tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: "".to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context(Block::new(
                     1,
                     2,
                     HashMap::from([("keep-sorted".to_string(), "invalid".to_string())]),
+                    0..0,
                     0..0,
                 ))],
             },
@@ -209,15 +218,16 @@ mod validate_tests {
     #[test]
     fn single_line_asc_sorted_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "block contents goes here: Hello";
+        let file1_contents = "/*<block>*/block contents goes here: Hello//</block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context(Block::new(
                     1,
                     3,
                     HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
+                    test_utils::substr_range(file1_contents, "<block>"),
                     test_utils::substr_range(file1_contents, "Hello"),
                 ))],
             },
@@ -232,15 +242,16 @@ mod validate_tests {
     #[test]
     fn single_line_desc_sorted_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "block contents goes here: Hello";
+        let file1_contents = "/*<block>*/block contents goes here: Hello//</block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context(Block::new(
                     1,
                     3,
                     HashMap::from([("keep-sorted".to_string(), "desc".to_string())]),
+                    test_utils::substr_range(file1_contents, "<block>"),
                     test_utils::substr_range(file1_contents, "Hello"),
                 ))],
             },
@@ -255,15 +266,16 @@ mod validate_tests {
     #[test]
     fn multiple_lines_asc_sorted_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "block contents goes here: A\nB\nB\nC";
+        let file1_contents = "/*<block>*/block contents goes here: A\nB\nB\nC//</block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context(Block::new(
                     1,
                     6,
                     HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
+                    test_utils::substr_range(file1_contents, "<block>"),
                     test_utils::substr_range(file1_contents, "A\nB\nB\nC"),
                 ))],
             },
@@ -278,15 +290,16 @@ mod validate_tests {
     #[test]
     fn multiple_lines_desc_sorted_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "block contents goes here: C\nB\nB\nA\nA";
+        let file1_contents = "/*<block>*/block contents goes here: C\nB\nB\nA\nA//</block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context(Block::new(
                     1,
                     7,
                     HashMap::from([("keep-sorted".to_string(), "desc".to_string())]),
+                    test_utils::substr_range(file1_contents, "<block>"),
                     test_utils::substr_range(file1_contents, "C\nB\nB\nA\nA"),
                 ))],
             },
@@ -301,15 +314,16 @@ mod validate_tests {
     #[test]
     fn empty_lines_and_spaces_are_ignored() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "block contents goes here: A\n\nB\n B\n C ";
+        let file1_contents = "/*<block>*/block contents goes here: A\n\nB\n B\n C //</block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context(Block::new(
                     1,
                     6,
                     HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
+                    test_utils::substr_range(file1_contents, "<block>"),
                     test_utils::substr_range(file1_contents, "A\n\nB\n B\n C "),
                 ))],
             },
@@ -324,15 +338,16 @@ mod validate_tests {
     #[test]
     fn unsorted_asc_returns_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "block contents goes here: A\nB\nC\nBB";
+        let file1_contents = "/*<block>*/block contents goes here: A\nB\nC\nBB//</block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context(Block::new(
                     1,
                     6,
                     HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
+                    test_utils::substr_range(file1_contents, "<block>"),
                     test_utils::substr_range(file1_contents, "A\nB\nC\nBB"),
                 ))],
             },
@@ -361,15 +376,16 @@ mod validate_tests {
     #[test]
     fn unsorted_desc_returns_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "block contents goes here: D\nC\nD\nC";
+        let file1_contents = "/*<block>*/block contents goes here: D\nC\nD\nC//</block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context(Block::new(
                     1,
                     6,
                     HashMap::from([("keep-sorted".to_string(), "desc".to_string())]),
+                    test_utils::substr_range(file1_contents, "<block>"),
                     test_utils::substr_range(file1_contents, "D\nC\nD\nC"),
                 ))],
             },
@@ -398,15 +414,16 @@ mod validate_tests {
     #[test]
     fn identical_lines_asc_sorted_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "block contents goes here: A\nA\nA";
+        let file1_contents = "/*<block>*/block contents goes here: A\nA\nA//</block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context(Block::new(
                     1,
                     5,
                     HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
+                    test_utils::substr_range(file1_contents, "<block>"),
                     test_utils::substr_range(file1_contents, "A\nA\nA"),
                 ))],
             },
@@ -421,15 +438,16 @@ mod validate_tests {
     #[test]
     fn identical_lines_desc_sorted_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "block contents goes here: A\nA\nA";
+        let file1_contents = "/*<block>*/block contents goes here: A\nA\nA//</block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context(Block::new(
                     1,
                     5,
                     HashMap::from([("keep-sorted".to_string(), "desc".to_string())]),
+                    test_utils::substr_range(file1_contents, "<block>"),
                     test_utils::substr_range(file1_contents, "A\nA\nA"),
                 ))],
             },

@@ -228,6 +228,7 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
     fn process_start_tag<'idx>(
         stack: &mut Vec<BlockBuilder<'idx>>,
         index: &'idx [CommentIndex],
+        start_position: usize,
         end_position: usize,
         attributes: HashMap<String, String>,
     ) {
@@ -242,6 +243,7 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
             comment_index.source_start_line_number,
             comment_index,
             attributes,
+            start_position..end_position + 1,
         ));
     }
 
@@ -292,11 +294,17 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
         while let Some(tag) = parser.next()? {
             match tag {
                 BlockTag::Start {
-                    start_position: _start_position,
+                    start_position,
                     end_position,
                     attributes,
                 } => {
-                    Self::process_start_tag(&mut stack, &index, end_position, attributes);
+                    Self::process_start_tag(
+                        &mut stack,
+                        &index,
+                        start_position,
+                        end_position,
+                        attributes,
+                    );
                 }
                 BlockTag::End {
                     start_position,
@@ -330,6 +338,7 @@ struct BlockBuilder<'a> {
     starts_at_line: usize,
     start_index: &'a CommentIndex,
     attributes: HashMap<String, String>,
+    start_tag_range: Range<usize>,
 }
 
 impl<'a> BlockBuilder<'a> {
@@ -337,17 +346,25 @@ impl<'a> BlockBuilder<'a> {
         starts_at_line: usize,
         start_index: &'a CommentIndex,
         attributes: HashMap<String, String>,
+        start_tag_range: Range<usize>,
     ) -> Self {
         Self {
             starts_at_line,
             start_index,
             attributes,
+            start_tag_range,
         }
     }
 
     /// Finalizes the block with the given end line and captured content, producing a `Block`.
     pub(crate) fn build(self, ends_at: usize, content_range: Range<usize>) -> Block {
-        Block::new(self.starts_at_line, ends_at, self.attributes, content_range)
+        Block::new(
+            self.starts_at_line,
+            ends_at,
+            self.attributes,
+            self.start_tag_range,
+            content_range,
+        )
     }
 }
 
@@ -504,7 +521,8 @@ mod tests {
                 1,
                 1,
                 HashMap::new(),
-                test_utils::substr_range(contents, " let say = \"hi\"; ")
+                test_utils::substr_range(contents, "<block>"),
+                test_utils::substr_range(contents, " let say = \"hi\"; "),
             ),]
         );
         Ok(())
@@ -521,6 +539,7 @@ mod tests {
                 1,
                 3,
                 HashMap::new(),
+                test_utils::substr_range(contents, "<block>"),
                 test_utils::substr_range(contents, "\nlet say = \"hi\";\n")
             ),]
         );
@@ -538,6 +557,7 @@ mod tests {
                 1,
                 2,
                 HashMap::new(),
+                test_utils::substr_range(contents, "<block\n>"),
                 test_utils::substr_range(contents, " let say = \"hi\"; ")
             ),]
         );
@@ -555,6 +575,7 @@ mod tests {
                 1,
                 2,
                 HashMap::new(),
+                test_utils::substr_range(contents, "<block>"),
                 test_utils::substr_range(contents, " let say = \"hi\"; ")
             ),]
         );
@@ -574,12 +595,14 @@ mod tests {
                     1,
                     3,
                     HashMap::new(),
+                    test_utils::substr_range(contents, "<block>"),
                     test_utils::substr_range(contents, "\nprintln!(\"hello1\");\n"),
                 ),
                 Block::new(
                     4,
                     6,
                     HashMap::new(),
+                    test_utils::substr_range_nth(contents, "<block>", 1),
                     test_utils::substr_range(contents, "\nprintln!(\"hello2\");\n")
                 )
             ]
@@ -599,12 +622,14 @@ mod tests {
                     1,
                     3,
                     HashMap::new(),
+                    test_utils::substr_range_nth(contents, "<block>", 0),
                     test_utils::substr_range(contents, "\nprintln!(\"hello1\");\n"),
                 ),
                 Block::new(
                     3,
                     5,
                     HashMap::new(),
+                    test_utils::substr_range_nth(contents, "<block>", 1),
                     test_utils::substr_range(contents, "\nprintln!(\"hello2\");\n"),
                 )
             ]
@@ -624,12 +649,14 @@ mod tests {
                     1,
                     1,
                     HashMap::new(),
+                    test_utils::substr_range_nth(contents, "<block>", 0),
                     test_utils::substr_range(contents, "println!(\"hello1\");")
                 ),
                 Block::new(
                     1,
                     1,
                     HashMap::new(),
+                    test_utils::substr_range_nth(contents, "<block>", 1),
                     test_utils::substr_range(contents, "println!(\"hello2\");")
                 )
             ]
@@ -676,30 +703,35 @@ mod tests {
                     2,
                     25,
                     HashMap::from([("name".to_string(), "foo".to_string())]),
+                    test_utils::substr_range(contents, "<block name=\"foo\">"),
                     30..620
                 ),
                 Block::new(
                     7,
                     17,
                     HashMap::from([("name".to_string(), "bar".to_string())]),
+                    test_utils::substr_range(contents, "<block name=\"bar\">"),
                     142..440
                 ),
                 Block::new(
                     11,
                     15,
                     HashMap::from([("name".to_string(), "bar-bar".to_string())]),
+                    test_utils::substr_range(contents, "<block name=\"bar-bar\">"),
                     281..415
                 ),
                 Block::new(
                     19,
                     23,
                     HashMap::from([("name".to_string(), "buzz".to_string())]),
+                    test_utils::substr_range(contents, "<block name=\"buzz\">"),
                     487..599
                 ),
                 Block::new(
                     26,
                     27,
                     HashMap::from([("name".to_string(), "fizz".to_string())]),
+                    test_utils::substr_range(contents, "<block name=\"fizz\">"),
                     662..671
                 ),
             ]
@@ -737,8 +769,7 @@ mod tests {
         let parser = create_parser();
         let contents = r#"// <block name="foo">This text is ignored
         let word = "hello";
-        // </block> Some comment.
-        "#;
+        // </block> Some comment."#;
         let blocks = parser.parse(contents)?;
         assert_eq!(
             blocks,
@@ -746,6 +777,7 @@ mod tests {
                 1,
                 3,
                 HashMap::from([("name".to_string(), "foo".to_string())]),
+                test_utils::substr_range(contents, "<block name=\"foo\">"),
                 test_utils::substr_range(contents, "\n        let word = \"hello\";\n        ")
             ),]
         );

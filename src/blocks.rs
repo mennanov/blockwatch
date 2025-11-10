@@ -1,7 +1,6 @@
 use crate::differ::LineChange;
 use crate::parsers::BlocksParser;
 use anyhow::Context;
-use serde::Serialize;
 use serde_repr::Serialize_repr;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -15,7 +14,7 @@ use strum_macros::EnumString;
 const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
 
 /// Represents a `block` tag parsed from the source file comments.
-#[derive(Debug, PartialEq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Block {
     // Source line number with the `block` tag.
     pub(crate) starts_at_line: usize,
@@ -23,8 +22,9 @@ pub struct Block {
     pub(crate) ends_at_line: usize,
     // Optional attributes in the `block` tag.
     pub(crate) attributes: HashMap<String, String>,
+    // Block's start tag range in the original source code.
+    start_tag_range: Range<usize>,
     // Block's content substring range in the original source code.
-    #[serde(skip_serializing)]
     content_range: Range<usize>,
 }
 
@@ -34,24 +34,31 @@ impl Block {
         starts_at_line: usize,
         ends_at_line: usize,
         attributes: HashMap<String, String>,
+        start_tag_range: Range<usize>,
         content_range: Range<usize>,
     ) -> Self {
         Self {
             starts_at_line,
             ends_at_line,
             attributes,
+            start_tag_range,
             content_range,
         }
     }
 
     /// Whether the `Block` intersects with the given `line_change`.
-    fn intersects_with(&self, line_change: &LineChange, new_line_positions: &[usize]) -> bool {
+    fn intersects_with_line_change(
+        &self,
+        range: &Range<usize>,
+        line_change: &LineChange,
+        new_line_positions: &[usize],
+    ) -> bool {
         if line_change.line < self.starts_at_line || line_change.line > self.ends_at_line {
             // `line_change` is outside the block's start and end tags.
             return false;
         }
         let block_content_start_line_idx = new_line_positions
-            .binary_search(&self.content_range.start)
+            .binary_search(&range.start)
             .unwrap_or_else(|i| i);
         let block_content_start_line_number = block_content_start_line_idx + 1;
         if line_change.line < block_content_start_line_number {
@@ -59,7 +66,7 @@ impl Block {
             return false;
         }
         let block_content_end_line_idx = new_line_positions
-            .binary_search(&self.content_range.end)
+            .binary_search(&range.end)
             .unwrap_or_else(|i| i);
         let block_content_end_line_number = block_content_end_line_idx + 1;
         if line_change.line > block_content_end_line_number {
@@ -74,7 +81,7 @@ impl Block {
                 } else {
                     0
                 };
-                self.content_range.start - content_start_line_pos
+                range.start - content_start_line_pos
             } else {
                 0
             };
@@ -86,7 +93,7 @@ impl Block {
                 } else {
                     0
                 };
-                self.content_range.end - source_line_end_pos
+                range.end - source_line_end_pos
             };
 
             // TODO: make sure `ranges` is sorted and use binary search here instead.
@@ -100,24 +107,46 @@ impl Block {
         }
     }
 
-    /// Whether the `Block` intersects with any of the **ordered** `line_changes`.
+    /// Whether the `Block`'s content intersects with any of the **ordered** `line_changes`.
     ///
     /// `new_line_positions` is used for locating a starting position of a line in the source code.
-    fn intersects_with_any(
+    fn content_intersects_with_any(
         &self,
         line_changes: &[LineChange],
         new_line_positions: &[usize],
     ) -> bool {
-        let idx = line_changes.binary_search_by(|line_change: &LineChange| {
-            if self.intersects_with(line_change, new_line_positions) {
-                Ordering::Equal
-            } else if line_change.line < self.starts_at_line {
-                Ordering::Less
-            } else {
-                Ordering::Greater
-            }
-        });
-        idx.is_ok()
+        self.intersects_with_any(&self.content_range, line_changes, new_line_positions)
+    }
+
+    /// Whether the `Block`'s start tag intersects with any of the **ordered** `line_changes`.
+    ///
+    /// `new_line_positions` is used for locating a starting position of a line in the source code.
+    fn start_tag_intersects_with_any(
+        &self,
+        line_changes: &[LineChange],
+        new_line_positions: &[usize],
+    ) -> bool {
+        self.intersects_with_any(&self.start_tag_range, line_changes, new_line_positions)
+    }
+
+    /// Whether the `Block`'s `range` intersects with any of the given `line_changes`.
+    fn intersects_with_any(
+        &self,
+        range: &Range<usize>,
+        line_changes: &[LineChange],
+        new_line_positions: &[usize],
+    ) -> bool {
+        line_changes
+            .binary_search_by(|line_change: &LineChange| {
+                if self.intersects_with_line_change(range, line_change, new_line_positions) {
+                    Ordering::Equal
+                } else if line_change.line < self.starts_at_line {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            })
+            .is_ok()
     }
 
     /// Returns the optional value of the `name` attribute for this block.
@@ -163,25 +192,35 @@ pub enum BlockSeverity {
 #[derive(Debug)]
 pub struct FileBlocks {
     pub(crate) file_contents: String,
-    pub(crate) blocks: Vec<Arc<Block>>,
+    pub(crate) blocks_with_context: Vec<BlockWithContext>,
+}
+
+/// Represents a block with its corresponding validation context.
+#[derive(Debug)]
+pub struct BlockWithContext {
+    pub(crate) block: Arc<Block>,
+    // Whether the block's tag is modified (computed from the input diff).
+    pub(crate) is_tag_modified: bool,
+    // Whether the content of the block is modified (computed from the input diff).
+    pub(crate) is_content_modified: bool,
 }
 
 /// Parses source files and returns only those blocks that intersect with the provided modified line ranges.
 ///
-/// - `modified_lines_by_file` maps file paths to sorted modified lines.
+/// - `line_changes_by_file` maps file paths to sorted line changes.
 /// - `file_reader` provides async access to file contents within a root path.
 /// - `parsers` maps file extensions to language-specific block parsers.
 /// - `extra_file_extensions` allows remapping unknown extensions to supported ones (e.g., "cxx" -> "cpp").
 ///
 /// Returns a map of file paths to the list of intersecting blocks found in that file.
 pub fn parse_blocks(
-    modified_lines_by_file: &HashMap<String, Vec<LineChange>>,
+    line_changes_by_file: &HashMap<String, Vec<LineChange>>,
     file_reader: &impl FileReader,
     parsers: HashMap<String, Rc<Box<dyn BlocksParser>>>,
     extra_file_extensions: HashMap<String, String>,
 ) -> anyhow::Result<HashMap<String, FileBlocks>> {
     let mut blocks = HashMap::new();
-    for (file_path, line_changes) in modified_lines_by_file {
+    for (file_path, line_changes) in line_changes_by_file {
         let source_code = file_reader.read_to_string(Path::new(&file_path))?;
         let new_line_positions: Vec<usize> = source_code
             .match_indices('\n')
@@ -198,11 +237,19 @@ pub fn parse_blocks(
                     .parse(&source_code)
                     .context(format!("Failed to parse file \"{file_path}\""))?
                 {
-                    if !block.intersects_with_any(line_changes, &new_line_positions) {
+                    let is_content_modified =
+                        block.content_intersects_with_any(line_changes, &new_line_positions);
+                    let is_tag_modified =
+                        block.content_intersects_with_any(line_changes, &new_line_positions);
+                    if !is_content_modified && !is_tag_modified {
                         // Skip untouched blocks.
                         continue;
                     }
-                    file_blocks.push(Arc::new(block));
+                    file_blocks.push(BlockWithContext {
+                        block: Arc::new(block),
+                        is_tag_modified,
+                        is_content_modified,
+                    });
                 }
             }
         }
@@ -211,7 +258,7 @@ pub fn parse_blocks(
                 file_path.to_string(),
                 FileBlocks {
                     file_contents: source_code,
-                    blocks: file_blocks,
+                    blocks_with_context: file_blocks,
                 },
             );
         }
@@ -257,6 +304,7 @@ mod block_severity_from_str_tests {
             0,
             HashMap::from([("severity".into(), severity.into())]),
             0..0,
+            0..0,
         )
     }
 
@@ -276,7 +324,7 @@ mod block_severity_from_str_tests {
 
     #[test]
     fn block_with_no_severity_returns_error_severity_by_default() {
-        let block = Block::new(0, 0, HashMap::new(), 0..0);
+        let block = Block::new(0, 0, HashMap::new(), 0..0, 0..0);
 
         assert_eq!(block.severity().unwrap(), BlockSeverity::Error);
     }
@@ -371,22 +419,23 @@ mod parse_blocks_tests {
         ]);
         let parsers = language_parsers()?;
 
-        let blocks_by_file = parse_blocks(&modified_ranges, &file_reader, parsers, HashMap::new())?;
+        let file_blocks_by_file =
+            parse_blocks(&modified_ranges, &file_reader, parsers, HashMap::new())?;
 
-        assert_eq!(blocks_by_file.len(), 2);
-        let blocks_a = &blocks_by_file["a.rs"].blocks;
+        assert_eq!(file_blocks_by_file.len(), 2);
+        let blocks_a = &file_blocks_by_file["a.rs"].blocks_with_context;
         assert_eq!(blocks_a.len(), 2);
-        assert_eq!(blocks_a[0].name(), Some("first"));
-        assert_eq!(blocks_a[1].name(), Some("second"));
-        let blocks_b = &blocks_by_file["b.rs"].blocks;
+        assert_eq!(blocks_a[0].block.name(), Some("first"));
+        assert_eq!(blocks_a[1].block.name(), Some("second"));
+        let blocks_b = &file_blocks_by_file["b.rs"].blocks_with_context;
         assert_eq!(blocks_b.len(), 2);
-        assert_eq!(blocks_b[0].name(), Some("outer"));
-        assert_eq!(blocks_b[1].name(), Some("inner"));
+        assert_eq!(blocks_b[0].block.name(), Some("outer"));
+        assert_eq!(blocks_b[1].block.name(), Some("inner"));
         Ok(())
     }
 
     #[test]
-    fn returns_blocks_with_modified_contents_only() -> anyhow::Result<()> {
+    fn returns_blocks_with_modified_start_tag_or_contents_only() -> anyhow::Result<()> {
         let content_a = r#"
         /* <block name="first"> */ let foo = "bar"; // </block>
         /* <block name="second"> */ let foo = "baz"; // </block>
@@ -550,17 +599,17 @@ mod parse_blocks_tests {
         let blocks_by_file = parse_blocks(&line_changes, &file_reader, parsers, HashMap::new())?;
 
         assert_eq!(blocks_by_file.len(), 2);
-        let blocks_a = &blocks_by_file["a.rs"].blocks;
+        let blocks_a = &blocks_by_file["a.rs"].blocks_with_context;
         assert_eq!(blocks_a.len(), 6);
-        assert_eq!(blocks_a[0].name(), Some("second"));
-        assert_eq!(blocks_a[1].name(), Some("third"));
-        assert_eq!(blocks_a[2].name(), Some("fourth"));
-        assert_eq!(blocks_a[3].name(), Some("eighth"));
-        assert_eq!(blocks_a[4].name(), Some("nineth"));
-        assert_eq!(blocks_a[5].name(), Some("tenth"));
-        let blocks_b = &blocks_by_file["b.rs"].blocks;
+        assert_eq!(blocks_a[0].block.name(), Some("second"));
+        assert_eq!(blocks_a[1].block.name(), Some("third"));
+        assert_eq!(blocks_a[2].block.name(), Some("fourth"));
+        assert_eq!(blocks_a[3].block.name(), Some("eighth"));
+        assert_eq!(blocks_a[4].block.name(), Some("nineth"));
+        assert_eq!(blocks_a[5].block.name(), Some("tenth"));
+        let blocks_b = &blocks_by_file["b.rs"].blocks_with_context;
         assert_eq!(blocks_b.len(), 1);
-        assert_eq!(blocks_b[0].name(), Some("first"));
+        assert_eq!(blocks_b[0].block.name(), Some("first"));
 
         Ok(())
     }
@@ -618,7 +667,7 @@ mod parse_blocks_tests {
         )?;
 
         assert_eq!(blocks_by_file.len(), 1);
-        assert_eq!(blocks_by_file["a.rust"].blocks.len(), 1);
+        assert_eq!(blocks_by_file["a.rust"].blocks_with_context.len(), 1);
         Ok(())
     }
 
