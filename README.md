@@ -1,14 +1,4 @@
-# BlockWatch: Smart language agnostic linter
-
-[//]: # (<block name="validators-list">)
-> - Keep your docs up to date with the code
-> - Enforce formatting rules (sorted lines)
-> - Ensure unique lines
-> - Validate each line against a regex pattern
-> - Enforce number of lines in a block
-> - Validate a block with an AI condition (LLM)
-
-[//]: # (</block>)
+# BlockWatch: smart language agnostic linter
 
 [![Build Status](https://github.com/mennanov/blockwatch/actions/workflows/rust.yml/badge.svg)](https://github.com/mennanov/blockwatch/actions)
 [![codecov](https://codecov.io/gh/mennanov/blockwatch/graph/badge.svg?token=LwUfGTZ551)](https://codecov.io/gh/mennanov/blockwatch)
@@ -17,28 +7,27 @@
 
 ## Why
 
-Have you ever updated a function but forgotten to update the `README.md` example that uses it? Or changed a list of
-supported items in your configuration but forgot to update the corresponding list in the documentation?
+Have you ever updated a function but forgotten to update the `README.md` example that uses it?
+Or changed a list of supported items in your configuration but forgot to update the corresponding list in the
+documentation?
 
-Keeping everything in sync manually is tedious and error-prone.
+Keeping everything in sync and valid manually is tedious and error-prone.
 
-## What
+## Features
 
-**BlockWatch** is a language agnostic lint:
+**Blockwatch** keeps your codebase consistent by making dependencies and formatting requirements explicit and
+automatically verifiable.
 
-- 🔗 Dependency-aware blocks: declare named blocks and link them to keep code, docs, and configs in sync across files.
-- 🤖 AI-powered validation: Validate blocks against natural-language conditions using OpenAi-compatible LLMs.
-- 🔤 Sorted segments: enforce stable ordering to prevent drift in lists and indexes.
-- 🤖 Git-native workflow: pipe git diff into blockwatch for instant, change-only validation before you commit.
-- 🛠️ Pre-commit & CI/CD ready: first-class support for pre-commit hooks and a dedicated GitHub Action.
-- 🌍 Broad language coverage: works with 20+ programming and markup languages out of the box.
-- 🧩 Flexible extension mapping: map custom file extensions to supported grammars via a simple CLI flag.
-- ⚡ Fast, single-binary tool: written in Rust with no runtime dependencies.
+[//]: # (<block name="validators-list">)
 
------
+- 📖 Keeps your docs up to date with the code
+- 🔤 Enforces formatting rules (e.g. sorted lines)
+- ✅ Ensures unique lines
+- 🔍 Validates lines against a regex pattern
+- 🔢 Enforces number of lines
+- 🤖 Validates blocks with conditions checked by AI (LLM)
 
-It keeps your codebase consistent by making dependencies and formatting requirements explicit and automatically
-verifiable.
+[//]: # (</block>)
 
 ## How It Works
 
@@ -54,7 +43,7 @@ fruits = [
 ]
 ```
 
-Running the following command will validate the changes:
+When changes are made running the following command will validate them:
 
 ```shell
 git diff --patch | blockwatch
@@ -64,7 +53,7 @@ git diff --patch | blockwatch
 
 Use the `affects` attribute to create relationships between blocks:
 
-Mark a "source" block of code and give a name to a "dependent" block in another file (like
+Mark a "source" block of code and give a name to a "dependent" block (possibly in a different file e.g.
 your documentation).
 
 In `src/parsers/mod.rs`, we define a list of languages. This block is marked as
@@ -75,7 +64,7 @@ pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn Bl
     Ok(HashMap::from([
         // Will report a violation if this list is updated, but the block `README.md:supported-grammar-example` is not,
         // which helps keeping the docs up-to-date:
-        // <block affects="README.md:supported-grammar-example">
+        // <block affects="example.py:supported-grammar-example">
         ("rs".into(), rust_parser),
         ("js".into(), Rc::clone(&js_parser)),
         ("go".into(), go_parser),
@@ -84,9 +73,11 @@ pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn Bl
 }
 ```
 
-In `README.md`, we define the block that depends on the code above:
+In `example.py`, we define the block that depends on the code above:
 
 ```python
+# example.py
+
 supported_languages = [
     # <block name="supported-grammar-example">
     "Go",
@@ -178,9 +169,9 @@ Empty lines and spaces are ignored.
 
 Use the `line-count` attribute to ensure the total number of lines in a block meets a constraint:
 
-- line-count="<50" — strictly less than 50 lines
-- line-count=">=3" — at least 3 lines
-- line-count="==10" — exactly 10 lines
+- `line-count="<50"` — strictly less than 50 lines
+- `line-count=">=3"` — at least 3 lines
+- `line-count="==10"` — exactly 10 lines
 
 ```python
 my_list = [
@@ -218,10 +209,10 @@ If the content does not satisfy the condition, BlockWatch will report a violatio
   `https://api.openai.com/v1`).
 - Optional: Set `BLOCKWATCH_AI_MODEL` to override the default model (default: `gpt-4o-mini`).
 
-#### Security
+#### ⚠️ Security Warning
 
-When used in CI make sure it can be triggered by trusted users only.
-Otherwise, an API quota may be exhausted.
+> **When used in CI make sure it can be triggered by trusted users only.**
+> Otherwise, an API quota may be exhausted.
 
 -----
 
