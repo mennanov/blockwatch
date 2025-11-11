@@ -190,7 +190,17 @@ Empty lines are ignored.
 Use the `check-ai` attribute to validate a block against a natural-language condition using an LLM.
 The model will return an actionable error message if the condition is not met.
 
-Example:
+#### Attributes
+
+- `check-ai` (required) — Natural language condition that the block must satisfy
+- `check-ai-pattern` (optional) — Regular Expression to extract specific content from the block before validation
+    - If a named capture group `value` is present, only that group's text is used
+    - If no named group exists, the entire match is used
+    - Lines that don't match the pattern are ignored
+
+#### Examples
+
+Basic validation:
 
 ```html
 <h1>Policy Section</h1>
@@ -198,6 +208,19 @@ Example:
 <!-- <block name="policy" check-ai="The block must mention the word 'banana' at least once."> -->
 We like apples and oranges.
 <!-- </block> -->
+```
+
+Using `check-ai-pattern` to validate only extracted content:
+
+```python
+# Validate only the numeric values, ignoring the rest
+prices = [
+    # <block check-ai="All prices must be under $100" check-ai-pattern="\$(?P<value>\d+)">
+    "Item A: $50",
+    "Item B: $75",
+    "Item C: $120",  # This will fail validation
+    # </block>
+]
 ```
 
 If the content does not satisfy the condition, BlockWatch will report a violation.
