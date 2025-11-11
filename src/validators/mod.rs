@@ -5,7 +5,7 @@ mod keep_unique;
 mod line_count;
 mod line_pattern;
 
-use crate::blocks::{Block, BlockSeverity, FileBlocks};
+use crate::blocks::{Block, BlockSeverity, BlockWithContext, FileBlocks};
 use crate::validators::affects::AffectsValidatorDetector;
 use crate::validators::check_ai::CheckAiValidatorDetector;
 use crate::validators::keep_sorted::KeepSortedValidatorDetector;
@@ -37,7 +37,10 @@ pub trait ValidatorSync: Send + Sync {
 ///
 /// This is used to determine whether an async runtime (e.g. Tokio) is needed to run the validators.
 pub trait ValidatorDetector {
-    fn detect(&self, block: &Block) -> anyhow::Result<Option<ValidatorType>>;
+    fn detect(
+        &self,
+        block_with_context: &BlockWithContext,
+    ) -> anyhow::Result<Option<ValidatorType>>;
 }
 
 /// Validator type (sync or async).
@@ -290,7 +293,7 @@ pub fn detect_validators(
     let mut sync_validators = Vec::new();
     let mut async_validators = Vec::new();
     'outer: for file_blocks in context.modified_blocks.values() {
-        for block in &file_blocks.blocks {
+        for block in &file_blocks.blocks_with_context {
             let mut undetected = Vec::new();
             while let Some(detector) = validator_detectors.pop() {
                 match detector.detect(block)? {
@@ -317,7 +320,8 @@ pub fn detect_validators(
 
 #[cfg(test)]
 mod tests {
-    use crate::blocks::{Block, FileBlocks};
+    use crate::blocks::{Block, BlockWithContext, FileBlocks};
+    use crate::test_utils::block_with_context_default;
     use crate::validators;
     use crate::validators::{
         DetectorFactory, ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorSync,
@@ -328,7 +332,7 @@ mod tests {
     use std::sync::Arc;
 
     fn empty_testing_block() -> Block {
-        Block::new(0, 0, HashMap::new(), 0..0)
+        Block::new(0, 0, HashMap::new(), 0..0, 0..0)
     }
 
     fn empty_testing_violation_range() -> ViolationRange {
@@ -395,8 +399,15 @@ mod tests {
     struct FakeAsyncValidatorDetector();
 
     impl ValidatorDetector for FakeAsyncValidatorDetector {
-        fn detect(&self, block: &Block) -> anyhow::Result<Option<ValidatorType>> {
-            if block.attributes.contains_key("fake-async") {
+        fn detect(
+            &self,
+            block_with_context: &BlockWithContext,
+        ) -> anyhow::Result<Option<ValidatorType>> {
+            if block_with_context
+                .block
+                .attributes
+                .contains_key("fake-async")
+            {
                 Ok(Some(ValidatorType::Async(Box::new(FakeAsyncValidator {
                     testing_block: Arc::new(empty_testing_block()),
                 }))))
@@ -408,8 +419,15 @@ mod tests {
 
     struct FakeSyncValidatorDetector();
     impl ValidatorDetector for FakeSyncValidatorDetector {
-        fn detect(&self, block: &Block) -> anyhow::Result<Option<ValidatorType>> {
-            if block.attributes.contains_key("fake-sync") {
+        fn detect(
+            &self,
+            block_with_context: &BlockWithContext,
+        ) -> anyhow::Result<Option<ValidatorType>> {
+            if block_with_context
+                .block
+                .attributes
+                .contains_key("fake-sync")
+            {
                 Ok(Some(ValidatorType::Sync(Box::new(FakeSyncValidator {
                     testing_block: Arc::new(empty_testing_block()),
                 }))))
@@ -432,13 +450,14 @@ mod tests {
                 "file1".to_string(),
                 FileBlocks {
                     file_contents: "".to_string(),
-                    blocks: vec![Arc::new(Block::new(
+                    blocks_with_context: vec![block_with_context_default(Block::new(
                         1,
                         6,
                         HashMap::from([
                             ("fake-sync".to_string(), "condition A".to_string()),
                             ("fake-async".to_string(), "condition B".to_string()),
                         ]),
+                        0..0,
                         0..0,
                     ))],
                 },
@@ -447,13 +466,14 @@ mod tests {
                 "file2".to_string(),
                 FileBlocks {
                     file_contents: "".to_string(),
-                    blocks: vec![Arc::new(Block::new(
+                    blocks_with_context: vec![block_with_context_default(Block::new(
                         1,
                         6,
                         HashMap::from([
                             ("fake-sync".to_string(), "condition C".to_string()),
                             ("fake-async".to_string(), "condition D".to_string()),
                         ]),
+                        0..0,
                         0..0,
                     ))],
                 },
@@ -493,10 +513,11 @@ mod tests {
                 "file1".to_string(),
                 FileBlocks {
                     file_contents: "".to_string(),
-                    blocks: vec![Arc::new(Block::new(
+                    blocks_with_context: vec![block_with_context_default(Block::new(
                         1,
                         6,
                         HashMap::from([("fake-sync".to_string(), "condition A".to_string())]),
+                        0..0,
                         0..0,
                     ))],
                 },
@@ -505,10 +526,11 @@ mod tests {
                 "file2".to_string(),
                 FileBlocks {
                     file_contents: "".to_string(),
-                    blocks: vec![Arc::new(Block::new(
+                    blocks_with_context: vec![block_with_context_default(Block::new(
                         1,
                         6,
                         HashMap::from([("fake-sync".to_string(), "condition B".to_string())]),
+                        0..0,
                         0..0,
                     ))],
                 },
@@ -539,10 +561,11 @@ mod tests {
                 "file1".to_string(),
                 FileBlocks {
                     file_contents: "".to_string(),
-                    blocks: vec![Arc::new(Block::new(
+                    blocks_with_context: vec![block_with_context_default(Block::new(
                         1,
                         6,
                         HashMap::from([("fake-async".to_string(), "condition A".to_string())]),
+                        0..0,
                         0..0,
                     ))],
                 },
@@ -551,10 +574,11 @@ mod tests {
                 "file2".to_string(),
                 FileBlocks {
                     file_contents: "".to_string(),
-                    blocks: vec![Arc::new(Block::new(
+                    blocks_with_context: vec![block_with_context_default(Block::new(
                         1,
                         6,
                         HashMap::from([("fake-async".to_string(), "condition B".to_string())]),
+                        0..0,
                         0..0,
                     ))],
                 },
@@ -584,13 +608,14 @@ mod tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: "".to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
                     HashMap::from([
                         ("fake-sync".to_string(), "condition A".to_string()),
                         ("fake-async".to_string(), "condition B".to_string()),
                     ]),
+                    0..0,
                     0..0,
                 ))],
             },
@@ -617,13 +642,14 @@ mod tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: "".to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
                     HashMap::from([
                         ("fake-sync".to_string(), "condition A".to_string()),
                         ("fake-async".to_string(), "condition B".to_string()),
                     ]),
+                    0..0,
                     0..0,
                 ))],
             },

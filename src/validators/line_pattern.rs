@@ -1,4 +1,4 @@
-use crate::blocks::Block;
+use crate::blocks::{Block, BlockWithContext};
 use crate::validators;
 use crate::validators::{
     ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
@@ -29,8 +29,8 @@ impl ValidatorSync for LinePatternValidator {
     ) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
         let mut violations = HashMap::new();
         for (file_path, file_blocks) in &context.modified_blocks {
-            for block in &file_blocks.blocks {
-                let Some(pattern) = block.attributes.get("line-pattern") else {
+            for block_with_context in &file_blocks.blocks_with_context {
+                let Some(pattern) = block_with_context.block.attributes.get("line-pattern") else {
                     continue;
                 };
                 // Compile regex and ensure it anchors to entire line. Users may pass unanchored; we enforce full-line.
@@ -39,12 +39,13 @@ impl ValidatorSync for LinePatternValidator {
                         "line-pattern expected a valid regular expression, got \"{}\" in {}:{} at line {} (error: {})",
                         pattern,
                         file_path,
-                        block.name_display(),
-                        block.starts_at_line,
+                        block_with_context.block.name_display(),
+                        block_with_context.block.starts_at_line,
                         e
                     )
                 })?;
-                for (line_number, line) in block
+                for (line_number, line) in block_with_context
+                    .block
                     .content(&file_blocks.file_contents)
                     .lines()
                     .enumerate()
@@ -54,7 +55,8 @@ impl ValidatorSync for LinePatternValidator {
                         continue;
                     }
                     if !re.is_match(trimmed_line) {
-                        let violation_line_number = block.starts_at_line + line_number;
+                        let violation_line_number =
+                            block_with_context.block.starts_at_line + line_number;
                         let line_character_start =
                             trimmed_line.as_ptr() as usize - line.as_ptr() as usize + 1; // Start position is 1-based.
                         let line_character_end = line_character_start + trimmed_line.len() - 1; // End position is 1-based and inclusive.
@@ -63,7 +65,7 @@ impl ValidatorSync for LinePatternValidator {
                             .or_insert_with(Vec::new)
                             .push(create_violation(
                                 file_path,
-                                Arc::clone(block),
+                                Arc::clone(&block_with_context.block),
                                 pattern,
                                 violation_line_number,
                                 line_character_start,
@@ -87,8 +89,15 @@ impl LinePatternValidatorDetector {
 }
 
 impl ValidatorDetector for LinePatternValidatorDetector {
-    fn detect(&self, block: &Block) -> anyhow::Result<Option<ValidatorType>> {
-        if block.attributes.contains_key("line-pattern") {
+    fn detect(
+        &self,
+        block_with_context: &BlockWithContext,
+    ) -> anyhow::Result<Option<ValidatorType>> {
+        if block_with_context
+            .block
+            .attributes
+            .contains_key("line-pattern")
+        {
             Ok(Some(ValidatorType::Sync(Box::new(
                 LinePatternValidator::new(),
             ))))
@@ -135,6 +144,7 @@ mod validate_tests {
     use super::*;
     use crate::blocks::{Block, FileBlocks};
     use crate::test_utils;
+    use crate::test_utils::block_with_context_default;
     use serde_json::json;
 
     #[test]
@@ -153,10 +163,11 @@ mod validate_tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: "".to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     2,
                     HashMap::from([("line-pattern".to_string(), "[A-Z]+".to_string())]),
+                    0..0,
                     0..0,
                 ))],
             },
@@ -169,15 +180,16 @@ mod validate_tests {
     #[test]
     fn valid_regex_all_lines_match_returns_no_violations() -> anyhow::Result<()> {
         let validator = LinePatternValidator::new();
-        let file1_contents = "block content goes here: FOO\nBAR\nZ";
+        let file1_contents = "/*<block>*/block content goes here: FOO\nBAR\nZ//</block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     5,
                     HashMap::from([("line-pattern".to_string(), "^[A-Z]+$".to_string())]),
+                    test_utils::substr_range(file1_contents, "<block>"),
                     test_utils::substr_range(file1_contents, "FOO\nBAR\nZ"),
                 ))],
             },
@@ -190,15 +202,16 @@ mod validate_tests {
     #[test]
     fn empty_lines_and_spaces_are_ignored() -> anyhow::Result<()> {
         let validator = LinePatternValidator::new();
-        let file1_contents = "block content goes here: FOO\n \n\n BAR \nZ ";
+        let file1_contents = "/*<block>*/block content goes here: FOO\n \n\n BAR \nZ //</block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     5,
                     HashMap::from([("line-pattern".to_string(), "^[A-Z]+$".to_string())]),
+                    test_utils::substr_range(file1_contents, "<block>"),
                     test_utils::substr_range(file1_contents, "FOO\n \n\n BAR \nZ "),
                 ))],
             },
@@ -211,15 +224,16 @@ mod validate_tests {
     #[test]
     fn non_matching_line_reports_first_violation_only() -> anyhow::Result<()> {
         let validator = LinePatternValidator::new();
-        let file1_contents = "block content goes here: OK\n fail \nALSOOK";
+        let file1_contents = "/*<block>*/block content goes here: OK\n fail \nALSOOK//</block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
                     HashMap::from([("line-pattern".to_string(), "^[A-Z]+$".to_string())]),
+                    test_utils::substr_range(file1_contents, "<block>"),
                     test_utils::substr_range(file1_contents, "OK\n fail \nALSOOK"),
                 ))],
             },
@@ -250,10 +264,11 @@ mod validate_tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: "".to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     10,
                     15,
                     HashMap::from([("line-pattern".to_string(), "[A-Z+".to_string())]),
+                    0..0,
                     0..0,
                 ))],
             },

@@ -1,4 +1,4 @@
-use crate::blocks::Block;
+use crate::blocks::{Block, BlockWithContext};
 use crate::validators;
 use crate::validators::{
     ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
@@ -22,11 +22,16 @@ impl ValidatorSync for KeepUniqueValidator {
     ) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
         let mut violations = HashMap::new();
         for (file_path, file_blocks) in &context.modified_blocks {
-            for block in &file_blocks.blocks {
-                if !block.attributes.contains_key("keep-unique") {
+            for block_with_context in &file_blocks.blocks_with_context {
+                if !block_with_context
+                    .block
+                    .attributes
+                    .contains_key("keep-unique")
+                {
                     continue;
                 }
-                let pattern = block
+                let pattern = block_with_context
+                    .block
                     .attributes
                     .get("keep-unique")
                     .cloned()
@@ -37,7 +42,8 @@ impl ValidatorSync for KeepUniqueValidator {
                     Some(regex::Regex::new(&pattern))
                 };
                 let mut seen: HashSet<&str> = HashSet::new();
-                for (line_number, line) in block
+                for (line_number, line) in block_with_context
+                    .block
                     .content(&file_blocks.file_contents)
                     .lines()
                     .enumerate()
@@ -76,8 +82,8 @@ impl ValidatorSync for KeepUniqueValidator {
                             return Err(anyhow::anyhow!(
                                 "Invalid keep-unique regex pattern for block {}:{} defined at line {}: {}",
                                 file_path,
-                                block.name_display(),
-                                block.starts_at_line,
+                                block_with_context.block.name_display(),
+                                block_with_context.block.starts_at_line,
                                 e
                             ));
                         }
@@ -85,7 +91,8 @@ impl ValidatorSync for KeepUniqueValidator {
                     if let Some((matched_line, line_range)) = line_match
                         && !seen.insert(matched_line)
                     {
-                        let violation_line_number = block.starts_at_line + line_number;
+                        let violation_line_number =
+                            block_with_context.block.starts_at_line + line_number;
                         let line_character_start = *line_range.start(); // Start position is 1-based.
                         let line_character_end = *line_range.end(); // End position is 1-based and inclusive.
                         violations
@@ -93,7 +100,7 @@ impl ValidatorSync for KeepUniqueValidator {
                             .or_insert_with(Vec::new)
                             .push(create_violation(
                                 file_path,
-                                Arc::clone(block),
+                                Arc::clone(&block_with_context.block),
                                 violation_line_number,
                                 line_character_start,
                                 line_character_end,
@@ -116,8 +123,15 @@ impl KeepUniqueValidatorDetector {
 }
 
 impl ValidatorDetector for KeepUniqueValidatorDetector {
-    fn detect(&self, block: &Block) -> anyhow::Result<Option<ValidatorType>> {
-        if block.attributes.contains_key("keep-unique") {
+    fn detect(
+        &self,
+        block_with_context: &BlockWithContext,
+    ) -> anyhow::Result<Option<ValidatorType>> {
+        if block_with_context
+            .block
+            .attributes
+            .contains_key("keep-unique")
+        {
             Ok(Some(ValidatorType::Sync(Box::new(
                 KeepUniqueValidator::new(),
             ))))
@@ -160,6 +174,7 @@ mod validate_tests {
     use super::*;
     use crate::blocks::{Block, FileBlocks};
     use crate::test_utils;
+    use crate::test_utils::block_with_context_default;
 
     #[test]
     fn empty_blocks_returns_no_violations() -> anyhow::Result<()> {
@@ -179,10 +194,11 @@ mod validate_tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: "".to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     2,
                     HashMap::from([("keep-unique".to_string(), "".to_string())]),
+                    0..0,
                     0..0,
                 ))],
             },
@@ -197,15 +213,16 @@ mod validate_tests {
     #[test]
     fn all_unique_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepUniqueValidator::new();
-        let file1_contents = "block contents goes here: A\nB\nC";
+        let file1_contents = "/*<block>*/block contents goes here: A\nB\nC//</block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     5,
                     HashMap::from([("keep-unique".to_string(), "".to_string())]),
+                    test_utils::substr_range(file1_contents, "<block>"),
                     test_utils::substr_range(file1_contents, "A\nB\nC"),
                 ))],
             },
@@ -220,15 +237,16 @@ mod validate_tests {
     #[test]
     fn empty_lines_and_spaces_are_ignored() -> anyhow::Result<()> {
         let validator = KeepUniqueValidator::new();
-        let file1_contents = "block contents goes here: A\nB\n \n \n  \n  \nC";
+        let file1_contents = "/*<block>*/block contents goes here: A\nB\n \n \n  \n  \nC//</block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     5,
                     HashMap::from([("keep-unique".to_string(), "".to_string())]),
+                    test_utils::substr_range(file1_contents, "<block>"),
                     test_utils::substr_range(file1_contents, "A\nB\n \n \n  \n  \nC"),
                 ))],
             },
@@ -243,15 +261,16 @@ mod validate_tests {
     #[test]
     fn spaces_in_regex_are_not_ignored() -> anyhow::Result<()> {
         let validator = KeepUniqueValidator::new();
-        let file1_contents = "block contents goes here:  1 \n 2 \n1\n 1 ";
+        let file1_contents = "/*<block>*/block contents goes here:  1 \n 2 \n1\n 1 //</block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     5,
                     HashMap::from([("keep-unique".to_string(), " \\d+ ".to_string())]),
+                    test_utils::substr_range(file1_contents, "<block>"),
                     test_utils::substr_range(file1_contents, " 1 \n 2 \n1\n 1 "),
                 ))],
             },
@@ -270,15 +289,16 @@ mod validate_tests {
     #[test]
     fn duplicate_returns_violation_first_dup_line_reported() -> anyhow::Result<()> {
         let validator = KeepUniqueValidator::new();
-        let file1_contents = "block contents goes here: A\nBB\nC\nBB\nC\nBB";
+        let file1_contents = "/*<block>*/block contents goes here: A\nBB\nC\nBB\nC\nBB//</block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
                     HashMap::from([("keep-unique".to_string(), "".to_string())]),
+                    test_utils::substr_range(file1_contents, "<block>"),
                     test_utils::substr_range(file1_contents, "A\nBB\nC\nBB\nC\nBB"),
                 ))],
             },
@@ -303,15 +323,17 @@ mod validate_tests {
     fn regex_with_named_group_detects_duplicates() -> anyhow::Result<()> {
         let validator = KeepUniqueValidator::new();
         let attrs = HashMap::from([("keep-unique".to_string(), "^ID:(?P<value>\\d+)".to_string())]);
-        let file1_contents = "block contents goes here: ID:1 A\nID:2 B\nID:1 C";
+        let file1_contents =
+            "/*<block>*/block contents goes here: ID:1 A\nID:2 B\nID:1 C//</block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
                     attrs,
+                    test_utils::substr_range(file1_contents, "<block>"),
                     test_utils::substr_range(file1_contents, "ID:1 A\nID:2 B\nID:1 C"),
                 ))],
             },
@@ -329,15 +351,17 @@ mod validate_tests {
     fn regex_without_named_group_uses_full_match() -> anyhow::Result<()> {
         let validator = KeepUniqueValidator::new();
         let attrs = HashMap::from([("keep-unique".to_string(), "^ID:\\d+".to_string())]);
-        let file1_contents = "block contents goes here: ID:1 A\nID:2 B\nID:1 C";
+        let file1_contents =
+            "/*<block>*/block contents goes here: ID:1 A\nID:2 B\nID:1 C//</block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
                     attrs,
+                    test_utils::substr_range(file1_contents, "<block>"),
                     test_utils::substr_range(file1_contents, "ID:1 A\nID:2 B\nID:1 C"),
                 ))],
             },
@@ -355,15 +379,16 @@ mod validate_tests {
     fn regex_non_matching_lines_are_skipped() -> anyhow::Result<()> {
         let validator = KeepUniqueValidator::new();
         let attrs = HashMap::from([("keep-unique".to_string(), "^ID:(?P<value>\\d+)".to_string())]);
-        let file1_contents = "block contents goes here: ID:1\nX:2\nID:2";
+        let file1_contents = "/*<block>*/block contents goes here: ID:1\nX:2\nID:2//</block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks: vec![Arc::new(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     4,
                     attrs,
+                    test_utils::substr_range(file1_contents, "<block>"),
                     test_utils::substr_range(file1_contents, "ID:1\nX:2\nID:2"),
                 ))],
             },
