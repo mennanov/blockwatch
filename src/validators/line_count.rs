@@ -186,7 +186,7 @@ mod tests {
     use super::*;
     use crate::blocks::{Block, FileBlocks};
     use crate::test_utils;
-    use crate::test_utils::block_with_context;
+    use crate::test_utils::block_with_context_default;
     use serde_json::json;
 
     #[test]
@@ -213,49 +213,49 @@ mod tests {
             FileBlocks {
                 file_contents: file1_contents.to_string(),
                 blocks_with_context: vec![
-                    block_with_context(Block::new(
+                    block_with_context_default(Block::new(
                         1,
                         4,
                         HashMap::from([("line-count".to_string(), "<3".to_string())]),
                         test_utils::substr_range(file1_contents, "<block>"),
                         test_utils::substr_range(file1_contents, "a\nb"),
                     )),
-                    block_with_context(Block::new(
+                    block_with_context_default(Block::new(
                         5,
                         8,
                         HashMap::from([("line-count".to_string(), "<=3".to_string())]),
                         test_utils::substr_range(file1_contents, "<block>"),
                         test_utils::substr_range(file1_contents, "a\nb"),
                     )),
-                    block_with_context(Block::new(
+                    block_with_context_default(Block::new(
                         9,
                         13,
                         HashMap::from([("line-count".to_string(), "<=3".to_string())]),
                         test_utils::substr_range(file1_contents, "<block>"),
                         test_utils::substr_range(file1_contents, "a\nb\nc"),
                     )),
-                    block_with_context(Block::new(
+                    block_with_context_default(Block::new(
                         15,
                         18,
                         HashMap::from([("line-count".to_string(), "== 2".to_string())]),
                         test_utils::substr_range(file1_contents, "<block>"),
                         test_utils::substr_range(file1_contents, "a\nb"),
                     )),
-                    block_with_context(Block::new(
+                    block_with_context_default(Block::new(
                         20,
                         23,
                         HashMap::from([("line-count".to_string(), ">= 2".to_string())]),
                         test_utils::substr_range(file1_contents, "<block>"),
                         test_utils::substr_range(file1_contents, "a\nb"),
                     )),
-                    block_with_context(Block::new(
+                    block_with_context_default(Block::new(
                         30,
                         34,
                         HashMap::from([("line-count".to_string(), ">= 2".to_string())]),
                         test_utils::substr_range(file1_contents, "<block>"),
                         test_utils::substr_range(file1_contents, "a\nb\nc"),
                     )),
-                    block_with_context(Block::new(
+                    block_with_context_default(Block::new(
                         40,
                         45,
                         HashMap::from([("line-count".to_string(), "> 3".to_string())]),
@@ -279,42 +279,42 @@ mod tests {
             FileBlocks {
                 file_contents: file1_contents.to_string(),
                 blocks_with_context: vec![
-                    block_with_context(Block::new(
+                    block_with_context_default(Block::new(
                         1,
                         5,
                         HashMap::from([("line-count".to_string(), "<3".to_string())]),
                         test_utils::substr_range(file1_contents, "<block>"),
                         test_utils::substr_range(file1_contents, "a\nb\nc"),
                     )),
-                    block_with_context(Block::new(
+                    block_with_context_default(Block::new(
                         7,
                         12,
                         HashMap::from([("line-count".to_string(), "<=3".to_string())]),
                         test_utils::substr_range(file1_contents, "<block>"),
                         test_utils::substr_range(file1_contents, "a\nb\nc\nd"),
                     )),
-                    block_with_context(Block::new(
+                    block_with_context_default(Block::new(
                         14,
                         19,
                         HashMap::from([("line-count".to_string(), "==3".to_string())]),
                         test_utils::substr_range(file1_contents, "<block>"),
                         test_utils::substr_range(file1_contents, "a\nb\nc\nd"),
                     )),
-                    block_with_context(Block::new(
+                    block_with_context_default(Block::new(
                         20,
                         23,
                         HashMap::from([("line-count".to_string(), "==3".to_string())]),
                         test_utils::substr_range(file1_contents, "<block>"),
                         test_utils::substr_range(file1_contents, "a\nb"),
                     )),
-                    block_with_context(Block::new(
+                    block_with_context_default(Block::new(
                         25,
                         28,
                         HashMap::from([("line-count".to_string(), ">=3".to_string())]),
                         test_utils::substr_range(file1_contents, "<block>"),
                         test_utils::substr_range(file1_contents, "a\nb"),
                     )),
-                    block_with_context(Block::new(
+                    block_with_context_default(Block::new(
                         25,
                         28,
                         HashMap::from([("line-count".to_string(), ">3".to_string())]),
@@ -426,7 +426,7 @@ mod tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks_with_context: vec![block_with_context(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     4,
                     HashMap::from([("line-count".to_string(), "<=4".to_string())]),

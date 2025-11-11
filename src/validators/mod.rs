@@ -321,7 +321,7 @@ pub fn detect_validators(
 #[cfg(test)]
 mod tests {
     use crate::blocks::{Block, BlockWithContext, FileBlocks};
-    use crate::test_utils::block_with_context;
+    use crate::test_utils::block_with_context_default;
     use crate::validators;
     use crate::validators::{
         DetectorFactory, ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorSync,
@@ -450,7 +450,7 @@ mod tests {
                 "file1".to_string(),
                 FileBlocks {
                     file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context(Block::new(
+                    blocks_with_context: vec![block_with_context_default(Block::new(
                         1,
                         6,
                         HashMap::from([
@@ -466,7 +466,7 @@ mod tests {
                 "file2".to_string(),
                 FileBlocks {
                     file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context(Block::new(
+                    blocks_with_context: vec![block_with_context_default(Block::new(
                         1,
                         6,
                         HashMap::from([
@@ -513,7 +513,7 @@ mod tests {
                 "file1".to_string(),
                 FileBlocks {
                     file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context(Block::new(
+                    blocks_with_context: vec![block_with_context_default(Block::new(
                         1,
                         6,
                         HashMap::from([("fake-sync".to_string(), "condition A".to_string())]),
@@ -526,7 +526,7 @@ mod tests {
                 "file2".to_string(),
                 FileBlocks {
                     file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context(Block::new(
+                    blocks_with_context: vec![block_with_context_default(Block::new(
                         1,
                         6,
                         HashMap::from([("fake-sync".to_string(), "condition B".to_string())]),
@@ -561,7 +561,7 @@ mod tests {
                 "file1".to_string(),
                 FileBlocks {
                     file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context(Block::new(
+                    blocks_with_context: vec![block_with_context_default(Block::new(
                         1,
                         6,
                         HashMap::from([("fake-async".to_string(), "condition A".to_string())]),
@@ -574,7 +574,7 @@ mod tests {
                 "file2".to_string(),
                 FileBlocks {
                     file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context(Block::new(
+                    blocks_with_context: vec![block_with_context_default(Block::new(
                         1,
                         6,
                         HashMap::from([("fake-async".to_string(), "condition B".to_string())]),
@@ -608,7 +608,7 @@ mod tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: "".to_string(),
-                blocks_with_context: vec![block_with_context(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
                     HashMap::from([
@@ -642,7 +642,7 @@ mod tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: "".to_string(),
-                blocks_with_context: vec![block_with_context(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
                     HashMap::from([

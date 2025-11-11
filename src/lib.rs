@@ -37,12 +37,34 @@ mod test_utils {
     /// * `block` - The block to wrap in a context
     ///
     /// # Returns
-    /// A `BlockWithContext` with both `is_tag_modified` and `is_content_modified` set to false.
-    pub(crate) fn block_with_context(block: Block) -> BlockWithContext {
+    /// A `BlockWithContext` with both `is_start_tag_modified` and `is_content_modified` set to
+    /// false.
+    pub(crate) fn block_with_context_default(block: Block) -> BlockWithContext {
         BlockWithContext {
             block: Arc::new(block),
-            is_tag_modified: false,
+            _is_start_tag_modified: false,
             is_content_modified: false,
+        }
+    }
+
+    /// Creates a `BlockWithContext` from a `Block` with specified modification flags.
+    ///
+    /// # Arguments
+    /// * `block` - The block to wrap in a context
+    /// * `is_start_tag_modified` - Whether the block's start tag is modified
+    /// * `is_content_modified` - Whether the block's content is modified
+    ///
+    /// # Returns
+    /// A `BlockWithContext` with the specified modification flags.
+    pub(crate) fn block_with_context(
+        block: Block,
+        is_start_tag_modified: bool,
+        is_content_modified: bool,
+    ) -> BlockWithContext {
+        BlockWithContext {
+            block: Arc::new(block),
+            _is_start_tag_modified: is_start_tag_modified,
+            is_content_modified,
         }
     }
 }

@@ -281,7 +281,7 @@ mod tests {
     use super::*;
     use crate::blocks::{Block, FileBlocks};
     use crate::test_utils;
-    use crate::test_utils::block_with_context;
+    use crate::test_utils::block_with_context_default;
     use serde_json::json;
 
     #[derive(Clone)]
@@ -339,7 +339,7 @@ mod tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks_with_context: vec![block_with_context(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     3,
                     HashMap::from([("check-ai".to_string(), "must mention banana".to_string())]),
@@ -365,7 +365,7 @@ mod tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks_with_context: vec![block_with_context(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     3,
                     HashMap::from([
@@ -395,7 +395,7 @@ mod tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks_with_context: vec![block_with_context(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     3,
                     HashMap::from([
@@ -427,7 +427,7 @@ mod tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks_with_context: vec![block_with_context(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     10,
                     14,
                     HashMap::from([("check-ai".to_string(), "must mention banana".to_string())]),
@@ -467,7 +467,7 @@ mod tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks_with_context: vec![block_with_context(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     2,
                     4,
                     HashMap::from([("check-ai".to_string(), "condition".to_string())]),
@@ -489,7 +489,7 @@ mod tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks_with_context: vec![block_with_context(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     5,
                     7,
                     HashMap::from([("check-ai".to_string(), " ".to_string())]),
@@ -509,12 +509,12 @@ mod tests {
     #[tokio::test]
     async fn empty_content_skips_api_call_returns_no_violations() -> anyhow::Result<()> {
         let validator = CheckAiValidator::with_client(FakeClient::default());
-        let file1_contents = "block content goes here:  \n\n";
+        let file1_contents = "/* <block> */block content goes here:  \n\n// </block>";
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks_with_context: vec![block_with_context(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     1,
                     HashMap::from([("check-ai".to_string(), "condition".to_string())]),

@@ -232,18 +232,31 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
         end_position: usize,
         attributes: HashMap<String, String>,
     ) {
-        let comment_index = index
+        let start_tag_start_index = index
+            .get(
+                index
+                    .binary_search_by(|comment_index| {
+                        comment_index.end_position.cmp(&start_position)
+                    })
+                    .unwrap_or_else(|e| e),
+            )
+            .expect("start tag start comment index out of bounds");
+        let start_tag_end_index = index
             .get(
                 index
                     .binary_search_by(|comment_index| comment_index.end_position.cmp(&end_position))
                     .unwrap_or_else(|e| e),
             )
-            .expect("start comment index out of bounds");
+            .expect("start tag end comment index out of bounds");
+        let start_tag_range = start_tag_start_index.source_start_position
+            + (start_position - start_tag_start_index.start_position)
+            ..start_tag_end_index.source_start_position
+                + (end_position - start_tag_end_index.start_position);
         stack.push(BlockBuilder::new(
-            comment_index.source_start_line_number,
-            comment_index,
+            start_tag_end_index.source_start_line_number,
+            start_tag_end_index,
             attributes,
-            start_position..end_position + 1,
+            start_tag_range,
         ));
     }
 
@@ -255,29 +268,33 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
         start_position: usize,
         end_position: usize,
     ) -> anyhow::Result<()> {
-        let idx = index
-            .binary_search_by(|comment_index| comment_index.end_position.cmp(&end_position))
-            .unwrap_or_else(|e| e);
-        let comment_index = index.get(idx).expect("end comment index out of bounds");
+        let end_tag_end_index = index
+            .get(
+                index
+                    .binary_search_by(|comment_index| comment_index.end_position.cmp(&end_position))
+                    .unwrap_or_else(|e| e),
+            )
+            .expect("end comment index out of bounds");
         if let Some(block_builder) = stack.pop() {
-            let content_range = if comment_index != block_builder.start_index {
-                block_builder.start_index.source_end_position..comment_index.source_start_position
+            let content_range = if end_tag_end_index != block_builder.start_tag_end_index {
+                block_builder.start_tag_end_index.source_end_position
+                    ..end_tag_end_index.source_start_position
             } else {
                 // Block that starts and ends in the same comment can't have any
                 // content.
                 0..0
             };
-            // TODO: get rid of the Block.ends_at_line and use block's source positions instead to compute intersections.
-            let block_comment = &concatenated_comments[comment_index.start_position..end_position];
+            let block_comment =
+                &concatenated_comments[end_tag_end_index.start_position..end_position];
             let end_line_number =
-                comment_index.source_start_line_number + block_comment.lines().count() - 1;
+                end_tag_end_index.source_start_line_number + block_comment.lines().count() - 1;
             blocks.push(block_builder.build(end_line_number, content_range));
             Ok(())
         } else {
             Err(anyhow::anyhow!(
                 "Unexpected closed block at line {}, position {}",
-                comment_index.source_start_line_number,
-                comment_index.source_start_position + start_position
+                end_tag_end_index.source_start_line_number,
+                end_tag_end_index.source_start_position + start_position
             ))
         }
     }
@@ -325,7 +342,7 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
         if let Some(unclosed_block) = stack.pop() {
             return Err(anyhow::anyhow!(format!(
                 "Block at line {} is not closed",
-                unclosed_block.start_index.source_start_line_number
+                unclosed_block.start_tag_end_index.source_start_line_number
             )));
         }
         blocks.sort_by(|a, b| a.starts_at_line.cmp(&b.starts_at_line));
@@ -336,7 +353,7 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
 
 struct BlockBuilder<'a> {
     starts_at_line: usize,
-    start_index: &'a CommentIndex,
+    start_tag_end_index: &'a CommentIndex,
     attributes: HashMap<String, String>,
     start_tag_range: Range<usize>,
 }
@@ -344,13 +361,13 @@ struct BlockBuilder<'a> {
 impl<'a> BlockBuilder<'a> {
     fn new(
         starts_at_line: usize,
-        start_index: &'a CommentIndex,
+        start_tag_end_index: &'a CommentIndex,
         attributes: HashMap<String, String>,
         start_tag_range: Range<usize>,
     ) -> Self {
         Self {
             starts_at_line,
-            start_index,
+            start_tag_end_index,
             attributes,
             start_tag_range,
         }

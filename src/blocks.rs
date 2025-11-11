@@ -200,7 +200,7 @@ pub struct FileBlocks {
 pub struct BlockWithContext {
     pub(crate) block: Arc<Block>,
     // Whether the block's tag is modified (computed from the input diff).
-    pub(crate) is_tag_modified: bool,
+    pub(crate) _is_start_tag_modified: bool,
     // Whether the content of the block is modified (computed from the input diff).
     pub(crate) is_content_modified: bool,
 }
@@ -239,15 +239,15 @@ pub fn parse_blocks(
                 {
                     let is_content_modified =
                         block.content_intersects_with_any(line_changes, &new_line_positions);
-                    let is_tag_modified =
-                        block.content_intersects_with_any(line_changes, &new_line_positions);
-                    if !is_content_modified && !is_tag_modified {
+                    let is_start_tag_modified =
+                        block.start_tag_intersects_with_any(line_changes, &new_line_positions);
+                    if !is_content_modified && !is_start_tag_modified {
                         // Skip untouched blocks.
                         continue;
                     }
                     file_blocks.push(BlockWithContext {
                         block: Arc::new(block),
-                        is_tag_modified,
+                        _is_start_tag_modified: is_start_tag_modified,
                         is_content_modified,
                     });
                 }
@@ -600,13 +600,43 @@ mod parse_blocks_tests {
 
         assert_eq!(blocks_by_file.len(), 2);
         let blocks_a = &blocks_by_file["a.rs"].blocks_with_context;
-        assert_eq!(blocks_a.len(), 6);
-        assert_eq!(blocks_a[0].block.name(), Some("second"));
-        assert_eq!(blocks_a[1].block.name(), Some("third"));
-        assert_eq!(blocks_a[2].block.name(), Some("fourth"));
-        assert_eq!(blocks_a[3].block.name(), Some("eighth"));
-        assert_eq!(blocks_a[4].block.name(), Some("nineth"));
-        assert_eq!(blocks_a[5].block.name(), Some("tenth"));
+        assert_eq!(blocks_a.len(), 9);
+        let first = &blocks_a[0];
+        assert_eq!(first.block.name(), Some("first"));
+        assert!(first._is_start_tag_modified);
+        assert!(!first.is_content_modified);
+        let second = &blocks_a[1];
+        assert_eq!(second.block.name(), Some("second"));
+        assert!(second._is_start_tag_modified);
+        assert!(second.is_content_modified);
+        let third = &blocks_a[2];
+        assert_eq!(third.block.name(), Some("third"));
+        assert!(!third._is_start_tag_modified);
+        assert!(third.is_content_modified);
+        let fourth = &blocks_a[3];
+        assert_eq!(fourth.block.name(), Some("fourth"));
+        assert!(!fourth._is_start_tag_modified);
+        assert!(fourth.is_content_modified);
+        let sixth = &blocks_a[4];
+        assert_eq!(sixth.block.name(), Some("sixth"));
+        assert!(sixth._is_start_tag_modified);
+        assert!(!sixth.is_content_modified);
+        let seventh = &blocks_a[5];
+        assert_eq!(seventh.block.name(), Some("seventh"));
+        assert!(seventh._is_start_tag_modified);
+        assert!(!seventh.is_content_modified);
+        let eighth = &blocks_a[6];
+        assert_eq!(eighth.block.name(), Some("eighth"));
+        assert!(!eighth._is_start_tag_modified);
+        assert!(eighth.is_content_modified);
+        let nineth = &blocks_a[7];
+        assert_eq!(nineth.block.name(), Some("nineth"));
+        assert!(!nineth._is_start_tag_modified);
+        assert!(nineth.is_content_modified);
+        let tenth = &blocks_a[8];
+        assert_eq!(tenth.block.name(), Some("tenth"));
+        assert!(!tenth._is_start_tag_modified);
+        assert!(tenth.is_content_modified);
         let blocks_b = &blocks_by_file["b.rs"].blocks_with_context;
         assert_eq!(blocks_b.len(), 1);
         assert_eq!(blocks_b[0].block.name(), Some("first"));

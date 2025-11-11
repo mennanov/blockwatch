@@ -174,7 +174,7 @@ mod validate_tests {
     use super::*;
     use crate::blocks::{Block, FileBlocks};
     use crate::test_utils;
-    use crate::test_utils::block_with_context;
+    use crate::test_utils::block_with_context_default;
 
     #[test]
     fn empty_blocks_returns_no_violations() -> anyhow::Result<()> {
@@ -194,7 +194,7 @@ mod validate_tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: "".to_string(),
-                blocks_with_context: vec![block_with_context(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     2,
                     HashMap::from([("keep-unique".to_string(), "".to_string())]),
@@ -218,7 +218,7 @@ mod validate_tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks_with_context: vec![block_with_context(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     5,
                     HashMap::from([("keep-unique".to_string(), "".to_string())]),
@@ -242,7 +242,7 @@ mod validate_tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks_with_context: vec![block_with_context(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     5,
                     HashMap::from([("keep-unique".to_string(), "".to_string())]),
@@ -266,7 +266,7 @@ mod validate_tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks_with_context: vec![block_with_context(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     5,
                     HashMap::from([("keep-unique".to_string(), " \\d+ ".to_string())]),
@@ -294,7 +294,7 @@ mod validate_tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks_with_context: vec![block_with_context(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
                     HashMap::from([("keep-unique".to_string(), "".to_string())]),
@@ -329,7 +329,7 @@ mod validate_tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks_with_context: vec![block_with_context(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
                     attrs,
@@ -357,7 +357,7 @@ mod validate_tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks_with_context: vec![block_with_context(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
                     attrs,
@@ -384,7 +384,7 @@ mod validate_tests {
             "file1".to_string(),
             FileBlocks {
                 file_contents: file1_contents.to_string(),
-                blocks_with_context: vec![block_with_context(Block::new(
+                blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     4,
                     attrs,
