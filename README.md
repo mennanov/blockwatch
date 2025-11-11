@@ -86,16 +86,14 @@ pub(crate) fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn Bl
 
 In `README.md`, we define the block that depends on the code above:
 
-```markdown
-## Supported Languages
-
-[//]: # (<block name="supported-grammar-example">)
-
-- Go
-- JavaScript
-- Rust
-
-[//]: # (</block>)
+```python
+supported_languages = [
+    # <block name="supported-grammar-example">
+    "Go",
+    "JavaScript",
+    "Rust",
+    # </block>
+]
 ```
 
 This simple mechanism ensures your documentation and code never drift apart.
@@ -135,30 +133,27 @@ Use the `keep-unique` attribute with an optional RegExp to ensure there are no d
   is present, that group's text is used; otherwise, the entire match is used. Lines that do not match the regex are
   ignored.
 
-```markdown
-# Contributors
-
-[//]: # (<block name="contributors-unique" keep-unique>)
-
-- Alice
-- Bob
-- Carol
-
-[//]: # (</block>)
+```python
+contributors = [
+    # <block keep-unique>
+    "Alice",
+    "Bob",
+    "Carol"
+    # </block>
+]
 ```
 
 Regex example using a named group to only consider the numeric ID for uniqueness and ignore non-matching lines:
 
-```markdown
-# IDs
-
-[//]: # (<block name="ids-unique" keep-unique="^ID:(?P<value>\d+)">)
-ID:1 Alice
-ID:2 Bob
-this line is skipped
-ID:1 Carol  <!-- duplicate by extracted ID -->
-
-[//]: # (</block>)
+```python
+ids = [
+    # <block keep-unique="^ID:(?P<value>\d+)">
+    "ID:1 Alice",
+    "ID:2 Bob",
+    "this line is skipped",
+    "ID:1 Carol",  # duplicate by extracted ID
+    # </block>
+]
 ```
 
 Empty lines and spaces are ignored.
@@ -167,15 +162,14 @@ Empty lines and spaces are ignored.
 
 Use the `line-pattern` attribute to ensure every line in the block matches a Regular Expression:
 
-```markdown
-# Slugs
-
-[//]: # (<block name="slugs" line-pattern="[a-z0-9-]+">)
-hello-world
-rust-2025
-blockwatch
-
-[//]: # (</block>)
+```python
+slugs = [
+    # <block line-pattern="[a-z0-9-]+">
+    "hello-world",
+    "rust-2025",
+    "blockwatch"
+    # </block>
+]
 ```
 
 Empty lines and spaces are ignored.
@@ -188,16 +182,14 @@ Use the `line-count` attribute to ensure the total number of lines in a block me
 - line-count=">=3" — at least 3 lines
 - line-count="==10" — exactly 10 lines
 
-```markdown
-# Small list
-
-[//]: # (<block name="small-list" line-count="<=3">)
-
-- a
-- b
-- c
-
-[//]: # (</block>)
+```python
+my_list = [
+    # <block line-count="<=3">
+    "a",
+    "b",
+    "c"
+    # </block>
+]
 ```
 
 Empty lines are ignored.
@@ -209,12 +201,12 @@ The model will return an actionable error message if the condition is not met.
 
 Example:
 
-```markdown
-# Policy Section
+```html
+<h1>Policy Section</h1>
 
-[//]: # (<block name="policy" check-ai="The block must mention the word 'banana' at least once.">)
+<!-- <block name="policy" check-ai="The block must mention the word 'banana' at least once."> -->
 We like apples and oranges.
-[//]: # (</block>)
+<!-- </block> -->
 ```
 
 If the content does not satisfy the condition, BlockWatch will report a violation.
@@ -264,6 +256,7 @@ Download a pre-built binary for your platform from the [Releases page](https://g
 ## Usage & Integration
 
 ### Command Line
+
 [//]: # (<block name="cli-docs">)
 
 The simplest way to run it is by piping a git diff into the command:
