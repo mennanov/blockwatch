@@ -115,6 +115,36 @@ const MONTHS: [&str; 12] = [
 
 Empty lines and spaces are ignored.
 
+You can optionally provide `keep-sorted-pattern` to sort by a specific part of each line using a Regular Expression:
+
+- If a named capture group `value` exists, its text is used for sorting
+- If no named group exists, the entire regex match is used
+- Lines that do not match the regex are ignored
+
+```python
+items = [
+    # Sort ascending by the numeric id only; comments are ignored
+    # <block keep-sorted="asc" keep-sorted-pattern="^id: (?P<value>\d+)">
+    "id: 1  apple",
+    "id: 2  banana",
+    "this line is skipped",
+    "id: 10 orange",
+    # </block>
+]
+```
+
+Another example using full match (no named group):
+
+```python
+kv = [
+    # <block keep-sorted="asc" keep-sorted-pattern="^x=\d+">
+    "x=1; note",
+    "ignore me",
+    "x=2; note",
+    # </block>
+]
+```
+
 ### Ensuring Unique Lines
 
 Use the `keep-unique` attribute with an optional RegExp to ensure there are no duplicate lines inside a block.
