@@ -113,3 +113,88 @@ index abc123..def456 100644
 
     output.assert().success();
 }
+
+#[test]
+fn diff_with_only_tag_modified_succeeds() {
+    let diff_content = r#"
+diff --git a/tests/affects_test.md b/tests/affects_test.md
+index abc123..def456 100644
+--- a/tests/affects_test.md
++++ b/tests/affects_test.md
+@@ -1,6 +1,6 @@
+ # Testing data for integration tests
+
+-[//]: # (<block affects=":foo" name="first">)
++[//]: # (<block affects=":foo">)
+ First block.
+
+ [//]: # (</block>)
+"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.write_stdin(diff_content);
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.assert().success();
+}
+
+#[test]
+fn diff_dependent_block_with_only_tag_modified_fails() {
+    let diff_content = r#"
+diff --git a/tests/affects_test.md b/tests/testing_data
+index abc123..def456 100644
+--- a/tests/affects_test.md
++++ b/tests/affects_test.md
+@@ -1,11 +1,9 @@
+ # Testing data for integration tests
+
+ [//]: # (<block affects=":foo">)
+-First block.
+
+ [//]: # (</block>)
+
+- [//]: # (<block name="foo" test="value">)
++ [//]: # (<block name="foo">)
+ Second block.
+
+ [//]: # (</block>)
+"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.write_stdin(diff_content);
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::function(|output: &str| {
+            let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
+            let value: serde_json::Value  = json!({
+              "tests/affects_test.md": [
+                {
+                  "range": {
+                    "start": {
+                        "line": 3,
+                        "character": 0
+                    },
+                    "end": {
+                        "line": 6,
+                        "character": 0
+                    }
+                  },
+                  "code": "affects",
+                  "message": "Block tests/affects_test.md:(unnamed) at line 3 is modified, but tests/affects_test.md:foo is not",
+                  "severity": 1,
+                  "data": {
+                    "affected_block_file_path": "tests/affects_test.md",
+                    "affected_block_name": "foo",
+                  }
+                }
+              ]
+            });
+            assert_eq!(output_json, value);
+            true
+        }));
+}
