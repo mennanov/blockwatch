@@ -76,3 +76,74 @@ index 366590e..82c1f16 100644
             true
         }));
 }
+
+#[test]
+fn with_keep_sorted_pattern_in_order_succeeds() {
+    let diff_content = r#"
+diff --git a/tests/keep_sorted_test.py b/tests/keep_sorted_test.py
+index 1111111..2222222 100644
+--- a/tests/keep_sorted_test.py
++++ b/tests/keep_sorted_test.py
+@@ -17,6 +17,7 @@ items = [
+     # <block keep-sorted="asc" keep-sorted-pattern="id: (?P<value>\d+)">
+     "id: 1 apple",
+     "id: 3 cherry",
++    "id: 4 orange",
+     # </block>
+ ]"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    let output = cmd.write_stdin(diff_content).output().unwrap();
+
+    output.assert().success();
+}
+
+#[test]
+fn with_keep_sorted_pattern_out_of_order_fails() {
+    let diff_content = r#"
+diff --git a/tests/keep_sorted_test.py b/tests/keep_sorted_test.py
+index 1111111..2222222 100644
+--- a/tests/keep_sorted_test.py
++++ b/tests/keep_sorted_test.py
+@@ -25,6 +25,7 @@ items = [
+     # <block keep-sorted="asc" keep-sorted-pattern="id: (?P<value>\d+)">
+     "id: 1 apple",
+     "id: 3 cherry",
++    "id: 10 orange",
+     # </block>
+ ]"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    let output = cmd.write_stdin(diff_content).output().unwrap();
+
+    output.assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::function(|output: &str| {
+            let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
+            let value: serde_json::Value  = json!({
+              "tests/keep_sorted_test.py": [
+                {
+                  "range": {
+                    "start": {
+                        "line": 29,
+                        "character": 10
+                    },
+                    "end": {
+                        "line": 29,
+                        "character": 11
+                    }
+                  },
+                  "code": "keep-sorted",
+                  "message": "Block tests/keep_sorted_test.py:(unnamed) defined at line 26 has an out-of-order line 29 (asc)",
+                  "severity": 1,
+                  "data": {
+                    "order_by": "asc",
+                  }
+                }
+              ]
+            });
+            assert_eq!(output_json, value);
+            true
+        }));
+}

@@ -23,7 +23,7 @@ pub struct Block {
     // Optional attributes in the `block` tag.
     pub(crate) attributes: HashMap<String, String>,
     // Block's start tag range in the original source code.
-    start_tag_range: Range<usize>,
+    pub(crate) start_tag_range: Range<usize>,
     // Block's content substring range in the original source code.
     content_range: Range<usize>,
 }
