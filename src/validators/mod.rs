@@ -5,6 +5,7 @@ mod keep_unique;
 mod line_count;
 mod line_pattern;
 
+use crate::Position;
 use crate::blocks::{Block, BlockSeverity, BlockWithContext, FileBlocks};
 use crate::validators::affects::AffectsValidatorDetector;
 use crate::validators::check_ai::CheckAiValidatorDetector;
@@ -96,31 +97,6 @@ pub struct ViolationRange {
 impl ViolationRange {
     fn new(start: Position, end: Position) -> Self {
         Self { start, end }
-    }
-}
-
-#[derive(Serialize, Debug, PartialEq)]
-struct Position {
-    line: usize,
-    character: usize,
-}
-
-impl Position {
-    pub fn new(line: usize, character: usize) -> Self {
-        Self { line, character }
-    }
-
-    pub fn from_byte_offset(offset: usize, new_line_positions: &[usize]) -> Self {
-        let line_idx = new_line_positions
-            .binary_search(&offset)
-            .unwrap_or_else(|i| i);
-        let line = line_idx + 1; // Line number is 1-based.
-        let character = if line_idx > 0 {
-            offset - new_line_positions[line_idx - 1]
-        } else {
-            offset
-        };
-        Self { line, character }
     }
 }
 
@@ -361,11 +337,11 @@ mod position_from_byte_offset_tests {
 mod tests {
     use crate::blocks::{Block, BlockWithContext};
     use crate::test_utils::{block_with_context_default, file_blocks_default};
-    use crate::validators;
     use crate::validators::{
-        DetectorFactory, Position, ValidationContext, ValidatorAsync, ValidatorDetector,
-        ValidatorSync, ValidatorType, Violation, ViolationRange, detect_validators,
+        DetectorFactory, ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorSync,
+        ValidatorType, Violation, ViolationRange, detect_validators,
     };
+    use crate::{Position, validators};
     use async_trait::async_trait;
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;

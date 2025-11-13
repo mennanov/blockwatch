@@ -1,8 +1,8 @@
 use crate::blocks::{Block, BlockWithContext};
-use crate::validators;
 use crate::validators::{
-    Position, ValidatorAsync, ValidatorDetector, ValidatorType, Violation, ViolationRange,
+    ValidatorAsync, ValidatorDetector, ValidatorType, Violation, ViolationRange,
 };
+use crate::{Position, validators};
 use anyhow::{Context, anyhow};
 use async_openai::Client;
 use async_openai::config::{Config, OPENAI_API_BASE, OpenAIConfig};

@@ -1,3 +1,4 @@
+use crate::Position;
 use crate::differ::LineChange;
 use crate::parsers::BlocksParser;
 use anyhow::Context;
@@ -57,51 +58,35 @@ impl Block {
             // `line_change` is outside the block's start and end tags.
             return false;
         }
-        // TODO: rewrite with Position::from_byte_offset().
-        let block_content_start_line_idx = new_line_positions
-            .binary_search(&range.start)
-            .unwrap_or_else(|i| i);
-        let block_content_start_line_number = block_content_start_line_idx + 1;
-        if line_change.line < block_content_start_line_number {
+        let content_start_position = Position::from_byte_offset(range.start, new_line_positions);
+        if line_change.line < content_start_position.line {
             // `line_change` is before the block's content start line.
             return false;
         }
-        let block_content_end_line_idx = new_line_positions
-            .binary_search(&range.end)
-            .unwrap_or_else(|i| i);
-        let block_content_end_line_number = block_content_end_line_idx + 1;
-        if line_change.line > block_content_end_line_number {
+
+        let content_end_position = Position::from_byte_offset(range.end - 1, new_line_positions);
+        if line_change.line > content_end_position.line {
             // `line_change` is after the block's content end line.
             return false;
         }
 
         if let Some(ranges) = &line_change.ranges {
-            let content_line_start_pos = if line_change.line == block_content_start_line_number {
-                let content_start_line_pos = if block_content_start_line_idx > 0 {
-                    new_line_positions[block_content_start_line_idx - 1]
-                } else {
-                    0
-                };
-                range.start - content_start_line_pos
+            let line_start_character = if line_change.line == content_start_position.line {
+                content_start_position.character
             } else {
                 0
             };
-            let content_line_end_pos = if line_change.line < block_content_end_line_number {
+            let line_end_character = if line_change.line < content_end_position.line {
                 usize::MAX
             } else {
-                let source_line_end_pos = if block_content_end_line_idx > 0 {
-                    new_line_positions[block_content_end_line_idx - 1]
-                } else {
-                    0
-                };
-                range.end - source_line_end_pos
+                content_end_position.character
             };
 
             // TODO: make sure `ranges` is sorted and use binary search here instead.
             ranges.iter().any(|range| {
-                // Intersection between [content_line_start_pos, content_line_end_pos] (inclusive)
+                // Intersection between [line_start_character, line_end_character] (inclusive)
                 // and half-open [range.start, range.end).
-                range.end > content_line_start_pos && range.start <= content_line_end_pos
+                range.end > line_start_character && range.start <= line_end_character
             })
         } else {
             true

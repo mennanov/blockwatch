@@ -1,6 +1,6 @@
 use crate::blocks::{Block, BlockWithContext};
-use crate::validators;
-use crate::validators::{Position, ValidatorType, Violation, ViolationRange};
+use crate::validators::{ValidatorType, Violation, ViolationRange};
+use crate::{Position, validators};
 use anyhow::Context;
 use serde::Serialize;
 use std::collections::HashMap;

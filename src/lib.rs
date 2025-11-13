@@ -1,3 +1,5 @@
+use serde::Serialize;
+
 pub mod blocks;
 pub mod differ;
 pub mod flags;
@@ -80,5 +82,30 @@ mod test_utils {
     /// Collects the starting byte indices of all newline characters (`\n`) within the input string.
     pub(crate) fn new_line_positions(input: &str) -> Vec<usize> {
         input.match_indices('\n').map(|(idx, _)| idx).collect()
+    }
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+struct Position {
+    line: usize,
+    character: usize,
+}
+
+impl Position {
+    pub fn new(line: usize, character: usize) -> Self {
+        Self { line, character }
+    }
+
+    pub fn from_byte_offset(offset: usize, new_line_positions: &[usize]) -> Self {
+        let line_idx = new_line_positions
+            .binary_search(&offset)
+            .unwrap_or_else(|i| i);
+        let line = line_idx + 1; // Line number is 1-based.
+        let character = if line_idx > 0 {
+            offset - new_line_positions[line_idx - 1]
+        } else {
+            offset
+        };
+        Self { line, character }
     }
 }
