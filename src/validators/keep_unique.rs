@@ -1,7 +1,7 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::validators;
 use crate::validators::{
-    ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
+    Position, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -44,7 +44,7 @@ impl ValidatorSync for KeepUniqueValidator {
                 let mut seen: HashSet<&str> = HashSet::new();
                 for (line_number, line) in block_with_context
                     .block
-                    .content(&file_blocks.file_contents)
+                    .content(&file_blocks.file_content)
                     .lines()
                     .enumerate()
                 {
@@ -157,10 +157,8 @@ fn create_violation(
     );
     Ok(Violation::new(
         ViolationRange::new(
-            violation_line_number,
-            violation_character_start,
-            violation_line_number,
-            violation_character_end,
+            Position::new(violation_line_number, violation_character_start),
+            Position::new(violation_line_number, violation_character_end),
         ),
         "keep-unique".to_string(),
         message,
@@ -174,7 +172,7 @@ mod validate_tests {
     use super::*;
     use crate::blocks::{Block, FileBlocks};
     use crate::test_utils;
-    use crate::test_utils::block_with_context_default;
+    use crate::test_utils::{block_with_context_default, file_blocks_default, new_line_positions};
 
     #[test]
     fn empty_blocks_returns_no_violations() -> anyhow::Result<()> {
@@ -192,16 +190,13 @@ mod validate_tests {
         let validator = KeepUniqueValidator::new();
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
-            FileBlocks {
-                file_contents: "".to_string(),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    2,
-                    HashMap::from([("keep-unique".to_string(), "".to_string())]),
-                    0..0,
-                    0..0,
-                ))],
-            },
+            file_blocks_default(vec![block_with_context_default(Block::new(
+                1,
+                2,
+                HashMap::from([("keep-unique".to_string(), "".to_string())]),
+                0..0,
+                0..0,
+            ))]),
         )])));
 
         let violations = validator.validate(context)?;
@@ -217,7 +212,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     5,
@@ -241,7 +237,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     5,
@@ -265,7 +262,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     5,
@@ -282,7 +280,10 @@ mod validate_tests {
         let file1_violations = violations.get("file1").unwrap();
         assert_eq!(file1_violations.len(), 1);
         // The last line ` 1 ` is the only duplicate.
-        assert_eq!(file1_violations[0].range, ViolationRange::new(4, 1, 4, 3));
+        assert_eq!(
+            file1_violations[0].range,
+            ViolationRange::new(Position::new(4, 1), Position::new(4, 3))
+        );
         Ok(())
     }
 
@@ -293,7 +294,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
@@ -315,7 +317,10 @@ mod validate_tests {
         );
         assert_eq!(file1_violations[0].code, "keep-unique");
         // Entire line is in the range.
-        assert_eq!(file1_violations[0].range, ViolationRange::new(4, 1, 4, 2));
+        assert_eq!(
+            file1_violations[0].range,
+            ViolationRange::new(Position::new(4, 1), Position::new(4, 2))
+        );
         Ok(())
     }
 
@@ -328,7 +333,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
@@ -343,7 +349,10 @@ mod validate_tests {
         let file1_violations = violations.get("file1").unwrap();
         assert_eq!(file1_violations.len(), 1);
         // Only the matched value group is in the range.
-        assert_eq!(file1_violations[0].range, ViolationRange::new(3, 4, 3, 4));
+        assert_eq!(
+            file1_violations[0].range,
+            ViolationRange::new(Position::new(3, 4), Position::new(3, 4))
+        );
         Ok(())
     }
 
@@ -356,7 +365,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
@@ -371,7 +381,10 @@ mod validate_tests {
         let file1_violations = violations.get("file1").unwrap();
         assert_eq!(file1_violations.len(), 1);
         // Full regex match is in the range.
-        assert_eq!(file1_violations[0].range, ViolationRange::new(3, 1, 3, 4));
+        assert_eq!(
+            file1_violations[0].range,
+            ViolationRange::new(Position::new(3, 1), Position::new(3, 4))
+        );
         Ok(())
     }
 
@@ -383,7 +396,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     4,

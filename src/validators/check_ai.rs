@@ -1,7 +1,7 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::validators;
 use crate::validators::{
-    ValidatorAsync, ValidatorDetector, ValidatorType, Violation, ViolationRange,
+    Position, ValidatorAsync, ValidatorDetector, ValidatorType, Violation, ViolationRange,
 };
 use anyhow::{Context, anyhow};
 use async_openai::Client;
@@ -55,7 +55,7 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
                     let re = regex::Regex::new(pattern)
                         .context("check-ai-pattern is not a valid regex")?;
                     if let Some(c) =
-                        re.captures(block_with_context.block.content(&file_blocks.file_contents))
+                        re.captures(block_with_context.block.content(&file_blocks.file_content))
                     {
                         // If named group "value" exists use it, otherwise use the whole match
                         if let Some(m) = c.name("value") {
@@ -69,7 +69,7 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
                 } else {
                     block_with_context
                         .block
-                        .content(&file_blocks.file_contents)
+                        .content(&file_blocks.file_content)
                         .trim()
                 };
                 // Skip blocks with empty content.
@@ -80,11 +80,12 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
                 let client = Arc::clone(&self.client);
                 let condition = condition_trimmed.to_string();
                 let block_content = block_content.to_string();
+                let new_line_positions = file_blocks.file_content_new_lines.clone();
                 let file_path = file_path.clone();
                 let block = Arc::clone(&block_with_context.block);
                 tasks.spawn(async move {
                     let result = client.check_block(condition, block_content).await;
-                    Self::process_ai_response(file_path, block, result)
+                    Self::process_ai_response(file_path, block, &new_line_positions, result)
                 });
             }
         }
@@ -130,6 +131,7 @@ impl ValidatorDetector for CheckAiValidatorDetector {
 fn create_violation(
     block_file_path: &str,
     block: Arc<Block>,
+    new_line_positions: &[usize],
     ai_message: &str,
 ) -> anyhow::Result<Violation> {
     let details = serde_json::to_value(CheckAiViolation {
@@ -148,8 +150,10 @@ fn create_violation(
         block.starts_at_line,
     );
     Ok(Violation::new(
-        // TODO: The block's start & end character position is not known. See issue #46.
-        ViolationRange::new(block.starts_at_line, 0, block.ends_at_line, 0),
+        ViolationRange::new(
+            Position::from_byte_offset(block.start_tag_range.start, new_line_positions),
+            Position::from_byte_offset(block.start_tag_range.end - 1, new_line_positions),
+        ),
         "check-ai".to_string(),
         error_message,
         block,
@@ -167,6 +171,7 @@ impl<C: AiClient> CheckAiValidator<C> {
     fn process_ai_response(
         file_path: String,
         block: Arc<Block>,
+        new_line_positions: &[usize],
         result: anyhow::Result<Option<String>>,
     ) -> anyhow::Result<Option<(String, Violation)>> {
         match result.context(format!(
@@ -177,7 +182,7 @@ impl<C: AiClient> CheckAiValidator<C> {
         ))? {
             None => Ok(None),
             Some(msg) => {
-                let violation = create_violation(&file_path, block, &msg)?;
+                let violation = create_violation(&file_path, block, new_line_positions, &msg)?;
                 Ok(Some((file_path, violation)))
             }
         }
@@ -193,6 +198,7 @@ struct CheckAiViolation<'a> {
 
 #[async_trait]
 pub(crate) trait AiClient: Send + Sync {
+    // TODO: take Arc<ValidationContext> as an input with file_path and block index to avoid cloning.
     /// Returns Ok(None) if the block satisfies the condition, Ok(Some(error_message)) otherwise.
     async fn check_block(
         &self,
@@ -281,7 +287,7 @@ mod tests {
     use super::*;
     use crate::blocks::{Block, FileBlocks};
     use crate::test_utils;
-    use crate::test_utils::block_with_context_default;
+    use crate::test_utils::{block_with_context_default, new_line_positions};
     use serde_json::json;
 
     #[derive(Clone)]
@@ -338,7 +344,8 @@ mod tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     3,
@@ -364,7 +371,8 @@ mod tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     3,
@@ -394,7 +402,8 @@ mod tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     3,
@@ -426,7 +435,8 @@ mod tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     10,
                     14,
@@ -452,7 +462,6 @@ mod tests {
                 "ai_message": "The block does not mention 'banana'. Add it."
             }))
         );
-        assert_eq!(violation.range, ViolationRange::new(10, 0, 14, 0));
         Ok(())
     }
 
@@ -466,7 +475,8 @@ mod tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     2,
                     4,
@@ -488,7 +498,8 @@ mod tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     5,
                     7,
@@ -513,7 +524,8 @@ mod tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     1,

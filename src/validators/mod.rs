@@ -94,22 +94,8 @@ pub struct ViolationRange {
 }
 
 impl ViolationRange {
-    pub fn new(
-        start_line: usize,
-        start_character: usize,
-        end_line: usize,
-        end_character: usize,
-    ) -> Self {
-        Self {
-            start: Position {
-                line: start_line,
-                character: start_character,
-            },
-            end: Position {
-                line: end_line,
-                character: end_character,
-            },
-        }
+    fn new(start: Position, end: Position) -> Self {
+        Self { start, end }
     }
 }
 
@@ -117,6 +103,25 @@ impl ViolationRange {
 struct Position {
     line: usize,
     character: usize,
+}
+
+impl Position {
+    pub fn new(line: usize, character: usize) -> Self {
+        Self { line, character }
+    }
+
+    pub fn from_byte_offset(offset: usize, new_line_positions: &[usize]) -> Self {
+        let line_idx = new_line_positions
+            .binary_search(&offset)
+            .unwrap_or_else(|i| i);
+        let line = line_idx + 1; // Line number is 1-based.
+        let character = if line_idx > 0 {
+            offset - new_line_positions[line_idx - 1]
+        } else {
+            offset
+        };
+        Self { line, character }
+    }
 }
 
 /// Represents a simplified, serializable diagnostic message.
@@ -319,13 +324,47 @@ pub fn detect_validators(
 }
 
 #[cfg(test)]
+mod position_from_byte_offset_tests {
+    use super::*;
+
+    #[test]
+    fn with_single_line_returns_correct_position() {
+        // A single line file has no new lines.
+        let result = Position::from_byte_offset(10, &[]);
+        assert_eq!(result.line, 1);
+        assert_eq!(result.character, 10);
+    }
+
+    #[test]
+    fn with_multiple_lines_returns_correct_position_on_first_line() {
+        let result = Position::from_byte_offset(10, &[20]);
+        assert_eq!(result.line, 1);
+        assert_eq!(result.character, 10);
+    }
+
+    #[test]
+    fn with_multiple_lines_returns_correct_position_on_middle_line() {
+        let result = Position::from_byte_offset(25, &[20, 30]);
+        assert_eq!(result.line, 2);
+        assert_eq!(result.character, 5);
+    }
+
+    #[test]
+    fn with_multiple_lines_returns_correct_position_on_last_line() {
+        let result = Position::from_byte_offset(21, &[20]);
+        assert_eq!(result.line, 2);
+        assert_eq!(result.character, 1);
+    }
+}
+
+#[cfg(test)]
 mod tests {
-    use crate::blocks::{Block, BlockWithContext, FileBlocks};
-    use crate::test_utils::block_with_context_default;
+    use crate::blocks::{Block, BlockWithContext};
+    use crate::test_utils::{block_with_context_default, file_blocks_default};
     use crate::validators;
     use crate::validators::{
-        DetectorFactory, ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorSync,
-        ValidatorType, Violation, ViolationRange, detect_validators,
+        DetectorFactory, Position, ValidationContext, ValidatorAsync, ValidatorDetector,
+        ValidatorSync, ValidatorType, Violation, ViolationRange, detect_validators,
     };
     use async_trait::async_trait;
     use std::collections::{HashMap, HashSet};
@@ -336,7 +375,7 @@ mod tests {
     }
 
     fn empty_testing_violation_range() -> ViolationRange {
-        ViolationRange::new(0, 0, 0, 0)
+        ViolationRange::new(Position::new(0, 0), Position::new(0, 0))
     }
 
     struct FakeAsyncValidator {
@@ -448,35 +487,29 @@ mod tests {
         let context = ValidationContext::new(HashMap::from([
             (
                 "file1".to_string(),
-                FileBlocks {
-                    file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context_default(Block::new(
-                        1,
-                        6,
-                        HashMap::from([
-                            ("fake-sync".to_string(), "condition A".to_string()),
-                            ("fake-async".to_string(), "condition B".to_string()),
-                        ]),
-                        0..0,
-                        0..0,
-                    ))],
-                },
+                file_blocks_default(vec![block_with_context_default(Block::new(
+                    1,
+                    6,
+                    HashMap::from([
+                        ("fake-sync".to_string(), "condition A".to_string()),
+                        ("fake-async".to_string(), "condition B".to_string()),
+                    ]),
+                    0..0,
+                    0..0,
+                ))]),
             ),
             (
                 "file2".to_string(),
-                FileBlocks {
-                    file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context_default(Block::new(
-                        1,
-                        6,
-                        HashMap::from([
-                            ("fake-sync".to_string(), "condition C".to_string()),
-                            ("fake-async".to_string(), "condition D".to_string()),
-                        ]),
-                        0..0,
-                        0..0,
-                    ))],
-                },
+                file_blocks_default(vec![block_with_context_default(Block::new(
+                    1,
+                    6,
+                    HashMap::from([
+                        ("fake-sync".to_string(), "condition C".to_string()),
+                        ("fake-async".to_string(), "condition D".to_string()),
+                    ]),
+                    0..0,
+                    0..0,
+                ))]),
             ),
         ]));
 
@@ -511,29 +544,23 @@ mod tests {
         let context = ValidationContext::new(HashMap::from([
             (
                 "file1".to_string(),
-                FileBlocks {
-                    file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context_default(Block::new(
-                        1,
-                        6,
-                        HashMap::from([("fake-sync".to_string(), "condition A".to_string())]),
-                        0..0,
-                        0..0,
-                    ))],
-                },
+                file_blocks_default(vec![block_with_context_default(Block::new(
+                    1,
+                    6,
+                    HashMap::from([("fake-sync".to_string(), "condition A".to_string())]),
+                    0..0,
+                    0..0,
+                ))]),
             ),
             (
                 "file2".to_string(),
-                FileBlocks {
-                    file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context_default(Block::new(
-                        1,
-                        6,
-                        HashMap::from([("fake-sync".to_string(), "condition B".to_string())]),
-                        0..0,
-                        0..0,
-                    ))],
-                },
+                file_blocks_default(vec![block_with_context_default(Block::new(
+                    1,
+                    6,
+                    HashMap::from([("fake-sync".to_string(), "condition B".to_string())]),
+                    0..0,
+                    0..0,
+                ))]),
             ),
         ]));
 
@@ -559,29 +586,23 @@ mod tests {
         let context = ValidationContext::new(HashMap::from([
             (
                 "file1".to_string(),
-                FileBlocks {
-                    file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context_default(Block::new(
-                        1,
-                        6,
-                        HashMap::from([("fake-async".to_string(), "condition A".to_string())]),
-                        0..0,
-                        0..0,
-                    ))],
-                },
+                file_blocks_default(vec![block_with_context_default(Block::new(
+                    1,
+                    6,
+                    HashMap::from([("fake-async".to_string(), "condition A".to_string())]),
+                    0..0,
+                    0..0,
+                ))]),
             ),
             (
                 "file2".to_string(),
-                FileBlocks {
-                    file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context_default(Block::new(
-                        1,
-                        6,
-                        HashMap::from([("fake-async".to_string(), "condition B".to_string())]),
-                        0..0,
-                        0..0,
-                    ))],
-                },
+                file_blocks_default(vec![block_with_context_default(Block::new(
+                    1,
+                    6,
+                    HashMap::from([("fake-async".to_string(), "condition B".to_string())]),
+                    0..0,
+                    0..0,
+                ))]),
             ),
         ]));
 
@@ -606,19 +627,16 @@ mod tests {
     -> anyhow::Result<()> {
         let context = ValidationContext::new(HashMap::from([(
             "file1".to_string(),
-            FileBlocks {
-                file_contents: "".to_string(),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    6,
-                    HashMap::from([
-                        ("fake-sync".to_string(), "condition A".to_string()),
-                        ("fake-async".to_string(), "condition B".to_string()),
-                    ]),
-                    0..0,
-                    0..0,
-                ))],
-            },
+            file_blocks_default(vec![block_with_context_default(Block::new(
+                1,
+                6,
+                HashMap::from([
+                    ("fake-sync".to_string(), "condition A".to_string()),
+                    ("fake-async".to_string(), "condition B".to_string()),
+                ]),
+                0..0,
+                0..0,
+            ))]),
         )]));
 
         let (sync_validators, async_validators) = detect_validators(
@@ -640,19 +658,16 @@ mod tests {
     -> anyhow::Result<()> {
         let context = ValidationContext::new(HashMap::from([(
             "file1".to_string(),
-            FileBlocks {
-                file_contents: "".to_string(),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    6,
-                    HashMap::from([
-                        ("fake-sync".to_string(), "condition A".to_string()),
-                        ("fake-async".to_string(), "condition B".to_string()),
-                    ]),
-                    0..0,
-                    0..0,
-                ))],
-            },
+            file_blocks_default(vec![block_with_context_default(Block::new(
+                1,
+                6,
+                HashMap::from([
+                    ("fake-sync".to_string(), "condition A".to_string()),
+                    ("fake-async".to_string(), "condition B".to_string()),
+                ]),
+                0..0,
+                0..0,
+            ))]),
         )]));
 
         let (sync_validators, async_validators) = detect_validators(

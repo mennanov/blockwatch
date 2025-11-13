@@ -1,6 +1,6 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::validators;
-use crate::validators::{ValidatorType, Violation, ViolationRange};
+use crate::validators::{Position, ValidatorType, Violation, ViolationRange};
 use anyhow::Context;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -62,6 +62,7 @@ impl validators::ValidatorSync for AffectsValidator {
                                 .push(create_violation(
                                     modified_block_file_path,
                                     Arc::clone(&block_with_context.block),
+                                    &file_blocks.file_content_new_lines,
                                     affected_file_path.as_str(),
                                     affected_block_name.as_str(),
                                 )?);
@@ -100,6 +101,7 @@ impl validators::ValidatorDetector for AffectsValidatorDetector {
 fn create_violation(
     modified_block_file_path: &str,
     modified_block: Arc<Block>,
+    modified_block_new_line_positions: &[usize],
     affected_block_file_path: &str,
     affected_block_name: &str,
 ) -> anyhow::Result<Violation> {
@@ -118,10 +120,14 @@ fn create_violation(
     .context("failed to serialize AffectsViolation block")?;
     Ok(Violation::new(
         ViolationRange::new(
-            modified_block.starts_at_line,
-            0, // TODO: The block's start position is not known. See issue #46.
-            modified_block.ends_at_line,
-            0, // TODO: The block's end position is not known. See issue #46.
+            Position::from_byte_offset(
+                modified_block.start_tag_range.start,
+                modified_block_new_line_positions,
+            ),
+            Position::from_byte_offset(
+                modified_block.start_tag_range.end - 1, // start_tag_range is non-inclusive.
+                modified_block_new_line_positions,
+            ),
         ),
         "affects".to_string(),
         message,
@@ -154,7 +160,7 @@ fn parse_affects_attribute(value: &str) -> anyhow::Result<Vec<(Option<String>, S
 mod validate_tests {
     use super::*;
     use crate::blocks::FileBlocks;
-    use crate::test_utils::{block_with_context, block_with_context_default};
+    use crate::test_utils::{block_with_context, block_with_context_default, file_blocks_default};
     use crate::validators::ValidatorSync;
 
     #[test]
@@ -162,16 +168,13 @@ mod validate_tests {
         let validator = AffectsValidator::new();
         let modified_blocks = HashMap::from([(
             "file1".to_string(),
-            FileBlocks {
-                file_contents: "".to_string(),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    10,
-                    HashMap::from([("name".to_string(), "foo".to_string())]),
-                    0..0,
-                    0..0,
-                ))],
-            },
+            file_blocks_default(vec![block_with_context_default(Block::new(
+                1,
+                10,
+                HashMap::from([("name".to_string(), "foo".to_string())]),
+                0..0,
+                0..0,
+            ))]),
         )]);
 
         let violations = validator.validate(Arc::new(validators::ValidationContext::new(
@@ -188,14 +191,15 @@ mod validate_tests {
         let modified_blocks = HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: "".to_string(),
+                file_content: "".to_string(),
+                file_content_new_lines: vec![0],
                 blocks_with_context: vec![
                     block_with_context(
                         Block::new(
                             1,
                             10,
                             HashMap::from([("affects".to_string(), ":foo".to_string())]),
-                            0..0,
+                            1..10,
                             0..0,
                         ),
                         false,
@@ -206,7 +210,7 @@ mod validate_tests {
                             12,
                             16,
                             HashMap::from([("affects".to_string(), ":foo".to_string())]),
-                            0..0,
+                            0..1,
                             0..0,
                         ),
                         false,
@@ -227,14 +231,10 @@ mod validate_tests {
             file1_violations[0].message,
             "Block file1:(unnamed) at line 1 is modified, but file1:foo is not"
         );
-        // TODO: The block's start & end character position is not known. See issue #46.
-        assert_eq!(file1_violations[0].range, ViolationRange::new(1, 0, 10, 0));
         assert_eq!(
             file1_violations[1].message,
             "Block file1:(unnamed) at line 12 is modified, but file1:foo is not"
         );
-        // TODO: The block's start & end character position is not known. See issue #46.
-        assert_eq!(file1_violations[1].range, ViolationRange::new(12, 0, 16, 0));
 
         Ok(())
     }
@@ -245,67 +245,58 @@ mod validate_tests {
         let modified_blocks = HashMap::from([
             (
                 "file1".to_string(),
-                FileBlocks {
-                    file_contents: "".to_string(),
-                    blocks_with_context: vec![
-                        block_with_context(
-                            Block::new(
-                                1,
-                                10,
-                                HashMap::from([("affects".to_string(), "file2:foo".to_string())]),
-                                0..0,
-                                0..0,
-                            ),
-                            false,
-                            true,
+                file_blocks_default(vec![
+                    block_with_context(
+                        Block::new(
+                            1,
+                            10,
+                            HashMap::from([("affects".to_string(), "file2:foo".to_string())]),
+                            0..1,
+                            0..0,
                         ),
-                        block_with_context(
-                            Block::new(
-                                12,
-                                16,
-                                HashMap::from([("affects".to_string(), "file3:bar".to_string())]),
-                                0..0,
-                                0..0,
-                            ),
-                            false,
-                            true,
+                        false,
+                        true,
+                    ),
+                    block_with_context(
+                        Block::new(
+                            12,
+                            16,
+                            HashMap::from([("affects".to_string(), "file3:bar".to_string())]),
+                            0..1,
+                            0..0,
                         ),
-                    ],
-                },
+                        false,
+                        true,
+                    ),
+                ]),
             ),
             (
                 "file2".to_string(),
-                FileBlocks {
-                    file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context(
-                        Block::new(
-                            1,
-                            10,
-                            HashMap::from([("name".to_string(), "not-foo".to_string())]),
-                            0..0,
-                            0..0,
-                        ),
-                        false,
-                        true,
-                    )],
-                },
+                file_blocks_default(vec![block_with_context(
+                    Block::new(
+                        1,
+                        10,
+                        HashMap::from([("name".to_string(), "not-foo".to_string())]),
+                        0..0,
+                        0..0,
+                    ),
+                    false,
+                    true,
+                )]),
             ),
             (
                 "file3".to_string(),
-                FileBlocks {
-                    file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context(
-                        Block::new(
-                            1,
-                            10,
-                            HashMap::from([("name".to_string(), "not-bar".to_string())]),
-                            0..0,
-                            0..0,
-                        ),
-                        false,
-                        true,
-                    )],
-                },
+                file_blocks_default(vec![block_with_context(
+                    Block::new(
+                        1,
+                        10,
+                        HashMap::from([("name".to_string(), "not-bar".to_string())]),
+                        0..0,
+                        0..0,
+                    ),
+                    false,
+                    true,
+                )]),
             ),
         ]);
 
@@ -320,14 +311,10 @@ mod validate_tests {
             file1_violations[0].message,
             "Block file1:(unnamed) at line 1 is modified, but file2:foo is not"
         );
-        // TODO: The block's start & end character position is not known. See issue #46.
-        assert_eq!(file1_violations[0].range, ViolationRange::new(1, 0, 10, 0));
         assert_eq!(
             file1_violations[1].message,
             "Block file1:(unnamed) at line 12 is modified, but file3:bar is not"
         );
-        // TODO: The block's start & end character position is not known. See issue #46.
-        assert_eq!(file1_violations[1].range, ViolationRange::new(12, 0, 16, 0));
 
         Ok(())
     }
@@ -337,16 +324,60 @@ mod validate_tests {
         let validator = AffectsValidator::new();
         let modified_blocks = HashMap::from([(
             "file1".to_string(),
-            FileBlocks {
-                file_contents: "".to_string(),
-                blocks_with_context: vec![
+            file_blocks_default(vec![
+                block_with_context(
+                    Block::new(
+                        1,
+                        10,
+                        HashMap::from([
+                            ("name".to_string(), "foo".to_string()),
+                            ("affects".to_string(), ":bar".to_string()),
+                        ]),
+                        0..0,
+                        0..0,
+                    ),
+                    false,
+                    true,
+                ),
+                block_with_context(
+                    Block::new(
+                        12,
+                        16,
+                        HashMap::from([
+                            ("name".to_string(), "bar".to_string()),
+                            ("affects".to_string(), ":foo".to_string()),
+                        ]),
+                        0..0,
+                        0..0,
+                    ),
+                    false,
+                    true,
+                ),
+            ]),
+        )]);
+
+        let violations = validator.validate(Arc::new(validators::ValidationContext::new(
+            modified_blocks,
+        )))?;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn with_multiple_references_returns_ok() -> anyhow::Result<()> {
+        let validator = AffectsValidator::new();
+        let modified_blocks = HashMap::from([
+            (
+                "file1".to_string(),
+                file_blocks_default(vec![
                     block_with_context(
                         Block::new(
                             1,
                             10,
                             HashMap::from([
                                 ("name".to_string(), "foo".to_string()),
-                                ("affects".to_string(), ":bar".to_string()),
+                                ("affects".to_string(), ":bar, file2:buzz".to_string()),
                             ]),
                             0..0,
                             0..0,
@@ -368,77 +399,24 @@ mod validate_tests {
                         false,
                         true,
                     ),
-                ],
-            },
-        )]);
-
-        let violations = validator.validate(Arc::new(validators::ValidationContext::new(
-            modified_blocks,
-        )))?;
-
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn with_multiple_references_returns_ok() -> anyhow::Result<()> {
-        let validator = AffectsValidator::new();
-        let modified_blocks = HashMap::from([
-            (
-                "file1".to_string(),
-                FileBlocks {
-                    file_contents: "".to_string(),
-                    blocks_with_context: vec![
-                        block_with_context(
-                            Block::new(
-                                1,
-                                10,
-                                HashMap::from([
-                                    ("name".to_string(), "foo".to_string()),
-                                    ("affects".to_string(), ":bar, file2:buzz".to_string()),
-                                ]),
-                                0..0,
-                                0..0,
-                            ),
-                            false,
-                            true,
-                        ),
-                        block_with_context(
-                            Block::new(
-                                12,
-                                16,
-                                HashMap::from([
-                                    ("name".to_string(), "bar".to_string()),
-                                    ("affects".to_string(), ":foo".to_string()),
-                                ]),
-                                0..0,
-                                0..0,
-                            ),
-                            false,
-                            true,
-                        ),
-                    ],
-                },
+                ]),
             ),
             (
                 "file2".to_string(),
-                FileBlocks {
-                    file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context(
-                        Block::new(
-                            1,
-                            10,
-                            HashMap::from([
-                                ("name".to_string(), "buzz".to_string()),
-                                ("affects".to_string(), "file1:bar".to_string()),
-                            ]),
-                            0..0,
-                            0..0,
-                        ),
-                        false,
-                        true,
-                    )],
-                },
+                file_blocks_default(vec![block_with_context(
+                    Block::new(
+                        1,
+                        10,
+                        HashMap::from([
+                            ("name".to_string(), "buzz".to_string()),
+                            ("affects".to_string(), "file1:bar".to_string()),
+                        ]),
+                        0..0,
+                        0..0,
+                    ),
+                    false,
+                    true,
+                )]),
             ),
         ]);
 
@@ -456,59 +434,53 @@ mod validate_tests {
         let modified_blocks = HashMap::from([
             (
                 "file1".to_string(),
-                FileBlocks {
-                    file_contents: "".to_string(),
-                    blocks_with_context: vec![
-                        block_with_context(
-                            Block::new(
-                                1,
-                                10,
-                                HashMap::from([
-                                    ("name".to_string(), "foo".to_string()),
-                                    ("affects".to_string(), ":bar, file2:buzz".to_string()),
-                                ]),
-                                0..0,
-                                0..0,
-                            ),
-                            false,
-                            true,
-                        ),
-                        block_with_context(
-                            Block::new(
-                                12,
-                                16,
-                                HashMap::from([
-                                    ("name".to_string(), "bar".to_string()),
-                                    ("affects".to_string(), ":foo".to_string()),
-                                ]),
-                                0..0,
-                                0..0,
-                            ),
-                            false,
-                            true,
-                        ),
-                    ],
-                },
-            ),
-            (
-                "file2".to_string(),
-                FileBlocks {
-                    file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context(
+                file_blocks_default(vec![
+                    block_with_context(
                         Block::new(
                             1,
                             10,
                             HashMap::from([
-                                ("name".to_string(), "not-buzz".to_string()),
-                                ("affects".to_string(), "file1:bar".to_string()),
+                                ("name".to_string(), "foo".to_string()),
+                                ("affects".to_string(), ":bar, file2:buzz".to_string()),
                             ]),
-                            0..0,
+                            0..1,
                             0..0,
                         ),
                         false,
                         true,
-                    )],
-                },
+                    ),
+                    block_with_context(
+                        Block::new(
+                            12,
+                            16,
+                            HashMap::from([
+                                ("name".to_string(), "bar".to_string()),
+                                ("affects".to_string(), ":foo".to_string()),
+                            ]),
+                            0..1,
+                            0..0,
+                        ),
+                        false,
+                        true,
+                    ),
+                ]),
+            ),
+            (
+                "file2".to_string(),
+                file_blocks_default(vec![block_with_context(
+                    Block::new(
+                        1,
+                        10,
+                        HashMap::from([
+                            ("name".to_string(), "not-buzz".to_string()),
+                            ("affects".to_string(), "file1:bar".to_string()),
+                        ]),
+                        0..1,
+                        0..0,
+                    ),
+                    false,
+                    true,
+                )]),
             ),
         ]);
 
@@ -523,8 +495,6 @@ mod validate_tests {
             file1_violations[0].message,
             "Block file1:foo at line 1 is modified, but file2:buzz is not"
         );
-        // TODO: The block's start & end character position is not known. See issue #46.
-        assert_eq!(file1_violations[0].range, ViolationRange::new(1, 0, 10, 0));
         Ok(())
     }
 
@@ -534,67 +504,58 @@ mod validate_tests {
         let modified_blocks = HashMap::from([
             (
                 "file1".to_string(),
-                FileBlocks {
-                    file_contents: "".to_string(),
-                    blocks_with_context: vec![
-                        block_with_context(
-                            Block::new(
-                                1,
-                                10,
-                                HashMap::from([("affects".to_string(), "file2:foo".to_string())]),
-                                0..0,
-                                0..0,
-                            ),
-                            false,
-                            true,
+                file_blocks_default(vec![
+                    block_with_context(
+                        Block::new(
+                            1,
+                            10,
+                            HashMap::from([("affects".to_string(), "file2:foo".to_string())]),
+                            0..0,
+                            0..0,
                         ),
-                        block_with_context(
-                            Block::new(
-                                12,
-                                16,
-                                HashMap::from([("affects".to_string(), "file3:bar".to_string())]),
-                                0..0,
-                                0..0,
-                            ),
-                            false,
-                            true,
+                        false,
+                        true,
+                    ),
+                    block_with_context(
+                        Block::new(
+                            12,
+                            16,
+                            HashMap::from([("affects".to_string(), "file3:bar".to_string())]),
+                            0..0,
+                            0..0,
                         ),
-                    ],
-                },
+                        false,
+                        true,
+                    ),
+                ]),
             ),
             (
                 "file2".to_string(),
-                FileBlocks {
-                    file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context(
-                        Block::new(
-                            1,
-                            10,
-                            HashMap::from([("name".to_string(), "foo".to_string())]),
-                            0..0,
-                            0..0,
-                        ),
-                        false,
-                        true,
-                    )],
-                },
+                file_blocks_default(vec![block_with_context(
+                    Block::new(
+                        1,
+                        10,
+                        HashMap::from([("name".to_string(), "foo".to_string())]),
+                        0..0,
+                        0..0,
+                    ),
+                    false,
+                    true,
+                )]),
             ),
             (
                 "file3".to_string(),
-                FileBlocks {
-                    file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context(
-                        Block::new(
-                            1,
-                            10,
-                            HashMap::from([("name".to_string(), "bar".to_string())]),
-                            0..0,
-                            0..0,
-                        ),
-                        false,
-                        true,
-                    )],
-                },
+                file_blocks_default(vec![block_with_context(
+                    Block::new(
+                        1,
+                        10,
+                        HashMap::from([("name".to_string(), "bar".to_string())]),
+                        0..0,
+                        0..0,
+                    ),
+                    false,
+                    true,
+                )]),
             ),
         ]);
 
@@ -612,59 +573,50 @@ mod validate_tests {
         let modified_blocks = HashMap::from([
             (
                 "file1".to_string(),
-                FileBlocks {
-                    file_contents: "".to_string(),
-                    blocks_with_context: vec![
-                        block_with_context_default(Block::new(
-                            1,
-                            10,
-                            HashMap::from([("affects".to_string(), "file2:foo".to_string())]),
+                file_blocks_default(vec![
+                    block_with_context_default(Block::new(
+                        1,
+                        10,
+                        HashMap::from([("affects".to_string(), "file2:foo".to_string())]),
+                        0..0,
+                        0..0,
+                    )),
+                    block_with_context(
+                        Block::new(
+                            12,
+                            16,
+                            HashMap::from([("affects".to_string(), "file3:bar".to_string())]),
                             0..0,
                             0..0,
-                        )),
-                        block_with_context(
-                            Block::new(
-                                12,
-                                16,
-                                HashMap::from([("affects".to_string(), "file3:bar".to_string())]),
-                                0..0,
-                                0..0,
-                            ),
-                            true, // Start tag is modified only, not the content.
-                            false,
                         ),
-                    ],
-                },
+                        true, // Start tag is modified only, not the content.
+                        false,
+                    ),
+                ]),
             ),
             (
                 "file2".to_string(),
-                FileBlocks {
-                    file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context(
-                        Block::new(
-                            1,
-                            10,
-                            HashMap::from([("name".to_string(), "foo".to_string())]),
-                            0..0,
-                            0..0,
-                        ),
-                        true,
-                        false,
-                    )],
-                },
+                file_blocks_default(vec![block_with_context(
+                    Block::new(
+                        1,
+                        10,
+                        HashMap::from([("name".to_string(), "foo".to_string())]),
+                        0..0,
+                        0..0,
+                    ),
+                    true,
+                    false,
+                )]),
             ),
             (
                 "file3".to_string(),
-                FileBlocks {
-                    file_contents: "".to_string(),
-                    blocks_with_context: vec![block_with_context_default(Block::new(
-                        1,
-                        10,
-                        HashMap::from([("name".to_string(), "bar".to_string())]),
-                        0..0,
-                        0..0,
-                    ))],
-                },
+                file_blocks_default(vec![block_with_context_default(Block::new(
+                    1,
+                    10,
+                    HashMap::from([("name".to_string(), "bar".to_string())]),
+                    0..0,
+                    0..0,
+                ))]),
             ),
         ]);
 
@@ -681,39 +633,36 @@ mod validate_tests {
         let validator = AffectsValidator::new();
         let modified_blocks = HashMap::from([(
             "file1".to_string(),
-            FileBlocks {
-                file_contents: "".to_string(),
-                blocks_with_context: vec![
-                    block_with_context(
-                        Block::new(
-                            1,
-                            10,
-                            HashMap::from([
-                                ("name".to_string(), "foo".to_string()),
-                                ("affects".to_string(), ":bar".to_string()),
-                            ]),
-                            0..0,
-                            0..0,
-                        ),
-                        true,
-                        true,
+            file_blocks_default(vec![
+                block_with_context(
+                    Block::new(
+                        1,
+                        10,
+                        HashMap::from([
+                            ("name".to_string(), "foo".to_string()),
+                            ("affects".to_string(), ":bar".to_string()),
+                        ]),
+                        0..1,
+                        0..0,
                     ),
-                    block_with_context(
-                        Block::new(
-                            12,
-                            16,
-                            HashMap::from([
-                                ("name".to_string(), "bar".to_string()),
-                                ("affects".to_string(), ":foo".to_string()),
-                            ]),
-                            0..0,
-                            0..0,
-                        ),
-                        true, // Start tag is modified only, not the content.
-                        false,
+                    true,
+                    true,
+                ),
+                block_with_context(
+                    Block::new(
+                        12,
+                        16,
+                        HashMap::from([
+                            ("name".to_string(), "bar".to_string()),
+                            ("affects".to_string(), ":foo".to_string()),
+                        ]),
+                        0..1,
+                        0..0,
                     ),
-                ],
-            },
+                    true, // Start tag is modified only, not the content.
+                    false,
+                ),
+            ]),
         )]);
 
         let violations = validator.validate(Arc::new(validators::ValidationContext::new(

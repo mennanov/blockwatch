@@ -1,7 +1,7 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::validators;
 use crate::validators::{
-    ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
+    Position, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
 };
 use anyhow::{Context, anyhow};
 use serde::Serialize;
@@ -94,7 +94,7 @@ impl ValidatorSync for KeepSortedValidator {
                     let mut prev_value: Option<(&str, RangeInclusive<usize>)> = None;
                     for (line_number, line) in block_with_context
                         .block
-                        .content(&file_blocks.file_contents)
+                        .content(&file_blocks.file_content)
                         .lines()
                         .enumerate()
                     {
@@ -188,10 +188,8 @@ fn create_violation(
     );
     Ok(Violation::new(
         ViolationRange::new(
-            violation_line_number,
-            violation_character_start,
-            violation_line_number,
-            violation_character_end,
+            Position::new(violation_line_number, violation_character_start),
+            Position::new(violation_line_number, violation_character_end),
         ),
         "keep-sorted".to_string(),
         message,
@@ -210,7 +208,7 @@ mod validate_tests {
     use super::*;
     use crate::blocks::FileBlocks;
     use crate::test_utils;
-    use crate::test_utils::block_with_context_default;
+    use crate::test_utils::{block_with_context_default, file_blocks_default, new_line_positions};
     use serde_json::json;
     use std::collections::HashMap;
 
@@ -230,16 +228,13 @@ mod validate_tests {
         let validator = KeepSortedValidator::new();
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
-            FileBlocks {
-                file_contents: "".to_string(),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    2,
-                    HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
-                    0..0,
-                    0..0,
-                ))],
-            },
+            file_blocks_default(vec![block_with_context_default(Block::new(
+                1,
+                2,
+                HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
+                0..0,
+                0..0,
+            ))]),
         )])));
 
         let violations = validator.validate(context)?;
@@ -253,16 +248,13 @@ mod validate_tests {
         let validator = KeepSortedValidator::new();
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
-            FileBlocks {
-                file_contents: "".to_string(),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    2,
-                    HashMap::from([("keep-sorted".to_string(), "invalid".to_string())]),
-                    0..0,
-                    0..0,
-                ))],
-            },
+            file_blocks_default(vec![block_with_context_default(Block::new(
+                1,
+                2,
+                HashMap::from([("keep-sorted".to_string(), "invalid".to_string())]),
+                0..0,
+                0..0,
+            ))]),
         )])));
 
         let result = validator.validate(context);
@@ -278,7 +270,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     3,
@@ -302,7 +295,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     3,
@@ -326,7 +320,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
@@ -350,7 +345,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     7,
@@ -374,7 +370,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
@@ -398,7 +395,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
@@ -419,7 +417,10 @@ mod validate_tests {
             "Block file1:(unnamed) defined at line 1 has an out-of-order line 4 (asc)"
         );
         assert_eq!(file1_violations[0].code, "keep-sorted");
-        assert_eq!(file1_violations[0].range, ViolationRange::new(4, 1, 4, 2));
+        assert_eq!(
+            file1_violations[0].range,
+            ViolationRange::new(Position::new(4, 1), Position::new(4, 2))
+        );
         assert_eq!(
             file1_violations[0].data,
             Some(json!({
@@ -436,7 +437,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
@@ -457,7 +459,10 @@ mod validate_tests {
             "Block file1:(unnamed) defined at line 1 has an out-of-order line 3 (desc)"
         );
         assert_eq!(file1_violations[0].code, "keep-sorted",);
-        assert_eq!(file1_violations[0].range, ViolationRange::new(3, 1, 3, 1));
+        assert_eq!(
+            file1_violations[0].range,
+            ViolationRange::new(Position::new(3, 1), Position::new(3, 1))
+        );
         assert_eq!(
             file1_violations[0].data,
             Some(json!({
@@ -474,7 +479,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     5,
@@ -498,7 +504,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     5,
@@ -523,7 +530,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.clone(),
+                file_content: file1_contents.clone(),
+                file_content_new_lines: new_line_positions(file1_contents.as_str()),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
@@ -546,7 +554,10 @@ mod validate_tests {
         let file1_violations = violations.get("file1").unwrap();
         assert_eq!(file1_violations.len(), 1);
         assert_eq!(file1_violations[0].code, "keep-sorted");
-        assert_eq!(file1_violations[0].range, ViolationRange::new(3, 7, 3, 7));
+        assert_eq!(
+            file1_violations[0].range,
+            ViolationRange::new(Position::new(3, 7), Position::new(3, 7))
+        );
         Ok(())
     }
 
@@ -558,7 +569,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.clone(),
+                file_content: file1_contents.clone(),
+                file_content_new_lines: new_line_positions(file1_contents.as_str()),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     5,
@@ -577,7 +589,10 @@ mod validate_tests {
         assert_eq!(violations.len(), 1);
         let file1_violations = violations.get("file1").unwrap();
         assert_eq!(file1_violations.len(), 1);
-        assert_eq!(file1_violations[0].range, ViolationRange::new(3, 1, 3, 3));
+        assert_eq!(
+            file1_violations[0].range,
+            ViolationRange::new(Position::new(3, 1), Position::new(3, 3))
+        );
         Ok(())
     }
 
@@ -588,7 +603,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     4,

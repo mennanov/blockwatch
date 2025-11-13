@@ -57,6 +57,7 @@ impl Block {
             // `line_change` is outside the block's start and end tags.
             return false;
         }
+        // TODO: rewrite with Position::from_byte_offset().
         let block_content_start_line_idx = new_line_positions
             .binary_search(&range.start)
             .unwrap_or_else(|i| i);
@@ -191,7 +192,12 @@ pub enum BlockSeverity {
 /// Represents a source field with its corresponding modified blocks.
 #[derive(Debug)]
 pub struct FileBlocks {
-    pub(crate) file_contents: String,
+    /// Source file contents.
+    pub(crate) file_content: String,
+    /// Newline positions in the `file_content`.
+    /// Can be used to convert a byte offset to a line number and a character position in log(N).
+    pub(crate) file_content_new_lines: Vec<usize>,
+    /// Blocks to be validated.
     pub(crate) blocks_with_context: Vec<BlockWithContext>,
 }
 
@@ -257,7 +263,8 @@ pub fn parse_blocks(
             blocks.insert(
                 file_path.to_string(),
                 FileBlocks {
-                    file_contents: source_code,
+                    file_content: source_code,
+                    file_content_new_lines: new_line_positions,
                     blocks_with_context: file_blocks,
                 },
             );
@@ -671,7 +678,7 @@ mod parse_blocks_tests {
 
         let blocks_by_file = parse_blocks(&modified_ranges, &file_reader, parsers, HashMap::new())?;
 
-        let content_a = &blocks_by_file["a.rs"].file_contents;
+        let content_a = &blocks_by_file["a.rs"].file_content;
         assert_eq!(content_a, file_a_contents);
         Ok(())
     }

@@ -124,11 +124,11 @@ index 1111111..2222222 100644
                   "range": {
                     "start": {
                         "line": 7,
-                        "character": 0
+                        "character": 3
                     },
                     "end": {
-                        "line": 9,
-                        "character": 0
+                        "line": 7,
+                        "character": 40
                     }
                   },
                   "code": "check-ai",

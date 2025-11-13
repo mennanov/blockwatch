@@ -6,7 +6,7 @@ pub mod validators;
 
 #[cfg(test)]
 mod test_utils {
-    use crate::blocks::{Block, BlockWithContext};
+    use crate::blocks::{Block, BlockWithContext, FileBlocks};
     use std::ops::Range;
     use std::sync::Arc;
 
@@ -66,5 +66,19 @@ mod test_utils {
             _is_start_tag_modified: is_start_tag_modified,
             is_content_modified,
         }
+    }
+
+    /// Creates a `FileBlock` with an empty file contents.
+    pub(crate) fn file_blocks_default(blocks_with_context: Vec<BlockWithContext>) -> FileBlocks {
+        FileBlocks {
+            file_content: "".to_string(),
+            file_content_new_lines: vec![],
+            blocks_with_context,
+        }
+    }
+
+    /// Collects the starting byte indices of all newline characters (`\n`) within the input string.
+    pub(crate) fn new_line_positions(input: &str) -> Vec<usize> {
+        input.match_indices('\n').map(|(idx, _)| idx).collect()
     }
 }

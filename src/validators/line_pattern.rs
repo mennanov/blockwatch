@@ -1,7 +1,7 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::validators;
 use crate::validators::{
-    ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
+    Position, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
 };
 use anyhow::anyhow;
 use regex::Regex;
@@ -46,7 +46,7 @@ impl ValidatorSync for LinePatternValidator {
                 })?;
                 for (line_number, line) in block_with_context
                     .block
-                    .content(&file_blocks.file_contents)
+                    .content(&file_blocks.file_content)
                     .lines()
                     .enumerate()
                 {
@@ -125,10 +125,8 @@ fn create_violation(
     );
     Ok(Violation::new(
         ViolationRange::new(
-            violation_line_number,
-            violation_character_start,
-            violation_line_number,
-            violation_character_end,
+            Position::new(violation_line_number, violation_character_start),
+            Position::new(violation_line_number, violation_character_end),
         ),
         "line-pattern".to_string(),
         message,
@@ -144,7 +142,7 @@ mod validate_tests {
     use super::*;
     use crate::blocks::{Block, FileBlocks};
     use crate::test_utils;
-    use crate::test_utils::block_with_context_default;
+    use crate::test_utils::{block_with_context_default, file_blocks_default, new_line_positions};
     use serde_json::json;
 
     #[test]
@@ -161,16 +159,13 @@ mod validate_tests {
         let validator = LinePatternValidator::new();
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
-            FileBlocks {
-                file_contents: "".to_string(),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    2,
-                    HashMap::from([("line-pattern".to_string(), "[A-Z]+".to_string())]),
-                    0..0,
-                    0..0,
-                ))],
-            },
+            file_blocks_default(vec![block_with_context_default(Block::new(
+                1,
+                2,
+                HashMap::from([("line-pattern".to_string(), "[A-Z]+".to_string())]),
+                0..0,
+                0..0,
+            ))]),
         )])));
         let violations = validator.validate(context)?;
         assert!(violations.is_empty());
@@ -184,7 +179,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     5,
@@ -206,7 +202,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     5,
@@ -228,7 +225,8 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     6,
@@ -247,7 +245,10 @@ mod validate_tests {
             "Block file1:(unnamed) defined at line 1 has a non-matching line 2 (pattern: /^[A-Z]+$/)"
         );
         assert_eq!(file1_violations[0].code, "line-pattern");
-        assert_eq!(file1_violations[0].range, ViolationRange::new(2, 2, 2, 5));
+        assert_eq!(
+            file1_violations[0].range,
+            ViolationRange::new(Position::new(2, 2), Position::new(2, 5))
+        );
         assert_eq!(
             file1_violations[0].data,
             Some(json!({
@@ -262,16 +263,13 @@ mod validate_tests {
         let validator = LinePatternValidator::new();
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
-            FileBlocks {
-                file_contents: "".to_string(),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    10,
-                    15,
-                    HashMap::from([("line-pattern".to_string(), "[A-Z+".to_string())]),
-                    0..0,
-                    0..0,
-                ))],
-            },
+            file_blocks_default(vec![block_with_context_default(Block::new(
+                10,
+                15,
+                HashMap::from([("line-pattern".to_string(), "[A-Z+".to_string())]),
+                0..0,
+                0..0,
+            ))]),
         )])));
         let result = validator.validate(context);
         assert!(result.is_err());

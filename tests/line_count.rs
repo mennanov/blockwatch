@@ -56,11 +56,11 @@ index 6781fec..4ce6a3b 100644
                   "range": {
                     "start": {
                         "line": 12,
-                        "character": 0
+                        "character": 7
                     },
                     "end": {
-                        "line": 16,
-                        "character": 0
+                        "line": 12,
+                        "character": 29
                     }
                   },
                   "code": "line-count",

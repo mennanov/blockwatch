@@ -1,7 +1,7 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::validators;
 use crate::validators::{
-    ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
+    Position, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
 };
 use anyhow::anyhow;
 use serde::Serialize;
@@ -44,14 +44,14 @@ impl ValidatorSync for LineCountValidator {
                 ))?;
                 let actual = if block_with_context
                     .block
-                    .content(&file_blocks.file_contents)
+                    .content(&file_blocks.file_content)
                     .is_empty()
                 {
                     0
                 } else {
                     block_with_context
                         .block
-                        .content(&file_blocks.file_contents)
+                        .content(&file_blocks.file_content)
                         .lines()
                         .filter(|line| !line.trim().is_empty())
                         .count()
@@ -70,6 +70,7 @@ impl ValidatorSync for LineCountValidator {
                         .push(create_violation(
                             file_path,
                             Arc::clone(&block_with_context.block),
+                            &file_blocks.file_content_new_lines,
                             op,
                             expected,
                             actual,
@@ -84,6 +85,7 @@ impl ValidatorSync for LineCountValidator {
 fn create_violation(
     block_file_path: &str,
     block: Arc<Block>,
+    new_line_positions: &[usize],
     operation: Op,
     expected: usize,
     actual: usize,
@@ -98,8 +100,10 @@ fn create_violation(
         expected
     );
     Ok(Violation::new(
-        // TODO: The block's start and end positions are unavailable. See issue #46.
-        ViolationRange::new(block.starts_at_line, 0, block.ends_at_line, 0),
+        ViolationRange::new(
+            Position::from_byte_offset(block.start_tag_range.start, new_line_positions),
+            Position::from_byte_offset(block.start_tag_range.end - 1, new_line_positions),
+        ),
         "line-count".to_string(),
         message,
         block,
@@ -186,7 +190,7 @@ mod tests {
     use super::*;
     use crate::blocks::{Block, FileBlocks};
     use crate::test_utils;
-    use crate::test_utils::block_with_context_default;
+    use crate::test_utils::{block_with_context_default, new_line_positions};
     use serde_json::json;
 
     #[test]
@@ -211,7 +215,8 @@ mod tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![
                     block_with_context_default(Block::new(
                         1,
@@ -277,7 +282,8 @@ mod tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file2".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![
                     block_with_context_default(Block::new(
                         1,
@@ -335,8 +341,6 @@ mod tests {
             file2_violations[0].message,
             "Block file2:(unnamed) defined at line 1 has 3 lines, which does not satisfy <3"
         );
-        // TODO: The block's start and end positions are unavailable. See issue #46.
-        assert_eq!(file2_violations[0].range, ViolationRange::new(1, 0, 5, 0));
         assert_eq!(
             file2_violations[0].data,
             Some(json!({
@@ -425,7 +429,8 @@ mod tests {
         let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
-                file_contents: file1_contents.to_string(),
+                file_content: file1_contents.to_string(),
+                file_content_new_lines: new_line_positions(file1_contents),
                 blocks_with_context: vec![block_with_context_default(Block::new(
                     1,
                     4,

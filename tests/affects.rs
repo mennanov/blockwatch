@@ -33,11 +33,11 @@ index abc123..def456 100644
                   "range": {
                     "start": {
                         "line": 3,
-                        "character": 0
+                        "character": 10
                     },
                     "end": {
-                        "line": 6,
-                        "character": 0
+                        "line": 3,
+                        "character": 31
                     }
                   },
                   "code": "affects",
@@ -177,11 +177,11 @@ index abc123..def456 100644
                   "range": {
                     "start": {
                         "line": 3,
-                        "character": 0
+                        "character": 10
                     },
                     "end": {
-                        "line": 6,
-                        "character": 0
+                        "line": 3,
+                        "character": 31
                     }
                   },
                   "code": "affects",
