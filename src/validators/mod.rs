@@ -6,7 +6,7 @@ mod line_count;
 mod line_pattern;
 
 use crate::Position;
-use crate::blocks::{Block, BlockSeverity, BlockWithContext, FileBlocks};
+use crate::blocks::{BlockSeverity, BlockWithContext, FileBlocks};
 use crate::validators::affects::AffectsValidatorDetector;
 use crate::validators::check_ai::CheckAiValidatorDetector;
 use crate::validators::keep_sorted::KeepSortedValidatorDetector;
@@ -55,7 +55,7 @@ pub struct Violation {
     range: ViolationRange,
     code: String,
     message: String,
-    block: Arc<Block>,
+    severity: BlockSeverity,
     data: Option<serde_json::Value>,
 }
 
@@ -65,26 +65,26 @@ impl Violation {
         range: ViolationRange,
         code: String,
         message: String,
-        block: Arc<Block>,
+        severity: BlockSeverity,
         data: Option<serde_json::Value>,
     ) -> Self {
         Self {
             range,
             code,
             message,
-            block,
+            severity,
             data,
         }
     }
 
-    pub fn as_simple_diagnostic(&self) -> anyhow::Result<SimpleDiagnostic<'_>> {
-        Ok(SimpleDiagnostic {
+    pub fn as_simple_diagnostic(&self) -> SimpleDiagnostic<'_> {
+        SimpleDiagnostic {
             range: &self.range,
             code: self.code.as_str(),
             message: self.message.as_str(),
-            severity: self.block.severity()?,
+            severity: self.severity,
             data: &self.data,
-        })
+        }
     }
 }
 
@@ -374,7 +374,7 @@ mod tests {
                             empty_testing_violation_range(),
                             "fake-async".to_string(),
                             "fake-async error message".to_string(),
-                            Arc::clone(&self.testing_block),
+                            self.testing_block.severity().unwrap(),
                             None,
                         )],
                     )
@@ -402,7 +402,7 @@ mod tests {
                             empty_testing_violation_range(),
                             "fake-sync".to_string(),
                             "fake-sync error message".to_string(),
-                            Arc::clone(&self.testing_block),
+                            self.testing_block.severity().unwrap(),
                             None,
                         )],
                     )

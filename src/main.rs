@@ -44,7 +44,7 @@ fn main() -> anyhow::Result<()> {
         for (file_path, file_violations) in violations {
             let mut file_diagnostics = Vec::with_capacity(file_violations.len());
             for violation in file_violations {
-                let diagnostic = violation.as_simple_diagnostic()?;
+                let diagnostic = violation.as_simple_diagnostic();
                 if diagnostic.severity() == BlockSeverity::Error {
                     has_error_severity = true;
                 }

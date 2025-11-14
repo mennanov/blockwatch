@@ -10,7 +10,6 @@ pub mod validators;
 mod test_utils {
     use crate::blocks::{Block, BlockWithContext, FileBlocks};
     use std::ops::Range;
-    use std::sync::Arc;
 
     /// Finds the byte range of the first occurrence of a substring within a string.
     ///
@@ -43,7 +42,7 @@ mod test_utils {
     /// false.
     pub(crate) fn block_with_context_default(block: Block) -> BlockWithContext {
         BlockWithContext {
-            block: Arc::new(block),
+            block,
             _is_start_tag_modified: false,
             is_content_modified: false,
         }
@@ -64,7 +63,7 @@ mod test_utils {
         is_content_modified: bool,
     ) -> BlockWithContext {
         BlockWithContext {
-            block: Arc::new(block),
+            block,
             _is_start_tag_modified: is_start_tag_modified,
             is_content_modified,
         }

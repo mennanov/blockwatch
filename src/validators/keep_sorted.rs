@@ -126,7 +126,7 @@ impl ValidatorSync for KeepSortedValidator {
                                         .or_insert_with(Vec::new)
                                         .push(create_violation(
                                             file_path,
-                                            Arc::clone(&block_with_context.block),
+                                            &block_with_context.block,
                                             keep_sorted_normalized.as_str(),
                                             violation_line_number,
                                             line_character_start,
@@ -175,7 +175,7 @@ impl ValidatorDetector for KeepSortedValidatorDetector {
 
 fn create_violation(
     block_file_path: &str,
-    block: Arc<Block>,
+    block: &Block,
     keep_sorted_value: &str,
     violation_line_number: usize,
     violation_character_start: usize,
@@ -193,7 +193,7 @@ fn create_violation(
         ),
         "keep-sorted".to_string(),
         message,
-        block,
+        block.severity()?,
         Some(
             serde_json::to_value(KeepSortedViolation {
                 order_by: keep_sorted_value,

@@ -69,7 +69,7 @@ impl ValidatorSync for LineCountValidator {
                         .or_insert_with(Vec::new)
                         .push(create_violation(
                             file_path,
-                            Arc::clone(&block_with_context.block),
+                            &block_with_context.block,
                             &file_blocks.file_content_new_lines,
                             op,
                             expected,
@@ -84,7 +84,7 @@ impl ValidatorSync for LineCountValidator {
 
 fn create_violation(
     block_file_path: &str,
-    block: Arc<Block>,
+    block: &Block,
     new_line_positions: &[usize],
     operation: Op,
     expected: usize,
@@ -106,7 +106,7 @@ fn create_violation(
         ),
         "line-count".to_string(),
         message,
-        block,
+        block.severity()?,
         Some(serde_json::to_value(LineCountViolation {
             actual,
             op: operation.as_str().to_string(),

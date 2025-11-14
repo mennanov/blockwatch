@@ -19,7 +19,7 @@ async fn start_fake_openai() -> (SocketAddr, tokio::task::JoinHandle<()>) {
             }
         }
         // Extract only the BLOCK content portion from the user message to avoid matching the CONDITION text.
-        let marker = "BLOCK (preserve formatting):\n";
+        let marker = "BLOCK (formatting preserved):\n";
         let block_only = if let Some(pos) = user_content.find(marker) {
             &user_content[pos + marker.len()..]
         } else {

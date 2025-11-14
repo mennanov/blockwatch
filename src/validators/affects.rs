@@ -61,7 +61,7 @@ impl validators::ValidatorSync for AffectsValidator {
                                 .or_insert_with(Vec::new)
                                 .push(create_violation(
                                     modified_block_file_path,
-                                    Arc::clone(&block_with_context.block),
+                                    &block_with_context.block,
                                     &file_blocks.file_content_new_lines,
                                     affected_file_path.as_str(),
                                     affected_block_name.as_str(),
@@ -100,7 +100,7 @@ impl validators::ValidatorDetector for AffectsValidatorDetector {
 
 fn create_violation(
     modified_block_file_path: &str,
-    modified_block: Arc<Block>,
+    modified_block: &Block,
     modified_block_new_line_positions: &[usize],
     affected_block_file_path: &str,
     affected_block_name: &str,
@@ -131,7 +131,7 @@ fn create_violation(
         ),
         "affects".to_string(),
         message,
-        modified_block,
+        modified_block.severity()?,
         Some(details),
     ))
 }

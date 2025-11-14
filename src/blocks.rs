@@ -9,7 +9,6 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::str::FromStr;
-use std::sync::Arc;
 use strum_macros::EnumString;
 
 const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
@@ -189,7 +188,7 @@ pub struct FileBlocks {
 /// Represents a block with its corresponding validation context.
 #[derive(Debug)]
 pub struct BlockWithContext {
-    pub(crate) block: Arc<Block>,
+    pub(crate) block: Block,
     // Whether the block's tag is modified (computed from the input diff).
     pub(crate) _is_start_tag_modified: bool,
     // Whether the content of the block is modified (computed from the input diff).
@@ -237,7 +236,7 @@ pub fn parse_blocks(
                         continue;
                     }
                     file_blocks.push(BlockWithContext {
-                        block: Arc::new(block),
+                        block,
                         _is_start_tag_modified: is_start_tag_modified,
                         is_content_modified,
                     });

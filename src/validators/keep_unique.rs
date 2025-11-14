@@ -100,7 +100,7 @@ impl ValidatorSync for KeepUniqueValidator {
                             .or_insert_with(Vec::new)
                             .push(create_violation(
                                 file_path,
-                                Arc::clone(&block_with_context.block),
+                                &block_with_context.block,
                                 violation_line_number,
                                 line_character_start,
                                 line_character_end,
@@ -143,7 +143,7 @@ impl ValidatorDetector for KeepUniqueValidatorDetector {
 
 fn create_violation(
     block_file_path: &str,
-    block: Arc<Block>,
+    block: &Block,
     violation_line_number: usize,
     violation_character_start: usize,
     violation_character_end: usize,
@@ -162,7 +162,7 @@ fn create_violation(
         ),
         "keep-unique".to_string(),
         message,
-        block,
+        block.severity()?,
         None,
     ))
 }

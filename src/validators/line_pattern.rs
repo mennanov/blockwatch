@@ -65,7 +65,7 @@ impl ValidatorSync for LinePatternValidator {
                             .or_insert_with(Vec::new)
                             .push(create_violation(
                                 file_path,
-                                Arc::clone(&block_with_context.block),
+                                &block_with_context.block,
                                 pattern,
                                 violation_line_number,
                                 line_character_start,
@@ -109,7 +109,7 @@ impl ValidatorDetector for LinePatternValidatorDetector {
 
 fn create_violation(
     block_file_path: &str,
-    block: Arc<Block>,
+    block: &Block,
     pattern: &str,
     violation_line_number: usize,
     violation_character_start: usize,
@@ -130,7 +130,7 @@ fn create_violation(
         ),
         "line-pattern".to_string(),
         message,
-        block,
+        block.severity()?,
         Some(serde_json::to_value(LinePatternViolation {
             pattern: pattern.to_string(),
         })?),

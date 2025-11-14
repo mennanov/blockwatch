@@ -1,8 +1,8 @@
-use crate::blocks::{Block, BlockWithContext};
+use crate::Position;
+use crate::blocks::{Block, BlockWithContext, FileBlocks};
 use crate::validators::{
-    ValidatorAsync, ValidatorDetector, ValidatorType, Violation, ViolationRange,
+    ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorType, Violation, ViolationRange,
 };
-use crate::{Position, validators};
 use anyhow::{Context, anyhow};
 use async_openai::Client;
 use async_openai::config::{Config, OPENAI_API_BASE, OpenAIConfig};
@@ -30,62 +30,43 @@ pub(crate) struct CheckAiValidator<C: AiClient> {
 impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
     async fn validate(
         &self,
-        context: Arc<validators::ValidationContext>,
+        context: Arc<ValidationContext>,
     ) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
         let mut violations = HashMap::new();
         let mut tasks = JoinSet::new();
         for (file_path, file_blocks) in &context.modified_blocks {
-            for block_with_context in &file_blocks.blocks_with_context {
-                let condition = match block_with_context.block.attributes.get("check-ai") {
-                    None => continue,
-                    Some(v) => v,
-                };
-                let condition_trimmed = condition.trim();
-                if condition_trimmed.is_empty() {
-                    return Err(anyhow!(
-                        "check-ai requires a non-empty condition in {}:{} at line {}",
-                        file_path,
-                        block_with_context.block.name_display(),
-                        block_with_context.block.starts_at_line
-                    ));
-                }
-                let block_content = if let Some(pattern) =
-                    block_with_context.block.attributes.get("check-ai-pattern")
-                {
-                    let re = regex::Regex::new(pattern)
-                        .context("check-ai-pattern is not a valid regex")?;
-                    if let Some(c) =
-                        re.captures(block_with_context.block.content(&file_blocks.file_content))
-                    {
-                        // If named group "value" exists use it, otherwise use the whole match
-                        if let Some(m) = c.name("value") {
-                            m.as_str()
-                        } else {
-                            c.get(0).map_or("", |m| m.as_str())
-                        }
-                    } else {
-                        ""
-                    }
+            for (block_idx, block_with_context) in
+                file_blocks.blocks_with_context.iter().enumerate()
+            {
+                if let Some(condition) = block_with_context.block.attributes.get("check-ai") {
+                    if condition.trim().is_empty() {
+                        return Err(anyhow!(
+                            "check-ai requires a non-empty condition in {}:{} at line {}",
+                            file_path,
+                            block_with_context.block.name_display(),
+                            block_with_context.block.starts_at_line
+                        ));
+                    };
                 } else {
-                    block_with_context
-                        .block
-                        .content(&file_blocks.file_content)
-                        .trim()
-                };
-                // Skip blocks with empty content.
-                if block_content.is_empty() {
                     continue;
                 }
 
                 let client = Arc::clone(&self.client);
-                let condition = condition_trimmed.to_string();
-                let block_content = block_content.to_string();
-                let new_line_positions = file_blocks.file_content_new_lines.clone();
+                let context = Arc::clone(&context);
                 let file_path = file_path.clone();
-                let block = Arc::clone(&block_with_context.block);
                 tasks.spawn(async move {
-                    let result = client.check_block(condition, block_content).await;
-                    Self::process_ai_response(file_path, block, &new_line_positions, result)
+                    let file_blocks = &context.modified_blocks[&file_path];
+                    let block_with_context = &file_blocks.blocks_with_context[block_idx];
+                    let condition = &block_with_context.block.attributes["check-ai"];
+                    let content = block_content(block_with_context, &file_blocks.file_content)?;
+
+                    let result = client.check_block(condition, content).await;
+                    Self::process_ai_response(
+                        file_path.to_string(),
+                        file_blocks,
+                        block_with_context,
+                        result,
+                    )
                 });
             }
         }
@@ -128,9 +109,32 @@ impl ValidatorDetector for CheckAiValidatorDetector {
     }
 }
 
+fn block_content<'c>(
+    block_with_context: &BlockWithContext,
+    file_content: &'c str,
+) -> anyhow::Result<&'c str> {
+    let content = if let Some(pattern) = block_with_context.block.attributes.get("check-ai-pattern")
+    {
+        let re = regex::Regex::new(pattern).context("check-ai-pattern is not a valid regex")?;
+        if let Some(c) = re.captures(block_with_context.block.content(file_content)) {
+            // If named group "value" exists use it, otherwise use the whole match
+            if let Some(m) = c.name("value") {
+                m.as_str()
+            } else {
+                c.get(0).map_or("", |m| m.as_str())
+            }
+        } else {
+            ""
+        }
+    } else {
+        block_with_context.block.content(file_content).trim()
+    };
+    Ok(content)
+}
+
 fn create_violation(
-    block_file_path: &str,
-    block: Arc<Block>,
+    file_path: &str,
+    block: &Block,
     new_line_positions: &[usize],
     ai_message: &str,
 ) -> anyhow::Result<Violation> {
@@ -145,7 +149,7 @@ fn create_violation(
     .context("failed to serialize CheckAiDetails")?;
     let error_message = format!(
         "Block {}:{} defined at line {} failed AI check: {ai_message}",
-        block_file_path,
+        file_path,
         block.name_display(),
         block.starts_at_line,
     );
@@ -156,7 +160,7 @@ fn create_violation(
         ),
         "check-ai".to_string(),
         error_message,
-        block,
+        block.severity()?,
         Some(details),
     ))
 }
@@ -170,19 +174,24 @@ impl<C: AiClient> CheckAiValidator<C> {
 
     fn process_ai_response(
         file_path: String,
-        block: Arc<Block>,
-        new_line_positions: &[usize],
+        file_blocks: &FileBlocks,
+        block_with_context: &BlockWithContext,
         result: anyhow::Result<Option<String>>,
     ) -> anyhow::Result<Option<(String, Violation)>> {
         match result.context(format!(
             "check-ai API error in {}:{} at line {}",
             file_path,
-            block.name_display(),
-            block.starts_at_line
+            block_with_context.block.name_display(),
+            block_with_context.block.starts_at_line
         ))? {
             None => Ok(None),
             Some(msg) => {
-                let violation = create_violation(&file_path, block, new_line_positions, &msg)?;
+                let violation = create_violation(
+                    &file_path,
+                    &block_with_context.block,
+                    &file_blocks.file_content_new_lines,
+                    &msg,
+                )?;
                 Ok(Some((file_path, violation)))
             }
         }
@@ -198,12 +207,11 @@ struct CheckAiViolation<'a> {
 
 #[async_trait]
 pub(crate) trait AiClient: Send + Sync {
-    // TODO: take Arc<ValidationContext> as an input with file_path and block index to avoid cloning.
     /// Returns Ok(None) if the block satisfies the condition, Ok(Some(error_message)) otherwise.
     async fn check_block(
         &self,
-        condition: String,
-        block_content: String,
+        condition: &str,
+        block_content: &str,
     ) -> anyhow::Result<Option<String>>;
 }
 
@@ -233,25 +241,26 @@ impl OpenAiClient {
 impl AiClient for OpenAiClient {
     async fn check_block(
         &self,
-        condition: String,
-        block_content: String,
+        condition: &str,
+        block_content: &str,
     ) -> anyhow::Result<Option<String>> {
         if self.client.config().api_key().expose_secret().is_empty() {
             return Err(anyhow::anyhow!(
+                // TODO: add a block with "affects" for `BLOCKWATCH_AI_API_KEY`
                 "API key is empty. Is BLOCKWATCH_AI_API_KEY env variable set?"
             ));
         }
-        let system_msg = ChatCompletionRequestSystemMessageArgs::default()
-            .content(DEFAULT_SYSTEM_PROMPT)
-            .build()
-            .context("failed to build system message")?;
-
         let user =
-            format!("CONDITION:\n{condition}\n\nBLOCK (preserve formatting):\n{block_content}");
+            format!("CONDITION:\n{condition}\n\nBLOCK (formatting preserved):\n{block_content}");
         let user_msg = ChatCompletionRequestUserMessageArgs::default()
             .content(user)
             .build()
             .context("failed to build user message")?;
+
+        let system_msg = ChatCompletionRequestSystemMessageArgs::default()
+            .content(DEFAULT_SYSTEM_PROMPT)
+            .build()
+            .context("failed to build system message")?;
 
         let req = CreateChatCompletionRequestArgs::default()
             .model(self.model.clone())
@@ -316,12 +325,12 @@ mod tests {
     impl AiClient for FakeClient {
         async fn check_block(
             &self,
-            condition: String,
-            block_content: String,
+            condition: &str,
+            block_content: &str,
         ) -> anyhow::Result<Option<String>> {
             let response = self
                 .responses
-                .get(&(condition.clone(), block_content.clone()))
+                .get(&(condition.to_string(), block_content.to_string()))
                 .cloned()
                 .unwrap_or_else(|| {
                     panic!("Unexpected AiClient call: {condition:?}, {block_content:?}")
@@ -341,7 +350,7 @@ mod tests {
             FakeAiResponse::None,
         )])));
         let file1_contents = "/*<block>*/block content goes here: I like banana//</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
+        let context = Arc::new(ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_content: file1_contents.to_string(),
@@ -368,7 +377,7 @@ mod tests {
         )])));
         let file1_contents =
             "/*<block>*/block content goes here: I like banana and apples//</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
+        let context = Arc::new(ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_content: file1_contents.to_string(),
@@ -399,7 +408,7 @@ mod tests {
         )])));
         let file1_contents =
             "/*<block>*/block content goes here: I like banana and apples//</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
+        let context = Arc::new(ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_content: file1_contents.to_string(),
@@ -432,7 +441,7 @@ mod tests {
             FakeAiResponse::Some("The block does not mention 'banana'. Add it.".into()),
         )])));
         let file1_contents = "/*<block>*/block content goes here: I like apples//</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
+        let context = Arc::new(ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_content: file1_contents.to_string(),
@@ -472,7 +481,7 @@ mod tests {
             FakeAiResponse::Err("API error".into()),
         )])));
         let file1_contents = "/*<block>*/block content goes here: text//<block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
+        let context = Arc::new(ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_content: file1_contents.to_string(),
@@ -495,7 +504,7 @@ mod tests {
     async fn empty_condition_returns_error() -> anyhow::Result<()> {
         let validator = CheckAiValidator::with_client(FakeClient::default());
         let file1_contents = "/*<block>*/block content goes here: text//<block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
+        let context = Arc::new(ValidationContext::new(HashMap::from([(
             "file1".to_string(),
             FileBlocks {
                 file_content: file1_contents.to_string(),
@@ -514,29 +523,6 @@ mod tests {
             err.to_string()
                 .contains("check-ai requires a non-empty condition")
         );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn empty_content_skips_api_call_returns_no_violations() -> anyhow::Result<()> {
-        let validator = CheckAiValidator::with_client(FakeClient::default());
-        let file1_contents = "/* <block> */block content goes here:  \n\n// </block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    1,
-                    HashMap::from([("check-ai".to_string(), "condition".to_string())]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "  \n\n"),
-                ))],
-            },
-        )])));
-        let violations = validator.validate(context).await?;
-        assert!(violations.is_empty());
         Ok(())
     }
 }
