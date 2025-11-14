@@ -5,6 +5,11 @@ use serde_json::{Value, json};
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 
+// <block name="check-ai-env-vars">
+const API_KEY_ENV_VAR_NAME: &str = "BLOCKWATCH_AI_API_KEY";
+const API_URL_ENV_VAR_NAME: &str = "BLOCKWATCH_AI_API_URL";
+// </block>
+
 async fn start_fake_openai() -> (SocketAddr, tokio::task::JoinHandle<()>) {
     async fn chat_completions(Json(payload): Json<Value>) -> Json<Value> {
         let mut user_content = String::new();
@@ -66,8 +71,8 @@ async fn check_ai_ok_succeeds() {
 
     // Configure client to use fake server for this command only
     let mut cmd = cargo_bin_cmd!();
-    cmd.env("BLOCKWATCH_AI_API_URL", format!("http://{addr}/v1"));
-    cmd.env("BLOCKWATCH_AI_API_KEY", "test-key");
+    cmd.env(API_URL_ENV_VAR_NAME, format!("http://{addr}/v1"));
+    cmd.env(API_KEY_ENV_VAR_NAME, "test-key");
 
     let diff_content = r#"
 diff --git a/tests/check_ai_test.py b/tests/check_ai_test.py
@@ -92,8 +97,8 @@ async fn check_ai_violation_fails_and_reports_message() {
     let (addr, _handle) = start_fake_openai().await;
 
     let mut cmd = cargo_bin_cmd!();
-    cmd.env("BLOCKWATCH_AI_API_URL", format!("http://{addr}/v1"));
-    cmd.env("BLOCKWATCH_AI_API_KEY", "test-key");
+    cmd.env(API_URL_ENV_VAR_NAME, format!("http://{addr}/v1"));
+    cmd.env(API_KEY_ENV_VAR_NAME, "test-key");
 
     let diff_content = r#"
 diff --git a/tests/check_ai_test.py b/tests/check_ai_test.py
@@ -152,7 +157,7 @@ async fn when_api_key_is_empty_error_is_printed() {
 
     // Configure client to use fake server for this command only
     let mut cmd = cargo_bin_cmd!();
-    cmd.env("BLOCKWATCH_AI_API_URL", format!("http://{addr}/v1"));
+    cmd.env(API_URL_ENV_VAR_NAME, format!("http://{addr}/v1"));
 
     let diff_content = r#"
 diff --git a/tests/check_ai_test.py b/tests/check_ai_test.py

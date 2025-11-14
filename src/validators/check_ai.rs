@@ -22,6 +22,12 @@ const DEFAULT_SYSTEM_PROMPT: &str = r"You are a strict validator. You are given 
 - If the BLOCK violates the CONDITION, reply ONLY with a short, meaningful, and actionable error message describing what must be changed.
 - Do not include quotes, labels, or extra text.";
 
+// <block affects="README.md:check-ai-env-vars, tests/check_ai.rs:check-ai-env-vars">
+const API_KEY_ENV_VAR_NAME: &str = "BLOCKWATCH_AI_API_KEY";
+const API_URL_ENV_VAR_NAME: &str = "BLOCKWATCH_AI_API_URL";
+const API_MODEL_ENV_VAR_NAME: &str = "BLOCKWATCH_AI_MODEL";
+// </block>
+
 pub(crate) struct CheckAiValidator<C: AiClient> {
     client: Arc<C>,
 }
@@ -225,10 +231,9 @@ impl OpenAiClient {
     /// Creates a new OpenAI client from environment variables (BLOCKWATCH_AI_*),
     /// falling back to `async-openai` crate defaults when not provided.
     pub(crate) fn new_from_env() -> Self {
-        let model = std::env::var("BLOCKWATCH_AI_MODEL").unwrap_or("gpt-4o-mini".to_string());
-        let api_base =
-            std::env::var("BLOCKWATCH_AI_API_URL").unwrap_or(OPENAI_API_BASE.to_string());
-        let api_key = std::env::var("BLOCKWATCH_AI_API_KEY").unwrap_or("".to_string());
+        let model = std::env::var(API_MODEL_ENV_VAR_NAME).unwrap_or("gpt-4o-mini".to_string());
+        let api_base = std::env::var(API_URL_ENV_VAR_NAME).unwrap_or(OPENAI_API_BASE.to_string());
+        let api_key = std::env::var(API_KEY_ENV_VAR_NAME).unwrap_or("".to_string());
         let config = OpenAIConfig::new()
             .with_api_base(api_base)
             .with_api_key(api_key);
@@ -246,8 +251,7 @@ impl AiClient for OpenAiClient {
     ) -> anyhow::Result<Option<String>> {
         if self.client.config().api_key().expose_secret().is_empty() {
             return Err(anyhow::anyhow!(
-                // TODO: add a block with "affects" for `BLOCKWATCH_AI_API_KEY`
-                "API key is empty. Is BLOCKWATCH_AI_API_KEY env variable set?"
+                "API key is empty. Is {API_KEY_ENV_VAR_NAME} env variable set?"
             ));
         }
         let user =

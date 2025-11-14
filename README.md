@@ -257,10 +257,14 @@ If the content does not satisfy the condition, BlockWatch will report a violatio
 
 #### Configuration
 
+[//]: # (<block name="check-ai-env-vars">)
 - Set `BLOCKWATCH_AI_API_KEY` env variable to contain an LLM API key.
 - Optional: Set `BLOCKWATCH_AI_API_URL` env variable to point to an OpenAi-compatible LLM API (default:
   `https://api.openai.com/v1`).
 - Optional: Set `BLOCKWATCH_AI_MODEL` to override the default model (default: `gpt-4o-mini`).
+
+
+[//]: # (</block>)
 
 #### ⚠️ Security Warning
 
