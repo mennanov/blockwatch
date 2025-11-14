@@ -81,12 +81,19 @@ impl Block {
                 content_end_position.character
             };
 
-            // TODO: make sure `ranges` is sorted and use binary search here instead.
-            ranges.iter().any(|range| {
-                // Intersection between [line_start_character, line_end_character] (inclusive)
-                // and half-open [range.start, range.end).
-                range.end > line_start_character && range.start <= line_end_character
-            })
+            ranges
+                .binary_search_by(|range| {
+                    if range.end > line_start_character && range.start <= line_end_character {
+                        // Intersection between [line_start_character, line_end_character]
+                        // and half-open [range.start, range.end).
+                        Ordering::Equal
+                    } else if range.end <= line_start_character {
+                        Ordering::Less
+                    } else {
+                        Ordering::Greater
+                    }
+                })
+                .is_ok()
         } else {
             true
         }

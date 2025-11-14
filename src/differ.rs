@@ -68,6 +68,7 @@ fn line_changes(patched_file: &PatchedFile) -> Vec<LineChange> {
     line_changes
 }
 
+/// Returns sorted character ranges in `new` that represent changes from `old`.
 fn line_diff(old: &str, new: &str) -> Vec<Range<usize>> {
     let mut result = Vec::new();
     let diff = similar::TextDiff::from_chars(old, new);
@@ -107,6 +108,12 @@ fn push_or_merge_range(ranges: &mut Vec<Range<usize>>, mut new: Range<usize>) {
         new = start..end;
     }
     ranges.push(new);
+    // Sink the new/merged range to its sorted position.
+    let mut i = ranges.len() - 1;
+    while i > 0 && ranges[i].start < ranges[i - 1].start {
+        ranges.swap(i, i - 1);
+        i -= 1;
+    }
 }
 
 /// Pushes the first deleted line to the `line_changes` and deletes all the rest.
