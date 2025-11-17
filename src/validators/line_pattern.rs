@@ -140,15 +140,13 @@ fn create_violation(
 #[cfg(test)]
 mod validate_tests {
     use super::*;
-    use crate::blocks::{Block, FileBlocks};
-    use crate::test_utils;
-    use crate::test_utils::{block_with_context_default, file_blocks_default, new_line_positions};
+    use crate::test_utils::validation_context;
     use serde_json::json;
 
     #[test]
     fn empty_blocks_returns_no_violations() -> anyhow::Result<()> {
         let validator = LinePatternValidator::new();
-        let context = Arc::new(validators::ValidationContext::new(HashMap::new()));
+        let context = validation_context("example.py", "#<block>\n#</block>");
         let violations = validator.validate(context)?;
         assert!(violations.is_empty());
         Ok(())
@@ -157,16 +155,11 @@ mod validate_tests {
     #[test]
     fn blocks_with_empty_content_returns_no_violations() -> anyhow::Result<()> {
         let validator = LinePatternValidator::new();
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            file_blocks_default(vec![block_with_context_default(Block::new(
-                1,
-                2,
-                HashMap::from([("line-pattern".to_string(), "[A-Z]+".to_string())]),
-                0..0,
-                0..0,
-            ))]),
-        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-pattern="[A-Z]+">
+        # </block>"#,
+        );
         let violations = validator.validate(context)?;
         assert!(violations.is_empty());
         Ok(())
@@ -175,21 +168,14 @@ mod validate_tests {
     #[test]
     fn valid_regex_all_lines_match_returns_no_violations() -> anyhow::Result<()> {
         let validator = LinePatternValidator::new();
-        let file1_contents = "/*<block>*/block content goes here: FOO\nBAR\nZ//</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    5,
-                    HashMap::from([("line-pattern".to_string(), "^[A-Z]+$".to_string())]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "FOO\nBAR\nZ"),
-                ))],
-            },
-        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-pattern="^[A-Z]+$">
+        FOO
+        BAR
+        Z
+        # </block>"#,
+        );
         let violations = validator.validate(context)?;
         assert!(violations.is_empty());
         Ok(())
@@ -198,22 +184,19 @@ mod validate_tests {
     #[test]
     fn empty_lines_and_spaces_are_ignored() -> anyhow::Result<()> {
         let validator = LinePatternValidator::new();
-        let file1_contents = "/*<block>*/block content goes here: FOO\n \n\n BAR \nZ //</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    5,
-                    HashMap::from([("line-pattern".to_string(), "^[A-Z]+$".to_string())]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "FOO\n \n\n BAR \nZ "),
-                ))],
-            },
-        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-pattern="^[A-Z]+$">
+        FOO
+         
+        
+         BAR 
+        Z 
+        # </block>"#,
+        );
+
         let violations = validator.validate(context)?;
+
         assert!(violations.is_empty());
         Ok(())
     }
@@ -221,36 +204,31 @@ mod validate_tests {
     #[test]
     fn non_matching_line_reports_first_violation_only() -> anyhow::Result<()> {
         let validator = LinePatternValidator::new();
-        let file1_contents = "/*<block>*/block content goes here: OK\n fail \nALSOOK//</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    6,
-                    HashMap::from([("line-pattern".to_string(), "^[A-Z]+$".to_string())]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "OK\n fail \nALSOOK"),
-                ))],
-            },
-        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-pattern="^[A-Z]+$">
+        OK
+        fail
+        NOT OK
+        # </block>"#,
+        );
+
         let violations = validator.validate(context)?;
+
         assert_eq!(violations.len(), 1);
-        let file1_violations = violations.get("file1").unwrap();
-        assert_eq!(file1_violations.len(), 1);
+        let file_violations = violations.get("example.py").unwrap();
+        assert_eq!(file_violations.len(), 1);
         assert_eq!(
-            file1_violations[0].message,
-            "Block file1:(unnamed) defined at line 1 has a non-matching line 2 (pattern: /^[A-Z]+$/)"
+            file_violations[0].message,
+            "Block example.py:(unnamed) defined at line 1 has a non-matching line 3 (pattern: /^[A-Z]+$/)"
         );
-        assert_eq!(file1_violations[0].code, "line-pattern");
+        assert_eq!(file_violations[0].code, "line-pattern");
         assert_eq!(
-            file1_violations[0].range,
-            ViolationRange::new(Position::new(2, 2), Position::new(2, 5))
+            file_violations[0].range,
+            ViolationRange::new(Position::new(3, 9), Position::new(3, 12))
         );
         assert_eq!(
-            file1_violations[0].data,
+            file_violations[0].data,
             Some(json!({
                 "pattern": "^[A-Z]+$"
             }))
@@ -261,17 +239,14 @@ mod validate_tests {
     #[test]
     fn invalid_regex_returns_error() {
         let validator = LinePatternValidator::new();
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            file_blocks_default(vec![block_with_context_default(Block::new(
-                10,
-                15,
-                HashMap::from([("line-pattern".to_string(), "[A-Z+".to_string())]),
-                0..0,
-                0..0,
-            ))]),
-        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-pattern="[A-Z+">
+        # </block>"#,
+        );
+
         let result = validator.validate(context);
+
         assert!(result.is_err());
     }
 }

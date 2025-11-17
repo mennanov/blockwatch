@@ -159,27 +159,24 @@ fn parse_affects_attribute(value: &str) -> anyhow::Result<Vec<(Option<String>, S
 #[cfg(test)]
 mod validate_tests {
     use super::*;
-    use crate::blocks::FileBlocks;
-    use crate::test_utils::{block_with_context, block_with_context_default, file_blocks_default};
+    use crate::differ::LineChange;
+    use crate::test_utils::{
+        merge_validation_contexts, validation_context, validation_context_with_changes,
+    };
     use crate::validators::ValidatorSync;
 
     #[test]
     fn no_blocks_with_affects_attr_returns_ok() -> anyhow::Result<()> {
         let validator = AffectsValidator::new();
-        let modified_blocks = HashMap::from([(
-            "file1".to_string(),
-            file_blocks_default(vec![block_with_context_default(Block::new(
-                1,
-                10,
-                HashMap::from([("name".to_string(), "foo".to_string())]),
-                0..0,
-                0..0,
-            ))]),
-        )]);
+        let context = validation_context(
+            "file1.py",
+            r#"# <block name="foo">
+pass
+# </block>
+"#,
+        );
 
-        let violations = validator.validate(Arc::new(validators::ValidationContext::new(
-            modified_blocks,
-        )))?;
+        let violations = validator.validate(context)?;
 
         assert!(violations.is_empty());
         Ok(())
@@ -188,52 +185,30 @@ mod validate_tests {
     #[test]
     fn with_missing_blocks_in_same_file_returns_violations() -> anyhow::Result<()> {
         let validator = AffectsValidator::new();
-        let modified_blocks = HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: "".to_string(),
-                file_content_new_lines: vec![0],
-                blocks_with_context: vec![
-                    block_with_context(
-                        Block::new(
-                            1,
-                            10,
-                            HashMap::from([("affects".to_string(), ":foo".to_string())]),
-                            1..10,
-                            0..0,
-                        ),
-                        false,
-                        true,
-                    ),
-                    block_with_context(
-                        Block::new(
-                            12,
-                            16,
-                            HashMap::from([("affects".to_string(), ":foo".to_string())]),
-                            0..1,
-                            0..0,
-                        ),
-                        false,
-                        true,
-                    ),
-                ],
-            },
-        )]);
+        let context = validation_context_with_changes(
+            "file1.py",
+            r#"# <block affects=":foo">
+print("first")
+# </block>
 
-        let violations = validator.validate(Arc::new(validators::ValidationContext::new(
-            modified_blocks,
-        )))?;
+# <block name="foo">
+print("second")
+# </block>
+"#,
+            vec![LineChange {
+                line: 2,
+                ranges: None,
+            }],
+        );
+
+        let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file1_violations = violations.get("file1").unwrap();
-        assert_eq!(file1_violations.len(), 2);
+        let file1_violations = violations.get("file1.py").unwrap();
+        assert_eq!(file1_violations.len(), 1);
         assert_eq!(
             file1_violations[0].message,
-            "Block file1:(unnamed) at line 1 is modified, but file1:foo is not"
-        );
-        assert_eq!(
-            file1_violations[1].message,
-            "Block file1:(unnamed) at line 12 is modified, but file1:foo is not"
+            "Block file1.py:(unnamed) at line 1 is modified, but file1.py:foo is not"
         );
 
         Ok(())
@@ -242,78 +217,54 @@ mod validate_tests {
     #[test]
     fn with_missing_blocks_in_different_files_returns_violations() -> anyhow::Result<()> {
         let validator = AffectsValidator::new();
-        let modified_blocks = HashMap::from([
-            (
-                "file1".to_string(),
-                file_blocks_default(vec![
-                    block_with_context(
-                        Block::new(
-                            1,
-                            10,
-                            HashMap::from([("affects".to_string(), "file2:foo".to_string())]),
-                            0..1,
-                            0..0,
-                        ),
-                        false,
-                        true,
-                    ),
-                    block_with_context(
-                        Block::new(
-                            12,
-                            16,
-                            HashMap::from([("affects".to_string(), "file3:bar".to_string())]),
-                            0..1,
-                            0..0,
-                        ),
-                        false,
-                        true,
-                    ),
-                ]),
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "file1.py",
+                r#"# <block affects="file2.py:foo">
+print("first")
+# </block>
+
+# <block affects="file3.py:bar">
+print("second")
+# </block>
+"#,
             ),
-            (
-                "file2".to_string(),
-                file_blocks_default(vec![block_with_context(
-                    Block::new(
-                        1,
-                        10,
-                        HashMap::from([("name".to_string(), "not-foo".to_string())]),
-                        0..0,
-                        0..0,
-                    ),
-                    false,
-                    true,
-                )]),
+            validation_context_with_changes(
+                "file2.py",
+                r#"# <block name="foo">
+print("file2")
+# </block>
+"#,
+                vec![LineChange {
+                    line: 1, // Only the start tag is changed, not the content.
+                    ranges: Some(vec![3..8, 10..15]),
+                }],
             ),
-            (
-                "file3".to_string(),
-                file_blocks_default(vec![block_with_context(
-                    Block::new(
-                        1,
-                        10,
-                        HashMap::from([("name".to_string(), "not-bar".to_string())]),
-                        0..0,
-                        0..0,
-                    ),
-                    false,
-                    true,
-                )]),
+            validation_context_with_changes(
+                "file3.py",
+                r#"# <block name="not-bar">
+print("file3")
+# </block>
+"#,
+                vec![LineChange {
+                    line: 3, // Only the end tag is modified, not the content.
+                    ranges: None,
+                }],
             ),
         ]);
 
-        let violations = validator.validate(Arc::new(validators::ValidationContext::new(
-            modified_blocks,
-        )))?;
+        let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file1_violations = violations.get("file1").unwrap();
+        let file1_violations = violations.get("file1.py").unwrap();
         assert_eq!(file1_violations.len(), 2);
         assert_eq!(
             file1_violations[0].message,
-            "Block file1:(unnamed) at line 1 is modified, but file2:foo is not"
+            "Block file1.py:(unnamed) at line 1 is modified, but file2.py:foo is not"
         );
         assert_eq!(
             file1_violations[1].message,
-            "Block file1:(unnamed) at line 12 is modified, but file3:bar is not"
+            "Block file1.py:(unnamed) at line 5 is modified, but file3.py:bar is not"
         );
 
         Ok(())
@@ -322,43 +273,19 @@ mod validate_tests {
     #[test]
     fn with_cyclic_references_returns_ok() -> anyhow::Result<()> {
         let validator = AffectsValidator::new();
-        let modified_blocks = HashMap::from([(
-            "file1".to_string(),
-            file_blocks_default(vec![
-                block_with_context(
-                    Block::new(
-                        1,
-                        10,
-                        HashMap::from([
-                            ("name".to_string(), "foo".to_string()),
-                            ("affects".to_string(), ":bar".to_string()),
-                        ]),
-                        0..0,
-                        0..0,
-                    ),
-                    false,
-                    true,
-                ),
-                block_with_context(
-                    Block::new(
-                        12,
-                        16,
-                        HashMap::from([
-                            ("name".to_string(), "bar".to_string()),
-                            ("affects".to_string(), ":foo".to_string()),
-                        ]),
-                        0..0,
-                        0..0,
-                    ),
-                    false,
-                    true,
-                ),
-            ]),
-        )]);
+        let context = validation_context(
+            "file1.py",
+            r#"# <block name="foo" affects=":bar">
+print("foo")
+# </block>
 
-        let violations = validator.validate(Arc::new(validators::ValidationContext::new(
-            modified_blocks,
-        )))?;
+# <block name="bar" affects=":foo">
+print("bar")
+# </block>
+"#,
+        );
+
+        let violations = validator.validate(context)?;
 
         assert!(violations.is_empty());
         Ok(())
@@ -367,62 +294,28 @@ mod validate_tests {
     #[test]
     fn with_multiple_references_returns_ok() -> anyhow::Result<()> {
         let validator = AffectsValidator::new();
-        let modified_blocks = HashMap::from([
-            (
-                "file1".to_string(),
-                file_blocks_default(vec![
-                    block_with_context(
-                        Block::new(
-                            1,
-                            10,
-                            HashMap::from([
-                                ("name".to_string(), "foo".to_string()),
-                                ("affects".to_string(), ":bar, file2:buzz".to_string()),
-                            ]),
-                            0..0,
-                            0..0,
-                        ),
-                        false,
-                        true,
-                    ),
-                    block_with_context(
-                        Block::new(
-                            12,
-                            16,
-                            HashMap::from([
-                                ("name".to_string(), "bar".to_string()),
-                                ("affects".to_string(), ":foo".to_string()),
-                            ]),
-                            0..0,
-                            0..0,
-                        ),
-                        false,
-                        true,
-                    ),
-                ]),
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "file1.py",
+                r#"# <block name="foo" affects=":bar, file2.py:buzz">
+print("foo")
+# </block>
+
+# <block name="bar" affects=":foo">
+print("bar")
+# </block>
+"#,
             ),
-            (
-                "file2".to_string(),
-                file_blocks_default(vec![block_with_context(
-                    Block::new(
-                        1,
-                        10,
-                        HashMap::from([
-                            ("name".to_string(), "buzz".to_string()),
-                            ("affects".to_string(), "file1:bar".to_string()),
-                        ]),
-                        0..0,
-                        0..0,
-                    ),
-                    false,
-                    true,
-                )]),
+            validation_context(
+                "file2.py",
+                r#"# <block name="buzz" affects="file1.py:bar">
+print("buzz")
+# </block>
+"#,
             ),
         ]);
 
-        let violations = validator.validate(Arc::new(validators::ValidationContext::new(
-            modified_blocks,
-        )))?;
+        let violations = validator.validate(context)?;
 
         assert!(violations.is_empty());
         Ok(())
@@ -431,69 +324,40 @@ mod validate_tests {
     #[test]
     fn with_multiple_references_and_some_missing_returns_violations() -> anyhow::Result<()> {
         let validator = AffectsValidator::new();
-        let modified_blocks = HashMap::from([
-            (
-                "file1".to_string(),
-                file_blocks_default(vec![
-                    block_with_context(
-                        Block::new(
-                            1,
-                            10,
-                            HashMap::from([
-                                ("name".to_string(), "foo".to_string()),
-                                ("affects".to_string(), ":bar, file2:buzz".to_string()),
-                            ]),
-                            0..1,
-                            0..0,
-                        ),
-                        false,
-                        true,
-                    ),
-                    block_with_context(
-                        Block::new(
-                            12,
-                            16,
-                            HashMap::from([
-                                ("name".to_string(), "bar".to_string()),
-                                ("affects".to_string(), ":foo".to_string()),
-                            ]),
-                            0..1,
-                            0..0,
-                        ),
-                        false,
-                        true,
-                    ),
-                ]),
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "file1.py",
+                r#"# <block name="foo" affects=":bar, file2.py:buzz">
+print("foo")
+# </block>
+
+# <block name="bar" affects=":foo">
+print("bar")
+# </block>
+"#,
             ),
-            (
-                "file2".to_string(),
-                file_blocks_default(vec![block_with_context(
-                    Block::new(
-                        1,
-                        10,
-                        HashMap::from([
-                            ("name".to_string(), "not-buzz".to_string()),
-                            ("affects".to_string(), "file1:bar".to_string()),
-                        ]),
-                        0..1,
-                        0..0,
-                    ),
-                    false,
-                    true,
-                )]),
+            validation_context_with_changes(
+                "file2.py",
+                r#"# <block name="buzz" affects="file1.py:bar">
+print("not-buzz")
+# </block>
+print("hello")
+"#,
+                vec![LineChange {
+                    line: 4, // Line outside the block is changed.
+                    ranges: None,
+                }],
             ),
         ]);
 
-        let violations = validator.validate(Arc::new(validators::ValidationContext::new(
-            modified_blocks,
-        )))?;
+        let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file1_violations = violations.get("file1").unwrap();
+        let file1_violations = violations.get("file1.py").unwrap();
         assert_eq!(file1_violations.len(), 1);
         assert_eq!(
             file1_violations[0].message,
-            "Block file1:foo at line 1 is modified, but file2:buzz is not"
+            "Block file1.py:foo at line 1 is modified, but file2.py:buzz is not"
         );
         Ok(())
     }
@@ -501,67 +365,35 @@ mod validate_tests {
     #[test]
     fn with_no_missing_blocks_returns_ok() -> anyhow::Result<()> {
         let validator = AffectsValidator::new();
-        let modified_blocks = HashMap::from([
-            (
-                "file1".to_string(),
-                file_blocks_default(vec![
-                    block_with_context(
-                        Block::new(
-                            1,
-                            10,
-                            HashMap::from([("affects".to_string(), "file2:foo".to_string())]),
-                            0..0,
-                            0..0,
-                        ),
-                        false,
-                        true,
-                    ),
-                    block_with_context(
-                        Block::new(
-                            12,
-                            16,
-                            HashMap::from([("affects".to_string(), "file3:bar".to_string())]),
-                            0..0,
-                            0..0,
-                        ),
-                        false,
-                        true,
-                    ),
-                ]),
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "file1.py",
+                r#"# <block affects="file2.py:foo">
+print("first")
+# </block>
+
+# <block affects="file3.py:bar">
+print("second")
+# </block>
+"#,
             ),
-            (
-                "file2".to_string(),
-                file_blocks_default(vec![block_with_context(
-                    Block::new(
-                        1,
-                        10,
-                        HashMap::from([("name".to_string(), "foo".to_string())]),
-                        0..0,
-                        0..0,
-                    ),
-                    false,
-                    true,
-                )]),
+            validation_context(
+                "file2.py",
+                r#"# <block name="foo">
+print("foo")
+# </block>
+"#,
             ),
-            (
-                "file3".to_string(),
-                file_blocks_default(vec![block_with_context(
-                    Block::new(
-                        1,
-                        10,
-                        HashMap::from([("name".to_string(), "bar".to_string())]),
-                        0..0,
-                        0..0,
-                    ),
-                    false,
-                    true,
-                )]),
+            validation_context(
+                "file3.py",
+                r#"# <block name="bar">
+print("bar")
+# </block>
+"#,
             ),
         ]);
 
-        let violations = validator.validate(Arc::new(validators::ValidationContext::new(
-            modified_blocks,
-        )))?;
+        let violations = validator.validate(context)?;
 
         assert!(violations.is_empty());
         Ok(())
@@ -570,59 +402,53 @@ mod validate_tests {
     #[test]
     fn blocks_with_unmodified_content_returns_ok() -> anyhow::Result<()> {
         let validator = AffectsValidator::new();
-        let modified_blocks = HashMap::from([
-            (
-                "file1".to_string(),
-                file_blocks_default(vec![
-                    block_with_context_default(Block::new(
-                        1,
-                        10,
-                        HashMap::from([("affects".to_string(), "file2:foo".to_string())]),
-                        0..0,
-                        0..0,
-                    )),
-                    block_with_context(
-                        Block::new(
-                            12,
-                            16,
-                            HashMap::from([("affects".to_string(), "file3:bar".to_string())]),
-                            0..0,
-                            0..0,
-                        ),
-                        true, // Start tag is modified only, not the content.
-                        false,
-                    ),
-                ]),
+        let context = merge_validation_contexts(vec![
+            validation_context_with_changes(
+                "file1.py",
+                r#"# <block affects="file2.py:foo">
+pass
+# </block>
+
+# <block affects="file3.py:bar">
+pass
+# </block>
+"#,
+                vec![
+                    LineChange {
+                        line: 1,
+                        ranges: Some(vec![0..10, 12..15]),
+                    }, // First block start tag
+                    LineChange {
+                        line: 7,
+                        ranges: None,
+                    }, // Second block end tag
+                ],
             ),
-            (
-                "file2".to_string(),
-                file_blocks_default(vec![block_with_context(
-                    Block::new(
-                        1,
-                        10,
-                        HashMap::from([("name".to_string(), "foo".to_string())]),
-                        0..0,
-                        0..0,
-                    ),
-                    true,
-                    false,
-                )]),
+            validation_context_with_changes(
+                "file2.py",
+                r#"# <block name="foo">
+pass
+# </block>
+"#,
+                vec![LineChange {
+                    line: 1,
+                    ranges: Some(vec![0..4, 6..10]),
+                }], // Only start tag modified
             ),
-            (
-                "file3".to_string(),
-                file_blocks_default(vec![block_with_context_default(Block::new(
-                    1,
-                    10,
-                    HashMap::from([("name".to_string(), "bar".to_string())]),
-                    0..0,
-                    0..0,
-                ))]),
+            validation_context_with_changes(
+                "file3.py",
+                r#"# <block name="bar">
+pass
+# </block>
+"#,
+                vec![LineChange {
+                    line: 3,
+                    ranges: None,
+                }], // Only end tag modified
             ),
         ]);
 
-        let violations = validator.validate(Arc::new(validators::ValidationContext::new(
-            modified_blocks,
-        )))?;
+        let violations = validator.validate(context)?;
 
         assert!(violations.is_empty());
         Ok(())
@@ -630,44 +456,31 @@ mod validate_tests {
 
     #[test]
     fn dependent_blocks_with_unmodified_content_returns_violations() -> anyhow::Result<()> {
-        let validator = AffectsValidator::new();
-        let modified_blocks = HashMap::from([(
-            "file1".to_string(),
-            file_blocks_default(vec![
-                block_with_context(
-                    Block::new(
-                        1,
-                        10,
-                        HashMap::from([
-                            ("name".to_string(), "foo".to_string()),
-                            ("affects".to_string(), ":bar".to_string()),
-                        ]),
-                        0..1,
-                        0..0,
-                    ),
-                    true,
-                    true,
-                ),
-                block_with_context(
-                    Block::new(
-                        12,
-                        16,
-                        HashMap::from([
-                            ("name".to_string(), "bar".to_string()),
-                            ("affects".to_string(), ":foo".to_string()),
-                        ]),
-                        0..1,
-                        0..0,
-                    ),
-                    true, // Start tag is modified only, not the content.
-                    false,
-                ),
-            ]),
-        )]);
+        use crate::differ::LineChange;
+        use crate::test_utils::validation_context_with_changes;
 
-        let violations = validator.validate(Arc::new(validators::ValidationContext::new(
-            modified_blocks,
-        )))?;
+        let validator = AffectsValidator::new();
+        let contents = r#"# <block name="foo" affects=":bar">
+print("foo")
+# </block>
+
+# <block name="bar" affects=":foo">
+pass
+# </block>
+"#;
+        let line_changes = vec![
+            LineChange {
+                line: 2,
+                ranges: None,
+            }, // First block's content line
+            LineChange {
+                line: 4, // Not in any of the blocks.
+                ranges: None,
+            },
+        ];
+        let context = validation_context_with_changes("file1.py", contents, line_changes);
+
+        let violations = validator.validate(context)?;
 
         assert!(!violations.is_empty());
         Ok(())

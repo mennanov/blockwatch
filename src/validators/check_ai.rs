@@ -298,9 +298,7 @@ impl AiClient for OpenAiClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blocks::{Block, FileBlocks};
-    use crate::test_utils;
-    use crate::test_utils::{block_with_context_default, new_line_positions};
+    use crate::test_utils::validation_context;
     use serde_json::json;
 
     #[derive(Clone)]
@@ -353,21 +351,12 @@ mod tests {
             ("must mention banana".into(), "I like banana".into()),
             FakeAiResponse::None,
         )])));
-        let file1_contents = "/*<block>*/block content goes here: I like banana//</block>";
-        let context = Arc::new(ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    3,
-                    HashMap::from([("check-ai".to_string(), "must mention banana".to_string())]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "I like banana"),
-                ))],
-            },
-        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-ai="must mention banana">
+I like banana
+# </block>"#,
+        );
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());
         Ok(())
@@ -379,26 +368,12 @@ mod tests {
             ("must mention banana".into(), "I like banana".into()),
             FakeAiResponse::None,
         )])));
-        let file1_contents =
-            "/*<block>*/block content goes here: I like banana and apples//</block>";
-        let context = Arc::new(ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    3,
-                    HashMap::from([
-                        ("check-ai".to_string(), "must mention banana".to_string()),
-                        // Entire RegExp match is used as the block's content.
-                        ("check-ai-pattern".to_string(), r"I like \w+".to_string()),
-                    ]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "I like banana and apples"),
-                ))],
-            },
-        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-ai="must mention banana" check-ai-pattern="I like \w+">
+I like banana and apples
+# </block>"#,
+        );
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());
         Ok(())
@@ -410,29 +385,12 @@ mod tests {
             ("must mention banana".into(), "banana and apples".into()),
             FakeAiResponse::None,
         )])));
-        let file1_contents =
-            "/*<block>*/block content goes here: I like banana and apples//</block>";
-        let context = Arc::new(ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    3,
-                    HashMap::from([
-                        ("check-ai".to_string(), "must mention banana".to_string()),
-                        // When a RegExp named group "value" is present it is used as the block's content.
-                        (
-                            "check-ai-pattern".to_string(),
-                            r"I like (?P<value>banana and \w+)".to_string(),
-                        ),
-                    ]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "I like banana and apples"),
-                ))],
-            },
-        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-ai="must mention banana" check-ai-pattern="I like (?P<value>banana and \w+)">
+I like banana and apples
+# </block>"#,
+        );
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());
         Ok(())
@@ -444,29 +402,20 @@ mod tests {
             ("must mention banana".into(), "I like apples".into()),
             FakeAiResponse::Some("The block does not mention 'banana'. Add it.".into()),
         )])));
-        let file1_contents = "/*<block>*/block content goes here: I like apples//</block>";
-        let context = Arc::new(ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    10,
-                    14,
-                    HashMap::from([("check-ai".to_string(), "must mention banana".to_string())]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "I like apples"),
-                ))],
-            },
-        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-ai="must mention banana">
+I like apples
+# </block>"#,
+        );
         let violations = validator.validate(context).await?;
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations["file1"].len(), 1);
-        let violation = &violations["file1"][0];
+        assert_eq!(violations["example.py"].len(), 1);
+        let violation = &violations["example.py"][0];
         assert_eq!(violation.code, "check-ai");
         assert_eq!(
             violation.message,
-            "Block file1:(unnamed) defined at line 10 failed AI check: The block does not mention 'banana'. Add it."
+            "Block example.py:(unnamed) defined at line 1 failed AI check: The block does not mention 'banana'. Add it."
         );
         assert_eq!(
             violation.data,
@@ -484,21 +433,12 @@ mod tests {
             ("condition".into(), "text".into()),
             FakeAiResponse::Err("API error".into()),
         )])));
-        let file1_contents = "/*<block>*/block content goes here: text//<block>";
-        let context = Arc::new(ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    2,
-                    4,
-                    HashMap::from([("check-ai".to_string(), "condition".to_string())]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "text"),
-                ))],
-            },
-        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-ai="condition">
+text
+# </block>"#,
+        );
         let err = validator.validate(context).await.unwrap_err();
         assert!(err.to_string().contains("check-ai API error"));
         Ok(())
@@ -507,21 +447,12 @@ mod tests {
     #[tokio::test]
     async fn empty_condition_returns_error() -> anyhow::Result<()> {
         let validator = CheckAiValidator::with_client(FakeClient::default());
-        let file1_contents = "/*<block>*/block content goes here: text//<block>";
-        let context = Arc::new(ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    5,
-                    7,
-                    HashMap::from([("check-ai".to_string(), " ".to_string())]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "text"),
-                ))],
-            },
-        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-ai=" ">
+text
+# </block>"#,
+        );
         let err = validator.validate(context).await.unwrap_err();
         assert!(
             err.to_string()

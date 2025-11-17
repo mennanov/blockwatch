@@ -188,9 +188,7 @@ fn parse_constraint(s: &str) -> anyhow::Result<(Op, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blocks::{Block, FileBlocks};
-    use crate::test_utils;
-    use crate::test_utils::{block_with_context_default, new_line_positions};
+    use crate::test_utils::validation_context;
     use serde_json::json;
 
     #[test]
@@ -211,65 +209,41 @@ mod tests {
     #[test]
     fn validate_with_correct_number_of_lines_returns_no_violations() -> anyhow::Result<()> {
         let validator = LineCountValidator::new();
-        let file1_contents = "/*<block>*/blocks content goes here: a\nb\nc\nd//</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![
-                    block_with_context_default(Block::new(
-                        1,
-                        4,
-                        HashMap::from([("line-count".to_string(), "<3".to_string())]),
-                        test_utils::substr_range(file1_contents, "<block>"),
-                        test_utils::substr_range(file1_contents, "a\nb"),
-                    )),
-                    block_with_context_default(Block::new(
-                        5,
-                        8,
-                        HashMap::from([("line-count".to_string(), "<=3".to_string())]),
-                        test_utils::substr_range(file1_contents, "<block>"),
-                        test_utils::substr_range(file1_contents, "a\nb"),
-                    )),
-                    block_with_context_default(Block::new(
-                        9,
-                        13,
-                        HashMap::from([("line-count".to_string(), "<=3".to_string())]),
-                        test_utils::substr_range(file1_contents, "<block>"),
-                        test_utils::substr_range(file1_contents, "a\nb\nc"),
-                    )),
-                    block_with_context_default(Block::new(
-                        15,
-                        18,
-                        HashMap::from([("line-count".to_string(), "== 2".to_string())]),
-                        test_utils::substr_range(file1_contents, "<block>"),
-                        test_utils::substr_range(file1_contents, "a\nb"),
-                    )),
-                    block_with_context_default(Block::new(
-                        20,
-                        23,
-                        HashMap::from([("line-count".to_string(), ">= 2".to_string())]),
-                        test_utils::substr_range(file1_contents, "<block>"),
-                        test_utils::substr_range(file1_contents, "a\nb"),
-                    )),
-                    block_with_context_default(Block::new(
-                        30,
-                        34,
-                        HashMap::from([("line-count".to_string(), ">= 2".to_string())]),
-                        test_utils::substr_range(file1_contents, "<block>"),
-                        test_utils::substr_range(file1_contents, "a\nb\nc"),
-                    )),
-                    block_with_context_default(Block::new(
-                        40,
-                        45,
-                        HashMap::from([("line-count".to_string(), "> 3".to_string())]),
-                        test_utils::substr_range(file1_contents, "<block>"),
-                        test_utils::substr_range(file1_contents, "a\nb\nc\nd"),
-                    )),
-                ],
-            },
-        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-count="<3">
+        a
+        b
+        # </block>
+        # <block line-count="<=3">
+        a
+        b
+        # </block>
+        # <block line-count="<=3">
+        a
+        b
+        c
+        # </block>
+        # <block line-count="== 2">
+        a
+        b
+        # </block>
+        # <block line-count=">= 2">
+        a
+        b
+        # </block>
+        # <block line-count=">= 2">
+        a
+        b
+        c
+        # </block>
+        # <block line-count="> 3">
+        a
+        b
+        c
+        d
+        # </block>"#,
+        );
         let violations = validator.validate(context)?;
         assert!(violations.is_empty());
         Ok(())
@@ -278,68 +252,49 @@ mod tests {
     #[test]
     fn validate_with_incorrect_number_of_lines_returns_violations() -> anyhow::Result<()> {
         let validator = LineCountValidator::new();
-        let file1_contents = "/*<block>*/blocks content goes here: a\nb\nc\nd //</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file2".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![
-                    block_with_context_default(Block::new(
-                        1,
-                        5,
-                        HashMap::from([("line-count".to_string(), "<3".to_string())]),
-                        test_utils::substr_range(file1_contents, "<block>"),
-                        test_utils::substr_range(file1_contents, "a\nb\nc"),
-                    )),
-                    block_with_context_default(Block::new(
-                        7,
-                        12,
-                        HashMap::from([("line-count".to_string(), "<=3".to_string())]),
-                        test_utils::substr_range(file1_contents, "<block>"),
-                        test_utils::substr_range(file1_contents, "a\nb\nc\nd"),
-                    )),
-                    block_with_context_default(Block::new(
-                        14,
-                        19,
-                        HashMap::from([("line-count".to_string(), "==3".to_string())]),
-                        test_utils::substr_range(file1_contents, "<block>"),
-                        test_utils::substr_range(file1_contents, "a\nb\nc\nd"),
-                    )),
-                    block_with_context_default(Block::new(
-                        20,
-                        23,
-                        HashMap::from([("line-count".to_string(), "==3".to_string())]),
-                        test_utils::substr_range(file1_contents, "<block>"),
-                        test_utils::substr_range(file1_contents, "a\nb"),
-                    )),
-                    block_with_context_default(Block::new(
-                        25,
-                        28,
-                        HashMap::from([("line-count".to_string(), ">=3".to_string())]),
-                        test_utils::substr_range(file1_contents, "<block>"),
-                        test_utils::substr_range(file1_contents, "a\nb"),
-                    )),
-                    block_with_context_default(Block::new(
-                        25,
-                        28,
-                        HashMap::from([("line-count".to_string(), ">3".to_string())]),
-                        test_utils::substr_range(file1_contents, "<block>"),
-                        test_utils::substr_range(file1_contents, "a\nb\nc"),
-                    )),
-                ],
-            },
-        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-count="<3">
+        a
+        b
+        c
+        # </block>
+        # <block line-count="<=3">
+        a
+        b
+        c
+        d
+        # </block>
+        # <block line-count="==3">
+        a
+        b
+        c
+        d
+        # </block>
+        # <block line-count="==3">
+        a
+        b
+        # </block>
+        # <block line-count=">=3">
+        a
+        b
+        # </block>
+        # <block line-count=">3">
+        a
+        b
+        c
+        # </block>"#,
+        );
 
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file2_violations = violations.get("file2").unwrap();
+        let file2_violations = violations.get("example.py").unwrap();
         assert_eq!(file2_violations.len(), 6);
         assert_eq!(file2_violations[0].code, "line-count");
         assert_eq!(
             file2_violations[0].message,
-            "Block file2:(unnamed) defined at line 1 has 3 lines, which does not satisfy <3"
+            "Block example.py:(unnamed) defined at line 1 has 3 lines, which does not satisfy <3"
         );
         assert_eq!(
             file2_violations[0].data,
@@ -353,7 +308,7 @@ mod tests {
         assert_eq!(file2_violations[1].code, "line-count");
         assert_eq!(
             file2_violations[1].message,
-            "Block file2:(unnamed) defined at line 7 has 4 lines, which does not satisfy <=3"
+            "Block example.py:(unnamed) defined at line 6 has 4 lines, which does not satisfy <=3"
         );
         assert_eq!(
             file2_violations[1].data,
@@ -367,7 +322,7 @@ mod tests {
         assert_eq!(file2_violations[2].code, "line-count");
         assert_eq!(
             file2_violations[2].message,
-            "Block file2:(unnamed) defined at line 14 has 4 lines, which does not satisfy ==3"
+            "Block example.py:(unnamed) defined at line 12 has 4 lines, which does not satisfy ==3"
         );
         assert_eq!(
             file2_violations[2].data,
@@ -381,7 +336,7 @@ mod tests {
         assert_eq!(file2_violations[3].code, "line-count");
         assert_eq!(
             file2_violations[3].message,
-            "Block file2:(unnamed) defined at line 20 has 2 lines, which does not satisfy ==3"
+            "Block example.py:(unnamed) defined at line 18 has 2 lines, which does not satisfy ==3"
         );
         assert_eq!(
             file2_violations[3].data,
@@ -395,7 +350,7 @@ mod tests {
         assert_eq!(file2_violations[4].code, "line-count");
         assert_eq!(
             file2_violations[4].message,
-            "Block file2:(unnamed) defined at line 25 has 2 lines, which does not satisfy >=3"
+            "Block example.py:(unnamed) defined at line 22 has 2 lines, which does not satisfy >=3"
         );
         assert_eq!(
             file2_violations[4].data,
@@ -409,7 +364,7 @@ mod tests {
         assert_eq!(file2_violations[5].code, "line-count");
         assert_eq!(
             file2_violations[5].message,
-            "Block file2:(unnamed) defined at line 25 has 3 lines, which does not satisfy >3"
+            "Block example.py:(unnamed) defined at line 26 has 3 lines, which does not satisfy >3"
         );
         assert_eq!(
             file2_violations[5].data,
@@ -425,21 +380,18 @@ mod tests {
     #[test]
     fn empty_lines_and_lines_with_spaces_only_are_ignored() -> anyhow::Result<()> {
         let validator = LineCountValidator::new();
-        let file1_contents = "/*<block>*/blocks content goes here: a\n\nb\nc\n \n \nd//</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    4,
-                    HashMap::from([("line-count".to_string(), "<=4".to_string())]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "a\n\nb\nc\n \n \nd"),
-                ))],
-            },
-        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-count="<=4">
+        a
+        
+        b
+        c
+         
+         
+        d
+        # </block>"#,
+        );
         let violations = validator.validate(context)?;
         assert!(violations.is_empty());
         Ok(())

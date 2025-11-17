@@ -206,19 +206,14 @@ fn create_violation(
 #[cfg(test)]
 mod validate_tests {
     use super::*;
-    use crate::blocks::FileBlocks;
-    use crate::test_utils;
-    use crate::test_utils::{block_with_context_default, file_blocks_default, new_line_positions};
+    use crate::test_utils::validation_context;
     use serde_json::json;
-    use std::collections::HashMap;
 
     #[test]
     fn empty_blocks_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let context = Arc::new(validators::ValidationContext::new(HashMap::new()));
-
+        let context = validation_context("example.py", "#<block>\n#</block>");
         let violations = validator.validate(context)?;
-
         assert!(violations.is_empty());
         Ok(())
     }
@@ -226,19 +221,12 @@ mod validate_tests {
     #[test]
     fn blocks_with_empty_content_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            file_blocks_default(vec![block_with_context_default(Block::new(
-                1,
-                2,
-                HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
-                0..0,
-                0..0,
-            ))]),
-        )])));
-
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc">
+        # </block>"#,
+        );
         let violations = validator.validate(context)?;
-
         assert!(violations.is_empty());
         Ok(())
     }
@@ -246,19 +234,12 @@ mod validate_tests {
     #[test]
     fn invalid_keep_sorted_value_returns_error() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            file_blocks_default(vec![block_with_context_default(Block::new(
-                1,
-                2,
-                HashMap::from([("keep-sorted".to_string(), "invalid".to_string())]),
-                0..0,
-                0..0,
-            ))]),
-        )])));
-
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="invalid">
+        # </block>"#,
+        );
         let result = validator.validate(context);
-
         assert!(result.is_err());
         Ok(())
     }
@@ -266,24 +247,13 @@ mod validate_tests {
     #[test]
     fn single_line_asc_sorted_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "/*<block>*/block contents goes here: Hello//</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    3,
-                    HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "Hello"),
-                ))],
-            },
-        )])));
-
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc">
+        Hello
+        # </block>"#,
+        );
         let violations = validator.validate(context)?;
-
         assert!(violations.is_empty());
         Ok(())
     }
@@ -291,24 +261,13 @@ mod validate_tests {
     #[test]
     fn single_line_desc_sorted_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "/*<block>*/block contents goes here: Hello//</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    3,
-                    HashMap::from([("keep-sorted".to_string(), "desc".to_string())]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "Hello"),
-                ))],
-            },
-        )])));
-
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="desc">
+        Hello
+        # </block>"#,
+        );
         let violations = validator.validate(context)?;
-
         assert!(violations.is_empty());
         Ok(())
     }
@@ -316,24 +275,16 @@ mod validate_tests {
     #[test]
     fn multiple_lines_asc_sorted_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "/*<block>*/block contents goes here: A\nB\nB\nC//</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    6,
-                    HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "A\nB\nB\nC"),
-                ))],
-            },
-        )])));
-
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc">
+        A
+        B
+        B
+        C
+        # </block>"#,
+        );
         let violations = validator.validate(context)?;
-
         assert!(violations.is_empty());
         Ok(())
     }
@@ -341,24 +292,17 @@ mod validate_tests {
     #[test]
     fn multiple_lines_desc_sorted_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "/*<block>*/block contents goes here: C\nB\nB\nA\nA//</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    7,
-                    HashMap::from([("keep-sorted".to_string(), "desc".to_string())]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "C\nB\nB\nA\nA"),
-                ))],
-            },
-        )])));
-
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="desc">
+        C
+        B
+        B
+        A
+        A
+        # </block>"#,
+        );
         let violations = validator.validate(context)?;
-
         assert!(violations.is_empty());
         Ok(())
     }
@@ -366,24 +310,18 @@ mod validate_tests {
     #[test]
     fn empty_lines_and_spaces_are_ignored() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "/*<block>*/block contents goes here: A\n\nB\n B\n C //</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    6,
-                    HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "A\n\nB\n B\n C "),
-                ))],
-            },
-        )])));
-
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc">
+        A
+        
+        
+         B 
+    B 
+        C
+        # </block>"#,
+        );
         let violations = validator.validate(context)?;
-
         assert!(violations.is_empty());
         Ok(())
     }
@@ -391,38 +329,32 @@ mod validate_tests {
     #[test]
     fn unsorted_asc_returns_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "/*<block>*/block contents goes here: A\nB\nC\nBB//</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    6,
-                    HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "A\nB\nC\nBB"),
-                ))],
-            },
-        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc">
+        A
+        B
+        C
+        BB
+        # </block>"#,
+        );
 
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file1_violations = violations.get("file1").unwrap();
-        assert_eq!(file1_violations.len(), 1);
+        let file_violations = violations.get("example.py").unwrap();
+        assert_eq!(file_violations.len(), 1);
         assert_eq!(
-            file1_violations[0].message,
-            "Block file1:(unnamed) defined at line 1 has an out-of-order line 4 (asc)"
+            file_violations[0].message,
+            "Block example.py:(unnamed) defined at line 1 has an out-of-order line 5 (asc)"
         );
-        assert_eq!(file1_violations[0].code, "keep-sorted");
+        assert_eq!(file_violations[0].code, "keep-sorted");
         assert_eq!(
-            file1_violations[0].range,
-            ViolationRange::new(Position::new(4, 1), Position::new(4, 2))
+            file_violations[0].range,
+            ViolationRange::new(Position::new(5, 9), Position::new(5, 10))
         );
         assert_eq!(
-            file1_violations[0].data,
+            file_violations[0].data,
             Some(json!({
                 "order_by": "asc"
             }))
@@ -433,38 +365,32 @@ mod validate_tests {
     #[test]
     fn unsorted_desc_returns_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "/*<block>*/block contents goes here: D\nC\nD\nC//</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    6,
-                    HashMap::from([("keep-sorted".to_string(), "desc".to_string())]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "D\nC\nD\nC"),
-                ))],
-            },
-        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="desc">
+        D
+        C
+        D
+        C
+        # </block>"#,
+        );
 
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file1_violations = violations.get("file1").unwrap();
-        assert_eq!(file1_violations.len(), 1);
+        let file_violations = violations.get("example.py").unwrap();
+        assert_eq!(file_violations.len(), 1);
         assert_eq!(
-            file1_violations[0].message,
-            "Block file1:(unnamed) defined at line 1 has an out-of-order line 3 (desc)"
+            file_violations[0].message,
+            "Block example.py:(unnamed) defined at line 1 has an out-of-order line 4 (desc)"
         );
-        assert_eq!(file1_violations[0].code, "keep-sorted",);
+        assert_eq!(file_violations[0].code, "keep-sorted");
         assert_eq!(
-            file1_violations[0].range,
-            ViolationRange::new(Position::new(3, 1), Position::new(3, 1))
+            file_violations[0].range,
+            ViolationRange::new(Position::new(4, 9), Position::new(4, 9))
         );
         assert_eq!(
-            file1_violations[0].data,
+            file_violations[0].data,
             Some(json!({
                 "order_by": "desc"
             }))
@@ -475,24 +401,15 @@ mod validate_tests {
     #[test]
     fn identical_lines_asc_sorted_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "/*<block>*/block contents goes here: A\nA\nA//</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    5,
-                    HashMap::from([("keep-sorted".to_string(), "asc".to_string())]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "A\nA\nA"),
-                ))],
-            },
-        )])));
-
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc">
+        A
+        A
+        A
+        # </block>"#,
+        );
         let violations = validator.validate(context)?;
-
         assert!(violations.is_empty());
         Ok(())
     }
@@ -500,24 +417,15 @@ mod validate_tests {
     #[test]
     fn identical_lines_desc_sorted_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "/*<block>*/block contents goes here: A\nA\nA//</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    5,
-                    HashMap::from([("keep-sorted".to_string(), "desc".to_string())]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "A\nA\nA"),
-                ))],
-            },
-        )])));
-
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="desc">
+        A
+        A
+        A
+        # </block>"#,
+        );
         let violations = validator.validate(context)?;
-
         assert!(violations.is_empty());
         Ok(())
     }
@@ -525,38 +433,24 @@ mod validate_tests {
     #[test]
     fn regex_with_named_group_detects_out_of_order_and_reports_group_range() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let content = "B id: 2\nA id: 3\nC id: 1";
-        let file1_contents = format!("/*<block>*/{content}//</block>");
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.clone(),
-                file_content_new_lines: new_line_positions(file1_contents.as_str()),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    6,
-                    HashMap::from([
-                        ("keep-sorted".to_string(), "asc".to_string()),
-                        (
-                            "keep-sorted-pattern".to_string(),
-                            r"id: (?P<value>\d+)".to_string(),
-                        ),
-                    ]),
-                    test_utils::substr_range(file1_contents.as_str(), "<block>"),
-                    test_utils::substr_range(file1_contents.as_str(), content),
-                ))],
-            },
-        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc" keep-sorted-pattern="id: (?P<value>\d+)">
+        B_id_2 = "id: 2"
+        A_id_3 = "id: 3"
+        C_id_1 = "id: 1"
+        # </block>"#,
+        );
 
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file1_violations = violations.get("file1").unwrap();
-        assert_eq!(file1_violations.len(), 1);
-        assert_eq!(file1_violations[0].code, "keep-sorted");
+        let file_violations = violations.get("example.py").unwrap();
+        assert_eq!(file_violations.len(), 1);
+        assert_eq!(file_violations[0].code, "keep-sorted");
         assert_eq!(
-            file1_violations[0].range,
-            ViolationRange::new(Position::new(3, 7), Position::new(3, 7))
+            file_violations[0].range,
+            ViolationRange::new(Position::new(4, 23), Position::new(4, 23))
         );
         Ok(())
     }
@@ -564,34 +458,23 @@ mod validate_tests {
     #[test]
     fn regex_without_named_group_uses_full_match_and_skips_nonmatching() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let content = "x=2\nignored\nx=1";
-        let file1_contents = format!("/*<block>*/{content}//</block>");
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.clone(),
-                file_content_new_lines: new_line_positions(file1_contents.as_str()),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    5,
-                    HashMap::from([
-                        ("keep-sorted".to_string(), "asc".to_string()),
-                        ("keep-sorted-pattern".to_string(), r"x=\d+".to_string()),
-                    ]),
-                    test_utils::substr_range(file1_contents.as_str(), "<block>"),
-                    test_utils::substr_range(file1_contents.as_str(), content),
-                ))],
-            },
-        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc" keep-sorted-pattern="x=\d+">
+        x=2
+        # ignored
+        x=1
+        # </block>"#,
+        );
 
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file1_violations = violations.get("file1").unwrap();
-        assert_eq!(file1_violations.len(), 1);
+        let file_violations = violations.get("example.py").unwrap();
+        assert_eq!(file_violations.len(), 1);
         assert_eq!(
-            file1_violations[0].range,
-            ViolationRange::new(Position::new(3, 1), Position::new(3, 3))
+            file_violations[0].range,
+            ViolationRange::new(Position::new(4, 9), Position::new(4, 11))
         );
         Ok(())
     }
@@ -599,24 +482,13 @@ mod validate_tests {
     #[test]
     fn invalid_pattern_returns_error() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
-        let file1_contents = "/*<block>*/block contents goes here: 1\n2//</block>";
-        let context = Arc::new(validators::ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            FileBlocks {
-                file_content: file1_contents.to_string(),
-                file_content_new_lines: new_line_positions(file1_contents),
-                blocks_with_context: vec![block_with_context_default(Block::new(
-                    1,
-                    4,
-                    HashMap::from([
-                        ("keep-sorted".to_string(), "asc".to_string()),
-                        ("keep-sorted-pattern".to_string(), "(unclosed".to_string()),
-                    ]),
-                    test_utils::substr_range(file1_contents, "<block>"),
-                    test_utils::substr_range(file1_contents, "1\n2"),
-                ))],
-            },
-        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc" keep-sorted-pattern="(unclosed">
+        item1 = 1
+        item2 = 2
+        # </block>"#,
+        );
 
         let result = validator.validate(context);
         assert!(result.is_err());

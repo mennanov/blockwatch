@@ -7,9 +7,10 @@ use unidiff::{Line, PatchSet, PatchedFile};
 /// Represents a line change from a diff.
 #[derive(Debug, Eq, PartialEq)]
 pub struct LineChange {
+    /// 1-based line number with a change.
     pub line: usize,
-    // Modified ranges in this line. Can only be `Some` for modified lines, not added or deleted.
-    pub ranges: Option<Vec<Range<usize>>>,
+    /// Modified ranges in this line. Can only be `Some` for modified lines, not added or deleted.
+    pub ranges: Option<Vec<Range<usize>>>, // TODO: consider making it 1-based to be consistent with `line`.
 }
 
 /// Extracts line changes from a unified diff patch string.

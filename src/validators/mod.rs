@@ -122,7 +122,7 @@ impl SimpleDiagnostic<'_> {
 
 pub struct ValidationContext {
     // Modified blocks with their corresponding source file contents grouped by filename.
-    modified_blocks: HashMap<String, FileBlocks>,
+    pub(crate) modified_blocks: HashMap<String, FileBlocks>,
 }
 
 impl ValidationContext {

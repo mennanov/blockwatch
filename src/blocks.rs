@@ -193,7 +193,7 @@ pub struct FileBlocks {
 }
 
 /// Represents a block with its corresponding validation context.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BlockWithContext {
     pub(crate) block: Block,
     // Whether the block's tag is modified (computed from the input diff).
@@ -340,22 +340,7 @@ mod parse_blocks_tests {
     use crate::blocks::*;
     use crate::parsers::language_parsers;
     use crate::test_utils;
-
-    struct FakeFileReader {
-        files: HashMap<String, String>,
-    }
-
-    impl FakeFileReader {
-        fn new(files: HashMap<String, String>) -> Self {
-            Self { files }
-        }
-    }
-
-    impl FileReader for FakeFileReader {
-        fn read_to_string(&self, path: &Path) -> anyhow::Result<String> {
-            Ok(self.files[&path.display().to_string()].clone())
-        }
-    }
+    use crate::test_utils::FakeFileReader;
 
     /// Creates a whole line change (either added or deleted line).
     fn line_change(line: usize) -> LineChange {
