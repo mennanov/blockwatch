@@ -33,7 +33,7 @@ impl Position {
 
 #[cfg(test)]
 mod test_utils {
-    use crate::blocks::{Block, BlockWithContext, FileBlocks, FileReader, parse_blocks};
+    use crate::blocks::{FileBlocks, FileReader, parse_blocks};
     use crate::differ::LineChange;
     use crate::parsers;
     use crate::validators::ValidationContext;
@@ -61,31 +61,6 @@ mod test_utils {
     pub(crate) fn substr_range_nth(input: &str, substr: &str, nth: usize) -> Range<usize> {
         let (pos, _) = input.match_indices(substr).nth(nth).unwrap();
         pos..(pos + substr.len())
-    }
-
-    /// Creates a `BlockWithContext` from a `Block` with default modification flags.
-    ///
-    /// # Arguments
-    /// * `block` - The block to wrap in a context
-    ///
-    /// # Returns
-    /// A `BlockWithContext` with both `is_start_tag_modified` and `is_content_modified` set to
-    /// false.
-    pub(crate) fn block_with_context_default(block: Block) -> BlockWithContext {
-        BlockWithContext {
-            block,
-            _is_start_tag_modified: false,
-            is_content_modified: false,
-        }
-    }
-
-    /// Creates a `FileBlock` with an empty file contents.
-    pub(crate) fn file_blocks_default(blocks_with_context: Vec<BlockWithContext>) -> FileBlocks {
-        FileBlocks {
-            file_content: "".to_string(),
-            file_content_new_lines: vec![],
-            blocks_with_context,
-        }
     }
 
     pub(crate) struct FakeFileReader {
@@ -154,5 +129,39 @@ mod test_utils {
             }
         }
         Arc::new(ValidationContext::new(merged_modified_blocks))
+    }
+}
+
+#[cfg(test)]
+mod position_from_byte_offset_tests {
+    use super::*;
+
+    #[test]
+    fn with_single_line_returns_correct_position() {
+        // A single line file has no new lines.
+        let result = Position::from_byte_offset(10, &[]);
+        assert_eq!(result.line, 1);
+        assert_eq!(result.character, 10);
+    }
+
+    #[test]
+    fn with_multiple_lines_returns_correct_position_on_first_line() {
+        let result = Position::from_byte_offset(10, &[20]);
+        assert_eq!(result.line, 1);
+        assert_eq!(result.character, 10);
+    }
+
+    #[test]
+    fn with_multiple_lines_returns_correct_position_on_middle_line() {
+        let result = Position::from_byte_offset(25, &[20, 30]);
+        assert_eq!(result.line, 2);
+        assert_eq!(result.character, 5);
+    }
+
+    #[test]
+    fn with_multiple_lines_returns_correct_position_on_last_line() {
+        let result = Position::from_byte_offset(21, &[20]);
+        assert_eq!(result.line, 2);
+        assert_eq!(result.character, 1);
     }
 }

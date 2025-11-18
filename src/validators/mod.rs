@@ -300,43 +300,9 @@ pub fn detect_validators(
 }
 
 #[cfg(test)]
-mod position_from_byte_offset_tests {
-    use super::*;
-
-    #[test]
-    fn with_single_line_returns_correct_position() {
-        // A single line file has no new lines.
-        let result = Position::from_byte_offset(10, &[]);
-        assert_eq!(result.line, 1);
-        assert_eq!(result.character, 10);
-    }
-
-    #[test]
-    fn with_multiple_lines_returns_correct_position_on_first_line() {
-        let result = Position::from_byte_offset(10, &[20]);
-        assert_eq!(result.line, 1);
-        assert_eq!(result.character, 10);
-    }
-
-    #[test]
-    fn with_multiple_lines_returns_correct_position_on_middle_line() {
-        let result = Position::from_byte_offset(25, &[20, 30]);
-        assert_eq!(result.line, 2);
-        assert_eq!(result.character, 5);
-    }
-
-    #[test]
-    fn with_multiple_lines_returns_correct_position_on_last_line() {
-        let result = Position::from_byte_offset(21, &[20]);
-        assert_eq!(result.line, 2);
-        assert_eq!(result.character, 1);
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use crate::blocks::{Block, BlockWithContext};
-    use crate::test_utils::{block_with_context_default, file_blocks_default};
+    use crate::test_utils::{merge_validation_contexts, validation_context};
     use crate::validators::{
         DetectorFactory, ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorSync,
         ValidatorType, Violation, ViolationRange, detect_validators,
@@ -460,34 +426,18 @@ mod tests {
     #[test]
     fn detect_and_run_with_sync_and_async_validators_returns_correct_violations()
     -> anyhow::Result<()> {
-        let context = ValidationContext::new(HashMap::from([
-            (
-                "file1".to_string(),
-                file_blocks_default(vec![block_with_context_default(Block::new(
-                    1,
-                    6,
-                    HashMap::from([
-                        ("fake-sync".to_string(), "condition A".to_string()),
-                        ("fake-async".to_string(), "condition B".to_string()),
-                    ]),
-                    0..0,
-                    0..0,
-                ))]),
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "example1.py",
+                r#"# <block fake-sync="condition A" fake-async="condition B">
+    # </block>"#,
             ),
-            (
-                "file2".to_string(),
-                file_blocks_default(vec![block_with_context_default(Block::new(
-                    1,
-                    6,
-                    HashMap::from([
-                        ("fake-sync".to_string(), "condition C".to_string()),
-                        ("fake-async".to_string(), "condition D".to_string()),
-                    ]),
-                    0..0,
-                    0..0,
-                ))]),
+            validation_context(
+                "example2.py",
+                r#"# <block fake-sync="condition C" fake-async="condition D">
+    # </block>"#,
             ),
-        ]));
+        ]);
 
         let (sync_validators, async_validators) = detect_validators(
             &context,
@@ -495,18 +445,18 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
         )?;
-        let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
+        let violations = validators::run(context, sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 2);
-        assert_eq!(violations["file1"].len(), 2);
-        let mut file1_violations = violations["file1"]
+        assert_eq!(violations["example1.py"].len(), 2);
+        let mut file1_violations = violations["example1.py"]
             .iter()
             .map(|v| v.code.as_str())
             .collect::<Vec<_>>();
         file1_violations.sort();
         assert_eq!(file1_violations, vec!["fake-async", "fake-sync"]);
-        assert_eq!(violations["file2"].len(), 2);
-        let mut file2_violations = violations["file2"]
+        assert_eq!(violations["example2.py"].len(), 2);
+        let mut file2_violations = violations["example2.py"]
             .iter()
             .map(|v| v.code.as_str())
             .collect::<Vec<_>>();
@@ -517,28 +467,18 @@ mod tests {
 
     #[test]
     fn detect_and_run_with_sync_only_validators_returns_correct_violations() -> anyhow::Result<()> {
-        let context = ValidationContext::new(HashMap::from([
-            (
-                "file1".to_string(),
-                file_blocks_default(vec![block_with_context_default(Block::new(
-                    1,
-                    6,
-                    HashMap::from([("fake-sync".to_string(), "condition A".to_string())]),
-                    0..0,
-                    0..0,
-                ))]),
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "example1.py",
+                r#"# <block fake-sync="condition A">
+    # </block>"#,
             ),
-            (
-                "file2".to_string(),
-                file_blocks_default(vec![block_with_context_default(Block::new(
-                    1,
-                    6,
-                    HashMap::from([("fake-sync".to_string(), "condition B".to_string())]),
-                    0..0,
-                    0..0,
-                ))]),
+            validation_context(
+                "example2.py",
+                r#"# <block fake-sync="condition B">
+    # </block>"#,
             ),
-        ]));
+        ]);
 
         let (sync_validators, async_validators) = detect_validators(
             &context,
@@ -546,105 +486,77 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
         )?;
-        let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
+        let violations = validators::run(context, sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 2);
-        assert_eq!(violations["file1"].len(), 1);
-        assert_eq!(violations["file1"][0].code, "fake-sync");
-        assert_eq!(violations["file2"].len(), 1);
-        assert_eq!(violations["file2"][0].code, "fake-sync");
+        assert_eq!(violations["example1.py"].len(), 1);
+        assert_eq!(violations["example1.py"][0].code, "fake-sync");
+        assert_eq!(violations["example2.py"].len(), 1);
+        assert_eq!(violations["example2.py"][0].code, "fake-sync");
         Ok(())
     }
 
     #[test]
     fn detect_and_run_with_async_only_validators_returns_correct_violations() -> anyhow::Result<()>
     {
-        let context = ValidationContext::new(HashMap::from([
-            (
-                "file1".to_string(),
-                file_blocks_default(vec![block_with_context_default(Block::new(
-                    1,
-                    6,
-                    HashMap::from([("fake-async".to_string(), "condition A".to_string())]),
-                    0..0,
-                    0..0,
-                ))]),
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "example1.py",
+                r#"# <block fake-async="condition A">
+    # </block>"#,
             ),
-            (
-                "file2".to_string(),
-                file_blocks_default(vec![block_with_context_default(Block::new(
-                    1,
-                    6,
-                    HashMap::from([("fake-async".to_string(), "condition B".to_string())]),
-                    0..0,
-                    0..0,
-                ))]),
+            validation_context(
+                "example2.py",
+                r#"# <block fake-async="condition B">
+    # </block>"#,
             ),
-        ]));
-
+        ]);
         let (sync_validators, async_validators) = detect_validators(
             &context,
             DETECTOR_FACTORIES,
             &HashSet::new(),
             &HashSet::new(),
         )?;
-        let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
+        let violations = validators::run(context, sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 2);
-        assert_eq!(violations["file1"].len(), 1);
-        assert_eq!(violations["file1"][0].code, "fake-async");
-        assert_eq!(violations["file2"].len(), 1);
-        assert_eq!(violations["file2"][0].code, "fake-async");
+        assert_eq!(violations["example1.py"].len(), 1);
+        assert_eq!(violations["example1.py"][0].code, "fake-async");
+        assert_eq!(violations["example2.py"].len(), 1);
+        assert_eq!(violations["example2.py"][0].code, "fake-async");
         Ok(())
     }
 
     #[test]
     fn detect_and_run_with_disabled_async_validators_returns_violations_for_sync_validators_only()
     -> anyhow::Result<()> {
-        let context = ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            file_blocks_default(vec![block_with_context_default(Block::new(
-                1,
-                6,
-                HashMap::from([
-                    ("fake-sync".to_string(), "condition A".to_string()),
-                    ("fake-async".to_string(), "condition B".to_string()),
-                ]),
-                0..0,
-                0..0,
-            ))]),
-        )]));
-
+        let context = validation_context(
+            "example1.py",
+            r#"# <block fake-sync="condition A" fake-async="condition B">
+    # </block>"#,
+        );
         let (sync_validators, async_validators) = detect_validators(
             &context,
             DETECTOR_FACTORIES,
             &HashSet::from(["fake-async"]),
             &HashSet::new(),
         )?;
-        let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
+        let violations = validators::run(context, sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations["file1"].len(), 1);
-        assert_eq!(violations["file1"][0].code, "fake-sync");
+        assert_eq!(violations["example1.py"].len(), 1);
+        assert_eq!(violations["example1.py"][0].code, "fake-sync");
         Ok(())
     }
 
     #[test]
     fn detect_and_run_with_enabled_async_validators_returns_violations_for_async_validators_only()
     -> anyhow::Result<()> {
-        let context = ValidationContext::new(HashMap::from([(
-            "file1".to_string(),
-            file_blocks_default(vec![block_with_context_default(Block::new(
-                1,
-                6,
-                HashMap::from([
-                    ("fake-sync".to_string(), "condition A".to_string()),
-                    ("fake-async".to_string(), "condition B".to_string()),
-                ]),
-                0..0,
-                0..0,
-            ))]),
-        )]));
+        let context = validation_context(
+            "example1.py",
+            r#"# <block fake-sync="condition A" fake-async="condition B">
+    # </block>"#,
+        );
 
         let (sync_validators, async_validators) = detect_validators(
             &context,
@@ -652,11 +564,56 @@ mod tests {
             &HashSet::new(),
             &HashSet::from(["fake-async"]),
         )?;
-        let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
+        let violations = validators::run(context, sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations["file1"].len(), 1);
-        assert_eq!(violations["file1"][0].code, "fake-async");
+        assert_eq!(violations["example1.py"].len(), 1);
+        assert_eq!(violations["example1.py"][0].code, "fake-async");
+        Ok(())
+    }
+
+    #[test]
+    fn detect_and_run_with_disabled_sync_validators_returns_violations_for_async_validators_only()
+    -> anyhow::Result<()> {
+        let context = validation_context(
+            "example1.py",
+            r#"# <block fake-sync="condition A" fake-async="condition B">
+    # </block>"#,
+        );
+        let (sync_validators, async_validators) = detect_validators(
+            &context,
+            DETECTOR_FACTORIES,
+            &HashSet::from(["fake-sync"]),
+            &HashSet::new(),
+        )?;
+        let violations = validators::run(context, sync_validators, async_validators)?;
+
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations["example1.py"].len(), 1);
+        assert_eq!(violations["example1.py"][0].code, "fake-async");
+        Ok(())
+    }
+
+    #[test]
+    fn detect_and_run_with_enabled_sync_validators_returns_violations_for_sync_validators_only()
+    -> anyhow::Result<()> {
+        let context = validation_context(
+            "example1.py",
+            r#"# <block fake-sync="condition A" fake-async="condition B">
+    # </block>"#,
+        );
+
+        let (sync_validators, async_validators) = detect_validators(
+            &context,
+            DETECTOR_FACTORIES,
+            &HashSet::new(),
+            &HashSet::from(["fake-sync"]),
+        )?;
+        let violations = validators::run(context, sync_validators, async_validators)?;
+
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations["example1.py"].len(), 1);
+        assert_eq!(violations["example1.py"][0].code, "fake-sync");
         Ok(())
     }
 }
