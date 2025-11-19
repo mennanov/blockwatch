@@ -1,6 +1,7 @@
 use similar::DiffOp;
 use std::collections::{HashMap, VecDeque};
 use std::ops::Range;
+use std::path::PathBuf;
 use std::str::FromStr;
 use unidiff::{Line, PatchSet, PatchedFile};
 
@@ -17,7 +18,7 @@ pub struct LineChange {
 ///
 /// Parses a patch/diff string and extracts all line changes grouped by file path.
 /// Deleted files are ignored and not included in the result.
-pub fn extract(patch_diff: &str) -> anyhow::Result<HashMap<String, Vec<LineChange>>> {
+pub fn extract(patch_diff: &str) -> anyhow::Result<HashMap<PathBuf, Vec<LineChange>>> {
     let patch_set = PatchSet::from_str(patch_diff)?;
     let mut result = HashMap::new();
     for patched_file in patch_set {
@@ -26,10 +27,7 @@ pub fn extract(patch_diff: &str) -> anyhow::Result<HashMap<String, Vec<LineChang
             continue;
         }
         result.insert(
-            patched_file
-                .target_file
-                .trim_start_matches("b/")
-                .to_string(),
+            patched_file.target_file.trim_start_matches("b/").into(),
             line_changes(&patched_file),
         );
     }
@@ -278,7 +276,10 @@ index e69de29..215ed53 100644
 "#,
         )?;
         assert_eq!(
-            ranges.keys().map(|k| k.as_str()).collect::<HashSet<_>>(),
+            ranges
+                .keys()
+                .map(|k| k.to_str().unwrap())
+                .collect::<HashSet<_>>(),
             HashSet::from(["Cargo.toml", "src/main.rs", "src/differ.rs"])
         );
         Ok(())
@@ -298,7 +299,7 @@ index f384549..b4b0c67 100644
 +three and a half
  four"#,
         )?;
-        assert_eq!(ranges["a.txt"], vec![line_change(4)]);
+        assert_eq!(ranges[&PathBuf::from("a.txt")], vec![line_change(4)]);
         Ok(())
     }
 
@@ -315,7 +316,7 @@ index f384549..fa220f8 100644
  two
  three"#,
         )?;
-        assert_eq!(ranges["a.txt"], vec![line_change(1)]);
+        assert_eq!(ranges[&PathBuf::from("a.txt")], vec![line_change(1)]);
         Ok(())
     }
 
@@ -334,7 +335,10 @@ index f384549..3a7bc2a 100644
 +almost four
  four"#,
         )?;
-        assert_eq!(ranges["a.txt"], vec![line_change(4), line_change(5),]);
+        assert_eq!(
+            ranges[&PathBuf::from("a.txt")],
+            vec![line_change(4), line_change(5),]
+        );
         Ok(())
     }
 
@@ -353,7 +357,10 @@ index f384549..3ccae75 100644
  two
  three"#,
         )?;
-        assert_eq!(ranges["a.txt"], vec![line_change(1), line_change(2),]);
+        assert_eq!(
+            ranges[&PathBuf::from("a.txt")],
+            vec![line_change(1), line_change(2),]
+        );
         Ok(())
     }
 
@@ -373,7 +380,10 @@ index f384549..e797e7c 100644
 +three and a half
  four"#,
         )?;
-        assert_eq!(ranges["a.txt"], vec![line_change(3), line_change(5)]);
+        assert_eq!(
+            ranges[&PathBuf::from("a.txt")],
+            vec![line_change(3), line_change(5)]
+        );
         Ok(())
     }
 
@@ -396,7 +406,7 @@ index f384549..ab47fb2 100644
  four"#,
         )?;
         assert_eq!(
-            ranges["a.txt"],
+            ranges[&PathBuf::from("a.txt")],
             vec![
                 line_change(3),
                 line_change(4),
@@ -422,7 +432,7 @@ index f384549..e4c2829 100644
  four"#,
         )?;
         assert_eq!(
-            ranges["a.txt"],
+            ranges[&PathBuf::from("a.txt")],
             vec![LineChange {
                 line: 3,
                 // "i" in "is" was modified, "o" and "a" in "thora" were modified.
@@ -452,7 +462,7 @@ index f384549..46c7533 100644
  "#,
         )?;
         assert_eq!(
-            ranges["a.txt"],
+            ranges[&PathBuf::from("a.txt")],
             vec![
                 LineChange {
                     line: 1,
@@ -491,7 +501,7 @@ index f384549..676cbb7 100644
  four"#,
         )?;
         assert_eq!(
-            ranges["a.txt"],
+            ranges[&PathBuf::from("a.txt")],
             vec![
                 LineChange {
                     line: 2,
@@ -522,7 +532,7 @@ index f384549..676cbb7 100644
 +modified two"#,
         )?;
         assert_eq!(
-            ranges["a.txt"],
+            ranges[&PathBuf::from("a.txt")],
             vec![
                 LineChange {
                     line: 1,
@@ -550,7 +560,7 @@ index f384549..87a123c 100644
 -three
  four"#,
         )?;
-        assert_eq!(ranges["a.txt"], vec![line_change(3)]);
+        assert_eq!(ranges[&PathBuf::from("a.txt")], vec![line_change(3)]);
         Ok(())
     }
 
@@ -567,7 +577,7 @@ index f384549..58ac960 100644
  three
  four"#,
         )?;
-        assert_eq!(ranges["a.txt"], vec![line_change(1)]);
+        assert_eq!(ranges[&PathBuf::from("a.txt")], vec![line_change(1)]);
         Ok(())
     }
 
@@ -584,7 +594,7 @@ index f384549..4cb29ea 100644
  three
 -four"#,
         )?;
-        assert_eq!(ranges["a.txt"], vec![line_change(4)]);
+        assert_eq!(ranges[&PathBuf::from("a.txt")], vec![line_change(4)]);
         Ok(())
     }
 
@@ -602,7 +612,10 @@ index f384549..8c05df4 100644
 -three
  four"#,
         )?;
-        assert_eq!(ranges["a.txt"], vec![line_change(1), line_change(3)]);
+        assert_eq!(
+            ranges[&PathBuf::from("a.txt")],
+            vec![line_change(1), line_change(3)]
+        );
         Ok(())
     }
 
@@ -621,7 +634,7 @@ index f384549..a9c7698 100644
         )?;
         // Consecutive deleted lines are treated as a single one-line range because they no longer
         // exist in the target file.
-        assert_eq!(ranges["a.txt"], vec![line_change(2)]);
+        assert_eq!(ranges[&PathBuf::from("a.txt")], vec![line_change(2)]);
         Ok(())
     }
 
@@ -660,7 +673,7 @@ index f384549..58a279e 100644
 +added five"#,
         )?;
         assert_eq!(
-            ranges["a.txt"],
+            ranges[&PathBuf::from("a.txt")],
             vec![
                 LineChange {
                     line: 1,
@@ -695,7 +708,7 @@ index 0000000..710d1d9
 "#,
         )?;
         assert_eq!(
-            ranges["example.rs"],
+            ranges[&PathBuf::from("example.rs")],
             vec![line_change(1), line_change(2), line_change(3)]
         );
         Ok(())

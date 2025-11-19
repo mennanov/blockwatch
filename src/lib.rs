@@ -99,7 +99,7 @@ mod test_utils {
             file_name.to_string(),
             contents.to_string(),
         )]));
-        let line_changes_by_file = HashMap::from([(file_name.to_string(), line_changes)]);
+        let line_changes_by_file = HashMap::from([(file_name.into(), line_changes)]);
         Arc::new(ValidationContext::new(
             parse_blocks(
                 &line_changes_by_file,

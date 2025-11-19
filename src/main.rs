@@ -39,7 +39,7 @@ fn main() -> anyhow::Result<()> {
     let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
     if !violations.is_empty() {
         let mut has_error_severity = false;
-        let mut diagnostics: HashMap<String, Vec<serde_json::Value>> =
+        let mut diagnostics: HashMap<PathBuf, Vec<serde_json::Value>> =
             HashMap::with_capacity(violations.len());
         for (file_path, file_violations) in violations {
             let mut file_diagnostics = Vec::with_capacity(file_violations.len());

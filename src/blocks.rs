@@ -5,6 +5,7 @@ use anyhow::Context;
 use serde_repr::Serialize_repr;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -211,11 +212,11 @@ pub struct BlockWithContext {
 ///
 /// Returns a map of file paths to the list of intersecting blocks found in that file.
 pub fn parse_blocks(
-    line_changes_by_file: &HashMap<String, Vec<LineChange>>,
+    line_changes_by_file: &HashMap<PathBuf, Vec<LineChange>>,
     file_reader: &impl FileReader,
-    parsers: HashMap<String, Rc<Box<dyn BlocksParser>>>,
-    extra_file_extensions: HashMap<String, String>,
-) -> anyhow::Result<HashMap<String, FileBlocks>> {
+    parsers: HashMap<OsString, Rc<Box<dyn BlocksParser>>>,
+    extra_file_extensions: HashMap<OsString, OsString>,
+) -> anyhow::Result<HashMap<PathBuf, FileBlocks>> {
     let mut blocks = HashMap::new();
     for (file_path, line_changes) in line_changes_by_file {
         let source_code = file_reader.read_to_string(Path::new(&file_path))?;
@@ -224,15 +225,15 @@ pub fn parse_blocks(
             .map(|(idx, _)| idx)
             .collect();
         let mut file_blocks = Vec::new();
-        if let Some(mut ext) = file_name_extension(file_path) {
+        if let Some(mut ext) = file_path.extension() {
             ext = extra_file_extensions
                 .get(ext)
-                .map(|e| e.as_str())
+                .map(|v| v.as_os_str())
                 .unwrap_or(ext);
             if let Some(parser) = parsers.get(ext) {
                 for block in parser
                     .parse(&source_code)
-                    .context(format!("Failed to parse file \"{file_path}\""))?
+                    .context(format!("Failed to parse file {file_path:?}"))?
                 {
                     let is_content_modified =
                         block.content_intersects_with_any(line_changes, &new_line_positions);
@@ -252,7 +253,7 @@ pub fn parse_blocks(
         }
         if !file_blocks.is_empty() {
             blocks.insert(
-                file_path.to_string(),
+                file_path.clone(),
                 FileBlocks {
                     file_content: source_code,
                     file_content_new_lines: new_line_positions,
@@ -267,10 +268,6 @@ pub fn parse_blocks(
 pub trait FileReader {
     /// Reads the entire contents of a file into a string.
     fn read_to_string(&self, path: &Path) -> anyhow::Result<String>;
-}
-
-fn file_name_extension(file_name: &str) -> Option<&str> {
-    file_name.rsplit('.').next()
 }
 
 pub struct FsReader {
@@ -394,11 +391,11 @@ mod parse_blocks_tests {
         ]));
         let modified_ranges = HashMap::from([
             (
-                "a.rs".to_string(),
+                PathBuf::from("a.rs"),
                 vec![line_change(3), line_change(7), line_change(8)],
             ), // Both blocks are modified.
-            ("b.rs".to_string(), vec![line_change(5), line_change(6)]), // The inner block is modified.
-            ("c.rs".to_string(), vec![line_change(6), line_change(7)]), // No block is modified.
+            (PathBuf::from("b.rs"), vec![line_change(5), line_change(6)]), // The inner block is modified.
+            (PathBuf::from("c.rs"), vec![line_change(6), line_change(7)]), // No block is modified.
         ]);
         let parsers = language_parsers()?;
 
@@ -406,11 +403,11 @@ mod parse_blocks_tests {
             parse_blocks(&modified_ranges, &file_reader, parsers, HashMap::new())?;
 
         assert_eq!(file_blocks_by_file.len(), 2);
-        let blocks_a = &file_blocks_by_file["a.rs"].blocks_with_context;
+        let blocks_a = &file_blocks_by_file[&PathBuf::from("a.rs")].blocks_with_context;
         assert_eq!(blocks_a.len(), 2);
         assert_eq!(blocks_a[0].block.name(), Some("first"));
         assert_eq!(blocks_a[1].block.name(), Some("second"));
-        let blocks_b = &file_blocks_by_file["b.rs"].blocks_with_context;
+        let blocks_b = &file_blocks_by_file[&PathBuf::from("b.rs")].blocks_with_context;
         assert_eq!(blocks_b.len(), 2);
         assert_eq!(blocks_b[0].block.name(), Some("outer"));
         assert_eq!(blocks_b[1].block.name(), Some("inner"));
@@ -453,7 +450,7 @@ mod parse_blocks_tests {
         ]));
         let line_changes = HashMap::from([
             (
-                "a.rs".to_string(),
+                PathBuf::from("a.rs"),
                 vec![
                     line_change(1), // No blocks on this line.
                     LineChange {
@@ -567,7 +564,7 @@ mod parse_blocks_tests {
                 ],
             ),
             (
-                "b.rs".to_string(),
+                PathBuf::from("b.rs"),
                 vec![LineChange {
                     line: 1,
                     ranges: Some(vec![test_utils::substr_range(
@@ -582,7 +579,7 @@ mod parse_blocks_tests {
         let blocks_by_file = parse_blocks(&line_changes, &file_reader, parsers, HashMap::new())?;
 
         assert_eq!(blocks_by_file.len(), 2);
-        let blocks_a = &blocks_by_file["a.rs"].blocks_with_context;
+        let blocks_a = &blocks_by_file[&PathBuf::from("a.rs")].blocks_with_context;
         assert_eq!(blocks_a.len(), 9);
         let first = &blocks_a[0];
         assert_eq!(first.block.name(), Some("first"));
@@ -620,7 +617,7 @@ mod parse_blocks_tests {
         assert_eq!(tenth.block.name(), Some("tenth"));
         assert!(!tenth._is_start_tag_modified);
         assert!(tenth.is_content_modified);
-        let blocks_b = &blocks_by_file["b.rs"].blocks_with_context;
+        let blocks_b = &blocks_by_file[&PathBuf::from("b.rs")].blocks_with_context;
         assert_eq!(blocks_b.len(), 1);
         assert_eq!(blocks_b[0].block.name(), Some("first"));
 
@@ -646,7 +643,7 @@ mod parse_blocks_tests {
         )]));
         let modified_ranges = HashMap::from([
             (
-                "a.rs".to_string(),
+                PathBuf::from("a.rs"),
                 vec![line_change(3), line_change(7), line_change(8)],
             ), // Both blocks are modified.
         ]);
@@ -654,7 +651,7 @@ mod parse_blocks_tests {
 
         let blocks_by_file = parse_blocks(&modified_ranges, &file_reader, parsers, HashMap::new())?;
 
-        let content_a = &blocks_by_file["a.rs"].file_content;
+        let content_a = &blocks_by_file[&PathBuf::from("a.rs")].file_content;
         assert_eq!(content_a, file_a_contents);
         Ok(())
     }
@@ -669,18 +666,23 @@ mod parse_blocks_tests {
         // </block>"#
                 .to_string(),
         )]));
-        let modified_ranges = HashMap::from([("a.rust".to_string(), vec![line_change(3)])]);
+        let modified_ranges = HashMap::from([(PathBuf::from("a.rust"), vec![line_change(3)])]);
         let parsers = language_parsers()?;
 
         let blocks_by_file = parse_blocks(
             &modified_ranges,
             &file_reader,
             parsers,
-            HashMap::from([("rust".to_string(), "rs".to_string())]),
+            HashMap::from([("rust".into(), "rs".into())]),
         )?;
 
         assert_eq!(blocks_by_file.len(), 1);
-        assert_eq!(blocks_by_file["a.rust"].blocks_with_context.len(), 1);
+        assert_eq!(
+            blocks_by_file[&PathBuf::from("a.rust")]
+                .blocks_with_context
+                .len(),
+            1
+        );
         Ok(())
     }
 
@@ -688,7 +690,7 @@ mod parse_blocks_tests {
     fn skips_unknown_files() -> anyhow::Result<()> {
         let files = HashMap::from([("test.unknown".to_string(), "test content".to_string())]);
         let modified_ranges = HashMap::from([(
-            "test.unknown".to_string(),
+            PathBuf::from("test.unknown"),
             vec![line_change(1), line_change(2)],
         )]);
 

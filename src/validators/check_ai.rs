@@ -14,6 +14,7 @@ use async_trait::async_trait;
 use secrecy::ExposeSecret;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::task::JoinSet;
 
@@ -37,7 +38,7 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
     async fn validate(
         &self,
         context: Arc<ValidationContext>,
-    ) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
+    ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
         let mut violations = HashMap::new();
         let mut tasks = JoinSet::new();
         for (file_path, file_blocks) in &context.modified_blocks {
@@ -48,7 +49,7 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
                     if condition.trim().is_empty() {
                         return Err(anyhow!(
                             "check-ai requires a non-empty condition in {}:{} at line {}",
-                            file_path,
+                            file_path.display(),
                             block_with_context.block.name_display(),
                             block_with_context.block.starts_at_line
                         ));
@@ -67,12 +68,7 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
                     let content = block_content(block_with_context, &file_blocks.file_content)?;
 
                     let result = client.check_block(condition, content).await;
-                    Self::process_ai_response(
-                        file_path.to_string(),
-                        file_blocks,
-                        block_with_context,
-                        result,
-                    )
+                    Self::process_ai_response(file_path, file_blocks, block_with_context, result)
                 });
             }
         }
@@ -139,7 +135,7 @@ fn block_content<'c>(
 }
 
 fn create_violation(
-    file_path: &str,
+    file_path: &Path,
     block: &Block,
     new_line_positions: &[usize],
     ai_message: &str,
@@ -155,7 +151,7 @@ fn create_violation(
     .context("failed to serialize CheckAiDetails")?;
     let error_message = format!(
         "Block {}:{} defined at line {} failed AI check: {ai_message}",
-        file_path,
+        file_path.display(),
         block.name_display(),
         block.starts_at_line,
     );
@@ -179,14 +175,14 @@ impl<C: AiClient> CheckAiValidator<C> {
     }
 
     fn process_ai_response(
-        file_path: String,
+        file_path: PathBuf,
         file_blocks: &FileBlocks,
         block_with_context: &BlockWithContext,
         result: anyhow::Result<Option<String>>,
-    ) -> anyhow::Result<Option<(String, Violation)>> {
+    ) -> anyhow::Result<Option<(PathBuf, Violation)>> {
         match result.context(format!(
             "check-ai API error in {}:{} at line {}",
-            file_path,
+            file_path.display(),
             block_with_context.block.name_display(),
             block_with_context.block.starts_at_line
         ))? {
@@ -410,8 +406,8 @@ I like apples
         );
         let violations = validator.validate(context).await?;
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations["example.py"].len(), 1);
-        let violation = &violations["example.py"][0];
+        assert_eq!(violations[&PathBuf::from("example.py")].len(), 1);
+        let violation = &violations[&PathBuf::from("example.py")][0];
         assert_eq!(violation.code, "check-ai");
         assert_eq!(
             violation.message,

@@ -8,6 +8,7 @@ use serde::Serialize;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub(crate) struct KeepSortedValidator {}
@@ -57,7 +58,7 @@ impl ValidatorSync for KeepSortedValidator {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,
-    ) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
+    ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
         let mut violations = HashMap::new();
         for (file_path, file_blocks) in &context.modified_blocks {
             for block_with_context in &file_blocks.blocks_with_context {
@@ -67,7 +68,7 @@ impl ValidatorSync for KeepSortedValidator {
                         return Err(anyhow!(
                             "keep-sorted expected values are \"asc\" or \"desc\", got \"{}\" in {}:{} at line {}",
                             keep_sorted,
-                            file_path,
+                            file_path.display(),
                             block_with_context.block.name_display(),
                             block_with_context.block.starts_at_line
                         ));
@@ -105,7 +106,7 @@ impl ValidatorSync for KeepSortedValidator {
                             Some(Err(e)) => {
                                 return Err(anyhow!(
                                     "Invalid keep-sorted-pattern expression in block {}:{} defined at line {}: {}",
-                                    file_path,
+                                    file_path.display(),
                                     block_with_context.block.name_display(),
                                     block_with_context.block.starts_at_line,
                                     e
@@ -174,7 +175,7 @@ impl ValidatorDetector for KeepSortedValidatorDetector {
 }
 
 fn create_violation(
-    block_file_path: &str,
+    block_file_path: &Path,
     block: &Block,
     keep_sorted_value: &str,
     violation_line_number: usize,
@@ -182,7 +183,8 @@ fn create_violation(
     violation_character_end: usize,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {block_file_path}:{} defined at line {} has an out-of-order line {violation_line_number} ({keep_sorted_value})",
+        "Block {}:{} defined at line {} has an out-of-order line {violation_line_number} ({keep_sorted_value})",
+        block_file_path.display(),
         block.name_display(),
         block.starts_at_line,
     );
@@ -342,7 +344,7 @@ mod validate_tests {
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get("example.py").unwrap();
+        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,
@@ -378,7 +380,7 @@ mod validate_tests {
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get("example.py").unwrap();
+        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,
@@ -445,7 +447,7 @@ mod validate_tests {
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get("example.py").unwrap();
+        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
         assert_eq!(file_violations.len(), 1);
         assert_eq!(file_violations[0].code, "keep-sorted");
         assert_eq!(
@@ -470,7 +472,7 @@ mod validate_tests {
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get("example.py").unwrap();
+        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].range,

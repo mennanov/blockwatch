@@ -4,6 +4,7 @@ use crate::{Position, validators};
 use anyhow::Context;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub(crate) struct AffectsValidator {}
@@ -16,7 +17,7 @@ impl AffectsValidator {
 
 #[derive(Serialize)]
 struct AffectsViolation<'a> {
-    affected_block_file_path: &'a str,
+    affected_block_file_path: &'a Path,
     affected_block_name: &'a str,
 }
 
@@ -24,7 +25,7 @@ impl validators::ValidatorSync for AffectsValidator {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,
-    ) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
+    ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
         let mut named_modified_blocks = HashMap::new();
         for (file_path, file_blocks) in &context.modified_blocks {
             for block_with_context in &file_blocks.blocks_with_context {
@@ -63,7 +64,7 @@ impl validators::ValidatorSync for AffectsValidator {
                                     modified_block_file_path,
                                     &block_with_context.block,
                                     &file_blocks.file_content_new_lines,
-                                    affected_file_path.as_str(),
+                                    &affected_file_path,
                                     affected_block_name.as_str(),
                                 )?);
                         }
@@ -99,18 +100,18 @@ impl validators::ValidatorDetector for AffectsValidatorDetector {
 }
 
 fn create_violation(
-    modified_block_file_path: &str,
+    modified_block_file_path: &Path,
     modified_block: &Block,
     modified_block_new_line_positions: &[usize],
-    affected_block_file_path: &str,
+    affected_block_file_path: &Path,
     affected_block_name: &str,
 ) -> anyhow::Result<Violation> {
     let message = format!(
         "Block {}:{} at line {} is modified, but {}:{} is not",
-        modified_block_file_path,
+        modified_block_file_path.display(),
         modified_block.name_display(),
         modified_block.starts_at_line,
-        affected_block_file_path,
+        affected_block_file_path.display(),
         affected_block_name
     );
     let details = serde_json::to_value(AffectsViolation {
@@ -136,7 +137,7 @@ fn create_violation(
     ))
 }
 
-fn parse_affects_attribute(value: &str) -> anyhow::Result<Vec<(Option<String>, String)>> {
+fn parse_affects_attribute(value: &str) -> anyhow::Result<Vec<(Option<PathBuf>, String)>> {
     let mut result = Vec::new();
     for block_ref in value.split(',') {
         let block = block_ref.trim();
@@ -148,7 +149,7 @@ fn parse_affects_attribute(value: &str) -> anyhow::Result<Vec<(Option<String>, S
             if filename.is_empty() {
                 None
             } else {
-                Some(filename.to_string())
+                Some(filename.into())
             },
             block_name.trim().to_string(),
         ));
@@ -204,7 +205,7 @@ print("second")
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file1_violations = violations.get("file1.py").unwrap();
+        let file1_violations = violations.get(&PathBuf::from("file1.py")).unwrap();
         assert_eq!(file1_violations.len(), 1);
         assert_eq!(
             file1_violations[0].message,
@@ -256,7 +257,7 @@ print("file3")
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file1_violations = violations.get("file1.py").unwrap();
+        let file1_violations = violations.get(&PathBuf::from("file1.py")).unwrap();
         assert_eq!(file1_violations.len(), 2);
         assert_eq!(
             file1_violations[0].message,
@@ -353,7 +354,7 @@ print("hello")
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file1_violations = violations.get("file1.py").unwrap();
+        let file1_violations = violations.get(&PathBuf::from("file1.py")).unwrap();
         assert_eq!(file1_violations.len(), 1);
         assert_eq!(
             file1_violations[0].message,
@@ -496,7 +497,7 @@ mod parse_affects_attribute_tests {
         let result = parse_affects_attribute("file.rs:block_name")?;
         assert_eq!(
             result,
-            vec![(Some("file.rs".to_string()), "block_name".to_string())]
+            vec![(Some("file.rs".into()), "block_name".to_string())]
         );
         Ok(())
     }
@@ -507,8 +508,8 @@ mod parse_affects_attribute_tests {
         assert_eq!(
             result,
             vec![
-                (Some("file1.rs".to_string()), "block1".to_string()),
-                (Some("file2.rs".to_string()), "block2".to_string())
+                (Some("file1.rs".into()), "block1".to_string()),
+                (Some("file2.rs".into()), "block2".to_string())
             ]
         );
         Ok(())

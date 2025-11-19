@@ -24,6 +24,7 @@ mod yaml;
 
 use crate::blocks::Block;
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::ops::Range;
 use std::rc::Rc;
 use std::string::ToString;
@@ -45,7 +46,7 @@ trait CommentsParser {
 }
 
 /// Returns a map of all available language parsers by their file extensions.
-pub fn language_parsers() -> anyhow::Result<HashMap<String, Rc<Box<dyn BlocksParser>>>> {
+pub fn language_parsers() -> anyhow::Result<HashMap<OsString, Rc<Box<dyn BlocksParser>>>> {
     let bash_parser = Rc::new(bash::parser()?);
     let c_parser = Rc::new(c::parser()?);
     let c_sharp_parser = Rc::new(c_sharp::parser()?);

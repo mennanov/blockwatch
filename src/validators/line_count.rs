@@ -6,6 +6,7 @@ use crate::{Position, validators};
 use anyhow::anyhow;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub(crate) struct LineCountValidator {}
@@ -27,7 +28,7 @@ impl ValidatorSync for LineCountValidator {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,
-    ) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
+    ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
         let mut violations = HashMap::new();
         for (file_path, file_blocks) in &context.modified_blocks {
             for block_with_context in &file_blocks.blocks_with_context {
@@ -37,7 +38,7 @@ impl ValidatorSync for LineCountValidator {
                 let (op, expected) = parse_constraint(expr).map_err(|e| anyhow!(
                     "line-count expected a comparator like <N, <=N, ==N, >=N, >N; got \"{}\" in {}:{} at line {} (error: {})",
                     expr,
-                    file_path,
+                    file_path.display(),
                     block_with_context.block.name_display(),
                     block_with_context.block.starts_at_line,
                     e
@@ -83,7 +84,7 @@ impl ValidatorSync for LineCountValidator {
 }
 
 fn create_violation(
-    block_file_path: &str,
+    block_file_path: &Path,
     block: &Block,
     new_line_positions: &[usize],
     operation: Op,
@@ -92,7 +93,7 @@ fn create_violation(
 ) -> anyhow::Result<Violation> {
     let message = format!(
         "Block {}:{} defined at line {} has {} lines, which does not satisfy {}{}",
-        block_file_path,
+        block_file_path.display(),
         block.name_display(),
         block.starts_at_line,
         actual,
@@ -289,7 +290,7 @@ mod tests {
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file2_violations = violations.get("example.py").unwrap();
+        let file2_violations = violations.get(&PathBuf::from("example.py")).unwrap();
         assert_eq!(file2_violations.len(), 6);
         assert_eq!(file2_violations[0].code, "line-count");
         assert_eq!(

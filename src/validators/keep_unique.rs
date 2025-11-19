@@ -4,6 +4,7 @@ use crate::validators::{
 };
 use crate::{Position, validators};
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub(super) struct KeepUniqueValidator {}
@@ -19,7 +20,7 @@ impl ValidatorSync for KeepUniqueValidator {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,
-    ) -> anyhow::Result<HashMap<String, Vec<Violation>>> {
+    ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
         let mut violations = HashMap::new();
         for (file_path, file_blocks) in &context.modified_blocks {
             for block_with_context in &file_blocks.blocks_with_context {
@@ -81,7 +82,7 @@ impl ValidatorSync for KeepUniqueValidator {
                             // Invalid regex: return an error for the validator
                             return Err(anyhow::anyhow!(
                                 "Invalid keep-unique regex pattern for block {}:{} defined at line {}: {}",
-                                file_path,
+                                file_path.display(),
                                 block_with_context.block.name_display(),
                                 block_with_context.block.starts_at_line,
                                 e
@@ -142,7 +143,7 @@ impl ValidatorDetector for KeepUniqueValidatorDetector {
 }
 
 fn create_violation(
-    block_file_path: &str,
+    block_file_path: &Path,
     block: &Block,
     violation_line_number: usize,
     violation_character_start: usize,
@@ -150,7 +151,7 @@ fn create_violation(
 ) -> anyhow::Result<Violation> {
     let message = format!(
         "Block {}:{} defined at line {} has a duplicated line {}",
-        block_file_path,
+        block_file_path.display(),
         block.name_display(),
         block.starts_at_line,
         violation_line_number,
@@ -254,7 +255,7 @@ C
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get("example.py").unwrap();
+        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
         assert_eq!(file_violations.len(), 1);
         // The last line ` 1 ` is the only duplicate.
         assert_eq!(
@@ -282,7 +283,7 @@ BB
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get("example.py").unwrap();
+        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,
@@ -311,7 +312,7 @@ ID:1 C
 
         let violations = validator.validate(context)?;
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get("example.py").unwrap();
+        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
         assert_eq!(file_violations.len(), 1);
         // Only the matched value group is in the range.
         assert_eq!(
@@ -335,7 +336,7 @@ ID:1 C
 
         let violations = validator.validate(context)?;
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get("example.py").unwrap();
+        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
         assert_eq!(file_violations.len(), 1);
         // Full regex match is in the range.
         assert_eq!(

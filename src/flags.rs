@@ -2,6 +2,7 @@ use crate::validators;
 use anyhow::Context;
 use clap::{Parser, builder::ValueParser, crate_version};
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -61,10 +62,10 @@ pub struct Args {
 
 impl Args {
     /// Returns a map of user-provided extension remappings: KEY -> VALUE.
-    pub fn extensions(&self) -> HashMap<String, String> {
+    pub fn extensions(&self) -> HashMap<OsString, OsString> {
         self.extensions
             .iter()
-            .map(|(key, val)| (key.clone(), val.clone()))
+            .map(|(key, val)| (OsString::from(key), OsString::from(val)))
             .collect()
     }
 
@@ -79,10 +80,10 @@ impl Args {
     }
 
     /// Validates all arguments.
-    pub fn validate(&self, supported_extensions: HashSet<String>) -> anyhow::Result<()> {
+    pub fn validate(&self, supported_extensions: HashSet<OsString>) -> anyhow::Result<()> {
         // Check custom extensions.
         for (key, val) in &self.extensions {
-            if !supported_extensions.contains(val) {
+            if !supported_extensions.contains(&OsString::from(val)) {
                 anyhow::bail!("Unsupported extension mapping: {key}={val}");
             }
         }
