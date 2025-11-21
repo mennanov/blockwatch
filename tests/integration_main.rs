@@ -3,7 +3,7 @@ use assert_cmd::cargo_bin_cmd;
 use predicates::prelude::{PredicateBooleanExt, predicate};
 
 #[test]
-fn with_custom_file_extensions_args() {
+fn with_custom_file_extensions_args_recognizes_files_with_given_extensions() {
     let diff_content = r#"
 diff --git a/tests/custom_file_extension_test.javascript b/tests/custom_file_extension_test.javascript
 index 09baa87..33c9660 100644
@@ -40,11 +40,15 @@ index da567bd..5586a8d 100644
 
     let output = cmd.output().expect("Failed to get command output");
 
-    output.assert().failure().code(1);
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("affects"));
 }
 
 #[test]
-fn with_disable_args() {
+fn with_disable_args_failures_from_disabled_validators_are_ignored() {
     let diff_content = r#"
 diff --git a/tests/disable_enable_test.py b/tests/disable_enable_test.py
 index 6739b09..a8464fb 100644
@@ -84,7 +88,7 @@ index 6739b09..a8464fb 100644
 }
 
 #[test]
-fn with_enable_args() {
+fn with_enable_args_only_the_failures_from_enabled_validators_are_returned() {
     let diff_content = r#"
 diff --git a/tests/disable_enable_test.py b/tests/disable_enable_test.py
 index 6739b09..a8464fb 100644
@@ -136,7 +140,7 @@ fn disable_and_enable_flags_used_together_fails_with_error() {
 }
 
 #[test]
-fn with_severity_warning_for_all_violations_exit_code_is_zero() {
+fn with_severity_warning_succeeds_with_exit_code_zero() {
     let diff_content = r#"
 diff --git a/tests/severity_test.py b/tests/severity_test.py
 index 74ff7b7..574d79a 100644
@@ -159,7 +163,7 @@ index 74ff7b7..574d79a 100644
 }
 
 #[test]
-fn with_severity_error_for_some_violations_fails_with_exit_code_one() {
+fn with_severity_error_fails_with_exit_code_one() {
     let diff_content = r#"
 diff --git a/tests/severity_test.py b/tests/severity_test.py
 index a01afcd..74c68a3 100644
