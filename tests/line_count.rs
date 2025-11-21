@@ -6,10 +6,10 @@ use serde_json::json;
 #[test]
 fn with_correct_number_of_lines_succeeds() {
     let diff_content = r#"
-diff --git a/tests/line_count_test.py b/tests/line_count_test.py
+diff --git a/tests/testdata/line_count.py b/tests/testdata/line_count.py
 index 6781fec..1a59757 100644
---- a/tests/line_count_test.py
-+++ b/tests/line_count_test.py
+--- a/tests/testdata/line_count.py
++++ b/tests/testdata/line_count.py
 @@ -2,7 +2,7 @@ colors = [
      # <block line-count="==4">
      'red',
@@ -29,10 +29,10 @@ index 6781fec..1a59757 100644
 #[test]
 fn with_incorrect_number_of_lines_fails() {
     let diff_content = r#"
-diff --git a/tests/line_count_test.py b/tests/line_count_test.py
+diff --git a/tests/testdata/line_count.py b/tests/testdata/line_count.py
 index 6781fec..4ce6a3b 100644
---- a/tests/line_count_test.py
-+++ b/tests/line_count_test.py
+--- a/tests/testdata/line_count.py
++++ b/tests/testdata/line_count.py
 @@ -11,6 +11,6 @@ fruits = [
      # <block line-count=">3">
      'apple',
@@ -51,7 +51,7 @@ index 6781fec..4ce6a3b 100644
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
             let value: serde_json::Value  = json!({
-              "tests/line_count_test.py": [
+              "tests/testdata/line_count.py": [
                 {
                   "range": {
                     "start": {
@@ -64,7 +64,7 @@ index 6781fec..4ce6a3b 100644
                     }
                   },
                   "code": "line-count",
-                  "message": "Block tests/line_count_test.py:(unnamed) defined at line 12 has 3 lines, which does not satisfy >3",
+                  "message": "Block tests/testdata/line_count.py:(unnamed) defined at line 12 has 3 lines, which does not satisfy >3",
                   "severity": 1,
                   "data": {
                     "actual": 3,

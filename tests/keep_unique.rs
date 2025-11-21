@@ -6,10 +6,10 @@ use serde_json::json;
 #[test]
 fn with_all_lines_unique_succeeds() {
     let diff_content = r#"
-diff --git a/tests/keep_unique_test.py b/tests/keep_unique_test.py
+diff --git a/tests/testdata/keep_unique.py b/tests/testdata/keep_unique.py
 index d69398d..c5cbb7f 100644
---- a/tests/keep_unique_test.py
-+++ b/tests/keep_unique_test.py
+--- a/tests/testdata/keep_unique.py
++++ b/tests/testdata/keep_unique.py
 @@ -2,7 +2,7 @@ fruits = [
      # <block keep-unique=>
      'apple',
@@ -28,10 +28,10 @@ index d69398d..c5cbb7f 100644
 #[test]
 fn with_non_unique_lines_fails() {
     let diff_content = r#"
-diff --git a/tests/keep_unique_test.py b/tests/keep_unique_test.py
+diff --git a/tests/testdata/keep_unique.py b/tests/testdata/keep_unique.py
 index d69398d..9b29f11 100644
---- a/tests/keep_unique_test.py
-+++ b/tests/keep_unique_test.py
+--- a/tests/testdata/keep_unique.py
++++ b/tests/testdata/keep_unique.py
 @@ -10,6 +10,6 @@ unique_prefixes = [
      # <block keep-unique="ID:(?P<value>\d+)">
      'ID:1 A',
@@ -50,7 +50,7 @@ index d69398d..9b29f11 100644
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
             let value: serde_json::Value  = json!({
-              "tests/keep_unique_test.py": [
+              "tests/testdata/keep_unique.py": [
                 {
                   "range": {
                     "start": {
@@ -63,7 +63,7 @@ index d69398d..9b29f11 100644
                     }
                   },
                   "code": "keep-unique",
-                  "message": "Block tests/keep_unique_test.py:(unnamed) defined at line 10 has a duplicated line 13",
+                  "message": "Block tests/testdata/keep_unique.py:(unnamed) defined at line 10 has a duplicated line 13",
                   "severity": 1,
                 }
               ]

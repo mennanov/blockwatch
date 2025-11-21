@@ -6,10 +6,10 @@ use serde_json::json;
 #[test]
 fn diff_with_unsatisfied_blocks_fails() {
     let diff_content = r#"
-diff --git a/tests/affects_test.md b/tests/affects_test.md
+diff --git a/tests/testdata/affects.md b/tests/testdata/affects.md
 index abc123..def456 100644
---- a/tests/affects_test.md
-+++ b/tests/affects_test.md
+--- a/tests/testdata/affects.md
++++ b/tests/testdata/affects.md
 @@ -1,6 +1,5 @@
  # Testing data for integration tests
 
@@ -28,7 +28,7 @@ index abc123..def456 100644
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
             let value: serde_json::Value  = json!({
-              "tests/affects_test.md": [
+              "tests/testdata/affects.md": [
                 {
                   "range": {
                     "start": {
@@ -41,10 +41,10 @@ index abc123..def456 100644
                     }
                   },
                   "code": "affects",
-                  "message": "Block tests/affects_test.md:(unnamed) at line 3 is modified, but tests/affects_test.md:foo is not",
+                  "message": "Block tests/testdata/affects.md:(unnamed) at line 3 is modified, but tests/testdata/affects.md:foo is not",
                   "severity": 1,
                   "data": {
-                    "affected_block_file_path": "tests/affects_test.md",
+                    "affected_block_file_path": "tests/testdata/affects.md",
                     "affected_block_name": "foo",
                   }
                 }
@@ -58,10 +58,10 @@ index abc123..def456 100644
 #[test]
 fn diff_with_satisfied_blocks_succeeds() {
     let diff_content = r#"
-diff --git a/tests/affects_test.md b/tests/testing_data
+diff --git a/tests/testdata/affects.md b/tests/testing_data
 index abc123..def456 100644
---- a/tests/affects_test.md
-+++ b/tests/affects_test.md
+--- a/tests/testdata/affects.md
++++ b/tests/testdata/affects.md
 @@ -1,11 +1,9 @@
  # Testing data for integration tests
 
@@ -87,10 +87,10 @@ index abc123..def456 100644
 #[test]
 fn diff_with_satisfied_blocks_non_root_dir_succeeds() {
     let diff_content = r#"
-diff --git a/tests/affects_test.md b/tests/testing_data
+diff --git a/tests/testdata/affects.md b/tests/testing_data
 index abc123..def456 100644
---- a/tests/affects_test.md
-+++ b/tests/affects_test.md
+--- a/tests/testdata/affects.md
++++ b/tests/testdata/affects.md
 @@ -1,11 +1,9 @@
  # Testing data for integration tests
 
@@ -117,10 +117,10 @@ index abc123..def456 100644
 #[test]
 fn diff_with_only_tag_modified_succeeds() {
     let diff_content = r#"
-diff --git a/tests/affects_test.md b/tests/affects_test.md
+diff --git a/tests/testdata/affects.md b/tests/testdata/affects.md
 index abc123..def456 100644
---- a/tests/affects_test.md
-+++ b/tests/affects_test.md
+--- a/tests/testdata/affects.md
++++ b/tests/testdata/affects.md
 @@ -1,6 +1,6 @@
  # Testing data for integration tests
 
@@ -142,10 +142,10 @@ index abc123..def456 100644
 #[test]
 fn diff_dependent_block_with_only_tag_modified_fails() {
     let diff_content = r#"
-diff --git a/tests/affects_test.md b/tests/testing_data
+diff --git a/tests/testdata/affects.md b/tests/testing_data
 index abc123..def456 100644
---- a/tests/affects_test.md
-+++ b/tests/affects_test.md
+--- a/tests/testdata/affects.md
++++ b/tests/testdata/affects.md
 @@ -1,11 +1,9 @@
  # Testing data for integration tests
 
@@ -172,7 +172,7 @@ index abc123..def456 100644
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
             let value: serde_json::Value  = json!({
-              "tests/affects_test.md": [
+              "tests/testdata/affects.md": [
                 {
                   "range": {
                     "start": {
@@ -185,10 +185,10 @@ index abc123..def456 100644
                     }
                   },
                   "code": "affects",
-                  "message": "Block tests/affects_test.md:(unnamed) at line 3 is modified, but tests/affects_test.md:foo is not",
+                  "message": "Block tests/testdata/affects.md:(unnamed) at line 3 is modified, but tests/testdata/affects.md:foo is not",
                   "severity": 1,
                   "data": {
-                    "affected_block_file_path": "tests/affects_test.md",
+                    "affected_block_file_path": "tests/testdata/affects.md",
                     "affected_block_name": "foo",
                   }
                 }

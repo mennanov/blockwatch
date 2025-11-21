@@ -5,10 +5,10 @@ use predicates::prelude::{PredicateBooleanExt, predicate};
 #[test]
 fn with_custom_file_extensions_args_recognizes_files_with_given_extensions() {
     let diff_content = r#"
-diff --git a/tests/custom_file_extension_test.javascript b/tests/custom_file_extension_test.javascript
+diff --git a/tests/testdata/custom_file_extension.javascript b/tests/testdata/custom_file_extension.javascript
 index 09baa87..33c9660 100644
---- a/tests/custom_file_extension_test.javascript
-+++ b/tests/custom_file_extension_test.javascript
+--- a/tests/testdata/custom_file_extension.javascript
++++ b/tests/testdata/custom_file_extension.javascript
 @@ -2,7 +2,7 @@
  
  function main() {
@@ -18,10 +18,10 @@ index 09baa87..33c9660 100644
    // </block>
  }
  
-diff --git a/tests/custom_file_extension_test.python b/tests/custom_file_extension_test.python
+diff --git a/tests/testdata/custom_file_extension.python b/tests/testdata/custom_file_extension.python
 index da567bd..5586a8d 100644
---- a/tests/custom_file_extension_test.python
-+++ b/tests/custom_file_extension_test.python
+--- a/tests/testdata/custom_file_extension.python
++++ b/tests/testdata/custom_file_extension.python
 @@ -2,7 +2,7 @@
  
  def main():
@@ -50,10 +50,10 @@ index da567bd..5586a8d 100644
 #[test]
 fn with_disable_args_failures_from_disabled_validators_are_ignored() {
     let diff_content = r#"
-diff --git a/tests/disable_enable_test.py b/tests/disable_enable_test.py
+diff --git a/tests/testdata/disable_enable.py b/tests/testdata/disable_enable.py
 index 6739b09..a8464fb 100644
---- a/tests/disable_enable_test.py
-+++ b/tests/disable_enable_test.py
+--- a/tests/testdata/disable_enable.py
++++ b/tests/testdata/disable_enable.py
 @@ -2,7 +2,7 @@ fruits = [
      # <block keep-unique>
      "apple",
@@ -90,10 +90,10 @@ index 6739b09..a8464fb 100644
 #[test]
 fn with_enable_args_only_the_failures_from_enabled_validators_are_returned() {
     let diff_content = r#"
-diff --git a/tests/disable_enable_test.py b/tests/disable_enable_test.py
+diff --git a/tests/testdata/disable_enable.py b/tests/testdata/disable_enable.py
 index 6739b09..a8464fb 100644
---- a/tests/disable_enable_test.py
-+++ b/tests/disable_enable_test.py
+--- a/tests/testdata/disable_enable.py
++++ b/tests/testdata/disable_enable.py
 @@ -2,7 +2,7 @@ fruits = [
      # <block keep-unique>
      "apple",
@@ -142,10 +142,10 @@ fn disable_and_enable_flags_used_together_fails_with_error() {
 #[test]
 fn with_severity_warning_succeeds_with_exit_code_zero() {
     let diff_content = r#"
-diff --git a/tests/severity_test.py b/tests/severity_test.py
+diff --git a/tests/testdata/severity.py b/tests/testdata/severity.py
 index 74ff7b7..574d79a 100644
---- a/tests/severity_test.py
-+++ b/tests/severity_test.py
+--- a/tests/testdata/severity.py
++++ b/tests/testdata/severity.py
 @@ -2,6 +2,6 @@ fruits = [
      # <block keep-unique severity="warn">
      "apple",
@@ -165,10 +165,10 @@ index 74ff7b7..574d79a 100644
 #[test]
 fn with_severity_error_fails_with_exit_code_one() {
     let diff_content = r#"
-diff --git a/tests/severity_test.py b/tests/severity_test.py
+diff --git a/tests/testdata/severity.py b/tests/testdata/severity.py
 index a01afcd..74c68a3 100644
---- a/tests/severity_test.py
-+++ b/tests/severity_test.py
+--- a/tests/testdata/severity.py
++++ b/tests/testdata/severity.py
 @@ -2,7 +2,7 @@ fruits = [
      # <block keep-unique severity="warning">
      "apple",
