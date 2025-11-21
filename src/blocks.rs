@@ -304,28 +304,28 @@ mod block_severity_from_str_tests {
     }
 
     #[test]
-    fn with_valid_value_returns_corresponding_severity() {
+    fn block_with_valid_severity_attribute_returns_correct_severity() {
         let block = new_empty_block_with_severity("warning");
 
         assert_eq!(block.severity().unwrap(), BlockSeverity::Warning);
     }
 
     #[test]
-    fn severity_is_case_insensitive() {
+    fn block_with_mixed_case_severity_attribute_returns_correct_severity() {
         let block = new_empty_block_with_severity("InFo");
 
         assert_eq!(block.severity().unwrap(), BlockSeverity::Info);
     }
 
     #[test]
-    fn block_with_no_severity_returns_error_severity_by_default() {
+    fn block_without_severity_attribute_returns_error_severity() {
         let block = Block::new(0, 0, HashMap::new(), 0..0, 0..0);
 
         assert_eq!(block.severity().unwrap(), BlockSeverity::Error);
     }
 
     #[test]
-    fn with_invalid_value_returns_error() {
+    fn block_with_invalid_severity_attribute_returns_error() {
         let block = new_empty_block_with_severity("warn");
 
         assert!(block.severity().is_err());
@@ -345,7 +345,7 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn returns_modified_blocks_from_multiple_files() -> anyhow::Result<()> {
+    fn multiple_files_with_changes_returns_modified_blocks() -> anyhow::Result<()> {
         let file_reader = FakeFileReader::new(HashMap::from([
             (
                 "a.rs".to_string(),
@@ -415,7 +415,8 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn returns_blocks_with_modified_start_tag_or_contents_only() -> anyhow::Result<()> {
+    fn files_with_various_changes_returns_only_blocks_with_modified_start_tag_or_content()
+    -> anyhow::Result<()> {
         let content_a = r#"
         /* <block name="first"> */ let foo = "bar"; // </block>
         /* <block name="second"> */ let foo = "baz"; // </block>
@@ -625,7 +626,7 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn returns_file_contents_correctly() -> anyhow::Result<()> {
+    fn file_blocks_file_content_contains_original_file_content() -> anyhow::Result<()> {
         let file_a_contents = r#"
         // <block name="first">
         fn a() {}
@@ -657,7 +658,43 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn uses_remapped_extensions() -> anyhow::Result<()> {
+    fn file_blocks_new_lines_contains_correct_new_lines() -> anyhow::Result<()> {
+        let file_a_contents = r#"
+        // <block name="first">
+        fn a() {}
+        // </block>
+        // <block name="second">
+        fn b() {
+            println!("hello");
+            println!("world");
+        }
+        // </block>
+        "#;
+        let file_reader = FakeFileReader::new(HashMap::from([(
+            "a.rs".to_string(),
+            file_a_contents.to_string(),
+        )]));
+        let modified_ranges = HashMap::from([
+            (
+                PathBuf::from("a.rs"),
+                vec![line_change(3), line_change(7), line_change(8)],
+            ), // Both blocks are modified.
+        ]);
+        let parsers = language_parsers()?;
+
+        let blocks_by_file = parse_blocks(&modified_ranges, &file_reader, parsers, HashMap::new())?;
+
+        let new_lines = &blocks_by_file[&PathBuf::from("a.rs")].file_content_new_lines;
+        let expected_new_lines: Vec<usize> = file_a_contents
+            .match_indices('\n')
+            .map(|(idx, _)| idx)
+            .collect();
+        assert_eq!(new_lines, &expected_new_lines);
+        Ok(())
+    }
+
+    #[test]
+    fn file_with_remapped_extension_returns_parsed_blocks() -> anyhow::Result<()> {
         let file_reader = FakeFileReader::new(HashMap::from([(
             "a.rust".to_string(),
             r#"
@@ -687,7 +724,7 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn skips_unknown_files() -> anyhow::Result<()> {
+    fn file_with_unknown_extension_returns_empty_result() -> anyhow::Result<()> {
         let files = HashMap::from([("test.unknown".to_string(), "test content".to_string())]);
         let modified_ranges = HashMap::from([(
             PathBuf::from("test.unknown"),
@@ -706,7 +743,7 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn empty_input_returns_ok() -> anyhow::Result<()> {
+    fn empty_input_returns_empty_result() -> anyhow::Result<()> {
         let blocks = parse_blocks(
             &HashMap::default(),
             &FakeFileReader::new(HashMap::default()),
