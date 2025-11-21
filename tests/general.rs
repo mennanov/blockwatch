@@ -203,3 +203,63 @@ fn empty_diff_succeeds() {
 
     output.assert().success();
 }
+
+#[test]
+#[ignore]
+fn files_mode_succeeds_on_valid_file() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/paths/valid.py");
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.assert().success();
+}
+
+#[test]
+#[ignore]
+fn files_mode_checks_multiple_explicit_paths() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/paths/valid.py");
+    cmd.arg("tests/testdata/paths/invalid.py");
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("keep-sorted"))
+        .stderr(predicate::str::contains("tests/testdata/paths/invalid.py"));
+}
+
+#[test]
+#[ignore]
+fn files_mode_checks_glob_patterns() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/paths/*.py");
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("tests/testdata/paths/invalid.py"));
+}
+
+#[test]
+#[ignore]
+fn files_mode_checks_recursive_glob_patterns() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/paths/**/*.py");
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "tests/testdata/paths/subdir/nested_invalid.py",
+        ));
+}
