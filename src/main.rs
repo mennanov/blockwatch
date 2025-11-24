@@ -29,7 +29,8 @@ fn main() -> anyhow::Result<()> {
 
     let root_path = repository_root_path(fs::canonicalize(env::current_dir()?)?)?;
     let glob_set = args.globs(&root_path)?;
-    let file_system = blocks::FileSystemImpl::new(root_path.clone(), glob_set);
+    let ignored_glob_set = args.ignored_globs(&root_path)?;
+    let file_system = blocks::FileSystemImpl::new(root_path.clone(), glob_set, ignored_glob_set);
 
     let modified_blocks = blocks::parse_blocks(
         modified_lines_by_file,

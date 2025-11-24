@@ -15,6 +15,9 @@ use std::path::Path;
     after_help = r"EXAMPLES:
     # Filter files using glob patterns
     blockwatch 'src/**/*.rs'
+
+    # Ignore files using glob patterns
+    blockwatch 'src/**/*.rs' --ignore '**/generated/**'
     
     # Filter files with the diff input
     git diff --patch | blockwatch 'src/**/*.rs'
@@ -69,6 +72,14 @@ pub struct Args {
     )]
     enabled_validators: Vec<String>,
 
+    /// Glob patterns to ignore files.
+    #[arg(
+        long = "ignore",
+        value_name = "GLOBS",
+        action = clap::ArgAction::Append,
+    )]
+    pub ignore: Vec<String>,
+
     /// Glob patterns to filter files.
     #[arg(value_name = "GLOBS")]
     pub globs: Vec<String>,
@@ -107,6 +118,21 @@ impl Args {
             builder.add(glob);
         }
         builder.build().context("Failed to build glob set")
+    }
+
+    /// Returns a compiled GlobSet from the provided ignore glob patterns.
+    pub fn ignored_globs(&self, root_path: &Path) -> anyhow::Result<GlobSet> {
+        let mut builder = GlobSetBuilder::new();
+        for glob_str in &self.ignore {
+            let path = root_path.join(glob_str);
+            let glob = Glob::new(
+                path.to_str()
+                    .context(format!("Invalid ignore path: {}", path.display()))?,
+            )
+            .with_context(|| format!("Invalid ignore glob pattern: {}", path.display()))?;
+            builder.add(glob);
+        }
+        builder.build().context("Failed to build ignore glob set")
     }
 
     /// Validates all arguments.

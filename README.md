@@ -329,6 +329,21 @@ blockwatch "README.md" "src/main.rs"
 > Failure to do so may result in the following error:
 `the total size of the argument list and exported variables (*) exceeds the OS limit` if the pattern matches many files.
 
+#### Ignoring files
+
+You can ignore files matching glob patterns using the `--ignore` flag. This is useful when you want to exclude generated
+files or specific directories from validation.
+
+**Examples:**
+
+```shell
+# Ignore generated files
+blockwatch "**/*.rs" --ignore "**/generated/**"
+
+# Ignore multiple patterns
+blockwatch "**/*.rs" --ignore "**/generated/**" --ignore "**/vendor/**"
+```
+
 #### Modified blocks validation
 
 You can pipe a git diff into the command to validate the modified blocks only:

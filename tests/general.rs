@@ -3,7 +3,7 @@ use assert_cmd::cargo_bin_cmd;
 use predicates::prelude::{PredicateBooleanExt, predicate};
 
 #[test]
-fn with_custom_file_extensions_args_recognizes_files_with_given_extensions() {
+fn custom_extensions_arg_provided_run_recognizes_custom_extensions() {
     let diff_content = r#"
 diff --git a/tests/testdata/custom_file_extension.javascript b/tests/testdata/custom_file_extension.javascript
 index 09baa87..33c9660 100644
@@ -48,7 +48,7 @@ index da567bd..5586a8d 100644
 }
 
 #[test]
-fn with_disable_args_failures_from_disabled_validators_are_ignored() {
+fn disabled_validator_arg_provided_run_ignores_disabled_validator_failures() {
     let diff_content = r#"
 diff --git a/tests/testdata/disable_enable.py b/tests/testdata/disable_enable.py
 index 6739b09..a8464fb 100644
@@ -88,7 +88,7 @@ index 6739b09..a8464fb 100644
 }
 
 #[test]
-fn with_enable_args_only_the_failures_from_enabled_validators_are_returned() {
+fn enabled_validator_arg_provided_run_returns_only_enabled_validator_failures() {
     let diff_content = r#"
 diff --git a/tests/testdata/disable_enable.py b/tests/testdata/disable_enable.py
 index 6739b09..a8464fb 100644
@@ -128,7 +128,7 @@ index 6739b09..a8464fb 100644
 }
 
 #[test]
-fn disable_and_enable_flags_used_together_fails_with_error() {
+fn disable_and_enable_flags_provided_run_fails_with_error() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("--enable=keep-sorted");
     cmd.arg("--disable=keep-unique");
@@ -140,7 +140,7 @@ fn disable_and_enable_flags_used_together_fails_with_error() {
 }
 
 #[test]
-fn with_severity_warning_succeeds_with_exit_code_zero() {
+fn severity_warning_violation_present_run_succeeds_with_exit_code_zero() {
     let diff_content = r#"
 diff --git a/tests/testdata/severity.py b/tests/testdata/severity.py
 index 74ff7b7..574d79a 100644
@@ -163,7 +163,7 @@ index 74ff7b7..574d79a 100644
 }
 
 #[test]
-fn with_severity_error_fails_with_exit_code_one() {
+fn severity_error_violation_present_run_fails_with_exit_code_one() {
     let diff_content = r#"
 diff --git a/tests/testdata/severity.py b/tests/testdata/severity.py
 index a01afcd..74c68a3 100644
@@ -195,7 +195,7 @@ index a01afcd..74c68a3 100644
 }
 
 #[test]
-fn empty_diff_succeeds() {
+fn empty_diff_provided_run_succeeds() {
     let mut cmd = cargo_bin_cmd!();
     cmd.write_stdin("");
 
@@ -205,7 +205,7 @@ fn empty_diff_succeeds() {
 }
 
 #[test]
-fn files_mode_succeeds_on_valid_file() {
+fn valid_file_path_provided_run_succeeds() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/paths/valid.py");
 
@@ -215,7 +215,7 @@ fn files_mode_succeeds_on_valid_file() {
 }
 
 #[test]
-fn files_mode_checks_multiple_explicit_paths() {
+fn multiple_explicit_paths_provided_run_checks_all_paths() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/paths/valid.py");
     cmd.arg("tests/testdata/paths/invalid.py");
@@ -231,7 +231,7 @@ fn files_mode_checks_multiple_explicit_paths() {
 }
 
 #[test]
-fn files_mode_checks_glob_patterns() {
+fn glob_pattern_provided_run_checks_matching_files() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/paths/*.py");
 
@@ -245,7 +245,7 @@ fn files_mode_checks_glob_patterns() {
 }
 
 #[test]
-fn files_mode_checks_recursive_glob_patterns() {
+fn recursive_glob_pattern_provided_run_checks_matching_files_recursively() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/paths/**/*.py");
 
@@ -258,4 +258,33 @@ fn files_mode_checks_recursive_glob_patterns() {
         .stderr(predicate::str::contains(
             "tests/testdata/paths/subdir/nested_invalid.py",
         ));
+}
+
+#[test]
+fn ignore_glob_provided_run_ignores_matching_files() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/paths/*.py");
+    cmd.arg("--ignore");
+    cmd.arg("tests/testdata/paths/invalid.py");
+    // globset matches separators by default, so *.py matches subdir/nested_invalid.py
+    cmd.arg("--ignore");
+    cmd.arg("tests/testdata/paths/subdir/nested_invalid.py");
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.assert().success();
+}
+
+#[test]
+fn recursive_ignore_glob_provided_run_ignores_matching_files_recursively() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/paths/**/*.py");
+    cmd.arg("--ignore");
+    cmd.arg("**/invalid.py");
+    cmd.arg("--ignore");
+    cmd.arg("**/nested_invalid.py");
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.assert().success();
 }

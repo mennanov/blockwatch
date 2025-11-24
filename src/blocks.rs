@@ -345,14 +345,16 @@ pub trait FileSystem {
 pub struct FileSystemImpl {
     root_path: PathBuf,
     glob_set: GlobSet,
+    ignored_glob_set: GlobSet,
 }
 
 impl FileSystemImpl {
     /// Creates a new filesystem-backed reader rooted at `root_path`.
-    pub fn new(root_path: PathBuf, glob_set: GlobSet) -> Self {
+    pub fn new(root_path: PathBuf, glob_set: GlobSet, ignored_glob_set: GlobSet) -> Self {
         Self {
             root_path,
             glob_set,
+            ignored_glob_set,
         }
     }
 }
@@ -370,7 +372,7 @@ impl FileSystem for FileSystemImpl {
                 if path.is_dir() {
                     return None;
                 }
-                if !self.glob_set.is_match(path) {
+                if self.ignored_glob_set.is_match(path) || !self.glob_set.is_match(path) {
                     return None;
                 }
                 Some(Ok(path.to_path_buf()))
