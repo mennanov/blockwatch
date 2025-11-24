@@ -239,7 +239,7 @@ type AsyncValidators = Vec<Box<dyn ValidatorAsync>>;
 type DetectorFactory = fn() -> Box<dyn ValidatorDetector>;
 
 pub const DETECTOR_FACTORIES: &[(&str, DetectorFactory)] = &[
-    // <block affects="README.md:validators-list, README.md:available-validators">
+    // <block affects="README.md:available-validators">
     ("affects", || Box::new(AffectsValidatorDetector::new())),
     ("keep-sorted", || {
         Box::new(KeepSortedValidatorDetector::new())
@@ -250,6 +250,7 @@ pub const DETECTOR_FACTORIES: &[(&str, DetectorFactory)] = &[
     ("line-pattern", || {
         Box::new(LinePatternValidatorDetector::new())
     }),
+    // test
     ("line-count", || Box::new(LineCountValidatorDetector::new())),
     ("check-ai", || Box::new(CheckAiValidatorDetector::new())),
     // </block>
