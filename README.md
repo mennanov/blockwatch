@@ -325,6 +325,10 @@ blockwatch "src/**"
 blockwatch "README.md" "src/main.rs"
 ```
 
+> **Note:** Always quote glob patterns (e.g. `"**/*.rs"`) to prevent your shell from expanding them.
+> Failure to do so may result in the following error:
+`the total size of the argument list and exported variables (*) exceeds the OS limit` if the pattern matches many files.
+
 #### Modified blocks validation
 
 You can pipe a git diff into the command to validate the modified blocks only:
