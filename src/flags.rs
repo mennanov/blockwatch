@@ -13,20 +13,29 @@ use std::path::Path;
     about = "Validate interdependent code/doc blocks in diffs to prevent drift.",
     long_about = r"Blockwatch reads a unified git diff from stdin and validates that named blocks, sorted segments, and other constraints remain consistent across files. It is designed for use in pre-commit hooks and CI. Pipe `git diff --patch` to blockwatch.",
     after_help = r"EXAMPLES:
+    # Filter files using glob patterns
+    blockwatch 'src/**/*.rs'
+    
+    # Filter files with the diff input
+    git diff --patch | blockwatch 'src/**/*.rs'
+
     # Validate current unstaged changes
     git diff --patch | blockwatch
 
     # Validate staged changes only
     git diff --cached --patch | blockwatch
 
+    # With zero context for tighter diffs (recommended for hooks)
+    git diff --patch --unified=0 | blockwatch
+
     # Provide extra extension mappings (map unknown extensions to supported grammars)
-    git diff --patch | blockwatch -E cxx=cpp -E c++=cpp
+    blockwatch -E cxx=cpp -E c++=cpp
 
     # Disable specific validators
-    git diff --patch | blockwatch -d keep-sorted -d line-count
+    blockwatch -d keep-sorted -d line-count
 
-    # With zero context for tighter diffs (recommended for hooks)
-    git diff --patch --unified=0 | blockwatch",
+    # Enable specific validators only
+    blockwatch -e keep-sorted -e line-count",
 )]
 pub struct Args {
     // <block affects="README.md:cli-docs">
