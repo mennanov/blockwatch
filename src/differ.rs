@@ -18,7 +18,9 @@ pub struct LineChange {
 ///
 /// Parses a patch/diff string and extracts all line changes grouped by file path.
 /// Deleted files are ignored and not included in the result.
-pub fn extract(patch_diff: &str) -> anyhow::Result<HashMap<PathBuf, Vec<LineChange>>> {
+pub fn line_changes_from_diff(
+    patch_diff: &str,
+) -> anyhow::Result<HashMap<PathBuf, Vec<LineChange>>> {
     let patch_set = PatchSet::from_str(patch_diff)?;
     let mut result = HashMap::new();
     for patched_file in patch_set {
@@ -222,7 +224,7 @@ mod tests {
 
     #[test]
     fn single_file_diff_extracts_ranges_for_single_file() -> anyhow::Result<()> {
-        let ranges = extract(
+        let ranges = line_changes_from_diff(
             r#"diff --git a/Cargo.toml b/Cargo.toml
 index 8c34c48..23ddd69 100644
 --- a/Cargo.toml
@@ -243,7 +245,7 @@ index 8c34c48..23ddd69 100644
 
     #[test]
     fn multiple_files_diff_extracts_ranges_for_multiple_files() -> anyhow::Result<()> {
-        let ranges = extract(
+        let line_changes = line_changes_from_diff(
             r#"diff --git a/Cargo.toml b/Cargo.toml
 index 8c34c48..23ddd69 100644
 --- a/Cargo.toml
@@ -276,7 +278,7 @@ index e69de29..215ed53 100644
 "#,
         )?;
         assert_eq!(
-            ranges
+            line_changes
                 .keys()
                 .map(|k| k.to_str().unwrap())
                 .collect::<HashSet<_>>(),
@@ -287,7 +289,7 @@ index e69de29..215ed53 100644
 
     #[test]
     fn single_new_line_diff_returns_single_line_change() -> anyhow::Result<()> {
-        let ranges = extract(
+        let line_changes = line_changes_from_diff(
             r#"diff --git a/a.txt b/a.txt
 index f384549..b4b0c67 100644
 --- a/a.txt
@@ -299,13 +301,13 @@ index f384549..b4b0c67 100644
 +three and a half
  four"#,
         )?;
-        assert_eq!(ranges[&PathBuf::from("a.txt")], vec![line_change(4)]);
+        assert_eq!(line_changes[&PathBuf::from("a.txt")], vec![line_change(4)]);
         Ok(())
     }
 
     #[test]
     fn single_first_new_line_diff_returns_single_line_change() -> anyhow::Result<()> {
-        let ranges = extract(
+        let ranges = line_changes_from_diff(
             r#"diff --git a/a.txt b/a.txt
 index f384549..fa220f8 100644
 --- a/a.txt
@@ -322,7 +324,7 @@ index f384549..fa220f8 100644
 
     #[test]
     fn multiple_contiguous_new_lines_diff_returns_multiple_line_changes() -> anyhow::Result<()> {
-        let ranges = extract(
+        let line_changes = line_changes_from_diff(
             r#"diff --git a/a.txt b/a.txt
 index f384549..3a7bc2a 100644
 --- a/a.txt
@@ -336,7 +338,7 @@ index f384549..3a7bc2a 100644
  four"#,
         )?;
         assert_eq!(
-            ranges[&PathBuf::from("a.txt")],
+            line_changes[&PathBuf::from("a.txt")],
             vec![line_change(4), line_change(5),]
         );
         Ok(())
@@ -345,7 +347,7 @@ index f384549..3a7bc2a 100644
     #[test]
     fn multiple_first_contiguous_new_lines_diff_returns_multiple_line_changes() -> anyhow::Result<()>
     {
-        let ranges = extract(
+        let line_changes = line_changes_from_diff(
             r#"diff --git a/a.txt b/a.txt
 index f384549..3ccae75 100644
 --- a/a.txt
@@ -358,7 +360,7 @@ index f384549..3ccae75 100644
  three"#,
         )?;
         assert_eq!(
-            ranges[&PathBuf::from("a.txt")],
+            line_changes[&PathBuf::from("a.txt")],
             vec![line_change(1), line_change(2),]
         );
         Ok(())
@@ -367,7 +369,7 @@ index f384549..3ccae75 100644
     #[test]
     fn multiple_non_contiguous_new_lines_diff_returns_multiple_line_changes() -> anyhow::Result<()>
     {
-        let ranges = extract(
+        let line_changes = line_changes_from_diff(
             r#"diff --git a/a.txt b/a.txt
 index f384549..e797e7c 100644
 --- a/a.txt
@@ -381,7 +383,7 @@ index f384549..e797e7c 100644
  four"#,
         )?;
         assert_eq!(
-            ranges[&PathBuf::from("a.txt")],
+            line_changes[&PathBuf::from("a.txt")],
             vec![line_change(3), line_change(5)]
         );
         Ok(())
@@ -390,7 +392,7 @@ index f384549..e797e7c 100644
     #[test]
     fn multiple_contiguous_new_line_groups_diff_returns_multiple_line_changes() -> anyhow::Result<()>
     {
-        let ranges = extract(
+        let line_changes = line_changes_from_diff(
             r#"diff --git a/a.txt b/a.txt
 index f384549..ab47fb2 100644
 --- a/a.txt
@@ -406,7 +408,7 @@ index f384549..ab47fb2 100644
  four"#,
         )?;
         assert_eq!(
-            ranges[&PathBuf::from("a.txt")],
+            line_changes[&PathBuf::from("a.txt")],
             vec![
                 line_change(3),
                 line_change(4),
@@ -419,7 +421,7 @@ index f384549..ab47fb2 100644
 
     #[test]
     fn modified_line_returns_single_line_change_with_ranges() -> anyhow::Result<()> {
-        let ranges = extract(
+        let line_changes = line_changes_from_diff(
             r#"diff --git a/a.txt b/a.txt
 index f384549..e4c2829 100644
 --- a/a.txt
@@ -432,7 +434,7 @@ index f384549..e4c2829 100644
  four"#,
         )?;
         assert_eq!(
-            ranges[&PathBuf::from("a.txt")],
+            line_changes[&PathBuf::from("a.txt")],
             vec![LineChange {
                 line: 3,
                 // "i" in "is" was modified, "o" and "a" in "thora" were modified.
@@ -445,7 +447,7 @@ index f384549..e4c2829 100644
     #[test]
     fn multiple_non_consecutive_modified_line_returns_separate_line_changes_with_ranges()
     -> anyhow::Result<()> {
-        let ranges = extract(
+        let line_changes = line_changes_from_diff(
             r#"diff --git a/a.txt b/a.txt
 index f384549..46c7533 100644
 --- a/a.txt
@@ -462,7 +464,7 @@ index f384549..46c7533 100644
  "#,
         )?;
         assert_eq!(
-            ranges[&PathBuf::from("a.txt")],
+            line_changes[&PathBuf::from("a.txt")],
             vec![
                 LineChange {
                     line: 1,
@@ -487,7 +489,7 @@ index f384549..46c7533 100644
     #[test]
     fn multiple_consecutive_modified_lines_returns_single_line_changes_with_ranges()
     -> anyhow::Result<()> {
-        let ranges = extract(
+        let line_changes = line_changes_from_diff(
             r#"diff --git a/a.txt b/a.txt
 index f384549..676cbb7 100644
 --- a/a.txt
@@ -501,7 +503,7 @@ index f384549..676cbb7 100644
  four"#,
         )?;
         assert_eq!(
-            ranges[&PathBuf::from("a.txt")],
+            line_changes[&PathBuf::from("a.txt")],
             vec![
                 LineChange {
                     line: 2,
@@ -518,7 +520,7 @@ index f384549..676cbb7 100644
 
     #[test]
     fn all_lines_replaced_returns_single_line_changes_with_ranges() -> anyhow::Result<()> {
-        let ranges = extract(
+        let line_changes = line_changes_from_diff(
             r#"diff --git a/a.txt b/a.txt
 index f384549..676cbb7 100644
 --- a/a.txt
@@ -532,7 +534,7 @@ index f384549..676cbb7 100644
 +modified two"#,
         )?;
         assert_eq!(
-            ranges[&PathBuf::from("a.txt")],
+            line_changes[&PathBuf::from("a.txt")],
             vec![
                 LineChange {
                     line: 1,
@@ -549,7 +551,7 @@ index f384549..676cbb7 100644
 
     #[test]
     fn single_deleted_line_returns_single_line_change() -> anyhow::Result<()> {
-        let ranges = extract(
+        let line_changes = line_changes_from_diff(
             r#"diff --git a/a.txt b/a.txt
 index f384549..87a123c 100644
 --- a/a.txt
@@ -560,13 +562,13 @@ index f384549..87a123c 100644
 -three
  four"#,
         )?;
-        assert_eq!(ranges[&PathBuf::from("a.txt")], vec![line_change(3)]);
+        assert_eq!(line_changes[&PathBuf::from("a.txt")], vec![line_change(3)]);
         Ok(())
     }
 
     #[test]
     fn single_first_deleted_line_returns_single_line_change() -> anyhow::Result<()> {
-        let ranges = extract(
+        let line_changes = line_changes_from_diff(
             r#"diff --git a/a.txt b/a.txt
 index f384549..58ac960 100644
 --- a/a.txt
@@ -577,13 +579,13 @@ index f384549..58ac960 100644
  three
  four"#,
         )?;
-        assert_eq!(ranges[&PathBuf::from("a.txt")], vec![line_change(1)]);
+        assert_eq!(line_changes[&PathBuf::from("a.txt")], vec![line_change(1)]);
         Ok(())
     }
 
     #[test]
     fn single_last_deleted_line_returns_single_line_change() -> anyhow::Result<()> {
-        let ranges = extract(
+        let line_changes = line_changes_from_diff(
             r#"diff --git a/a.txt b/a.txt
 index f384549..4cb29ea 100644
 --- a/a.txt
@@ -594,14 +596,14 @@ index f384549..4cb29ea 100644
  three
 -four"#,
         )?;
-        assert_eq!(ranges[&PathBuf::from("a.txt")], vec![line_change(4)]);
+        assert_eq!(line_changes[&PathBuf::from("a.txt")], vec![line_change(4)]);
         Ok(())
     }
 
     #[test]
     fn multiple_non_consecutive_deleted_lines_returns_separate_line_changes() -> anyhow::Result<()>
     {
-        let ranges = extract(
+        let line_changes = line_changes_from_diff(
             r#"diff --git a/a.txt b/a.txt
 index f384549..8c05df4 100644
 --- a/a.txt
@@ -613,7 +615,7 @@ index f384549..8c05df4 100644
  four"#,
         )?;
         assert_eq!(
-            ranges[&PathBuf::from("a.txt")],
+            line_changes[&PathBuf::from("a.txt")],
             vec![line_change(1), line_change(3)]
         );
         Ok(())
@@ -621,7 +623,7 @@ index f384549..8c05df4 100644
 
     #[test]
     fn multiple_consecutive_deleted_lines_returns_single_line_change() -> anyhow::Result<()> {
-        let ranges = extract(
+        let line_changes = line_changes_from_diff(
             r#"diff --git a/a.txt b/a.txt
 index f384549..a9c7698 100644
 --- a/a.txt
@@ -634,13 +636,13 @@ index f384549..a9c7698 100644
         )?;
         // Consecutive deleted lines are treated as a single one-line range because they no longer
         // exist in the target file.
-        assert_eq!(ranges[&PathBuf::from("a.txt")], vec![line_change(2)]);
+        assert_eq!(line_changes[&PathBuf::from("a.txt")], vec![line_change(2)]);
         Ok(())
     }
 
     #[test]
     fn all_lines_deleted_treated_as_deleted_file() -> anyhow::Result<()> {
-        let ranges = extract(
+        let line_changes = line_changes_from_diff(
             r#"diff --git a/a.txt b/a.txt
 index f384549..e69de29 100644
 --- a/a.txt
@@ -651,13 +653,13 @@ index f384549..e69de29 100644
 -three
 -four"#,
         )?;
-        assert!(ranges.is_empty());
+        assert!(line_changes.is_empty());
         Ok(())
     }
 
     #[test]
     fn mixed_changes_returns_correct_line_changes() -> anyhow::Result<()> {
-        let ranges = extract(
+        let line_changes = line_changes_from_diff(
             r#"diff --git a/a.txt b/a.txt
 index f384549..58a279e 100644
 --- a/a.txt
@@ -673,7 +675,7 @@ index f384549..58a279e 100644
 +added five"#,
         )?;
         assert_eq!(
-            ranges[&PathBuf::from("a.txt")],
+            line_changes[&PathBuf::from("a.txt")],
             vec![
                 LineChange {
                     line: 1,
@@ -695,7 +697,7 @@ index f384549..58a279e 100644
 
     #[test]
     fn new_file_diff_returns_line_changes_for_every_line() -> anyhow::Result<()> {
-        let ranges = extract(
+        let line_changes = line_changes_from_diff(
             r#"diff --git a/example.rs b/example.rs
 new file mode 100644
 index 0000000..710d1d9
@@ -708,7 +710,7 @@ index 0000000..710d1d9
 "#,
         )?;
         assert_eq!(
-            ranges[&PathBuf::from("example.rs")],
+            line_changes[&PathBuf::from("example.rs")],
             vec![line_change(1), line_change(2), line_change(3)]
         );
         Ok(())
@@ -716,7 +718,7 @@ index 0000000..710d1d9
 
     #[test]
     fn deleted_file_diff_is_ignored() -> anyhow::Result<()> {
-        let ranges = extract(
+        let line_changes = line_changes_from_diff(
             r#"diff --git a/a.txt b/a.txt
 deleted file mode 100644
 index f384549..0000000
@@ -728,7 +730,7 @@ index f384549..0000000
 -three
 -four"#,
         )?;
-        assert!(ranges.is_empty());
+        assert!(line_changes.is_empty());
         Ok(())
     }
 }

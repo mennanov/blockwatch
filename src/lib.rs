@@ -33,13 +33,13 @@ impl Position {
 
 #[cfg(test)]
 mod test_utils {
-    use crate::blocks::{FileBlocks, FileReader, parse_blocks};
+    use crate::blocks::{FileBlocks, FileSystem, parse_blocks};
     use crate::differ::LineChange;
     use crate::parsers;
     use crate::validators::ValidationContext;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::ops::Range;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
     /// Finds the byte range of the first occurrence of a substring within a string.
@@ -63,19 +63,37 @@ mod test_utils {
         pos..(pos + substr.len())
     }
 
-    pub(crate) struct FakeFileReader {
+    pub(crate) struct FakeFileSystem {
         files: HashMap<String, String>,
+        walkable_paths: HashSet<String>,
     }
 
-    impl FakeFileReader {
+    impl FakeFileSystem {
         pub(crate) fn new(files: HashMap<String, String>) -> Self {
-            Self { files }
+            Self {
+                files,
+                walkable_paths: HashSet::new(),
+            }
+        }
+
+        pub(crate) fn with_walk_paths(
+            files: HashMap<String, String>,
+            walkable_paths: &[&str],
+        ) -> Self {
+            Self {
+                files,
+                walkable_paths: walkable_paths.iter().map(|path| path.to_string()).collect(),
+            }
         }
     }
 
-    impl FileReader for FakeFileReader {
+    impl FileSystem for FakeFileSystem {
         fn read_to_string(&self, path: &Path) -> anyhow::Result<String> {
             Ok(self.files[&path.display().to_string()].clone())
+        }
+
+        fn walk(&self) -> impl Iterator<Item = anyhow::Result<PathBuf>> {
+            self.walkable_paths.iter().map(|p| Ok(PathBuf::from(p)))
         }
     }
 
@@ -95,15 +113,15 @@ mod test_utils {
         contents: &str,
         line_changes: Vec<LineChange>,
     ) -> Arc<ValidationContext> {
-        let file_reader = FakeFileReader::new(HashMap::from([(
+        let file_system = FakeFileSystem::new(HashMap::from([(
             file_name.to_string(),
             contents.to_string(),
         )]));
         let line_changes_by_file = HashMap::from([(file_name.into(), line_changes)]);
         Arc::new(ValidationContext::new(
             parse_blocks(
-                &line_changes_by_file,
-                &file_reader,
+                line_changes_by_file,
+                &file_system,
                 parsers::language_parsers().unwrap(),
                 HashMap::new(),
             )

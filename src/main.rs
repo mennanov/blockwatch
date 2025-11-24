@@ -4,9 +4,10 @@ use blockwatch::differ;
 use blockwatch::flags;
 use blockwatch::parsers;
 use blockwatch::validators;
+
 use clap::Parser;
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::{env, fs, process};
@@ -17,15 +18,22 @@ fn main() -> anyhow::Result<()> {
     args.validate(languages.keys().cloned().collect())?;
 
     let mut diff = String::new();
-    std::io::stdin().read_to_string(&mut diff)?;
-    let modified_lines_by_file = differ::extract(diff.as_str())?;
+    if !std::io::stdin().is_terminal() {
+        std::io::stdin().read_to_string(&mut diff)?;
+    }
+    let modified_lines_by_file = if diff.trim().is_empty() {
+        HashMap::new()
+    } else {
+        differ::line_changes_from_diff(diff.as_str())?
+    };
 
-    let file_reader = blocks::FsReader::new(repository_root_path(fs::canonicalize(
-        env::current_dir()?,
-    )?)?);
+    let root_path = repository_root_path(fs::canonicalize(env::current_dir()?)?)?;
+    let glob_set = args.globs(&root_path)?;
+    let file_system = blocks::FileSystemImpl::new(root_path.clone(), glob_set);
+
     let modified_blocks = blocks::parse_blocks(
-        &modified_lines_by_file,
-        &file_reader,
+        modified_lines_by_file,
+        &file_system,
         languages,
         args.extensions(),
     )?;

@@ -258,11 +258,11 @@ If the content does not satisfy the condition, BlockWatch will report a violatio
 #### Configuration
 
 [//]: # (<block name="check-ai-env-vars">)
+
 - Set `BLOCKWATCH_AI_API_KEY` env variable to contain an LLM API key.
 - Optional: Set `BLOCKWATCH_AI_API_URL` env variable to point to an OpenAi-compatible LLM API (default:
   `https://api.openai.com/v1`).
 - Optional: Set `BLOCKWATCH_AI_MODEL` to override the default model (default: `gpt-4o-mini`).
-
 
 [//]: # (</block>)
 
@@ -307,10 +307,37 @@ Download a pre-built binary for your platform from the [Releases page](https://g
 
 [//]: # (<block name="cli-docs">)
 
-The simplest way to run it is by piping a git diff into the command:
+#### Glob patterns
+
+You can provide glob patterns as positional arguments to validate files directly on disk.
+In this mode, BlockWatch validates **all** blocks in the matching files, regardless of whether they are modified.
+
+**Examples:**
+
+```shell
+# Check all Rust files in the project
+blockwatch "**/*.rs"
+
+# Check files in a specific directory
+blockwatch "src/**"
+
+# Check specific files
+blockwatch "README.md" "src/main.rs"
+```
+
+#### Modified blocks validation
+
+You can pipe a git diff into the command to validate the modified blocks only:
 
 ```shell
 git diff --patch | blockwatch
+```
+
+You can also combine this with glob patterns to validate modified blocks while ensuring specific files are always
+validated:
+
+```shell
+git diff --patch | blockwatch "important_file.rs"
 ```
 
 #### Disabling Validators

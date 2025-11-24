@@ -1,7 +1,9 @@
 use crate::Position;
 use crate::differ::LineChange;
 use crate::parsers::BlocksParser;
-use anyhow::Context;
+use anyhow::{Context, anyhow};
+use globset::GlobSet;
+use ignore::Walk;
 use serde_repr::Serialize_repr;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -193,6 +195,12 @@ pub struct FileBlocks {
     pub(crate) blocks_with_context: Vec<BlockWithContext>,
 }
 
+impl FileBlocks {
+    fn is_empty(&self) -> bool {
+        self.blocks_with_context.is_empty()
+    }
+}
+
 /// Represents a block with its corresponding validation context.
 #[derive(Debug, Clone)]
 pub struct BlockWithContext {
@@ -206,85 +214,169 @@ pub struct BlockWithContext {
 /// Parses source files and returns only those blocks that intersect with the provided modified line ranges.
 ///
 /// - `line_changes_by_file` maps file paths to sorted line changes.
-/// - `file_reader` provides async access to file contents within a root path.
+/// - `file_system` provides access to file contents within a root path.
 /// - `parsers` maps file extensions to language-specific block parsers.
 /// - `extra_file_extensions` allows remapping unknown extensions to supported ones (e.g., "cxx" -> "cpp").
 ///
 /// Returns a map of file paths to the list of intersecting blocks found in that file.
 pub fn parse_blocks(
-    line_changes_by_file: &HashMap<PathBuf, Vec<LineChange>>,
-    file_reader: &impl FileReader,
+    mut line_changes_by_file: HashMap<PathBuf, Vec<LineChange>>,
+    file_system: &impl FileSystem,
     parsers: HashMap<OsString, Rc<Box<dyn BlocksParser>>>,
     extra_file_extensions: HashMap<OsString, OsString>,
 ) -> anyhow::Result<HashMap<PathBuf, FileBlocks>> {
     let mut blocks = HashMap::new();
-    for (file_path, line_changes) in line_changes_by_file {
-        let source_code = file_reader.read_to_string(Path::new(&file_path))?;
-        let new_line_positions: Vec<usize> = source_code
-            .match_indices('\n')
-            .map(|(idx, _)| idx)
-            .collect();
-        let mut file_blocks = Vec::new();
-        if let Some(mut ext) = file_path.extension() {
-            ext = extra_file_extensions
-                .get(ext)
-                .map(|v| v.as_os_str())
-                .unwrap_or(ext);
-            if let Some(parser) = parsers.get(ext) {
-                for block in parser
-                    .parse(&source_code)
-                    .context(format!("Failed to parse file {file_path:?}"))?
+    // Parse files from the given file glob patterns (if any).
+    for result in file_system.walk() {
+        match result {
+            Ok(file_path) => {
+                let changes_owned = line_changes_by_file.remove(&file_path);
+                let line_changes = changes_owned.as_deref().unwrap_or(&[]);
+                let file_blocks_opt = parse_file(
+                    file_path.as_path(),
+                    line_changes,
+                    BlocksFilter::All,
+                    file_system,
+                    &parsers,
+                    &extra_file_extensions,
+                )?;
+                if let Some(file_blocks) = file_blocks_opt
+                    && !file_blocks.is_empty()
                 {
-                    let is_content_modified =
-                        block.content_intersects_with_any(line_changes, &new_line_positions);
-                    let is_start_tag_modified =
-                        block.start_tag_intersects_with_any(line_changes, &new_line_positions);
-                    if !is_content_modified && !is_start_tag_modified {
-                        // Skip untouched blocks.
-                        continue;
-                    }
-                    file_blocks.push(BlockWithContext {
-                        block,
-                        _is_start_tag_modified: is_start_tag_modified,
-                        is_content_modified,
-                    });
+                    blocks.insert(file_path, file_blocks);
                 }
             }
+            Err(err) => {
+                return Err(anyhow!("Failed to walk directory: {err}"));
+            }
         }
-        if !file_blocks.is_empty() {
-            blocks.insert(
-                file_path.clone(),
-                FileBlocks {
-                    file_content: source_code,
-                    file_content_new_lines: new_line_positions,
-                    blocks_with_context: file_blocks,
-                },
-            );
+    }
+    // Parse remaining files in `line_changes_by_file` from the given diff input (if any).
+    for (file_path, line_changes) in line_changes_by_file {
+        let file_blocks_opt = parse_file(
+            file_path.as_path(),
+            line_changes.as_slice(),
+            BlocksFilter::ModifiedOnly,
+            file_system,
+            &parsers,
+            &extra_file_extensions,
+        )?;
+        if let Some(file_blocks) = file_blocks_opt
+            && !file_blocks.is_empty()
+        {
+            blocks.insert(file_path.clone(), file_blocks);
         }
     }
     Ok(blocks)
 }
 
-pub trait FileReader {
+enum BlocksFilter {
+    All,
+    ModifiedOnly,
+}
+
+fn parse_file(
+    file_path: &Path,
+    line_changes: &[LineChange],
+    blocks_filter: BlocksFilter,
+    file_reader: &impl FileSystem,
+    parsers: &HashMap<OsString, Rc<Box<dyn BlocksParser>>>,
+    extra_file_extensions: &HashMap<OsString, OsString>,
+) -> anyhow::Result<Option<FileBlocks>> {
+    let ext = match file_path.extension() {
+        Some(ext) => ext,
+        None => return Ok(None),
+    };
+    let ext = extra_file_extensions
+        .get(ext)
+        .map(|v| v.as_os_str())
+        .unwrap_or(ext);
+    let parser = match parsers.get(ext) {
+        Some(parser) => parser,
+        None => return Ok(None),
+    };
+    let source_code = file_reader.read_to_string(file_path)?;
+    let new_line_positions: Vec<usize> = source_code
+        .match_indices('\n')
+        .map(|(idx, _)| idx)
+        .collect();
+    let blocks = parser
+        .parse(&source_code)
+        .context(format!("Failed to parse file {file_path:?}"))?;
+
+    let blocks_with_context = blocks
+        .into_iter()
+        .filter_map(|block| {
+            let is_content_modified =
+                block.content_intersects_with_any(line_changes, &new_line_positions);
+            let is_start_tag_modified =
+                block.start_tag_intersects_with_any(line_changes, &new_line_positions);
+
+            if matches!(blocks_filter, BlocksFilter::All)
+                || is_content_modified
+                || is_start_tag_modified
+            {
+                Some(BlockWithContext {
+                    block,
+                    _is_start_tag_modified: is_start_tag_modified,
+                    is_content_modified,
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    Ok(Some(FileBlocks {
+        file_content: source_code,
+        file_content_new_lines: new_line_positions,
+        blocks_with_context,
+    }))
+}
+
+pub trait FileSystem {
     /// Reads the entire contents of a file into a string.
     fn read_to_string(&self, path: &Path) -> anyhow::Result<String>;
+
+    /// Walks the directory tree rooted at the file system's root path, returning an iterator over the paths of all files.
+    fn walk(&self) -> impl Iterator<Item = anyhow::Result<PathBuf>>;
 }
 
-pub struct FsReader {
+pub struct FileSystemImpl {
     root_path: PathBuf,
+    glob_set: GlobSet,
 }
 
-impl FsReader {
+impl FileSystemImpl {
     /// Creates a new filesystem-backed reader rooted at `root_path`.
-    pub fn new(root_path: PathBuf) -> Self {
-        Self { root_path }
+    pub fn new(root_path: PathBuf, glob_set: GlobSet) -> Self {
+        Self {
+            root_path,
+            glob_set,
+        }
     }
 }
 
-impl FileReader for FsReader {
+impl FileSystem for FileSystemImpl {
     fn read_to_string(&self, path: &Path) -> anyhow::Result<String> {
         std::fs::read_to_string(self.root_path.join(path))
             .context(format!("Failed to read file \"{}\"", path.display()))
+    }
+
+    fn walk(&self) -> impl Iterator<Item = anyhow::Result<PathBuf>> {
+        Walk::new(&self.root_path).filter_map(|entry| match entry {
+            Ok(entry) => {
+                let path = entry.path();
+                if path.is_dir() {
+                    return None;
+                }
+                if !self.glob_set.is_match(path) {
+                    return None;
+                }
+                Some(Ok(path.to_path_buf()))
+            }
+            Err(err) => Some(Err(anyhow::Error::from(err))),
+        })
     }
 }
 
@@ -337,7 +429,7 @@ mod parse_blocks_tests {
     use crate::blocks::*;
     use crate::parsers::language_parsers;
     use crate::test_utils;
-    use crate::test_utils::FakeFileReader;
+    use crate::test_utils::FakeFileSystem;
 
     /// Creates a whole line change (either added or deleted line).
     fn line_change(line: usize) -> LineChange {
@@ -345,77 +437,7 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn multiple_files_with_changes_returns_modified_blocks() -> anyhow::Result<()> {
-        let file_reader = FakeFileReader::new(HashMap::from([
-            (
-                "a.rs".to_string(),
-                r#"
-        // <block name="first">
-        fn a() {}
-        // </block>
-        // <block name="second">
-        fn b() {
-            println!("hello");
-            println!("world");
-        }
-        // </block>
-        "#
-                .to_string(),
-            ),
-            (
-                "b.rs".to_string(),
-                r#"
-        // <block name="outer">
-        fn outer() {
-            // <block name="inner">
-            println!("hello");
-            println!("world");
-            // </block>
-        }
-        // </block>
-        "#
-                .to_string(),
-            ),
-            (
-                "c.rs".to_string(),
-                r#"
-        // <block name="target">
-        fn c() {}
-        // </block>
-        fn d() {
-            println!("hello");
-        }
-        "#
-                .to_string(),
-            ),
-        ]));
-        let modified_ranges = HashMap::from([
-            (
-                PathBuf::from("a.rs"),
-                vec![line_change(3), line_change(7), line_change(8)],
-            ), // Both blocks are modified.
-            (PathBuf::from("b.rs"), vec![line_change(5), line_change(6)]), // The inner block is modified.
-            (PathBuf::from("c.rs"), vec![line_change(6), line_change(7)]), // No block is modified.
-        ]);
-        let parsers = language_parsers()?;
-
-        let file_blocks_by_file =
-            parse_blocks(&modified_ranges, &file_reader, parsers, HashMap::new())?;
-
-        assert_eq!(file_blocks_by_file.len(), 2);
-        let blocks_a = &file_blocks_by_file[&PathBuf::from("a.rs")].blocks_with_context;
-        assert_eq!(blocks_a.len(), 2);
-        assert_eq!(blocks_a[0].block.name(), Some("first"));
-        assert_eq!(blocks_a[1].block.name(), Some("second"));
-        let blocks_b = &file_blocks_by_file[&PathBuf::from("b.rs")].blocks_with_context;
-        assert_eq!(blocks_b.len(), 2);
-        assert_eq!(blocks_b[0].block.name(), Some("outer"));
-        assert_eq!(blocks_b[1].block.name(), Some("inner"));
-        Ok(())
-    }
-
-    #[test]
-    fn files_with_various_changes_returns_only_blocks_with_modified_start_tag_or_content()
+    fn with_nonempty_line_changes_empty_walk_paths_returns_only_blocks_with_modified_start_tag_or_content()
     -> anyhow::Result<()> {
         let content_a = r#"
         /* <block name="first"> */ let foo = "bar"; // </block>
@@ -445,7 +467,7 @@ mod parse_blocks_tests {
         </block> */
         "#;
         let content_b = "/* <block name=\"first\"> */let foo = \"bar\"; // </block>";
-        let file_reader = FakeFileReader::new(HashMap::from([
+        let file_system = FakeFileSystem::new(HashMap::from([
             ("a.rs".to_string(), content_a.to_string()),
             ("b.rs".to_string(), content_b.to_string()),
         ]));
@@ -577,7 +599,7 @@ mod parse_blocks_tests {
         ]);
         let parsers = language_parsers()?;
 
-        let blocks_by_file = parse_blocks(&line_changes, &file_reader, parsers, HashMap::new())?;
+        let blocks_by_file = parse_blocks(line_changes, &file_system, parsers, HashMap::new())?;
 
         assert_eq!(blocks_by_file.len(), 2);
         let blocks_a = &blocks_by_file[&PathBuf::from("a.rs")].blocks_with_context;
@@ -626,7 +648,141 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn file_blocks_file_content_contains_original_file_content() -> anyhow::Result<()> {
+    fn with_nonempty_line_changes_non_empty_walk_paths_parses_modified_and_unmodified_blocks()
+    -> anyhow::Result<()> {
+        let file_system = FakeFileSystem::with_walk_paths(
+            HashMap::from([
+                (
+                    "a.rs".to_string(),
+                    r#"
+        // <block name="first_from_a">
+        fn a() {}
+        // </block>
+        // <block name="second_from_a">
+        fn b() {
+            println!("hello");
+        }
+        // </block>
+        "#
+                    .to_string(),
+                ),
+                (
+                    "b.rs".to_string(),
+                    r#"
+        // <block name="first_from_b">
+        fn a() {}
+        // </block>
+        // <block name="second_from_b">
+        fn b() {
+            println!("hello");
+        }
+        // </block>
+        "#
+                    .to_string(),
+                ),
+            ]),
+            &["a.rs", "b.rs"],
+        );
+        let parsers = language_parsers()?;
+
+        let line_changes = HashMap::from([
+            (
+                PathBuf::from("a.rs"),
+                vec![LineChange {
+                    line: 3, // Content line of the first block.
+                    ranges: None,
+                }],
+            ),
+            (
+                PathBuf::from("b.rs"),
+                vec![LineChange {
+                    line: 3, // Content line of the first block.
+                    ranges: None,
+                }],
+            ),
+        ]);
+        let blocks_by_file = parse_blocks(line_changes, &file_system, parsers, HashMap::new())?;
+
+        assert_eq!(
+            blocks_by_file[&PathBuf::from("a.rs")]
+                .blocks_with_context
+                .iter()
+                .map(|b| { (b.block.name().unwrap(), b.is_content_modified) })
+                .collect::<Vec<(&str, bool)>>(),
+            &[("first_from_a", true), ("second_from_a", false)]
+        );
+        assert_eq!(
+            blocks_by_file[&PathBuf::from("b.rs")]
+                .blocks_with_context
+                .iter()
+                .map(|b| { (b.block.name().unwrap(), b.is_content_modified) })
+                .collect::<Vec<(&str, bool)>>(),
+            &[("first_from_b", true), ("second_from_b", false)]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn with_empty_line_changes_nonempty_walk_paths_parses_unmodified_blocks() -> anyhow::Result<()>
+    {
+        let file_system = FakeFileSystem::with_walk_paths(
+            HashMap::from([
+                (
+                    "a.rs".to_string(),
+                    r#"
+        // <block name="first_from_a">
+        fn a() {}
+        // </block>
+        // <block name="second_from_a">
+        fn b() {
+            println!("hello");
+        }
+        // </block>
+        "#
+                    .to_string(),
+                ),
+                (
+                    "b.rs".to_string(),
+                    r#"
+        // <block name="first_from_b">
+        fn a() {}
+        // </block>
+        // <block name="second_from_b">
+        fn b() {
+            println!("hello");
+        }
+        // </block>
+        "#
+                    .to_string(),
+                ),
+            ]),
+            &["a.rs", "b.rs"],
+        );
+        let parsers = language_parsers()?;
+
+        let blocks_by_file = parse_blocks(HashMap::new(), &file_system, parsers, HashMap::new())?;
+
+        assert_eq!(
+            blocks_by_file[&PathBuf::from("a.rs")]
+                .blocks_with_context
+                .iter()
+                .map(|b| { (b.block.name().unwrap(), b.is_content_modified) })
+                .collect::<Vec<(&str, bool)>>(),
+            &[("first_from_a", false), ("second_from_a", false)]
+        );
+        assert_eq!(
+            blocks_by_file[&PathBuf::from("b.rs")]
+                .blocks_with_context
+                .iter()
+                .map(|b| { (b.block.name().unwrap(), b.is_content_modified) })
+                .collect::<Vec<(&str, bool)>>(),
+            &[("first_from_b", false), ("second_from_b", false)]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parsed_blocks_contain_original_file_content() -> anyhow::Result<()> {
         let file_a_contents = r#"
         // <block name="first">
         fn a() {}
@@ -638,7 +794,7 @@ mod parse_blocks_tests {
         }
         // </block>
         "#;
-        let file_reader = FakeFileReader::new(HashMap::from([(
+        let file_system = FakeFileSystem::new(HashMap::from([(
             "a.rs".to_string(),
             file_a_contents.to_string(),
         )]));
@@ -650,7 +806,7 @@ mod parse_blocks_tests {
         ]);
         let parsers = language_parsers()?;
 
-        let blocks_by_file = parse_blocks(&modified_ranges, &file_reader, parsers, HashMap::new())?;
+        let blocks_by_file = parse_blocks(modified_ranges, &file_system, parsers, HashMap::new())?;
 
         let content_a = &blocks_by_file[&PathBuf::from("a.rs")].file_content;
         assert_eq!(content_a, file_a_contents);
@@ -658,7 +814,7 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn file_blocks_new_lines_contains_correct_new_lines() -> anyhow::Result<()> {
+    fn parsed_blocks_new_lines_contains_correct_new_lines() -> anyhow::Result<()> {
         let file_a_contents = r#"
         // <block name="first">
         fn a() {}
@@ -670,7 +826,7 @@ mod parse_blocks_tests {
         }
         // </block>
         "#;
-        let file_reader = FakeFileReader::new(HashMap::from([(
+        let file_system = FakeFileSystem::new(HashMap::from([(
             "a.rs".to_string(),
             file_a_contents.to_string(),
         )]));
@@ -682,7 +838,7 @@ mod parse_blocks_tests {
         ]);
         let parsers = language_parsers()?;
 
-        let blocks_by_file = parse_blocks(&modified_ranges, &file_reader, parsers, HashMap::new())?;
+        let blocks_by_file = parse_blocks(modified_ranges, &file_system, parsers, HashMap::new())?;
 
         let new_lines = &blocks_by_file[&PathBuf::from("a.rs")].file_content_new_lines;
         let expected_new_lines: Vec<usize> = file_a_contents
@@ -694,8 +850,8 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn file_with_remapped_extension_returns_parsed_blocks() -> anyhow::Result<()> {
-        let file_reader = FakeFileReader::new(HashMap::from([(
+    fn with_remapped_extension_returns_parsed_blocks() -> anyhow::Result<()> {
+        let file_system = FakeFileSystem::new(HashMap::from([(
             "a.rust".to_string(),
             r#"
         // <block name="first">
@@ -707,8 +863,8 @@ mod parse_blocks_tests {
         let parsers = language_parsers()?;
 
         let blocks_by_file = parse_blocks(
-            &modified_ranges,
-            &file_reader,
+            modified_ranges,
+            &file_system,
             parsers,
             HashMap::from([("rust".into(), "rs".into())]),
         )?;
@@ -724,7 +880,7 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn file_with_unknown_extension_returns_empty_result() -> anyhow::Result<()> {
+    fn with_unknown_extension_returns_empty_result() -> anyhow::Result<()> {
         let files = HashMap::from([("test.unknown".to_string(), "test content".to_string())]);
         let modified_ranges = HashMap::from([(
             PathBuf::from("test.unknown"),
@@ -732,8 +888,8 @@ mod parse_blocks_tests {
         )]);
 
         let blocks = parse_blocks(
-            &modified_ranges,
-            &FakeFileReader::new(files),
+            modified_ranges,
+            &FakeFileSystem::new(files),
             HashMap::new(),
             HashMap::new(),
         )?;
@@ -744,9 +900,10 @@ mod parse_blocks_tests {
 
     #[test]
     fn empty_input_returns_empty_result() -> anyhow::Result<()> {
+        let line_changes = HashMap::default();
         let blocks = parse_blocks(
-            &HashMap::default(),
-            &FakeFileReader::new(HashMap::default()),
+            line_changes,
+            &FakeFileSystem::new(HashMap::default()),
             HashMap::new(),
             HashMap::new(),
         )?;

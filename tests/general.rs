@@ -205,7 +205,6 @@ fn empty_diff_succeeds() {
 }
 
 #[test]
-#[ignore]
 fn files_mode_succeeds_on_valid_file() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/paths/valid.py");
@@ -216,7 +215,6 @@ fn files_mode_succeeds_on_valid_file() {
 }
 
 #[test]
-#[ignore]
 fn files_mode_checks_multiple_explicit_paths() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/paths/valid.py");
@@ -233,7 +231,6 @@ fn files_mode_checks_multiple_explicit_paths() {
 }
 
 #[test]
-#[ignore]
 fn files_mode_checks_glob_patterns() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/paths/*.py");
@@ -248,7 +245,6 @@ fn files_mode_checks_glob_patterns() {
 }
 
 #[test]
-#[ignore]
 fn files_mode_checks_recursive_glob_patterns() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/paths/**/*.py");

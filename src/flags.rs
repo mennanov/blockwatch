@@ -1,8 +1,10 @@
 use crate::validators;
 use anyhow::Context;
 use clap::{Parser, builder::ValueParser, crate_version};
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
+use std::path::Path;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -57,6 +59,10 @@ pub struct Args {
         value_parser = ValueParser::new(parse_validator),
     )]
     enabled_validators: Vec<String>,
+
+    /// Glob patterns to filter files.
+    #[arg(value_name = "GLOBS")]
+    pub globs: Vec<String>,
     // </block>
 }
 
@@ -77,6 +83,21 @@ impl Args {
     /// Enabled validator names.
     pub fn enabled_validators(&self) -> HashSet<&str> {
         self.enabled_validators.iter().map(AsRef::as_ref).collect()
+    }
+
+    /// Returns a compiled GlobSet from the provided glob patterns.
+    pub fn globs(&self, root_path: &Path) -> anyhow::Result<GlobSet> {
+        let mut builder = GlobSetBuilder::new();
+        for glob_str in &self.globs {
+            let path = root_path.join(glob_str);
+            let glob = Glob::new(
+                path.to_str()
+                    .context(format!("Invalid path: {}", path.display()))?,
+            )
+            .with_context(|| format!("Invalid glob pattern: {}", path.display()))?;
+            builder.add(glob);
+        }
+        builder.build().context("Failed to build glob set")
     }
 
     /// Validates all arguments.
