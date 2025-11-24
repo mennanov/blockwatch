@@ -229,13 +229,14 @@ Validate logic or style using an LLM.
 ```
 
 **Configuration**
-#[//]: # (<block name="check-ai-env-vars">)
+
+[//]: # (<block name="check-ai-env-vars">)
 
 - `BLOCKWATCH_AI_API_KEY`: API Key (OpenAI compatible).
 - `BLOCKWATCH_AI_MODEL`: Model name (default: `gpt-4o-mini`).
 - `BLOCKWATCH_AI_API_URL`: Custom API URL (optional).
 
-#[//]: # (</block>)
+[//]: # (</block>)
 
 **Advanced: Extract Content for AI**
 Use `check-ai-pattern` to send only relevant parts of the text to the LLM.
@@ -253,7 +254,7 @@ prices = [
 
 BlockWatch supports comments in:
 
-#[//]: # (<block name="supported-grammar" keep-sorted="asc">)
+[//]: # (<block name="supported-grammar" keep-sorted="asc">)
 
 - Bash
 - C#
@@ -276,18 +277,18 @@ BlockWatch supports comments in:
 - XML
 - YAML
 
-#[//]: # (</block>)
+[//]: # (</block>)
 
 ## Configuration
 
-#[//]: # (<block name="cli-docs">)
+[//]: # (<block name="cli-docs">)
 
 - **Extensions**: Map custom extensions: `blockwatch -E cxx=cpp`
 - **Disable Validators**: `blockwatch -d check-ai`
 - **Enable Validators**: `blockwatch -e keep-sorted`
 - **Ignore Files**: Ignore files matching glob patterns: `blockwatch --ignore "**/generated/**"`
 
-#[//]: # (</block>)
+[//]: # (</block>)
 
 ## Known Limitations
 
