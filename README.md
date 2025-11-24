@@ -21,10 +21,10 @@ BlockWatch can run on your **entire codebase** or check only **changed files** i
 
 - 🔗 **Drift Detection**: Explicitly link blocks of code. If one changes, the other must be updated.
 - 🧹 **Content Enforcement**:
-    - `keep-sorted`: Keep lists sorted.
-    - `keep-unique`: Ensure no duplicates.
-    - `line-pattern`: Validate lines against Regex.
-    - `line-count`: Enforce block size limits.
+  - `keep-sorted`: Keep lists sorted.
+  - `keep-unique`: Ensure no duplicates.
+  - `line-pattern`: Validate lines against Regex.
+  - `line-count`: Enforce block size limits.
 - 🤖 **AI Validation**: Use natural language rules to validate code or docs (e.g., "Must mention 'banana'").
 - 🌍 **Language Agnostic**: Works with almost any language (Rust, Python, JS, Go, Markdown, YAML, etc.).
 - 🚀 **Flexible Execution**: Run on specific files, glob patterns, or git diffs.
@@ -228,17 +228,8 @@ Validate logic or style using an LLM.
 <!-- </block> -->
 ```
 
-**Configuration**
+#### Advanced: Extract Content for AI
 
-[//]: # (<block name="check-ai-env-vars">)
-
-- `BLOCKWATCH_AI_API_KEY`: API Key (OpenAI compatible).
-- `BLOCKWATCH_AI_MODEL`: Model name (default: `gpt-4o-mini`).
-- `BLOCKWATCH_AI_API_URL`: Custom API URL (optional).
-
-[//]: # (</block>)
-
-**Advanced: Extract Content for AI**
 Use `check-ai-pattern` to send only relevant parts of the text to the LLM.
 
 ```python
@@ -249,6 +240,16 @@ prices = [
     # </block>
 ]
 ```
+
+#### `check-ai` configuration
+
+[//]: # (<block name="check-ai-env-vars">)
+
+- `BLOCKWATCH_AI_API_KEY`: API Key (OpenAI compatible).
+- `BLOCKWATCH_AI_MODEL`: Model name (default: `gpt-4o-mini`).
+- `BLOCKWATCH_AI_API_URL`: Custom API URL (optional).
+
+[//]: # (</block>)
 
 ## Supported Languages
 
