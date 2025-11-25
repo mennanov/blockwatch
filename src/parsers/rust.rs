@@ -13,13 +13,13 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let rust_language = tree_sitter_rust::LANGUAGE.into();
     let line_comment_query = Query::new(&rust_language, "(line_comment) @comment")?;
     let block_comment_query = Query::new(&rust_language, "(block_comment) @comment")?;
-    let parser = TreeSitterCommentsParser::<fn(usize, &str) -> Option<String>>::new(
+    let parser = TreeSitterCommentsParser::new(
         rust_language,
         vec![
             (
                 line_comment_query,
-                Some(|_, comment| {
-                    Some(if comment.starts_with("///") {
+                Some(|_, comment, _node| {
+                    Ok(Some(if comment.starts_with("///") {
                         comment.replacen("///", "   ", 1)
                     } else if comment.starts_with("//!") {
                         comment.replacen("//!", "   ", 1)
@@ -27,12 +27,12 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
                         comment.replacen("//", "  ", 1)
                     } else {
                         comment.to_string()
-                    })
+                    }))
                 }),
             ),
             (
                 block_comment_query,
-                Some(|_, comment| Some(c_style_multiline_comment_processor(comment))),
+                Some(|_, comment, _node| Ok(Some(c_style_multiline_comment_processor(comment)))),
             ),
         ],
     );

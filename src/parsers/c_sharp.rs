@@ -12,18 +12,18 @@ pub(super) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let c_sharp = tree_sitter_c_sharp::LANGUAGE.into();
     let comment_query = Query::new(&c_sharp, "(comment) @comment")?;
-    let parser = TreeSitterCommentsParser::<fn(usize, &str) -> Option<String>>::new(
+    let parser = TreeSitterCommentsParser::new(
         c_sharp,
         vec![(
             comment_query,
-            Some(|_, comment| {
-                Some(if comment.starts_with("///") {
+            Some(|_, comment, _node| {
+                Ok(Some(if comment.starts_with("///") {
                     comment.replacen("///", "   ", 1)
                 } else if comment.starts_with("//") {
                     comment.replacen("//", "  ", 1)
                 } else {
                     c_style_multiline_comment_processor(comment)
-                })
+                }))
             }),
         )],
     );

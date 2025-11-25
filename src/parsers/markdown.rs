@@ -17,13 +17,13 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
              (#eq? @comment_marker "[//]")
          ) @comment"#,
     )?;
-    let parser = TreeSitterCommentsParser::<fn(usize, &str) -> Option<String>>::new(
+    let parser = TreeSitterCommentsParser::new(
         markdown_lang,
         vec![(
             block_comment_query,
-            Some(|capture_idx, comment| {
+            Some(|capture_idx, comment, _node| {
                 if capture_idx != 1 {
-                    return None;
+                    return Ok(None);
                 }
                 let mut result = String::with_capacity(comment.len());
                 let prefix_idx = comment
@@ -47,7 +47,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
                 if close_idx + 1 < comment.len() {
                     result.push_str(&comment[close_idx + 1..]);
                 }
-                Some(result)
+                Ok(Some(result))
             }),
         )],
     );

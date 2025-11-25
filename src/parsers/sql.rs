@@ -13,16 +13,16 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let sql_language = tree_sitter_sequel::LANGUAGE.into();
     let line_comment_query = Query::new(&sql_language, "(comment) @comment")?;
     let block_comment_query = Query::new(&sql_language, "(marginalia) @comment")?;
-    let parser = TreeSitterCommentsParser::<fn(usize, &str) -> Option<String>>::new(
+    let parser = TreeSitterCommentsParser::new(
         sql_language,
         vec![
             (
                 line_comment_query,
-                Some(|_, comment| Some(comment.replacen("--", "  ", 1))),
+                Some(|_, comment, _node| Ok(Some(comment.replacen("--", "  ", 1)))),
             ),
             (
                 block_comment_query,
-                Some(|_, comment| Some(c_style_multiline_comment_processor(comment))),
+                Some(|_, comment, _node| Ok(Some(c_style_multiline_comment_processor(comment)))),
             ),
         ],
     );

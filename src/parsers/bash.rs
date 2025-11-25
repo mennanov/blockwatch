@@ -11,15 +11,15 @@ pub(super) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let bash_language = tree_sitter_bash::LANGUAGE.into();
     let comment_query = Query::new(&bash_language, "(comment) @comment")?;
-    let parser = TreeSitterCommentsParser::<fn(usize, &str) -> Option<String>>::new(
+    let parser = TreeSitterCommentsParser::new(
         bash_language,
         vec![(
             comment_query,
-            Some(|_, comment| {
+            Some(|_, comment, _node| {
                 if comment.starts_with("#!") {
-                    None
+                    Ok(None)
                 } else {
-                    Some(comment.replacen("#", " ", 1))
+                    Ok(Some(comment.replacen("#", " ", 1)))
                 }
             }),
         )],

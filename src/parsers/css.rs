@@ -12,11 +12,11 @@ pub(super) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let css_language = tree_sitter_css::LANGUAGE.into();
     let multi_line_comment_query = Query::new(&css_language, "(comment) @comment")?;
-    let parser = TreeSitterCommentsParser::<fn(usize, &str) -> Option<String>>::new(
+    let parser = TreeSitterCommentsParser::new(
         css_language,
         vec![(
             multi_line_comment_query,
-            Some(|_, comment| Some(c_style_multiline_comment_processor(comment))),
+            Some(|_, comment, _node| Ok(Some(c_style_multiline_comment_processor(comment)))),
         )],
     );
     Ok(parser)
