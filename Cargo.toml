@@ -37,7 +37,7 @@ tokio = { version = "1.48", features = ["full"] }
 async-trait = "0.1"
 serde_json = "1.0"
 regex = "1.12"
-async-openai = { version = "0.30", default-features = true }
+async-openai = { version = "0.31", default-features = true }
 secrecy = "0.10"
 unidiff = "0.4"
 html-escape = "0.2"
