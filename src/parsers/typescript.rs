@@ -3,8 +3,8 @@ use crate::parsers::{BlocksFromCommentsParser, BlocksParser, CommentsParser};
 use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for TypeScript.
-pub(super) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
-    Ok(Box::new(BlocksFromCommentsParser::new(comments_parser()?)))
+pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
+    Ok(BlocksFromCommentsParser::new(comments_parser()?))
 }
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {

@@ -5,8 +5,8 @@ use crate::parsers::{
 use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for Rust.
-pub(super) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
-    Ok(Box::new(BlocksFromCommentsParser::new(comments_parser()?)))
+pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
+    Ok(BlocksFromCommentsParser::new(comments_parser()?))
 }
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
@@ -18,7 +18,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
         vec![
             (
                 line_comment_query,
-                Some(|_, comment, _node| {
+                Some(Box::new(|_, comment, _node| {
                     Ok(Some(if comment.starts_with("///") {
                         comment.replacen("///", "   ", 1)
                     } else if comment.starts_with("//!") {
@@ -28,11 +28,13 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
                     } else {
                         comment.to_string()
                     }))
-                }),
+                })),
             ),
             (
                 block_comment_query,
-                Some(|_, comment, _node| Ok(Some(c_style_multiline_comment_processor(comment)))),
+                Some(Box::new(|_, comment, _node| {
+                    Ok(Some(c_style_multiline_comment_processor(comment)))
+                })),
             ),
         ],
     );

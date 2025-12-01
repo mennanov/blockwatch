@@ -1,14 +1,74 @@
+use crate::blocks::Block;
 use crate::parsers::{
     BlocksFromCommentsParser, BlocksParser, CommentsParser, TreeSitterCommentsParser, html,
 };
-use tree_sitter::Query;
+use anyhow::Context;
+use itertools::Itertools;
+use tree_sitter::{Query, StreamingIterator};
 
 /// Returns a [`BlocksParser`] for Markdown.
-pub(super) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
-    Ok(Box::new(BlocksFromCommentsParser::new(comments_parser()?)))
+pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
+    let md_blocks_parser = BlocksFromCommentsParser::new(markdown_comments_parser()?);
+    let html_blocks_parser = html::parser()?;
+    Ok(MdParser::new(md_blocks_parser, html_blocks_parser))
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+struct MdParser<C: CommentsParser, HtmlParser: BlocksParser> {
+    md_parser: BlocksFromCommentsParser<C>,
+    html_parser: HtmlParser,
+}
+
+impl<C: CommentsParser, HtmlParser: BlocksParser> MdParser<C, HtmlParser> {
+    fn new(md_parser: BlocksFromCommentsParser<C>, html_parser: HtmlParser) -> Self {
+        Self {
+            md_parser,
+            html_parser,
+        }
+    }
+
+    fn parse_html_blocks(&self, contents: &str) -> anyhow::Result<Vec<Block>> {
+        let mut parser = tree_sitter::Parser::new();
+        let markdown_lang = tree_sitter_md::LANGUAGE.into();
+        parser
+            .set_language(&markdown_lang)
+            .expect("Error setting Tree-sitter language");
+        let tree = parser.parse(contents, None).unwrap();
+        let root_node = tree.root_node();
+        let query = Query::new(&markdown_lang, "(html_block) @html_block").unwrap();
+        let mut query_cursor = tree_sitter::QueryCursor::new();
+        let mut matches = query_cursor.matches(&query, root_node, contents.as_bytes());
+        let mut html_blocks = Vec::new();
+        while let Some(query_match) = matches.next() {
+            let capture = query_match
+                .captures
+                .first()
+                .context("Empty Tree-sitter html_block query match")?;
+            let node = capture.node;
+            let html_block = &contents[node.start_byte()..node.end_byte()];
+            let blocks = self
+                .html_parser
+                .parse(html_block)?
+                .into_iter()
+                .map(|mut block| {
+                    block.add_offsets(node.start_position().row + 1, node.start_byte());
+                    block
+                });
+            html_blocks.extend(blocks);
+        }
+        Ok(html_blocks)
+    }
+}
+
+impl<C: CommentsParser, HtmlParser: BlocksParser> BlocksParser for MdParser<C, HtmlParser> {
+    fn parse(&self, contents: &str) -> anyhow::Result<Vec<Block>> {
+        let md_blocks = self.md_parser.parse(contents)?;
+        let html_blocks = self.parse_html_blocks(contents)?;
+
+        Ok(md_blocks.into_iter().merge(html_blocks).collect())
+    }
+}
+
+fn markdown_comments_parser() -> anyhow::Result<impl CommentsParser> {
     let markdown_lang = tree_sitter_md::LANGUAGE.into();
     let block_comment_query = Query::new(
         &markdown_lang,
@@ -17,51 +77,53 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
              (#eq? @comment_marker "[//]")
          ) @comment"#,
     )?;
-    let html_comments_parser = html::parser()?;
-    let html_comment_query = Query::new(&markdown_lang, r#"(html_block) @comment"#)?;
+
     let parser = TreeSitterCommentsParser::new(
         markdown_lang,
-        vec![
-            (
-                block_comment_query,
-                Some(|capture_idx, comment| {
-                    if capture_idx != 1 {
-                        return None;
-                    }
-                    let mut result = String::with_capacity(comment.len());
-                    let prefix_idx = comment
-                        .find("[//]:")
-                        .expect("comment is expected to start with '[//]:'");
-                    let open_idx = comment
-                        .find("(")
-                        .expect("comment is expected to start with '('");
-                    let close_idx = comment
-                        .rfind(")")
-                        .expect("comment is expected to end with ')'");
-                    result.push_str(&comment[..prefix_idx]);
-                    // Replace "[//]:" with spaces.
-                    result.push_str("     ");
-                    // Replace everything before "(" with spaces (including the "(").
-                    result.push_str(" ".repeat(open_idx - (prefix_idx + 5) + 1).as_str());
-                    // Copy the comment's content.
-                    result.push_str(&comment[open_idx + 1..close_idx]);
-                    // Replace ")" with a space.
-                    result.push(' ');
-                    if close_idx + 1 < comment.len() {
-                        result.push_str(&comment[close_idx + 1..]);
-                    }
-                    Some(result)
-                }),
-            ),
-            (
-                html_comment_query,
-                Some(|_, comment| {
-                    println!("HTML comment: {}", comment);
-                    let comments = html_comments_parser.parse(comment);
-                    return None;
-                }),
-            ),
-        ],
+        vec![(
+            block_comment_query,
+            Some(Box::new(|capture_idx, comment, _node| {
+                if capture_idx != 1 {
+                    return Ok(None);
+                }
+                let mut result = String::with_capacity(comment.len());
+                let prefix_idx = comment
+                    .find("[//]:")
+                    .expect("comment is expected to start with '[//]:'");
+
+                let start_search = prefix_idx + 5;
+                let open_idx = comment[start_search..]
+                    .find(|c| ['(', '"', '\''].contains(&c))
+                    .map(|i| i + start_search)
+                    .expect("comment is expected to have a title delimiter");
+
+                let open_char = comment.chars().nth(open_idx).unwrap();
+                let close_char = match open_char {
+                    '(' => ')',
+                    '"' => '"',
+                    '\'' => '\'',
+                    _ => unreachable!(),
+                };
+
+                let close_idx = comment
+                    .rfind(close_char)
+                    .expect("comment is expected to end with matching delimiter");
+
+                result.push_str(&comment[..prefix_idx]);
+                // Replace "[//]:" with spaces.
+                result.push_str("     ");
+                // Replace everything before the open delimiter with spaces (including the delimiter).
+                result.push_str(" ".repeat(open_idx - (prefix_idx + 5) + 1).as_str());
+                // Copy the comment's content.
+                result.push_str(&comment[open_idx + 1..close_idx]);
+                // Replace the close delimiter with a space.
+                result.push(' ');
+                if close_idx + 1 < comment.len() {
+                    result.push_str(&comment[close_idx + 1..]);
+                }
+                Ok(Some(result))
+            })),
+        )],
     );
     Ok(parser)
 }
@@ -69,48 +131,60 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parsers::Comment;
+    use crate::test_utils;
+    use std::collections::HashMap;
 
     #[test]
-    fn parses_markdown_comments_correctly() -> anyhow::Result<()> {
-        let comments_parser = comments_parser()?;
+    fn parses_markdown_blocks_correctly() -> anyhow::Result<()> {
+        let parser = parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"
+        let content = r#"
 # Header
 [foo]: /url "title"
 
-[//]: # (This is a markdown comment)
-[//]: # (Another markdown comment )
-
+[//]: # (<block name="md_block">)
 Some text here
 
-[//]: # (Third comment with
-multiple lines
-in it)"#,
-        )?;
+[//]: # (</block>)
+
+[//]: # (<block name="md_block_2">)
+Some text here 2
+
+[//]: # (<block name="md_block_3">)
+Some text here 3
+
+[//]: # (</block>)
+[//]: # (</block>)
+"#;
+        let blocks = parser.parse(content)?;
 
         assert_eq!(
             blocks,
             vec![
-                Comment {
-                    source_line_number: 5,
-                    source_start_position: 31,
-                    source_end_position: 68,
-                    comment_text: "         This is a markdown comment \n".to_string()
-                },
-                Comment {
-                    source_line_number: 6,
-                    source_start_position: 68,
-                    source_end_position: 104,
-                    comment_text: "         Another markdown comment  \n".to_string()
-                },
-                Comment {
-                    source_line_number: 10,
-                    source_start_position: 121,
-                    source_end_position: 170,
-                    comment_text: "         Third comment with\nmultiple lines\nin it ".to_string()
-                },
+                Block::new(
+                    5,
+                    8,
+                    HashMap::from([("name".to_string(), "md_block".to_string())]),
+                    test_utils::substr_range(content, "<block name=\"md_block\">"),
+                    test_utils::substr_range(content, "Some text here\n\n")
+                ),
+                Block::new(
+                    10,
+                    17,
+                    HashMap::from([("name".to_string(), "md_block_2".to_string())]),
+                    test_utils::substr_range(content, "<block name=\"md_block_2\">"),
+                    test_utils::substr_range(
+                        content,
+                        "Some text here 2\n\n[//]: # (<block name=\"md_block_3\">)\nSome text here 3\n\n[//]: # (</block>)\n"
+                    )
+                ),
+                Block::new(
+                    13,
+                    16,
+                    HashMap::from([("name".to_string(), "md_block_3".to_string())]),
+                    test_utils::substr_range(content, "<block name=\"md_block_3\">"),
+                    test_utils::substr_range(content, "Some text here 3\n\n")
+                )
             ]
         );
 
@@ -118,47 +192,42 @@ in it)"#,
     }
 
     #[test]
-    fn parses_html_style_comments_correctly() -> anyhow::Result<()> {
-        let comments_parser = comments_parser()?;
+    fn parses_html_blocks_correctly() -> anyhow::Result<()> {
+        let parser = parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"
-# This is a Markdown header
+        let content = r#"
+# Header
 
 <div>
-<!-- This is an html comment -->
+<!-- <block name="html_block"> -->
+Some html content
+<!-- </block> -->
 </div>
-<!-- Another html comment -->
 
-Some text here
+[//]: # (<block name="md_block">)
+Some markdown content
 
-<!-- Third comment with
-multiple lines
-in it -->"#,
-        )?;
+[//]: # (</block>)
+"#;
+        let blocks = parser.parse(content)?;
 
         assert_eq!(
             blocks,
             vec![
-                Comment {
-                    source_line_number: 5,
-                    source_start_position: 36,
-                    source_end_position: 67,
-                    comment_text: "      This is an html comment     \n".to_string()
-                },
-                Comment {
-                    source_line_number: 7,
-                    source_start_position: 76,
-                    source_end_position: 104,
-                    comment_text: "      Another html comment     \n".to_string()
-                },
-                Comment {
-                    source_line_number: 11,
-                    source_start_position: 123,
-                    source_end_position: 170,
-                    comment_text: "      Third comment with\nmultiple lines\nin it     "
-                        .to_string()
-                },
+                Block::new(
+                    6,
+                    8,
+                    HashMap::from([("name".to_string(), "html_block".to_string())]),
+                    test_utils::substr_range(content, "<block name=\"html_block\">"),
+                    test_utils::substr_range(content, "\nSome html content\n")
+                ),
+                Block::new(
+                    10,
+                    13,
+                    HashMap::from([("name".to_string(), "md_block".to_string())]),
+                    test_utils::substr_range(content, "<block name=\"md_block\">"),
+                    test_utils::substr_range(content, "Some markdown content\n\n")
+                )
             ]
         );
 

@@ -4,8 +4,8 @@ use crate::parsers::{
 use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for Bash.
-pub(super) fn parser() -> anyhow::Result<Box<dyn BlocksParser>> {
-    Ok(Box::new(BlocksFromCommentsParser::new(comments_parser()?)))
+pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
+    Ok(BlocksFromCommentsParser::new(comments_parser()?))
 }
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
@@ -15,13 +15,13 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
         bash_language,
         vec![(
             comment_query,
-            Some(|_, comment, _node| {
+            Some(Box::new(|_, comment, _node| {
                 if comment.starts_with("#!") {
                     Ok(None)
                 } else {
                     Ok(Some(comment.replacen("#", " ", 1)))
                 }
-            }),
+            })),
         )],
     );
     Ok(parser)

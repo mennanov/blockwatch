@@ -17,7 +17,7 @@ use strum_macros::EnumString;
 const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
 
 /// Represents a `block` tag parsed from the source file comments.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Block {
     // Source line number with the `block` tag.
     pub(crate) starts_at_line: usize,
@@ -28,7 +28,22 @@ pub struct Block {
     // Block's start tag range in the original source code.
     pub(crate) start_tag_range: Range<usize>,
     // Block's content substring range in the original source code.
-    content_range: Range<usize>,
+    pub(crate) content_range: Range<usize>,
+}
+
+impl PartialOrd for Block {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Block {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.start_tag_range
+            .start
+            .cmp(&other.start_tag_range.start)
+            .then_with(|| self.start_tag_range.end.cmp(&other.start_tag_range.end))
+    }
 }
 
 impl Block {
@@ -167,6 +182,16 @@ impl Block {
                 BlockSeverity::from_str(s.as_str())
                     .context("Failed to parse \"severity\" attribute")
             })
+    }
+
+    /// Adds the given `line_offset` and `byte_offset` to the block's ranges.
+    pub(crate) fn add_offsets(&mut self, line_offset: usize, byte_offset: usize) {
+        self.starts_at_line += line_offset;
+        self.ends_at_line += line_offset;
+        self.start_tag_range.start += byte_offset;
+        self.start_tag_range.end += byte_offset;
+        self.content_range.start += byte_offset;
+        self.content_range.end += byte_offset;
     }
 }
 

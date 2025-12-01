@@ -47,28 +47,28 @@ trait CommentsParser {
 
 /// Returns a map of all available language parsers by their file extensions.
 pub fn language_parsers() -> anyhow::Result<HashMap<OsString, Rc<Box<dyn BlocksParser>>>> {
-    let bash_parser = Rc::new(bash::parser()?);
-    let c_parser = Rc::new(c::parser()?);
-    let c_sharp_parser = Rc::new(c_sharp::parser()?);
-    let cpp_parser = Rc::new(cpp::parser()?);
-    let css_parser = Rc::new(css::parser()?);
-    let go_parser = Rc::new(go::parser()?);
-    let html_parser = Rc::new(html::parser()?);
-    let java_parser = Rc::new(java::parser()?);
-    let js_parser = Rc::new(javascript::parser()?);
-    let kotlin_parser = Rc::new(kotlin::parser()?);
-    let markdown_parser = Rc::new(markdown::parser()?);
-    let php_parser = Rc::new(php::parser()?);
-    let python_parser = Rc::new(python::parser()?);
-    let ruby_parser = Rc::new(ruby::parser()?);
-    let rust_parser = Rc::new(rust::parser()?);
-    let sql_parser = Rc::new(sql::parser()?);
-    let swift_parser = Rc::new(swift::parser()?);
-    let toml_parser = Rc::new(toml::parser()?);
-    let typescript_parser = Rc::new(typescript::parser()?);
-    let typescript_tsx_parser = Rc::new(tsx::parser()?);
-    let xml_parser = Rc::new(xml::parser()?);
-    let yaml_parser = Rc::new(yaml::parser()?);
+    let bash_parser = Rc::new(Box::new(bash::parser()?) as Box<dyn BlocksParser>);
+    let c_parser = Rc::new(Box::new(c::parser()?) as Box<dyn BlocksParser>);
+    let c_sharp_parser = Rc::new(Box::new(c_sharp::parser()?) as Box<dyn BlocksParser>);
+    let cpp_parser = Rc::new(Box::new(cpp::parser()?) as Box<dyn BlocksParser>);
+    let css_parser = Rc::new(Box::new(css::parser()?) as Box<dyn BlocksParser>);
+    let go_parser = Rc::new(Box::new(go::parser()?) as Box<dyn BlocksParser>);
+    let html_parser = Rc::new(Box::new(html::parser()?) as Box<dyn BlocksParser>);
+    let java_parser = Rc::new(Box::new(java::parser()?) as Box<dyn BlocksParser>);
+    let js_parser = Rc::new(Box::new(javascript::parser()?) as Box<dyn BlocksParser>);
+    let kotlin_parser = Rc::new(Box::new(kotlin::parser()?) as Box<dyn BlocksParser>);
+    let markdown_parser = Rc::new(Box::new(markdown::parser()?) as Box<dyn BlocksParser>);
+    let php_parser = Rc::new(Box::new(php::parser()?) as Box<dyn BlocksParser>);
+    let python_parser = Rc::new(Box::new(python::parser()?) as Box<dyn BlocksParser>);
+    let ruby_parser = Rc::new(Box::new(ruby::parser()?) as Box<dyn BlocksParser>);
+    let rust_parser = Rc::new(Box::new(rust::parser()?) as Box<dyn BlocksParser>);
+    let sql_parser = Rc::new(Box::new(sql::parser()?) as Box<dyn BlocksParser>);
+    let swift_parser = Rc::new(Box::new(swift::parser()?) as Box<dyn BlocksParser>);
+    let toml_parser = Rc::new(Box::new(toml::parser()?) as Box<dyn BlocksParser>);
+    let typescript_parser = Rc::new(Box::new(typescript::parser()?) as Box<dyn BlocksParser>);
+    let typescript_tsx_parser = Rc::new(Box::new(tsx::parser()?) as Box<dyn BlocksParser>);
+    let xml_parser = Rc::new(Box::new(xml::parser()?) as Box<dyn BlocksParser>);
+    let yaml_parser = Rc::new(Box::new(yaml::parser()?) as Box<dyn BlocksParser>);
     Ok(HashMap::from([
         // <block affects="README.md:supported-grammar" keep-sorted="asc">
         ("bash".into(), Rc::clone(&bash_parser)),
@@ -108,7 +108,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, Rc<Box<dyn BlocksP
     ]))
 }
 
-type CaptureProcessor = fn(usize, &str, &Node) -> anyhow::Result<Option<String>>;
+type CaptureProcessor = Box<dyn Fn(usize, &str, &Node) -> anyhow::Result<Option<String>>>;
 
 struct TreeSitterCommentsParser {
     language: Language,
@@ -394,14 +394,14 @@ fn c_style_comments_parser(language: Language, query: Query) -> TreeSitterCommen
         language,
         vec![(
             query,
-            Some(|_, comment, _node| {
+            Some(Box::new(|_, comment, _node| {
                 let result = if comment.starts_with("//") {
                     comment.replacen("//", "  ", 1)
                 } else {
                     c_style_multiline_comment_processor(comment)
                 };
                 Ok(Some(result))
-            }),
+            })),
         )],
     )
 }
@@ -417,11 +417,15 @@ fn c_style_line_and_block_comments_parser(
         vec![
             (
                 line_comment_query,
-                Some(|_, comment, _node| Ok(Some(comment.replacen("//", "  ", 1)))),
+                Some(Box::new(|_, comment, _node| {
+                    Ok(Some(comment.replacen("//", "  ", 1)))
+                })),
             ),
             (
                 block_comment_query,
-                Some(|_, comment, _node| Ok(Some(c_style_multiline_comment_processor(comment)))),
+                Some(Box::new(|_, comment, _node| {
+                    Ok(Some(c_style_multiline_comment_processor(comment)))
+                })),
             ),
         ],
     )
@@ -436,7 +440,9 @@ fn python_style_comments_parser(
         language,
         vec![(
             comment_query,
-            Some(|_, comment, _node| Ok(Some(comment.replacen("#", " ", 1)))),
+            Some(Box::new(|_, comment, _node| {
+                Ok(Some(comment.replacen("#", " ", 1)))
+            })),
         )],
     )
 }
@@ -447,7 +453,7 @@ fn xml_style_comments_parser(language: Language, comment_query: Query) -> TreeSi
         language,
         vec![(
             comment_query,
-            Some(|_, comment, _node| {
+            Some(Box::new(|_, comment, _node| {
                 let open_idx = comment.find("<!--").expect("open comment tag is expected");
                 let close_idx = comment.rfind("-->").expect("close comment tag is expected");
                 let mut result = String::with_capacity(comment.len());
@@ -459,7 +465,7 @@ fn xml_style_comments_parser(language: Language, comment_query: Query) -> TreeSi
                 result.push_str("   ");
                 result.push_str(&comment[close_idx + 3..]);
                 Ok(Some(result))
-            }),
+            })),
         )],
     )
 }
@@ -507,7 +513,7 @@ mod tests {
     use super::*;
     use crate::test_utils;
 
-    fn create_parser() -> Box<dyn BlocksParser> {
+    fn create_parser() -> impl BlocksParser {
         rust::parser().unwrap()
     }
 
