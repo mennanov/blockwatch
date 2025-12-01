@@ -250,7 +250,6 @@ pub const DETECTOR_FACTORIES: &[(&str, DetectorFactory)] = &[
     ("line-pattern", || {
         Box::new(LinePatternValidatorDetector::new())
     }),
-    // test
     ("line-count", || Box::new(LineCountValidatorDetector::new())),
     ("check-ai", || Box::new(CheckAiValidatorDetector::new())),
     // </block>
