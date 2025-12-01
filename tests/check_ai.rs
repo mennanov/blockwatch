@@ -157,7 +157,8 @@ async fn when_api_key_is_empty_error_is_printed() {
 
     // Configure client to use fake server for this command only
     let mut cmd = cargo_bin_cmd!();
-    cmd.env(API_URL_ENV_VAR_NAME, format!("http://{addr}/v1"));
+    cmd.env_clear()
+        .env(API_URL_ENV_VAR_NAME, format!("http://{addr}/v1"));
 
     let diff_content = r#"
 diff --git a/tests/testdata/check_ai.py b/tests/testdata/check_ai.py

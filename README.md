@@ -21,10 +21,10 @@ BlockWatch can run on your **entire codebase** or check only **changed files** i
 
 - 🔗 **Drift Detection**: Explicitly link blocks of code. If one changes, the other must be updated.
 - 🧹 **Content Enforcement**:
-  - `keep-sorted`: Keep lists sorted.
-  - `keep-unique`: Ensure no duplicates.
-  - `line-pattern`: Validate lines against Regex.
-  - `line-count`: Enforce block size limits.
+    - `keep-sorted`: Keep lists sorted.
+    - `keep-unique`: Ensure no duplicates.
+    - `line-pattern`: Validate lines against Regex.
+    - `line-count`: Enforce block size limits.
 - 🤖 **AI Validation**: Use natural language rules to validate code or docs (e.g., "Must mention 'banana'").
 - 🌍 **Language Agnostic**: Works with almost any language (Rust, Python, JS, Go, Markdown, YAML, etc.).
 - 🚀 **Flexible Execution**: Run on specific files, glob patterns, or git diffs.
@@ -54,11 +54,11 @@ Download from [Releases](https://github.com/mennanov/blockwatch/releases).
 
 ### 1. Scan Your Project
 
-Validate all blocks in your project using glob patterns:
+Validate all blocks in your project:
 
 ```shell
-# Check all files
-blockwatch "**/*"
+# Check all files (defaults to "**")
+blockwatch
 
 # Check specific file types
 blockwatch "src/**/*.rs" "**/*.md"
@@ -79,6 +79,12 @@ git diff --patch | blockwatch
 
 # Check staged changes
 git diff --cached --patch | blockwatch
+
+# Check changes in a specific file only
+git diff --patch path/to/file | blockwatch
+
+# Check changes and some other (possibly unchanged) files
+git diff --patch | blockwatch "src/always_checked.rs" "**/*.md"
 ```
 
 ### 3. CI Integration

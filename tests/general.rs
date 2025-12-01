@@ -260,6 +260,25 @@ fn recursive_glob_pattern_provided_run_checks_matching_files_recursively() {
         ));
 }
 
+// Emulates running `blockwatch` with no args and input.
+#[test]
+fn no_globs_no_diff_input_provided_run_checks_for_all_paths() {
+    let mut cmd = cargo_bin_cmd!();
+    // BLOCKWATCH_TERMINAL_MODE is required to simulate a TTY input.
+    cmd.env("BLOCKWATCH_TERMINAL_MODE", "true");
+    // check-ai is disabled to avoid errors caused by the missing environment variables.
+    cmd.arg("--disable=check-ai");
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("keep-sorted"))
+        .stderr(predicate::str::contains("tests/testdata/paths/invalid.py"));
+}
+
 #[test]
 fn ignore_glob_provided_run_ignores_matching_files() {
     let mut cmd = cargo_bin_cmd!();
