@@ -246,7 +246,7 @@ prices = [
 [//]: # (<block name="check-ai-env-vars">)
 
 - `BLOCKWATCH_AI_API_KEY`: API Key (OpenAI compatible).
-- `BLOCKWATCH_AI_MODEL`: Model name (default: `gpt-4o-mini`).
+- `BLOCKWATCH_AI_MODEL`: Model name (default: `gpt-5-nano`).
 - `BLOCKWATCH_AI_API_URL`: Custom API URL (optional).
 
 [//]: # (</block>)

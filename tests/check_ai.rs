@@ -40,7 +40,7 @@ async fn start_fake_openai() -> (SocketAddr, tokio::task::JoinHandle<()>) {
             "id": "chatcmpl-test",
             "object": "chat.completion",
             "created": 1_700_000_000u64,
-            "model": payload.get("model").and_then(|v| v.as_str()).unwrap_or("gpt-4o-mini"),
+            "model": payload.get("model").and_then(|v| v.as_str()).unwrap_or("gpt-5-nano"),
             "choices": [
                 {
                     "index": 0,
