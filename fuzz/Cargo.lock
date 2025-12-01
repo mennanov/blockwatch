@@ -4,9 +4,9 @@ version = 4
 
 [[package]]
 name = "afl"
-version = "0.15.24"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "927cd71710d1a232519e2393470e8f74a178ae59367efe58fa122884bba35ca4"
+checksum = "2027b09e36bf321ace7af43a23df3d46dae645b855be337b0b6582c79ad53769"
 dependencies = [
  "home",
  "libc",
@@ -81,9 +81,9 @@ checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
 name = "async-openai"
-version = "0.30.1"
+version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bf39a15c8d613eb61892dc9a287c02277639ebead41ee611ad23aaa613f1a82"
+checksum = "1cc4c602409022b854d89332fae01a6c69a4122fdd0ec66a071b9b5c3a87750b"
 dependencies = [
  "async-openai-macros",
  "backoff",
@@ -98,11 +98,13 @@ dependencies = [
  "secrecy",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "thiserror 2.0.17",
  "tokio",
  "tokio-stream",
  "tokio-util",
  "tracing",
+ "url",
 ]
 
 [[package]]

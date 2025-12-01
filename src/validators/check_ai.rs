@@ -6,7 +6,7 @@ use crate::validators::{
 use anyhow::{Context, anyhow};
 use async_openai::Client;
 use async_openai::config::{Config, OPENAI_API_BASE, OpenAIConfig};
-use async_openai::types::{
+use async_openai::types::chat::{
     ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs,
     ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequestArgs,
 };
