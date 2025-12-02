@@ -89,7 +89,11 @@ mod test_utils {
 
     impl FileSystem for FakeFileSystem {
         fn read_to_string(&self, path: &Path) -> anyhow::Result<String> {
-            Ok(self.files[&path.display().to_string()].clone())
+            Ok(self
+                .files
+                .get(&path.display().to_string())
+                .unwrap_or_else(|| panic!("File {} not found", path.display()))
+                .clone())
         }
 
         fn walk(&self) -> impl Iterator<Item = anyhow::Result<PathBuf>> {

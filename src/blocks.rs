@@ -308,17 +308,9 @@ fn parse_file(
     parsers: &HashMap<OsString, Rc<Box<dyn BlocksParser>>>,
     extra_file_extensions: &HashMap<OsString, OsString>,
 ) -> anyhow::Result<Option<FileBlocks>> {
-    let ext = match file_path.extension() {
-        Some(ext) => ext,
+    let parser = match parser_for_file_path(file_path, parsers, extra_file_extensions) {
         None => return Ok(None),
-    };
-    let ext = extra_file_extensions
-        .get(ext)
-        .map(|v| v.as_os_str())
-        .unwrap_or(ext);
-    let parser = match parsers.get(ext) {
-        Some(parser) => parser,
-        None => return Ok(None),
+        Some(p) => p,
     };
     let source_code = file_reader.read_to_string(file_path)?;
     let new_line_positions: Vec<usize> = source_code
@@ -357,6 +349,33 @@ fn parse_file(
         file_content_new_lines: new_line_positions,
         blocks_with_context,
     }))
+}
+
+fn parser_for_file_path<'p>(
+    file_path: &Path,
+    parsers: &'p HashMap<OsString, Rc<Box<dyn BlocksParser>>>,
+    extra_file_extensions: &HashMap<OsString, OsString>,
+) -> Option<&'p Rc<Box<dyn BlocksParser>>> {
+    let file_name = file_path.file_name()?.to_str()?;
+    let parts: Vec<&str> = file_name.split('.').collect();
+
+    // Try increasingly longer compound extensions, starting from the last part
+    // For "go.mod", try: "mod", then "go.mod"
+    // For "types.d.ts", try: "ts", then "d.ts", then "types.d.ts"
+    for i in (0..parts.len()).rev() {
+        let extension = parts[i..].join(".");
+        let ext_os = OsString::from(&extension);
+
+        let ext = if let Some(ext) = extra_file_extensions.get(&ext_os) {
+            ext
+        } else {
+            &ext_os
+        };
+        if let Some(parser) = parsers.get(ext) {
+            return Some(parser);
+        }
+    }
+    None
 }
 
 pub trait FileSystem {
@@ -938,4 +957,225 @@ mod parse_blocks_tests {
         assert_eq!(blocks.len(), 0);
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod supported_languages_tests {
+    use std::{collections::HashMap, path::PathBuf};
+
+    use crate::blocks::*;
+    use crate::parsers::language_parsers;
+    use crate::test_utils::FakeFileSystem;
+
+    // <block name="supported-extensions">
+    #[test]
+    fn all_language_extensions_are_supported() -> anyhow::Result<()> {
+        let parsers = language_parsers()?;
+        let file_names = [
+            "bash.bash",
+            "c.c",
+            "cc.cpp",
+            "cpp.cpp",
+            "cs.cs",
+            "css.css",
+            "go.go",
+            "go.mod",
+            "go.sum",
+            "go.work",
+            "h.h",
+            "htm.htm",
+            "html.html",
+            "java.java",
+            "js.js",
+            "jsx.jsx",
+            "kt.kt",
+            "kts.kts",
+            "markdown.markdown",
+            "md.md",
+            "php.php",
+            "phtml.phtml",
+            "py.py",
+            "pyi.pyi",
+            "rb.rb",
+            "rs.rs",
+            "sh.sh",
+            "sql.sql",
+            "swift.swift",
+            "toml.toml",
+            "ts.ts",
+            "tsx.tsx",
+            "typescript.d.ts",
+            "xml.xml",
+            "yaml.yaml",
+            "yml.yml",
+        ];
+        let file_system = FakeFileSystem::with_walk_paths(
+            HashMap::from([
+                (
+                    "bash.bash".to_string(),
+                    "# <block>\necho \"hello\"\n# </block>".to_string(),
+                ),
+                (
+                    "c.c".to_string(),
+                    "/* <block> */\nint main() { return 0; }\n/* </block> */".to_string(),
+                ),
+                (
+                    "cc.cpp".to_string(),
+                    "// <block>\nint main() { return 0; }\n// </block>".to_string(),
+                ),
+                (
+                    "cpp.cpp".to_string(),
+                    "// <block>\nint main() { return 0; }\n// </block>".to_string(),
+                ),
+                (
+                    "cs.cs".to_string(),
+                    "// <block>\nclass Program { }\n// </block>".to_string(),
+                ),
+                (
+                    "css.css".to_string(),
+                    "/* <block> */\nbody { margin: 0; }\n/* </block> */".to_string(),
+                ),
+                (
+                    "go.go".to_string(),
+                    "// <block>\nfunc main() {}\n// </block>".to_string(),
+                ),
+                (
+                    "go.mod".to_string(),
+                    "// <block>\nmodule example.com/m\n// </block>".to_string(),
+                ),
+                (
+                    "go.sum".to_string(),
+                    "// <block>\nexample.com/dep v1.0.0 h1:abc\n// </block>".to_string(),
+                ),
+                (
+                    "go.work".to_string(),
+                    "// <block>\nuse ./mod\n// </block>".to_string(),
+                ),
+                (
+                    "h.h".to_string(),
+                    "// <block>\nvoid foo();\n// </block>".to_string(),
+                ),
+                (
+                    "htm.htm".to_string(),
+                    "<!-- <block> -->\n<div>Content</div>\n<!-- </block> -->".to_string(),
+                ),
+                (
+                    "html.html".to_string(),
+                    "<!-- <block> -->\n<p>Hello</p>\n<!-- </block> -->".to_string(),
+                ),
+                (
+                    "java.java".to_string(),
+                    "// <block>\nclass App {}\n// </block>".to_string(),
+                ),
+                (
+                    "js.js".to_string(),
+                    "// <block>\nconst x = 1;\n// </block>".to_string(),
+                ),
+                (
+                    "jsx.jsx".to_string(),
+                    "// <block>\nconst Comp = () => <div/>;\n// </block>".to_string(),
+                ),
+                (
+                    "kt.kt".to_string(),
+                    "// <block>\nfun main() {}\n// </block>".to_string(),
+                ),
+                (
+                    "kts.kts".to_string(),
+                    "// <block>\nplugins { }\n// </block>".to_string(),
+                ),
+                (
+                    "markdown.markdown".to_string(),
+                    "<div>\n<!-- <block> -->\n# Title\n<!-- </block> -->\n</div>".to_string(),
+                ),
+                (
+                    "md.md".to_string(),
+                    "<div>\n<!-- <block> -->\n## Heading\n<!-- </block> -->\n</div>".to_string(),
+                ),
+                (
+                    "php.php".to_string(),
+                    "<?php\n# <block>\necho 'hello';\n# </block>\n?>".to_string(),
+                ),
+                (
+                    "phtml.phtml".to_string(),
+                    "<?php\n# <block>\necho 'world';\n# </block>\n?>".to_string(),
+                ),
+                (
+                    "py.py".to_string(),
+                    "# <block>\ndef main():\n    pass\n# </block>".to_string(),
+                ),
+                (
+                    "pyi.pyi".to_string(),
+                    "# <block>\ndef foo() -> None: pass\n# </block>".to_string(),
+                ),
+                (
+                    "rb.rb".to_string(),
+                    "# <block>\ndef hello\n  puts 'world'\nend\n# </block>".to_string(),
+                ),
+                (
+                    "rs.rs".to_string(),
+                    r#"/* <block> */fn a() {}/* </block> */"#.to_string(),
+                ),
+                (
+                    "sh.sh".to_string(),
+                    "# <block>\necho \"hello\"\n# </block>".to_string(),
+                ),
+                (
+                    "sql.sql".to_string(),
+                    "-- <block>\nSELECT * FROM users;\n-- </block>".to_string(),
+                ),
+                (
+                    "swift.swift".to_string(),
+                    "// <block>\nfunc main() {}\n// </block>".to_string(),
+                ),
+                (
+                    "toml.toml".to_string(),
+                    "# <block>\nname = \"test\"\n# </block>".to_string(),
+                ),
+                (
+                    "ts.ts".to_string(),
+                    "// <block>\nconst x: number = 1;\n// </block>".to_string(),
+                ),
+                (
+                    "tsx.tsx".to_string(),
+                    "// <block>\nconst C = () => <div/>;\n// </block>".to_string(),
+                ),
+                (
+                    "typescript.d.ts".to_string(),
+                    "// <block>\ndeclare const x: number;\n// </block>".to_string(),
+                ),
+                (
+                    "xml.xml".to_string(),
+                    "<!-- <block> -->\n<root/>\n<!-- </block> -->".to_string(),
+                ),
+                (
+                    "yaml.yaml".to_string(),
+                    "# <block>\nkey: value\n# </block>".to_string(),
+                ),
+                (
+                    "yml.yml".to_string(),
+                    "# <block>\nname: test\n# </block>".to_string(),
+                ),
+            ]),
+            &file_names,
+        );
+
+        // Each file in `file_names` should have a corresponding parser.
+        assert_eq!(parsers.len(), file_names.len());
+
+        let blocks_by_file = parse_blocks(HashMap::new(), &file_system, parsers, HashMap::new())?;
+
+        assert_eq!(blocks_by_file.len(), 36);
+        for file_name in &file_names {
+            assert!(
+                !blocks_by_file
+                    .get(&PathBuf::from(file_name))
+                    .unwrap_or_else(|| panic!("No blocks found for file {file_name}"))
+                    .blocks_with_context
+                    .is_empty(),
+                "File {file_name} should have blocks",
+            );
+        }
+        Ok(())
+    }
+    // </block>
 }

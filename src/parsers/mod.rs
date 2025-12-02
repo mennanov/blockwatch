@@ -70,7 +70,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, Rc<Box<dyn BlocksP
     let xml_parser = Rc::new(Box::new(xml::parser()?) as Box<dyn BlocksParser>);
     let yaml_parser = Rc::new(Box::new(yaml::parser()?) as Box<dyn BlocksParser>);
     Ok(HashMap::from([
-        // <block affects="README.md:supported-grammar" keep-sorted="asc">
+        // <block affects="README.md:supported-grammar, src/blocks.rs:supported-extensions" keep-sorted="asc">
         ("bash".into(), Rc::clone(&bash_parser)),
         ("c".into(), c_parser),
         ("cc".into(), Rc::clone(&cpp_parser)),
