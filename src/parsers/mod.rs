@@ -8,6 +8,7 @@ mod html;
 mod java;
 mod javascript;
 mod kotlin;
+mod makefile;
 mod markdown;
 mod php;
 mod python;
@@ -57,6 +58,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, Rc<Box<dyn BlocksP
     let java_parser = Rc::new(Box::new(java::parser()?) as Box<dyn BlocksParser>);
     let js_parser = Rc::new(Box::new(javascript::parser()?) as Box<dyn BlocksParser>);
     let kotlin_parser = Rc::new(Box::new(kotlin::parser()?) as Box<dyn BlocksParser>);
+    let makefile_parser = Rc::new(Box::new(makefile::parser()?) as Box<dyn BlocksParser>);
     let markdown_parser = Rc::new(Box::new(markdown::parser()?) as Box<dyn BlocksParser>);
     let php_parser = Rc::new(Box::new(php::parser()?) as Box<dyn BlocksParser>);
     let python_parser = Rc::new(Box::new(python::parser()?) as Box<dyn BlocksParser>);
@@ -71,6 +73,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, Rc<Box<dyn BlocksP
     let yaml_parser = Rc::new(Box::new(yaml::parser()?) as Box<dyn BlocksParser>);
     Ok(HashMap::from([
         // <block affects="README.md:supported-grammar, src/blocks.rs:supported-extensions" keep-sorted="asc">
+        ("Makefile".into(), Rc::clone(&makefile_parser)),
         ("bash".into(), Rc::clone(&bash_parser)),
         ("c".into(), c_parser),
         ("cc".into(), Rc::clone(&cpp_parser)),
@@ -90,8 +93,10 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, Rc<Box<dyn BlocksP
         ("jsx".into(), js_parser),
         ("kt".into(), Rc::clone(&kotlin_parser)),
         ("kts".into(), kotlin_parser),
+        ("makefile".into(), Rc::clone(&makefile_parser)),
         ("markdown".into(), Rc::clone(&markdown_parser)),
         ("md".into(), markdown_parser),
+        ("mk".into(), makefile_parser),
         ("php".into(), Rc::clone(&php_parser)),
         ("phtml".into(), php_parser),
         ("py".into(), Rc::clone(&python_parser)),

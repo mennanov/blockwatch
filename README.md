@@ -272,6 +272,7 @@ BlockWatch supports comments in:
 - Java
 - JavaScript
 - Kotlin
+- Makefile
 - Markdown
 - PHP
 - Python

@@ -121,6 +121,7 @@ impl SimpleDiagnostic<'_> {
     }
 }
 
+#[derive(Debug)]
 pub struct ValidationContext {
     // Modified blocks with their corresponding source file contents grouped by filename.
     pub(crate) modified_blocks: HashMap<PathBuf, FileBlocks>,

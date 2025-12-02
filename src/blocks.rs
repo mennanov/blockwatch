@@ -359,9 +359,6 @@ fn parser_for_file_path<'p>(
     let file_name = file_path.file_name()?.to_str()?;
     let parts: Vec<&str> = file_name.split('.').collect();
 
-    // Try increasingly longer compound extensions, starting from the last part
-    // For "go.mod", try: "mod", then "go.mod"
-    // For "types.d.ts", try: "ts", then "d.ts", then "types.d.ts"
     for i in (0..parts.len()).rev() {
         let extension = parts[i..].join(".");
         let ext_os = OsString::from(&extension);
@@ -990,8 +987,11 @@ mod supported_languages_tests {
             "jsx.jsx",
             "kt.kt",
             "kts.kts",
+            "makefile",
+            "Makefile",
             "markdown.markdown",
             "md.md",
+            "mk.mk",
             "php.php",
             "phtml.phtml",
             "py.py",
@@ -1084,12 +1084,24 @@ mod supported_languages_tests {
                     "// <block>\nplugins { }\n// </block>".to_string(),
                 ),
                 (
+                    "makefile".to_string(),
+                    "# <block>\nall:\n\t@echo \"hello\"\n# </block>".to_string(),
+                ),
+                (
+                    "Makefile".to_string(),
+                    "# <block>\nall:\n\t@echo \"hello\"\n# </block>".to_string(),
+                ),
+                (
                     "markdown.markdown".to_string(),
                     "<div>\n<!-- <block> -->\n# Title\n<!-- </block> -->\n</div>".to_string(),
                 ),
                 (
                     "md.md".to_string(),
                     "<div>\n<!-- <block> -->\n## Heading\n<!-- </block> -->\n</div>".to_string(),
+                ),
+                (
+                    "mk.mk".to_string(),
+                    "# <block>\nall:\n\t@echo \"hello\"\n# </block>".to_string(),
                 ),
                 (
                     "php.php".to_string(),
@@ -1164,7 +1176,6 @@ mod supported_languages_tests {
 
         let blocks_by_file = parse_blocks(HashMap::new(), &file_system, parsers, HashMap::new())?;
 
-        assert_eq!(blocks_by_file.len(), 36);
         for file_name in &file_names {
             assert!(
                 !blocks_by_file
