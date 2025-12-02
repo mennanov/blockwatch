@@ -21,10 +21,10 @@ BlockWatch can run on your **entire codebase** or check only **changed files** i
 
 - 🔗 **Drift Detection**: Explicitly link blocks of code. If one changes, the other must be updated.
 - 🧹 **Content Enforcement**:
-    - `keep-sorted`: Keep lists sorted.
-    - `keep-unique`: Ensure no duplicates.
-    - `line-pattern`: Validate lines against Regex.
-    - `line-count`: Enforce block size limits.
+  - `keep-sorted`: Keep lists sorted.
+  - `keep-unique`: Ensure no duplicates.
+  - `line-pattern`: Validate lines against Regex.
+  - `line-count`: Enforce block size limits.
 - 🤖 **AI Validation**: Use natural language rules to validate code or docs (e.g., "Must mention 'banana'").
 - 🌍 **Language Agnostic**: Works with almost any language (Rust, Python, JS, Go, Markdown, YAML, etc.).
 - 🚀 **Flexible Execution**: Run on specific files, glob patterns, or git diffs.
@@ -267,7 +267,7 @@ BlockWatch supports comments in:
 - C#
 - C/C++
 - CSS
-- Go
+- Go (with `go.mod`, `go.sum` and `go.work` support)
 - HTML
 - Java
 - JavaScript
