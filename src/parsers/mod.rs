@@ -1121,6 +1121,22 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Active bug that needs to be fixed. See issue #57."]
+    fn comments_with_quotes_and_parenthesis_symbols() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = r#"
+/// "cxx" -> "c")
+// "a" block
+// "b" block
+// "c" block
+// <block name="foo-bar">
+// </block>"#;
+        let blocks = parser.parse(contents)?;
+        assert_eq!(blocks.len(), 1);
+        Ok(())
+    }
+
+    #[test]
     fn comments_with_unrelated_tags() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
