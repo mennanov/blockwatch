@@ -357,22 +357,30 @@ fn parser_for_file_path<'p>(
     extra_file_extensions: &HashMap<OsString, OsString>,
 ) -> Option<&'p Rc<Box<dyn BlocksParser>>> {
     let file_name = file_path.file_name()?.to_str()?;
-    let parts: Vec<&str> = file_name.split('.').collect();
 
-    for i in (0..parts.len()).rev() {
-        let extension = parts[i..].join(".");
-        let ext_os = OsString::from(&extension);
+    for (i, _) in file_name.match_indices('.').rev() {
+        let extension = &file_name[i + 1..];
+        let ext_os = OsString::from(extension);
 
-        let ext = if let Some(ext) = extra_file_extensions.get(&ext_os) {
-            ext
-        } else {
-            &ext_os
-        };
-        if let Some(parser) = parsers.get(ext) {
+        if let Some(parser) = try_parser_for_extension(&ext_os, parsers, extra_file_extensions) {
             return Some(parser);
         }
     }
-    None
+
+    try_parser_for_extension(&OsString::from(file_name), parsers, extra_file_extensions)
+}
+
+fn try_parser_for_extension<'p>(
+    extension: &OsString,
+    parsers: &'p HashMap<OsString, Rc<Box<dyn BlocksParser>>>,
+    extra_file_extensions: &HashMap<OsString, OsString>,
+) -> Option<&'p Rc<Box<dyn BlocksParser>>> {
+    let ext = if let Some(ext) = extra_file_extensions.get(extension) {
+        ext
+    } else {
+        extension
+    };
+    parsers.get(ext)
 }
 
 pub trait FileSystem {
