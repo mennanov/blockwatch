@@ -1,6 +1,6 @@
 use afl::fuzz;
 use blockwatch::blocks::Block;
-use blockwatch::parsers;
+use blockwatch::language_parsers;
 
 fn main() {
     fuzz!(|data: &[u8]| {
@@ -25,6 +25,6 @@ fn main() {
 }
 
 fn parse_rust_blocks(source: &str) -> anyhow::Result<Vec<Block>> {
-    let parsers = parsers::language_parsers()?;
+    let parsers = language_parsers::language_parsers()?;
     parsers["rs"].parse(source)
 }

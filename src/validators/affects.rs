@@ -160,7 +160,7 @@ fn parse_affects_attribute(value: &str) -> anyhow::Result<Vec<(Option<PathBuf>, 
 #[cfg(test)]
 mod validate_tests {
     use super::*;
-    use crate::differ::LineChange;
+    use crate::diff_parser::LineChange;
     use crate::test_utils::{
         merge_validation_contexts, validation_context, validation_context_with_changes,
     };
@@ -457,7 +457,7 @@ pass
 
     #[test]
     fn dependent_blocks_with_unmodified_content_returns_violations() -> anyhow::Result<()> {
-        use crate::differ::LineChange;
+        use crate::diff_parser::LineChange;
         use crate::test_utils::validation_context_with_changes;
 
         let validator = AffectsValidator::new();

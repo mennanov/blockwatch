@@ -1,6 +1,6 @@
-use crate::parsers::{
-    BlocksFromCommentsParser, BlocksParser, CommentsParser, TreeSitterCommentsParser,
-    c_style_multiline_comment_processor,
+use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
+use crate::language_parsers::{
+    CommentsParser, TreeSitterCommentsParser, c_style_multiline_comment_processor,
 };
 use tree_sitter::Query;
 
@@ -36,7 +36,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parsers::Comment;
+    use crate::language_parsers::Comment;
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {

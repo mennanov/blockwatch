@@ -1,5 +1,6 @@
-use crate::parsers;
-use crate::parsers::{BlocksFromCommentsParser, BlocksParser, CommentsParser};
+use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
+use crate::language_parsers;
+use crate::language_parsers::CommentsParser;
 use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for Golang.
@@ -10,14 +11,14 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let go_language = tree_sitter_go::LANGUAGE.into();
     let comment_query = Query::new(&go_language, "(comment) @comment")?;
-    let parser = parsers::c_style_comments_parser(go_language, comment_query);
+    let parser = language_parsers::c_style_comments_parser(go_language, comment_query);
     Ok(parser)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parsers::Comment;
+    use crate::language_parsers::Comment;
 
     #[test]
     fn parses_go_comments_correctly() -> anyhow::Result<()> {

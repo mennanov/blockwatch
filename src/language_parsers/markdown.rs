@@ -1,7 +1,6 @@
+use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::blocks::Block;
-use crate::parsers::{
-    BlocksFromCommentsParser, BlocksParser, CommentsParser, TreeSitterCommentsParser, html,
-};
+use crate::language_parsers::{CommentsParser, TreeSitterCommentsParser, html};
 use anyhow::Context;
 use itertools::Itertools;
 use tree_sitter::{Query, StreamingIterator};

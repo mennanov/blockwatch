@@ -1,5 +1,6 @@
-use crate::parsers;
-use crate::parsers::{BlocksFromCommentsParser, BlocksParser, CommentsParser};
+use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
+use crate::language_parsers;
+use crate::language_parsers::CommentsParser;
 use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for TypeScript.
@@ -10,14 +11,14 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let ts_language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
     let block_comment_query = Query::new(&ts_language, "(comment) @comment")?;
-    let parser = parsers::c_style_comments_parser(ts_language, block_comment_query);
+    let parser = language_parsers::c_style_comments_parser(ts_language, block_comment_query);
     Ok(parser)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parsers::Comment;
+    use crate::language_parsers::Comment;
 
     #[test]
     fn parses_typescript_comments_correctly() -> anyhow::Result<()> {

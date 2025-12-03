@@ -1,9 +1,11 @@
 use serde::Serialize;
 
+mod block_parser;
 pub mod blocks;
-pub mod differ;
+pub mod diff_parser;
 pub mod flags;
-pub mod parsers;
+pub mod language_parsers;
+mod tag_parser;
 pub mod validators;
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -34,8 +36,8 @@ impl Position {
 #[cfg(test)]
 mod test_utils {
     use crate::blocks::{FileBlocks, FileSystem, parse_blocks};
-    use crate::differ::LineChange;
-    use crate::parsers;
+    use crate::diff_parser::LineChange;
+    use crate::language_parsers;
     use crate::validators::ValidationContext;
     use std::collections::{HashMap, HashSet};
     use std::ops::Range;
@@ -126,7 +128,7 @@ mod test_utils {
             parse_blocks(
                 line_changes_by_file,
                 &file_system,
-                parsers::language_parsers().unwrap(),
+                language_parsers::language_parsers().unwrap(),
                 HashMap::new(),
             )
             .unwrap(),
