@@ -29,7 +29,9 @@ use std::ffi::OsString;
 use std::ops::Range;
 use std::rc::Rc;
 use std::string::ToString;
-use tag_parser::{BlockTag, BlockTagParser, TreeSitterHtmlBlockTagParser};
+use tag_parser::{
+    BlockTag, BlockTagParser, TreeSitterHtmlBlockTagParser, create_tree_sitter_parser_query,
+};
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator};
 
 /// Parses [`Blocks`] from a source code.
@@ -198,114 +200,46 @@ struct Comment {
     comment_text: String,
 }
 
-/// Represents a comment's metadata.
-#[derive(PartialEq)]
-struct CommentIndex {
-    // Comment's start position in **concatenated** comments (not in original source).
-    start_position: usize,
-    // Comment's end position in **concatenated** comments (not in original source).
-    end_position: usize,
-    // Comment's 1-based line number in the source.
-    source_start_line_number: usize,
-    // Comment's starting position in the source.
-    source_start_position: usize,
-    // Comment's end position in the source.
-    source_end_position: usize,
-}
-
 impl<C: CommentsParser> BlocksFromCommentsParser<C> {
     fn new(comments_parser: C) -> Self {
         Self { comments_parser }
     }
 
-    /// Returns a string of concatenated `comments` and its corresponding `CommentIndex`.
-    fn build_index(comments: &[Comment]) -> (String, Vec<CommentIndex>) {
-        let mut concatenated_comments = String::new();
-        let mut index = Vec::new();
-        for comment in comments {
-            index.push(CommentIndex {
-                start_position: concatenated_comments.len(),
-                end_position: concatenated_comments.len() + comment.comment_text.len(),
-                source_start_line_number: comment.source_line_number,
-                source_start_position: comment.source_start_position,
-                source_end_position: comment.source_end_position,
-            });
-            concatenated_comments.push_str(&comment.comment_text);
-        }
-
-        (concatenated_comments, index)
-    }
-
-    fn process_start_tag<'idx>(
-        stack: &mut Vec<BlockBuilder<'idx>>,
-        index: &'idx [CommentIndex],
+    fn process_start_tag<'c>(
+        comment: &'c Comment,
+        stack: &mut Vec<BlockBuilder<'c>>,
         start_position: usize,
         end_position: usize,
         attributes: HashMap<String, String>,
     ) {
-        let start_tag_start_index = index
-            .get(
-                index
-                    .binary_search_by(|comment_index| {
-                        comment_index.end_position.cmp(&start_position)
-                    })
-                    .unwrap_or_else(|e| e),
-            )
-            .expect("start tag start comment index out of bounds");
-        let start_tag_end_index = index
-            .get(
-                index
-                    .binary_search_by(|comment_index| comment_index.end_position.cmp(&end_position))
-                    .unwrap_or_else(|e| e),
-            )
-            .expect("start tag end comment index out of bounds");
-        let start_tag_range = start_tag_start_index.source_start_position
-            + (start_position - start_tag_start_index.start_position)
-            ..start_tag_end_index.source_start_position
-                + (end_position - start_tag_end_index.start_position);
-        stack.push(BlockBuilder::new(
-            start_tag_end_index.source_start_line_number,
-            start_tag_end_index,
-            attributes,
-            start_tag_range,
-        ));
+        let start_tag_range = comment.source_start_position + start_position
+            ..comment.source_start_position + end_position;
+        stack.push(BlockBuilder::new(comment, attributes, start_tag_range));
     }
 
-    fn process_end_tag<'idx>(
-        stack: &mut Vec<BlockBuilder<'idx>>,
+    fn process_end_tag<'c>(
+        comment: &'c Comment,
+        stack: &mut Vec<BlockBuilder<'c>>,
         blocks: &mut Vec<Block>,
-        concatenated_comments: &str,
-        index: &'idx [CommentIndex],
         start_position: usize,
-        end_position: usize,
     ) -> anyhow::Result<()> {
-        let end_tag_end_index = index
-            .get(
-                index
-                    .binary_search_by(|comment_index| comment_index.end_position.cmp(&end_position))
-                    .unwrap_or_else(|e| e),
-            )
-            .expect("end comment index out of bounds");
         if let Some(block_builder) = stack.pop() {
-            let content_range = if end_tag_end_index != block_builder.start_tag_end_index {
-                block_builder.start_tag_end_index.source_end_position
-                    ..end_tag_end_index.source_start_position
+            let content_range = if !std::ptr::eq(comment, block_builder.comment) {
+                block_builder.comment.source_end_position..comment.source_start_position
             } else {
                 // Block that starts and ends in the same comment can't have any
                 // content.
                 0..0
             };
-            let block_comment =
-                &concatenated_comments[end_tag_end_index.start_position..end_position];
             let end_line_number =
-                end_tag_end_index.source_start_line_number + block_comment.lines().count() - 1;
+                comment.source_line_number + comment.comment_text.lines().count() - 1;
             blocks.push(block_builder.build(end_line_number, content_range));
             Ok(())
         } else {
             Err(anyhow::anyhow!(
                 "Unexpected closed block at line {}, position {}",
-                end_tag_end_index.source_start_line_number,
-                end_tag_end_index.source_start_position + start_position
+                comment.source_line_number,
+                comment.source_start_position + start_position
             ))
         }
     }
@@ -314,38 +248,31 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
 impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
     fn parse(&self, contents: &str) -> anyhow::Result<Vec<Block>> {
         let comments = self.comments_parser.parse(contents)?;
-        let (concatenated_comments, index) = Self::build_index(&comments);
         let mut blocks = Vec::new();
         let mut stack = Vec::new();
-        let mut parser = TreeSitterHtmlBlockTagParser::new(concatenated_comments.as_str());
+        let (mut parser, query) = create_tree_sitter_parser_query();
+        for comment in &comments {
+            let mut parser =
+                TreeSitterHtmlBlockTagParser::new(&comment.comment_text, &mut parser, &query);
 
-        while let Some(tag) = parser.next()? {
-            match tag {
-                BlockTag::Start {
-                    start_position,
-                    end_position,
-                    attributes,
-                } => {
-                    Self::process_start_tag(
-                        &mut stack,
-                        &index,
+            while let Some(tag) = parser.next()? {
+                match tag {
+                    BlockTag::Start {
                         start_position,
                         end_position,
                         attributes,
-                    );
-                }
-                BlockTag::End {
-                    start_position,
-                    end_position,
-                } => {
-                    Self::process_end_tag(
-                        &mut stack,
-                        &mut blocks,
-                        concatenated_comments.as_str(),
-                        &index,
-                        start_position,
-                        end_position,
-                    )?;
+                    } => {
+                        Self::process_start_tag(
+                            comment,
+                            &mut stack,
+                            start_position,
+                            end_position,
+                            attributes,
+                        );
+                    }
+                    BlockTag::End { start_position, .. } => {
+                        Self::process_end_tag(comment, &mut stack, &mut blocks, start_position)?;
+                    }
                 }
             }
         }
@@ -353,7 +280,7 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
         if let Some(unclosed_block) = stack.pop() {
             return Err(anyhow::anyhow!(format!(
                 "Block at line {} is not closed",
-                unclosed_block.start_tag_end_index.source_start_line_number
+                unclosed_block.comment.source_line_number
             )));
         }
         blocks.sort_by(|a, b| a.starts_at_line.cmp(&b.starts_at_line));
@@ -362,23 +289,20 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
     }
 }
 
-struct BlockBuilder<'a> {
-    starts_at_line: usize,
-    start_tag_end_index: &'a CommentIndex,
+struct BlockBuilder<'c> {
+    comment: &'c Comment,
     attributes: HashMap<String, String>,
     start_tag_range: Range<usize>,
 }
 
-impl<'a> BlockBuilder<'a> {
+impl<'c> BlockBuilder<'c> {
     fn new(
-        starts_at_line: usize,
-        start_tag_end_index: &'a CommentIndex,
+        comment: &'c Comment,
         attributes: HashMap<String, String>,
         start_tag_range: Range<usize>,
     ) -> Self {
         Self {
-            starts_at_line,
-            start_tag_end_index,
+            comment,
             attributes,
             start_tag_range,
         }
@@ -387,7 +311,7 @@ impl<'a> BlockBuilder<'a> {
     /// Finalizes the block with the given end line and captured content, producing a `Block`.
     pub(crate) fn build(self, ends_at: usize, content_range: Range<usize>) -> Block {
         Block::new(
-            self.starts_at_line,
+            self.comment.source_line_number,
             ends_at,
             self.attributes,
             self.start_tag_range,
@@ -1081,14 +1005,14 @@ mod tests {
     }
 
     #[test]
-    fn malformed_block_tag_is_ignored() -> anyhow::Result<()> {
+    fn malformed_block_tag_returns_error() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
         // <block name="foo" affects="file:block" invalid-attr=">
         fn foo() {}
         // </block>
         "#;
-        assert!(parser.parse(contents)?.is_empty());
+        assert!(parser.parse(contents).is_err());
         Ok(())
     }
 

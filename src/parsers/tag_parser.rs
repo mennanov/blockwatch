@@ -22,19 +22,20 @@ pub(crate) enum BlockTag {
     },
 }
 
-pub(crate) struct TreeSitterHtmlBlockTagParser<'source> {
+pub(crate) struct TreeSitterHtmlBlockTagParser<'source, 'query> {
     source: &'source str,
-    query: Query,
+    query: &'query Query,
     tree: tree_sitter::Tree,
     last_searched_byte: usize,
 }
 
-impl<'source> TreeSitterHtmlBlockTagParser<'source> {
-    pub(crate) fn new(source: &'source str) -> Self {
-        let html_language = tree_sitter_html::LANGUAGE.into();
-        let query = Query::new(
-            &html_language,
-            r#"
+pub(crate) fn create_tree_sitter_parser_query() -> (Parser, Query) {
+    let html_language = tree_sitter_html::LANGUAGE.into();
+    let mut parser = Parser::new();
+    parser.set_language(&html_language).unwrap();
+    let query = Query::new(
+        &html_language,
+        r#"
             [
               (start_tag
                 (tag_name) @tag_name
@@ -44,10 +45,13 @@ impl<'source> TreeSitterHtmlBlockTagParser<'source> {
                 (#eq? @tag_name "block")) @end_tag
               (ERROR) @error_tag
             ]"#,
-        )
-        .unwrap();
-        let mut parser = Parser::new();
-        parser.set_language(&html_language).unwrap();
+    )
+    .unwrap();
+    (parser, query)
+}
+
+impl<'source, 'query> TreeSitterHtmlBlockTagParser<'source, 'query> {
+    pub(crate) fn new(source: &'source str, parser: &mut Parser, query: &'query Query) -> Self {
         let tree = parser.parse(source, None).unwrap();
         Self {
             source,
@@ -125,12 +129,12 @@ impl<'source> TreeSitterHtmlBlockTagParser<'source> {
     }
 }
 
-impl<'source> BlockTagParser for TreeSitterHtmlBlockTagParser<'source> {
+impl<'source, 'query> BlockTagParser for TreeSitterHtmlBlockTagParser<'source, 'query> {
     fn next(&mut self) -> anyhow::Result<Option<BlockTag>> {
         let mut cursor = QueryCursor::new();
         cursor.set_byte_range(self.last_searched_byte..self.source.len());
         let root = self.tree.root_node();
-        let mut matches = cursor.matches(&self.query, root, self.source.as_bytes());
+        let mut matches = cursor.matches(self.query, root, self.source.as_bytes());
 
         while let Some(query_match) = matches.next() {
             for capture in query_match.captures {
@@ -159,11 +163,11 @@ impl<'source> BlockTagParser for TreeSitterHtmlBlockTagParser<'source> {
                             .utf8_text(self.source.as_bytes())
                             .context("Failed to read error tag text")?;
                         // Handle unmatched end block tags.
-                        if node_text.trim() == "</block>" {
+                        if let Some(start_position) = node_text.find("</block>") {
                             self.last_searched_byte = end_position;
                             return Ok(Some(BlockTag::End {
                                 start_position,
-                                end_position,
+                                end_position: start_position + 8, // Length of "</block>".
                             }));
                         }
                     }
