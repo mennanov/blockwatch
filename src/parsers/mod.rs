@@ -212,7 +212,15 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
     ) {
         let start_tag_range = comment.source_start_position + start_position
             ..comment.source_start_position + end_position;
-        stack.push(BlockBuilder::new(comment, attributes, start_tag_range));
+        let starts_at_line = comment.source_line_number
+            + comment.comment_text[..start_position + 1].lines().count()
+            - 1;
+        stack.push(BlockBuilder::new(
+            starts_at_line,
+            comment,
+            attributes,
+            start_tag_range,
+        ));
     }
 
     fn process_end_tag<'c>(
@@ -229,8 +237,9 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
                 // content.
                 0..0
             };
-            let end_line_number =
-                comment.source_line_number + comment.comment_text.lines().count() - 1;
+            let end_line_number = comment.source_line_number
+                + comment.comment_text[..start_position + 1].lines().count()
+                - 1;
             blocks.push(block_builder.build(end_line_number, content_range));
             Ok(())
         } else {
@@ -286,6 +295,7 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
 }
 
 struct BlockBuilder<'c> {
+    starts_at_line: usize,
     comment: &'c Comment,
     attributes: HashMap<String, String>,
     start_tag_range: Range<usize>,
@@ -293,11 +303,13 @@ struct BlockBuilder<'c> {
 
 impl<'c> BlockBuilder<'c> {
     fn new(
+        starts_at_line: usize,
         comment: &'c Comment,
         attributes: HashMap<String, String>,
         start_tag_range: Range<usize>,
     ) -> Self {
         Self {
+            starts_at_line,
             comment,
             attributes,
             start_tag_range,
@@ -305,10 +317,10 @@ impl<'c> BlockBuilder<'c> {
     }
 
     /// Finalizes the block with the given end line and captured content, producing a `Block`.
-    pub(crate) fn build(self, ends_at: usize, content_range: Range<usize>) -> Block {
+    pub(crate) fn build(self, ends_at_line: usize, content_range: Range<usize>) -> Block {
         Block::new(
-            self.comment.source_line_number,
-            ends_at,
+            self.starts_at_line,
+            ends_at_line,
             self.attributes,
             self.start_tag_range,
             content_range,
@@ -521,7 +533,7 @@ mod tests {
             blocks,
             vec![Block::new(
                 1,
-                2,
+                1,
                 HashMap::new(),
                 test_utils::substr_range(contents, "<block>"),
                 test_utils::substr_range(contents, " let say = \"hi\"; ")
@@ -608,6 +620,42 @@ mod tests {
                     test_utils::substr_range(contents, "println!(\"hello2\");")
                 )
             ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn block_starts_on_non_first_comment_line() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = "/* Some comment\n<block> */println!(\"hello1\");// </block>";
+        let blocks = parser.parse(contents)?;
+        assert_eq!(
+            blocks,
+            vec![Block::new(
+                2,
+                2,
+                HashMap::new(),
+                test_utils::substr_range_nth(contents, "<block>", 0),
+                test_utils::substr_range(contents, "println!(\"hello1\");")
+            ),]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn block_ends_on_non_first_comment_line() -> anyhow::Result<()> {
+        let parser = create_parser();
+        let contents = "/* <block> */println!(\"hello1\");/* Some comment\n</block> */";
+        let blocks = parser.parse(contents)?;
+        assert_eq!(
+            blocks,
+            vec![Block::new(
+                1,
+                2,
+                HashMap::new(),
+                test_utils::substr_range_nth(contents, "<block>", 0),
+                test_utils::substr_range(contents, "println!(\"hello1\");")
+            ),]
         );
         Ok(())
     }
