@@ -29,9 +29,7 @@ use std::ffi::OsString;
 use std::ops::Range;
 use std::rc::Rc;
 use std::string::ToString;
-use tag_parser::{
-    BlockTag, BlockTagParser, TreeSitterHtmlBlockTagParser, create_tree_sitter_parser_query,
-};
+use tag_parser::{BlockTag, BlockTagParser, WinnowBlockTagParser};
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator};
 
 /// Parses [`Blocks`] from a source code.
@@ -250,10 +248,8 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
         let comments = self.comments_parser.parse(contents)?;
         let mut blocks = Vec::new();
         let mut stack = Vec::new();
-        let (mut parser, query) = create_tree_sitter_parser_query();
         for comment in &comments {
-            let mut parser =
-                TreeSitterHtmlBlockTagParser::new(&comment.comment_text, &mut parser, &query);
+            let mut parser = WinnowBlockTagParser::new(&comment.comment_text);
 
             while let Some(tag) = parser.next()? {
                 match tag {
@@ -842,14 +838,15 @@ mod tests {
     }
 
     #[test]
-    fn attributes_with_escaped_quotes() -> anyhow::Result<()> {
+    fn attributes_with_html_escaped_quotes_are_not_decoded() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
         // <block text="He said &quot;Hello&quot;">
         // </block>
         "#;
         let blocks = parser.parse(contents)?;
-        assert_eq!(blocks[0].attributes["text"], "He said \"Hello\"");
+
+        assert_eq!(blocks[0].attributes["text"], "He said &quot;Hello&quot;");
         Ok(())
     }
 
@@ -956,20 +953,18 @@ mod tests {
     }
 
     #[test]
-    fn duplicated_attributes_returns_error() -> anyhow::Result<()> {
+    fn duplicated_attributes_uses_last_value() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
         // <block color="red" color="blue">
         fn escaped() {}
         // </block>
         "#;
-        let result = parser.parse(contents);
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Duplicate attribute")
-        );
+        let blocks = parser.parse(contents)?;
+
+        // Duplicate attributes: last value wins (standard HTML/XML behavior)
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].attributes.get("color"), Some(&"blue".to_string()));
         Ok(())
     }
 
@@ -1045,7 +1040,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Active bug that needs to be fixed. See issue #57."]
     fn comments_with_quotes_and_parenthesis_symbols() -> anyhow::Result<()> {
         let parser = create_parser();
         let contents = r#"
