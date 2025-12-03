@@ -97,6 +97,8 @@ impl<'source> BlockTagParser for WinnowBlockTagParser<'source> {
 }
 
 /// Parses a block start tag.
+///
+/// Returns a map of attributes defined in the start tag.
 fn parse_start_tag(input: &mut &str) -> PResult<HashMap<String, String>> {
     delimited(
         literal("<block"),

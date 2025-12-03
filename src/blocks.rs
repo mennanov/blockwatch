@@ -1,6 +1,6 @@
 use crate::Position;
-use crate::differ::LineChange;
-use crate::parsers::BlocksParser;
+use crate::block_parser::BlocksParser;
+use crate::diff_parser::LineChange;
 use anyhow::{Context, anyhow};
 use globset::GlobSet;
 use ignore::Walk;
@@ -470,7 +470,7 @@ mod block_severity_from_str_tests {
 #[cfg(test)]
 mod parse_blocks_tests {
     use crate::blocks::*;
-    use crate::parsers::language_parsers;
+    use crate::language_parsers::language_parsers;
     use crate::test_utils;
     use crate::test_utils::FakeFileSystem;
 
@@ -961,7 +961,7 @@ mod supported_languages_tests {
     use std::{collections::HashMap, path::PathBuf};
 
     use crate::blocks::*;
-    use crate::parsers::language_parsers;
+    use crate::language_parsers::language_parsers;
     use crate::test_utils::FakeFileSystem;
 
     // <block name="supported-extensions">

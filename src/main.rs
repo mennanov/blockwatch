@@ -1,8 +1,8 @@
 use blockwatch::blocks;
 use blockwatch::blocks::BlockSeverity;
-use blockwatch::differ;
+use blockwatch::diff_parser;
 use blockwatch::flags;
-use blockwatch::parsers;
+use blockwatch::language_parsers;
 use blockwatch::validators;
 
 use blockwatch::validators::Violation;
@@ -16,7 +16,7 @@ use std::{env, fs, process};
 
 fn main() -> anyhow::Result<()> {
     let args = flags::Args::parse();
-    let languages = parsers::language_parsers()?;
+    let languages = language_parsers::language_parsers()?;
     args.validate(languages.keys().cloned().collect())?;
 
     let root_path = repository_root_path(fs::canonicalize(env::current_dir()?)?)?;
@@ -33,7 +33,7 @@ fn main() -> anyhow::Result<()> {
     let modified_lines_by_file = if !is_terminal {
         let mut diff = String::new();
         std::io::stdin().read_to_string(&mut diff)?;
-        differ::line_changes_from_diff(diff.as_str())?
+        diff_parser::line_changes_from_diff(diff.as_str())?
     } else {
         HashMap::new()
     };

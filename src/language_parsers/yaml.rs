@@ -1,6 +1,5 @@
-use crate::parsers::{
-    BlocksFromCommentsParser, BlocksParser, CommentsParser, python_style_comments_parser,
-};
+use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
+use crate::language_parsers::{CommentsParser, python_style_comments_parser};
 use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for Yaml.
@@ -18,7 +17,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parsers::Comment;
+    use crate::language_parsers::Comment;
 
     #[test]
     fn parses_yaml_comments_correctly() -> anyhow::Result<()> {
