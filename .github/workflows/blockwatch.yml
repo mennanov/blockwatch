@@ -15,3 +15,5 @@ jobs:
 
     steps:
       - uses: mennanov/blockwatch-action@v1
+        with:
+          ignore: "tests/testdata/**"
