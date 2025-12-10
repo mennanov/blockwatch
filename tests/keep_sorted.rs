@@ -147,3 +147,53 @@ index 1111111..2222222 100644
             true
         }));
 }
+
+#[test]
+fn with_empty_keep_sorted_value_defaults_to_asc() {
+    let diff_content = r#"
+diff --git a/tests/testdata/keep_sorted.py b/tests/testdata/keep_sorted.py
+index 1111111..2222222 100644
+--- a/tests/testdata/keep_sorted.py
++++ b/tests/testdata/keep_sorted.py
+@@ -33,6 +33,7 @@ defaults_unsorted = [
+     # <block keep-sorted>
+     'b',
+     'a',
++    'c',
+     # </block>
+ ]"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    let output = cmd.write_stdin(diff_content).output().unwrap();
+
+    output.assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::function(|output: &str| {
+            let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
+            let value: serde_json::Value  = json!({
+              "tests/testdata/keep_sorted.py": [
+                {
+                  "range": {
+                    "start": {
+                        "line": 36,
+                        "character": 5
+                    },
+                    "end": {
+                        "line": 36,
+                        "character": 8
+                    }
+                  },
+                  "code": "keep-sorted",
+                  "message": "Block tests/testdata/keep_sorted.py:(unnamed) defined at line 34 has an out-of-order line 36 (asc)",
+                  "severity": 1,
+                  "data": {
+                    "order_by": "asc",
+                  }
+                }
+              ]
+            });
+            assert_eq!(output_json, value);
+            true
+        }));
+}

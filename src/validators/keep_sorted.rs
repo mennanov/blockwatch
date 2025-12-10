@@ -63,7 +63,12 @@ impl ValidatorSync for KeepSortedValidator {
         for (file_path, file_blocks) in &context.modified_blocks {
             for block_with_context in &file_blocks.blocks_with_context {
                 if let Some(keep_sorted) = block_with_context.block.attributes.get("keep-sorted") {
-                    let keep_sorted_normalized = keep_sorted.to_lowercase();
+                    let keep_sorted_cleaned = keep_sorted.trim();
+                    let keep_sorted_normalized = if keep_sorted_cleaned.is_empty() {
+                        "asc".to_string()
+                    } else {
+                        keep_sorted.to_lowercase()
+                    };
                     if keep_sorted_normalized != "asc" && keep_sorted_normalized != "desc" {
                         return Err(anyhow!(
                             "keep-sorted expected values are \"asc\" or \"desc\", got \"{}\" in {}:{} at line {}",
@@ -243,6 +248,26 @@ mod validate_tests {
         );
         let result = validator.validate(context);
         assert!(result.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn empty_keep_sorted_value_defaults_to_asc() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted>
+        B
+        A
+        # </block>"#,
+        );
+        let violations = validator.validate(context)?;
+        assert_eq!(violations.len(), 1);
+        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
+        assert_eq!(
+            file_violations[0].message,
+            "Block example.py:(unnamed) defined at line 1 has an out-of-order line 3 (asc)"
+        );
         Ok(())
     }
 

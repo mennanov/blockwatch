@@ -144,10 +144,10 @@ If you change `src/lib.rs`, BlockWatch will complain if you don't also update `R
 
 ### Enforcing Sort Order (`keep-sorted`)
 
-Sort lines alphabetically (`asc` or `desc`).
+Sort lines alphabetically (`asc` or `desc`). The default is `asc`.
 
 ```python
-# <block keep-sorted="asc">
+# <block keep-sorted>
 "apple",
 "banana",
 "cherry",

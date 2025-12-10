@@ -29,3 +29,11 @@ more_items = [
     "id: 10 orange",
     # </block>
 ]
+
+defaults_unsorted = [
+    # <block keep-sorted>
+    'b',
+    'a',
+    'c'
+    # </block>
+]
