@@ -19,8 +19,7 @@ fn main() -> anyhow::Result<()> {
     let languages = language_parsers::language_parsers()?;
     args.validate(languages.keys().cloned().collect())?;
 
-    let root_path = repository_root_path(fs::canonicalize(env::current_dir()?)?)?;
-    let mut glob_set = args.globs(&root_path)?;
+    let mut glob_set = args.globs()?;
     let is_terminal =
         std::io::stdin().is_terminal() || env::var("BLOCKWATCH_TERMINAL_MODE").is_ok();
     if glob_set.is_empty() && is_terminal {
@@ -28,8 +27,10 @@ fn main() -> anyhow::Result<()> {
         // This allows running `blockwatch` with no args and input.
         glob_set = GlobSet::new([globset::Glob::new("**")?])?
     }
-    let ignored_glob_set = args.ignored_globs(&root_path)?;
-    let file_system = blocks::FileSystemImpl::new(root_path, glob_set, ignored_glob_set);
+    let should_scan_files = !glob_set.is_empty();
+    let path_checker = blocks::PathCheckerImpl::new(glob_set, args.ignored_globs()?);
+    let root_path = repository_root_path(fs::canonicalize(env::current_dir()?)?)?;
+    let file_system = blocks::FileSystemImpl::new(root_path);
     let modified_lines_by_file = if !is_terminal {
         let mut diff = String::new();
         std::io::stdin().read_to_string(&mut diff)?;
@@ -38,13 +39,16 @@ fn main() -> anyhow::Result<()> {
         HashMap::new()
     };
 
-    let modified_blocks = blocks::parse_blocks(
+    let blocks = blocks::parse_blocks(
         modified_lines_by_file,
+        should_scan_files,
         &file_system,
+        &path_checker,
         languages,
         args.extensions(),
     )?;
-    let context = validators::ValidationContext::new(modified_blocks);
+
+    let context = validators::ValidationContext::new(blocks);
     let (sync_validators, async_validators) = validators::detect_validators(
         &context,
         validators::DETECTOR_FACTORIES,

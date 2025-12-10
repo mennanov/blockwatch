@@ -29,7 +29,7 @@ impl ValidatorSync for LinePatternValidator {
         context: Arc<validators::ValidationContext>,
     ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
         let mut violations = HashMap::new();
-        for (file_path, file_blocks) in &context.modified_blocks {
+        for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
                 let Some(pattern) = block_with_context.block.attributes.get("line-pattern") else {
                     continue;

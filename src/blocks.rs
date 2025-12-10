@@ -239,6 +239,7 @@ pub struct BlockWithContext {
 /// Parses source files and returns only those blocks that intersect with the provided modified line ranges.
 ///
 /// - `line_changes_by_file` maps file paths to sorted line changes.
+/// - `should_scan_files` indicates whether all the files in filesystem should be scanned for blocks.
 /// - `file_system` provides access to file contents within a root path.
 /// - `parsers` maps file extensions to language-specific block parsers.
 /// - `extra_file_extensions` allows remapping unknown extensions to supported ones (e.g., "cxx" -> "cpp").
@@ -246,38 +247,51 @@ pub struct BlockWithContext {
 /// Returns a map of file paths to the list of intersecting blocks found in that file.
 pub fn parse_blocks(
     mut line_changes_by_file: HashMap<PathBuf, Vec<LineChange>>,
+    should_scan_files: bool,
     file_system: &impl FileSystem,
+    path_checker: &impl PathChecker,
     parsers: HashMap<OsString, Rc<Box<dyn BlocksParser>>>,
     extra_file_extensions: HashMap<OsString, OsString>,
 ) -> anyhow::Result<HashMap<PathBuf, FileBlocks>> {
     let mut blocks = HashMap::new();
-    // Parse files from the given file glob patterns (if any).
-    for result in file_system.walk() {
-        match result {
-            Ok(file_path) => {
-                let changes_owned = line_changes_by_file.remove(&file_path);
-                let line_changes = changes_owned.as_deref().unwrap_or(&[]);
-                let file_blocks_opt = parse_file(
-                    file_path.as_path(),
-                    line_changes,
-                    BlocksFilter::All,
-                    file_system,
-                    &parsers,
-                    &extra_file_extensions,
-                )?;
-                if let Some(file_blocks) = file_blocks_opt
-                    && !file_blocks.is_empty()
-                {
-                    blocks.insert(file_path, file_blocks);
+    if should_scan_files {
+        for result in file_system.walk() {
+            match result {
+                Ok(file_path) => {
+                    if !path_checker.should_allow(&file_path)
+                        || path_checker.should_ignore(&file_path)
+                    {
+                        continue;
+                    }
+                    let changes_owned = line_changes_by_file.remove(&file_path);
+                    let line_changes = changes_owned.as_deref().unwrap_or(&[]);
+                    let file_blocks_opt = parse_file(
+                        file_path.as_path(),
+                        line_changes,
+                        BlocksFilter::All,
+                        file_system,
+                        &parsers,
+                        &extra_file_extensions,
+                    )?;
+                    if let Some(file_blocks) = file_blocks_opt
+                        && !file_blocks.is_empty()
+                    {
+                        blocks.insert(file_path, file_blocks);
+                    }
                 }
-            }
-            Err(err) => {
-                return Err(anyhow!("Failed to walk directory: {err}"));
+                Err(err) => {
+                    return Err(anyhow!("Failed to walk directory: {err}"));
+                }
             }
         }
     }
     // Parse remaining files in `line_changes_by_file` from the given diff input (if any).
     for (file_path, line_changes) in line_changes_by_file {
+        if path_checker.should_ignore(&file_path) {
+            // Not calling `path_checker.should_allow()` because all the files in the
+            // `line_changes_by_file` are implicitly allowed.
+            continue;
+        }
         let file_blocks_opt = parse_file(
             file_path.as_path(),
             line_changes.as_slice(),
@@ -391,20 +405,23 @@ pub trait FileSystem {
     fn walk(&self) -> impl Iterator<Item = anyhow::Result<PathBuf>>;
 }
 
+/// Checks whether a path should be allowed or ignored when parsing blocks from files.
+pub trait PathChecker {
+    /// Whether the given `path` should be explicitly allowed.
+    fn should_allow(&self, path: &Path) -> bool;
+
+    /// Whether the given `path` should be explicitly ignored.
+    fn should_ignore(&self, path: &Path) -> bool;
+}
+
 pub struct FileSystemImpl {
     root_path: PathBuf,
-    glob_set: GlobSet,
-    ignored_glob_set: GlobSet,
 }
 
 impl FileSystemImpl {
     /// Creates a new filesystem-backed reader rooted at `root_path`.
-    pub fn new(root_path: PathBuf, glob_set: GlobSet, ignored_glob_set: GlobSet) -> Self {
-        Self {
-            root_path,
-            glob_set,
-            ignored_glob_set,
-        }
+    pub fn new(root_path: PathBuf) -> Self {
+        Self { root_path }
     }
 }
 
@@ -415,19 +432,45 @@ impl FileSystem for FileSystemImpl {
     }
 
     fn walk(&self) -> impl Iterator<Item = anyhow::Result<PathBuf>> {
-        Walk::new(&self.root_path).filter_map(|entry| match entry {
+        // Clone root_path for the closure.
+        let root_path = self.root_path.clone();
+        Walk::new(&self.root_path).filter_map(move |entry| match entry {
             Ok(entry) => {
                 let path = entry.path();
                 if path.is_dir() {
                     return None;
                 }
-                if self.ignored_glob_set.is_match(path) || !self.glob_set.is_match(path) {
-                    return None;
-                }
-                Some(Ok(path.to_path_buf()))
+                // Return path relative to the root.
+                let relative_path = path.strip_prefix(&root_path).unwrap_or(path);
+                Some(Ok(relative_path.to_path_buf()))
             }
             Err(err) => Some(Err(anyhow::Error::from(err))),
         })
+    }
+}
+
+/// Checks whether a path should be allowed or ignored.
+pub struct PathCheckerImpl {
+    glob_set: GlobSet,
+    ignored_glob_set: GlobSet,
+}
+
+impl PathCheckerImpl {
+    pub fn new(glob_set: GlobSet, ignored_glob_set: GlobSet) -> Self {
+        Self {
+            glob_set,
+            ignored_glob_set,
+        }
+    }
+}
+
+impl PathChecker for PathCheckerImpl {
+    fn should_allow(&self, path: &Path) -> bool {
+        self.glob_set.is_match(path)
+    }
+
+    fn should_ignore(&self, path: &Path) -> bool {
+        self.ignored_glob_set.is_match(path)
     }
 }
 
@@ -479,8 +522,9 @@ mod block_severity_from_str_tests {
 mod parse_blocks_tests {
     use crate::blocks::*;
     use crate::language_parsers::language_parsers;
-    use crate::test_utils;
     use crate::test_utils::FakeFileSystem;
+    use crate::test_utils::{self, FakePathChecker};
+    use std::collections::HashSet;
 
     /// Creates a whole line change (either added or deleted line).
     fn line_change(line: usize) -> LineChange {
@@ -488,7 +532,7 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn with_nonempty_line_changes_empty_walk_paths_returns_only_blocks_with_modified_start_tag_or_content()
+    fn with_nonempty_line_changes_no_scan_files_returns_only_blocks_with_modified_start_tag_or_content()
     -> anyhow::Result<()> {
         let content_a = r#"
         /* <block name="first"> */ let foo = "bar"; // </block>
@@ -505,7 +549,7 @@ mod parse_blocks_tests {
         /* <block name="eighth"
             keep-sorted="asc"> */ block eight
         // </block>
-        // <block name="nineth">
+        // <block name="ninth">
         block nine
         // </block>
         // <block name="tenth">
@@ -604,7 +648,7 @@ mod parse_blocks_tests {
                         )]), // Only the content on the same line as start tag is modified.
                     },
                     LineChange {
-                        // "nineth" block.
+                        // "ninth" block.
                         line: 17,
                         ranges: Some(vec![test_utils::substr_range(
                             content_a.lines().nth(16).unwrap(),
@@ -650,7 +694,14 @@ mod parse_blocks_tests {
         ]);
         let parsers = language_parsers()?;
 
-        let blocks_by_file = parse_blocks(line_changes, &file_system, parsers, HashMap::new())?;
+        let blocks_by_file = parse_blocks(
+            line_changes,
+            false,
+            &file_system,
+            &FakePathChecker::allow_all(),
+            parsers,
+            HashMap::new(),
+        )?;
 
         assert_eq!(blocks_by_file.len(), 2);
         let blocks_a = &blocks_by_file[&PathBuf::from("a.rs")].blocks_with_context;
@@ -683,10 +734,10 @@ mod parse_blocks_tests {
         assert_eq!(eighth.block.name(), Some("eighth"));
         assert!(!eighth._is_start_tag_modified);
         assert!(eighth.is_content_modified);
-        let nineth = &blocks_a[7];
-        assert_eq!(nineth.block.name(), Some("nineth"));
-        assert!(!nineth._is_start_tag_modified);
-        assert!(nineth.is_content_modified);
+        let ninth = &blocks_a[7];
+        assert_eq!(ninth.block.name(), Some("ninth"));
+        assert!(!ninth._is_start_tag_modified);
+        assert!(ninth.is_content_modified);
         let tenth = &blocks_a[8];
         assert_eq!(tenth.block.name(), Some("tenth"));
         assert!(!tenth._is_start_tag_modified);
@@ -699,13 +750,12 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn with_nonempty_line_changes_non_empty_walk_paths_parses_modified_and_unmodified_blocks()
+    fn with_nonempty_line_changes_with_scan_files_parses_modified_and_unmodified_blocks()
     -> anyhow::Result<()> {
-        let file_system = FakeFileSystem::with_walk_paths(
-            HashMap::from([
-                (
-                    "a.rs".to_string(),
-                    r#"
+        let file_system = FakeFileSystem::new(HashMap::from([
+            (
+                "a.rs".to_string(),
+                r#"
         // <block name="first_from_a">
         fn a() {}
         // </block>
@@ -715,11 +765,11 @@ mod parse_blocks_tests {
         }
         // </block>
         "#
-                    .to_string(),
-                ),
-                (
-                    "b.rs".to_string(),
-                    r#"
+                .to_string(),
+            ),
+            (
+                "b.rs".to_string(),
+                r#"
         // <block name="first_from_b">
         fn a() {}
         // </block>
@@ -729,11 +779,9 @@ mod parse_blocks_tests {
         }
         // </block>
         "#
-                    .to_string(),
-                ),
-            ]),
-            &["a.rs", "b.rs"],
-        );
+                .to_string(),
+            ),
+        ]));
         let parsers = language_parsers()?;
 
         let line_changes = HashMap::from([
@@ -752,7 +800,14 @@ mod parse_blocks_tests {
                 }],
             ),
         ]);
-        let blocks_by_file = parse_blocks(line_changes, &file_system, parsers, HashMap::new())?;
+        let blocks_by_file = parse_blocks(
+            line_changes,
+            true,
+            &file_system,
+            &FakePathChecker::allow_all(),
+            parsers,
+            HashMap::new(),
+        )?;
 
         assert_eq!(
             blocks_by_file[&PathBuf::from("a.rs")]
@@ -774,13 +829,11 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn with_empty_line_changes_nonempty_walk_paths_parses_unmodified_blocks() -> anyhow::Result<()>
-    {
-        let file_system = FakeFileSystem::with_walk_paths(
-            HashMap::from([
-                (
-                    "a.rs".to_string(),
-                    r#"
+    fn with_empty_line_changes_with_scan_files_parses_unmodified_blocks() -> anyhow::Result<()> {
+        let file_system = FakeFileSystem::new(HashMap::from([
+            (
+                "a.rs".to_string(),
+                r#"
         // <block name="first_from_a">
         fn a() {}
         // </block>
@@ -790,11 +843,11 @@ mod parse_blocks_tests {
         }
         // </block>
         "#
-                    .to_string(),
-                ),
-                (
-                    "b.rs".to_string(),
-                    r#"
+                .to_string(),
+            ),
+            (
+                "b.rs".to_string(),
+                r#"
         // <block name="first_from_b">
         fn a() {}
         // </block>
@@ -804,14 +857,19 @@ mod parse_blocks_tests {
         }
         // </block>
         "#
-                    .to_string(),
-                ),
-            ]),
-            &["a.rs", "b.rs"],
-        );
+                .to_string(),
+            ),
+        ]));
         let parsers = language_parsers()?;
 
-        let blocks_by_file = parse_blocks(HashMap::new(), &file_system, parsers, HashMap::new())?;
+        let blocks_by_file = parse_blocks(
+            HashMap::new(),
+            true,
+            &file_system,
+            &FakePathChecker::allow_all(),
+            parsers,
+            HashMap::new(),
+        )?;
 
         assert_eq!(
             blocks_by_file[&PathBuf::from("a.rs")]
@@ -849,15 +907,16 @@ mod parse_blocks_tests {
             "a.rs".to_string(),
             file_a_contents.to_string(),
         )]));
-        let modified_ranges = HashMap::from([
-            (
-                PathBuf::from("a.rs"),
-                vec![line_change(3), line_change(7), line_change(8)],
-            ), // Both blocks are modified.
-        ]);
         let parsers = language_parsers()?;
 
-        let blocks_by_file = parse_blocks(modified_ranges, &file_system, parsers, HashMap::new())?;
+        let blocks_by_file = parse_blocks(
+            HashMap::new(),
+            true,
+            &file_system,
+            &FakePathChecker::allow_all(),
+            parsers,
+            HashMap::new(),
+        )?;
 
         let content_a = &blocks_by_file[&PathBuf::from("a.rs")].file_content;
         assert_eq!(content_a, file_a_contents);
@@ -881,15 +940,16 @@ mod parse_blocks_tests {
             "a.rs".to_string(),
             file_a_contents.to_string(),
         )]));
-        let modified_ranges = HashMap::from([
-            (
-                PathBuf::from("a.rs"),
-                vec![line_change(3), line_change(7), line_change(8)],
-            ), // Both blocks are modified.
-        ]);
         let parsers = language_parsers()?;
 
-        let blocks_by_file = parse_blocks(modified_ranges, &file_system, parsers, HashMap::new())?;
+        let blocks_by_file = parse_blocks(
+            HashMap::new(),
+            true,
+            &file_system,
+            &FakePathChecker::allow_all(),
+            parsers,
+            HashMap::new(),
+        )?;
 
         let new_lines = &blocks_by_file[&PathBuf::from("a.rs")].file_content_new_lines;
         let expected_new_lines: Vec<usize> = file_a_contents
@@ -910,12 +970,13 @@ mod parse_blocks_tests {
         // </block>"#
                 .to_string(),
         )]));
-        let modified_ranges = HashMap::from([(PathBuf::from("a.rust"), vec![line_change(3)])]);
         let parsers = language_parsers()?;
 
         let blocks_by_file = parse_blocks(
-            modified_ranges,
+            HashMap::new(),
+            true,
             &file_system,
+            &FakePathChecker::allow_all(),
             parsers,
             HashMap::from([("rust".into(), "rs".into())]),
         )?;
@@ -933,14 +994,12 @@ mod parse_blocks_tests {
     #[test]
     fn with_unknown_extension_returns_empty_result() -> anyhow::Result<()> {
         let files = HashMap::from([("test.unknown".to_string(), "test content".to_string())]);
-        let modified_ranges = HashMap::from([(
-            PathBuf::from("test.unknown"),
-            vec![line_change(1), line_change(2)],
-        )]);
 
         let blocks = parse_blocks(
-            modified_ranges,
+            HashMap::new(),
+            true,
             &FakeFileSystem::new(files),
+            &FakePathChecker::allow_all(),
             HashMap::new(),
             HashMap::new(),
         )?;
@@ -950,11 +1009,54 @@ mod parse_blocks_tests {
     }
 
     #[test]
+    fn with_allowed_and_ignored_paths_returns_block_from_allowed_paths_only() -> anyhow::Result<()>
+    {
+        let file_system = FakeFileSystem::new(HashMap::from([
+            (
+                "allowed.rs".to_string(),
+                r#"
+        // <block name="allowed">
+        fn allowed() {}
+        // </block>
+        "#
+                .to_string(),
+            ),
+            (
+                "ignored.rs".to_string(),
+                r#"
+        // <block name="ignored">
+        fn ignored() {}
+        // </block>
+        "#
+                .to_string(),
+            ),
+        ]));
+        let path_checker =
+            FakePathChecker::with_ignored_paths(HashSet::from(["ignored.rs".to_string()]));
+
+        let blocks = parse_blocks(
+            HashMap::new(),
+            true,
+            &file_system,
+            &path_checker,
+            language_parsers()?,
+            HashMap::new(),
+        )?;
+
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks.contains_key(&PathBuf::from("allowed.rs")));
+        assert!(!blocks.contains_key(&PathBuf::from("ignored.rs")));
+        Ok(())
+    }
+
+    #[test]
     fn empty_input_returns_empty_result() -> anyhow::Result<()> {
         let line_changes = HashMap::default();
         let blocks = parse_blocks(
             line_changes,
+            true,
             &FakeFileSystem::new(HashMap::default()),
+            &FakePathChecker::allow_all(),
             HashMap::new(),
             HashMap::new(),
         )?;
@@ -970,221 +1072,182 @@ mod supported_languages_tests {
 
     use crate::blocks::*;
     use crate::language_parsers::language_parsers;
-    use crate::test_utils::FakeFileSystem;
+    use crate::test_utils::{FakeFileSystem, FakePathChecker};
 
     // <block name="supported-extensions">
     #[test]
     fn all_language_extensions_are_supported() -> anyhow::Result<()> {
         let parsers = language_parsers()?;
-        let file_names = [
-            "bash.bash",
-            "c.c",
-            "cc.cpp",
-            "cpp.cpp",
-            "cs.cs",
-            "css.css",
-            "go.go",
-            "go.mod",
-            "go.sum",
-            "go.work",
-            "h.h",
-            "htm.htm",
-            "html.html",
-            "java.java",
-            "js.js",
-            "jsx.jsx",
-            "kt.kt",
-            "kts.kts",
-            "makefile",
-            "Makefile",
-            "markdown.markdown",
-            "md.md",
-            "mk.mk",
-            "php.php",
-            "phtml.phtml",
-            "py.py",
-            "pyi.pyi",
-            "rb.rb",
-            "rs.rs",
-            "sh.sh",
-            "sql.sql",
-            "swift.swift",
-            "toml.toml",
-            "ts.ts",
-            "tsx.tsx",
-            "typescript.d.ts",
-            "xml.xml",
-            "yaml.yaml",
-            "yml.yml",
-        ];
-        let file_system = FakeFileSystem::with_walk_paths(
-            HashMap::from([
-                (
-                    "bash.bash".to_string(),
-                    "# <block>\necho \"hello\"\n# </block>".to_string(),
-                ),
-                (
-                    "c.c".to_string(),
-                    "/* <block> */\nint main() { return 0; }\n/* </block> */".to_string(),
-                ),
-                (
-                    "cc.cpp".to_string(),
-                    "// <block>\nint main() { return 0; }\n// </block>".to_string(),
-                ),
-                (
-                    "cpp.cpp".to_string(),
-                    "// <block>\nint main() { return 0; }\n// </block>".to_string(),
-                ),
-                (
-                    "cs.cs".to_string(),
-                    "// <block>\nclass Program { }\n// </block>".to_string(),
-                ),
-                (
-                    "css.css".to_string(),
-                    "/* <block> */\nbody { margin: 0; }\n/* </block> */".to_string(),
-                ),
-                (
-                    "go.go".to_string(),
-                    "// <block>\nfunc main() {}\n// </block>".to_string(),
-                ),
-                (
-                    "go.mod".to_string(),
-                    "// <block>\nmodule example.com/m\n// </block>".to_string(),
-                ),
-                (
-                    "go.sum".to_string(),
-                    "// <block>\nexample.com/dep v1.0.0 h1:abc\n// </block>".to_string(),
-                ),
-                (
-                    "go.work".to_string(),
-                    "// <block>\nuse ./mod\n// </block>".to_string(),
-                ),
-                (
-                    "h.h".to_string(),
-                    "// <block>\nvoid foo();\n// </block>".to_string(),
-                ),
-                (
-                    "htm.htm".to_string(),
-                    "<!-- <block> -->\n<div>Content</div>\n<!-- </block> -->".to_string(),
-                ),
-                (
-                    "html.html".to_string(),
-                    "<!-- <block> -->\n<p>Hello</p>\n<!-- </block> -->".to_string(),
-                ),
-                (
-                    "java.java".to_string(),
-                    "// <block>\nclass App {}\n// </block>".to_string(),
-                ),
-                (
-                    "js.js".to_string(),
-                    "// <block>\nconst x = 1;\n// </block>".to_string(),
-                ),
-                (
-                    "jsx.jsx".to_string(),
-                    "// <block>\nconst Comp = () => <div/>;\n// </block>".to_string(),
-                ),
-                (
-                    "kt.kt".to_string(),
-                    "// <block>\nfun main() {}\n// </block>".to_string(),
-                ),
-                (
-                    "kts.kts".to_string(),
-                    "// <block>\nplugins { }\n// </block>".to_string(),
-                ),
-                (
-                    "makefile".to_string(),
-                    "# <block>\nall:\n\t@echo \"hello\"\n# </block>".to_string(),
-                ),
-                (
-                    "Makefile".to_string(),
-                    "# <block>\nall:\n\t@echo \"hello\"\n# </block>".to_string(),
-                ),
-                (
-                    "markdown.markdown".to_string(),
-                    "<div>\n<!-- <block> -->\n# Title\n<!-- </block> -->\n</div>".to_string(),
-                ),
-                (
-                    "md.md".to_string(),
-                    "<div>\n<!-- <block> -->\n## Heading\n<!-- </block> -->\n</div>".to_string(),
-                ),
-                (
-                    "mk.mk".to_string(),
-                    "# <block>\nall:\n\t@echo \"hello\"\n# </block>".to_string(),
-                ),
-                (
-                    "php.php".to_string(),
-                    "<?php\n# <block>\necho 'hello';\n# </block>\n?>".to_string(),
-                ),
-                (
-                    "phtml.phtml".to_string(),
-                    "<?php\n# <block>\necho 'world';\n# </block>\n?>".to_string(),
-                ),
-                (
-                    "py.py".to_string(),
-                    "# <block>\ndef main():\n    pass\n# </block>".to_string(),
-                ),
-                (
-                    "pyi.pyi".to_string(),
-                    "# <block>\ndef foo() -> None: pass\n# </block>".to_string(),
-                ),
-                (
-                    "rb.rb".to_string(),
-                    "# <block>\ndef hello\n  puts 'world'\nend\n# </block>".to_string(),
-                ),
-                (
-                    "rs.rs".to_string(),
-                    r#"/* <block> */fn a() {}/* </block> */"#.to_string(),
-                ),
-                (
-                    "sh.sh".to_string(),
-                    "# <block>\necho \"hello\"\n# </block>".to_string(),
-                ),
-                (
-                    "sql.sql".to_string(),
-                    "-- <block>\nSELECT * FROM users;\n-- </block>".to_string(),
-                ),
-                (
-                    "swift.swift".to_string(),
-                    "// <block>\nfunc main() {}\n// </block>".to_string(),
-                ),
-                (
-                    "toml.toml".to_string(),
-                    "# <block>\nname = \"test\"\n# </block>".to_string(),
-                ),
-                (
-                    "ts.ts".to_string(),
-                    "// <block>\nconst x: number = 1;\n// </block>".to_string(),
-                ),
-                (
-                    "tsx.tsx".to_string(),
-                    "// <block>\nconst C = () => <div/>;\n// </block>".to_string(),
-                ),
-                (
-                    "typescript.d.ts".to_string(),
-                    "// <block>\ndeclare const x: number;\n// </block>".to_string(),
-                ),
-                (
-                    "xml.xml".to_string(),
-                    "<!-- <block> -->\n<root/>\n<!-- </block> -->".to_string(),
-                ),
-                (
-                    "yaml.yaml".to_string(),
-                    "# <block>\nkey: value\n# </block>".to_string(),
-                ),
-                (
-                    "yml.yml".to_string(),
-                    "# <block>\nname: test\n# </block>".to_string(),
-                ),
-            ]),
-            &file_names,
-        );
+        let files = HashMap::from([
+            (
+                "bash.bash".to_string(),
+                "# <block>\necho \"hello\"\n# </block>".to_string(),
+            ),
+            (
+                "c.c".to_string(),
+                "/* <block> */\nint main() { return 0; }\n/* </block> */".to_string(),
+            ),
+            (
+                "cc.cpp".to_string(),
+                "// <block>\nint main() { return 0; }\n// </block>".to_string(),
+            ),
+            (
+                "cpp.cpp".to_string(),
+                "// <block>\nint main() { return 0; }\n// </block>".to_string(),
+            ),
+            (
+                "cs.cs".to_string(),
+                "// <block>\nclass Program { }\n// </block>".to_string(),
+            ),
+            (
+                "css.css".to_string(),
+                "/* <block> */\nbody { margin: 0; }\n/* </block> */".to_string(),
+            ),
+            (
+                "go.go".to_string(),
+                "// <block>\nfunc main() {}\n// </block>".to_string(),
+            ),
+            (
+                "go.mod".to_string(),
+                "// <block>\nmodule example.com/m\n// </block>".to_string(),
+            ),
+            (
+                "go.sum".to_string(),
+                "// <block>\nexample.com/dep v1.0.0 h1:abc\n// </block>".to_string(),
+            ),
+            (
+                "go.work".to_string(),
+                "// <block>\nuse ./mod\n// </block>".to_string(),
+            ),
+            (
+                "h.h".to_string(),
+                "// <block>\nvoid foo();\n// </block>".to_string(),
+            ),
+            (
+                "htm.htm".to_string(),
+                "<!-- <block> -->\n<div>Content</div>\n<!-- </block> -->".to_string(),
+            ),
+            (
+                "html.html".to_string(),
+                "<!-- <block> -->\n<p>Hello</p>\n<!-- </block> -->".to_string(),
+            ),
+            (
+                "java.java".to_string(),
+                "// <block>\nclass App {}\n// </block>".to_string(),
+            ),
+            (
+                "js.js".to_string(),
+                "// <block>\nconst x = 1;\n// </block>".to_string(),
+            ),
+            (
+                "jsx.jsx".to_string(),
+                "// <block>\nconst Comp = () => <div/>;\n// </block>".to_string(),
+            ),
+            (
+                "kt.kt".to_string(),
+                "// <block>\nfun main() {}\n// </block>".to_string(),
+            ),
+            (
+                "kts.kts".to_string(),
+                "// <block>\nplugins { }\n// </block>".to_string(),
+            ),
+            (
+                "makefile".to_string(),
+                "# <block>\nall:\n\t@echo \"hello\"\n# </block>".to_string(),
+            ),
+            (
+                "Makefile".to_string(),
+                "# <block>\nall:\n\t@echo \"hello\"\n# </block>".to_string(),
+            ),
+            (
+                "markdown.markdown".to_string(),
+                "<div>\n<!-- <block> -->\n# Title\n<!-- </block> -->\n</div>".to_string(),
+            ),
+            (
+                "md.md".to_string(),
+                "<div>\n<!-- <block> -->\n## Heading\n<!-- </block> -->\n</div>".to_string(),
+            ),
+            (
+                "mk.mk".to_string(),
+                "# <block>\nall:\n\t@echo \"hello\"\n# </block>".to_string(),
+            ),
+            (
+                "php.php".to_string(),
+                "<?php\n# <block>\necho 'hello';\n# </block>\n?>".to_string(),
+            ),
+            (
+                "phtml.phtml".to_string(),
+                "<?php\n# <block>\necho 'world';\n# </block>\n?>".to_string(),
+            ),
+            (
+                "py.py".to_string(),
+                "# <block>\ndef main():\n    pass\n# </block>".to_string(),
+            ),
+            (
+                "pyi.pyi".to_string(),
+                "# <block>\ndef foo() -> None: pass\n# </block>".to_string(),
+            ),
+            (
+                "rb.rb".to_string(),
+                "# <block>\ndef hello\n  puts 'world'\nend\n# </block>".to_string(),
+            ),
+            (
+                "rs.rs".to_string(),
+                r#"/* <block> */fn a() {}/* </block> */"#.to_string(),
+            ),
+            (
+                "sh.sh".to_string(),
+                "# <block>\necho \"hello\"\n# </block>".to_string(),
+            ),
+            (
+                "sql.sql".to_string(),
+                "-- <block>\nSELECT * FROM users;\n-- </block>".to_string(),
+            ),
+            (
+                "swift.swift".to_string(),
+                "// <block>\nfunc main() {}\n// </block>".to_string(),
+            ),
+            (
+                "toml.toml".to_string(),
+                "# <block>\nname = \"test\"\n# </block>".to_string(),
+            ),
+            (
+                "ts.ts".to_string(),
+                "// <block>\nconst x: number = 1;\n// </block>".to_string(),
+            ),
+            (
+                "tsx.tsx".to_string(),
+                "// <block>\nconst C = () => <div/>;\n// </block>".to_string(),
+            ),
+            (
+                "typescript.d.ts".to_string(),
+                "// <block>\ndeclare const x: number;\n// </block>".to_string(),
+            ),
+            (
+                "xml.xml".to_string(),
+                "<!-- <block> -->\n<root/>\n<!-- </block> -->".to_string(),
+            ),
+            (
+                "yaml.yaml".to_string(),
+                "# <block>\nkey: value\n# </block>".to_string(),
+            ),
+            (
+                "yml.yml".to_string(),
+                "# <block>\nname: test\n# </block>".to_string(),
+            ),
+        ]);
+        let file_system = FakeFileSystem::new(files.clone());
 
-        // Each file in `file_names` should have a corresponding parser.
-        assert_eq!(parsers.len(), file_names.len());
+        let blocks_by_file = parse_blocks(
+            HashMap::new(),
+            true,
+            &file_system,
+            &FakePathChecker::allow_all(),
+            parsers,
+            HashMap::new(),
+        )?;
 
-        let blocks_by_file = parse_blocks(HashMap::new(), &file_system, parsers, HashMap::new())?;
-
-        for file_name in &file_names {
+        for file_name in files.keys() {
             assert!(
                 !blocks_by_file
                     .get(&PathBuf::from(file_name))

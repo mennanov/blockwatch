@@ -307,3 +307,38 @@ fn recursive_ignore_glob_provided_run_ignores_matching_files_recursively() {
 
     output.assert().success();
 }
+
+#[test]
+fn diff_input_with_ignore_flag_provided_run_ignores_matching_files_in_diff() {
+    let diff_content = r#"
+diff --git a/tests/testdata/paths/invalid.py b/tests/testdata/paths/invalid.py
+index 0000000..1111111 100644
+--- a/tests/testdata/paths/invalid.py
++++ b/tests/testdata/paths/invalid.py
+@@ -1,4 +1,4 @@
+ # <block keep-sorted="asc">
+ b = 2
+-a = 2
++a = 1
+ # </block>
+"#;
+
+    // First, verify that without --ignore it fails.
+    let mut cmd = cargo_bin_cmd!();
+    cmd.write_stdin(diff_content);
+    let output = cmd.output().expect("Failed to get command output");
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("keep-sorted"));
+
+    // Now verify that with --ignore it succeeds.
+    let mut cmd = cargo_bin_cmd!();
+    cmd.write_stdin(diff_content);
+    cmd.arg("--ignore");
+    cmd.arg("tests/testdata/paths/invalid.py");
+
+    let output = cmd.output().expect("Failed to get command output");
+    output.assert().success();
+}

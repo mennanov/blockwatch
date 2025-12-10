@@ -123,14 +123,14 @@ impl SimpleDiagnostic<'_> {
 
 #[derive(Debug)]
 pub struct ValidationContext {
-    // Modified blocks with their corresponding source file contents grouped by filename.
-    pub(crate) modified_blocks: HashMap<PathBuf, FileBlocks>,
+    // Blocks with their corresponding source file contents grouped by filename.
+    pub(crate) blocks: HashMap<PathBuf, FileBlocks>,
 }
 
 impl ValidationContext {
     /// Creates a new validation context with modified blocks grouped by filename.
-    pub fn new(modified_blocks: HashMap<PathBuf, FileBlocks>) -> Self {
-        Self { modified_blocks }
+    pub fn new(blocks: HashMap<PathBuf, FileBlocks>) -> Self {
+        Self { blocks }
     }
 }
 
@@ -275,7 +275,7 @@ pub fn detect_validators(
         .collect();
     let mut sync_validators = Vec::new();
     let mut async_validators = Vec::new();
-    'outer: for file_blocks in context.modified_blocks.values() {
+    'outer: for file_blocks in context.blocks.values() {
         for block in &file_blocks.blocks_with_context {
             let mut undetected = Vec::new();
             while let Some(detector) = validator_detectors.pop() {
@@ -334,7 +334,7 @@ mod tests {
             context: Arc<ValidationContext>,
         ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
             Ok(context
-                .modified_blocks
+                .blocks
                 .keys()
                 .map(|file_name| {
                     (
@@ -362,7 +362,7 @@ mod tests {
             context: Arc<ValidationContext>,
         ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
             Ok(context
-                .modified_blocks
+                .blocks
                 .keys()
                 .map(|file_name| {
                     (

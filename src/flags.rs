@@ -4,7 +4,6 @@ use clap::{Parser, builder::ValueParser, crate_version};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
-use std::path::Path;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -106,30 +105,22 @@ impl Args {
     }
 
     /// Returns a compiled GlobSet from the provided glob patterns.
-    pub fn globs(&self, root_path: &Path) -> anyhow::Result<GlobSet> {
+    pub fn globs(&self) -> anyhow::Result<GlobSet> {
         let mut builder = GlobSetBuilder::new();
         for glob_str in &self.globs {
-            let path = root_path.join(glob_str);
-            let glob = Glob::new(
-                path.to_str()
-                    .context(format!("Invalid path: {}", path.display()))?,
-            )
-            .with_context(|| format!("Invalid glob pattern: {}", path.display()))?;
+            let glob = Glob::new(glob_str)
+                .with_context(|| format!("Invalid glob pattern: {}", glob_str))?;
             builder.add(glob);
         }
         builder.build().context("Failed to build glob set")
     }
 
     /// Returns a compiled GlobSet from the provided ignore glob patterns.
-    pub fn ignored_globs(&self, root_path: &Path) -> anyhow::Result<GlobSet> {
+    pub fn ignored_globs(&self) -> anyhow::Result<GlobSet> {
         let mut builder = GlobSetBuilder::new();
         for glob_str in &self.ignore {
-            let path = root_path.join(glob_str);
-            let glob = Glob::new(
-                path.to_str()
-                    .context(format!("Invalid ignore path: {}", path.display()))?,
-            )
-            .with_context(|| format!("Invalid ignore glob pattern: {}", path.display()))?;
+            let glob = Glob::new(glob_str)
+                .with_context(|| format!("Invalid ignore glob pattern: {}", glob_str))?;
             builder.add(glob);
         }
         builder.build().context("Failed to build ignore glob set")

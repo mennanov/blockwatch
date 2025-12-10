@@ -35,7 +35,7 @@ impl Position {
 
 #[cfg(test)]
 mod test_utils {
-    use crate::blocks::{FileBlocks, FileSystem, parse_blocks};
+    use crate::blocks::{FileBlocks, FileSystem, PathChecker, parse_blocks};
     use crate::diff_parser::LineChange;
     use crate::language_parsers;
     use crate::validators::ValidationContext;
@@ -67,25 +67,11 @@ mod test_utils {
 
     pub(crate) struct FakeFileSystem {
         files: HashMap<String, String>,
-        walkable_paths: HashSet<String>,
     }
 
     impl FakeFileSystem {
         pub(crate) fn new(files: HashMap<String, String>) -> Self {
-            Self {
-                files,
-                walkable_paths: HashSet::new(),
-            }
-        }
-
-        pub(crate) fn with_walk_paths(
-            files: HashMap<String, String>,
-            walkable_paths: &[&str],
-        ) -> Self {
-            Self {
-                files,
-                walkable_paths: walkable_paths.iter().map(|path| path.to_string()).collect(),
-            }
+            Self { files }
         }
     }
 
@@ -99,7 +85,31 @@ mod test_utils {
         }
 
         fn walk(&self) -> impl Iterator<Item = anyhow::Result<PathBuf>> {
-            self.walkable_paths.iter().map(|p| Ok(PathBuf::from(p)))
+            self.files.keys().map(|p| Ok(PathBuf::from(p)))
+        }
+    }
+
+    pub(crate) struct FakePathChecker {
+        ignored_paths: HashSet<String>,
+    }
+
+    impl FakePathChecker {
+        pub(crate) fn with_ignored_paths(ignored_paths: HashSet<String>) -> Self {
+            Self { ignored_paths }
+        }
+
+        pub(crate) fn allow_all() -> Self {
+            Self::with_ignored_paths(HashSet::new())
+        }
+    }
+
+    impl PathChecker for FakePathChecker {
+        fn should_allow(&self, _unused_path: &Path) -> bool {
+            true
+        }
+
+        fn should_ignore(&self, path: &Path) -> bool {
+            self.ignored_paths.contains(&path.display().to_string())
         }
     }
 
@@ -127,7 +137,9 @@ mod test_utils {
         Arc::new(ValidationContext::new(
             parse_blocks(
                 line_changes_by_file,
+                false,
                 &file_system,
+                &FakePathChecker::allow_all(),
                 language_parsers::language_parsers().unwrap(),
                 HashMap::new(),
             )
@@ -140,7 +152,7 @@ mod test_utils {
     ) -> Arc<ValidationContext> {
         let mut merged_modified_blocks = HashMap::new();
         for context in contexts {
-            for (file_path, file_blocks) in &context.modified_blocks {
+            for (file_path, file_blocks) in &context.blocks {
                 merged_modified_blocks
                     .entry(file_path.clone())
                     .or_insert_with(|| FileBlocks {

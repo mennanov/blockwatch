@@ -27,7 +27,7 @@ impl validators::ValidatorSync for AffectsValidator {
         context: Arc<validators::ValidationContext>,
     ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
         let mut named_modified_blocks = HashMap::new();
-        for (file_path, file_blocks) in &context.modified_blocks {
+        for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
                 if !block_with_context.is_content_modified {
                     // Blocks with unmodified content are not considered modified by this validator.
@@ -42,7 +42,7 @@ impl validators::ValidatorSync for AffectsValidator {
             }
         }
         let mut violations = HashMap::new();
-        for (modified_block_file_path, file_blocks) in &context.modified_blocks {
+        for (modified_block_file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
                 if !block_with_context.is_content_modified {
                     // Blocks with unmodified content are not considered modified by this validator.

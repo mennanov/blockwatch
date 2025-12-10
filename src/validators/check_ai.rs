@@ -43,7 +43,7 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
     ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
         let mut violations = HashMap::new();
         let mut tasks = JoinSet::new();
-        for (file_path, file_blocks) in &context.modified_blocks {
+        for (file_path, file_blocks) in &context.blocks {
             for (block_idx, block_with_context) in
                 file_blocks.blocks_with_context.iter().enumerate()
             {
@@ -64,7 +64,7 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
                 let context = Arc::clone(&context);
                 let file_path = file_path.clone();
                 tasks.spawn(async move {
-                    let file_blocks = &context.modified_blocks[&file_path];
+                    let file_blocks = &context.blocks[&file_path];
                     let block_with_context = &file_blocks.blocks_with_context[block_idx];
                     let condition = &block_with_context.block.attributes["check-ai"];
                     let content = block_content(block_with_context, &file_blocks.file_content)?;
