@@ -5,29 +5,26 @@
 [![Crates.io](https://img.shields.io/crates/v/blockwatch)](https://crates.io/crates/blockwatch)
 [![Downloads](https://img.shields.io/crates/d/blockwatch)](https://crates.io/crates/blockwatch)
 
-**BlockWatch** is a language-agnostic linter that keeps your code, documentation, and configuration in sync.
+BlockWatch is a linter that keeps your code, documentation, and configuration in sync.
 
-It allows you to:
+It helps you avoid broken docs and messy config files by enforcing rules directly in your comments. You can link code to
+documentation, auto-sort lists, ensure uniqueness, and even validate content with Regex or AI.
 
-- **Link code to documentation** to ensure updates in one place are reflected in another.
-- **Enforce formatting rules** like sorted lists or unique lines.
-- **Validate content** using Regex or even AI (LLMs).
-
-BlockWatch can run on your **entire codebase** or check only **changed files** in a git diff.
+It works with almost any language (Rust, Python, JS, Go, Markdown, YAML, etc.) and can run on your entire repo or just
+your VCS diffs.
 
 ## Features
 
 [//]: # (<block name="available-validators">)
 
-- 🔗 **Drift Detection**: Explicitly link blocks of code. If one changes, the other must be updated.
-- 🧹 **Content Enforcement**:
-  - `keep-sorted`: Keep lists sorted.
-  - `keep-unique`: Ensure no duplicates.
-  - `line-pattern`: Validate lines against Regex.
-  - `line-count`: Enforce block size limits.
-- 🤖 **AI Validation**: Use natural language rules to validate code or docs (e.g., "Must mention 'banana'").
-- 🌍 **Language Agnostic**: Works with almost any language (Rust, Python, JS, Go, Markdown, YAML, etc.).
-- 🚀 **Flexible Execution**: Run on specific files, glob patterns, or git diffs.
+- **Drift Detection**: Link a block of code to its documentation. If you change the code but forget the docs, BlockWatch
+  alerts you.
+- **Strict Formatting**: Enforce sorted lists (`keep-sorted`) and unique entries (`keep-unique`) so you don't have to
+  nitpick in code reviews.
+- **Content Validation**: Check lines against Regex patterns (`line-pattern`) or enforce block size limits (
+  `line-count`).
+- **AI Rules**: Use natural language to validate code or text (e.g., "Must mention 'banana'").
+- **Flexible**: Run it on specific files, glob patterns, or just your unstaged changes.
 
 [//]: # (</block>)
 
@@ -48,30 +45,30 @@ cargo install blockwatch
 
 ### Prebuilt Binaries
 
-Download from [Releases](https://github.com/mennanov/blockwatch/releases).
+Check the [Releases](https://github.com/mennanov/blockwatch/releases) page for prebuilt binaries.
 
 ## Usage
 
-### 1. Scan Your Project
+### 1. Run Locally
 
 Validate all blocks in your project:
 
 ```shell
-# Check all files (defaults to "**")
+# Check everything
 blockwatch
 
-# Check specific file types
+# Check specific files
 blockwatch "src/**/*.rs" "**/*.md"
 
-# Ignore specific files
+# Ignore stuff
 blockwatch "**/*.rs" --ignore "**/generated/**"
 ```
 
-> **Note:** Always quote glob patterns to prevent shell expansion.
+> **Tip:** Quote your glob patterns so the shell doesn't expand them before BlockWatch sees them.
 
-### 2. Check Modified Files (CI / Hooks)
+### 2. Check Only What Changed
 
-Pipe a git diff to validate only changed blocks or blocks affected by changes:
+Pipe a git diff to BlockWatch to validate only the blocks you touched. This is perfect for pre-commit hooks.
 
 ```shell
 # Check unstaged changes
@@ -89,8 +86,9 @@ git diff --patch | blockwatch "src/always_checked.rs" "**/*.md"
 
 ### 3. CI Integration
 
-**Pre-commit Hook**:
-Add to `.pre-commit-config.yaml`:
+#### Pre-commit Hook
+
+Add this to `.pre-commit-config.yaml`:
 
 ```yaml
 - repo: local
@@ -103,20 +101,21 @@ Add to `.pre-commit-config.yaml`:
       pass_filenames: false
 ```
 
-**GitHub Action**:
-Add to `.github/workflows/your_workflow.yml`:
+#### GitHub Action
+
+Add this to `.github/workflows/your_workflow.yml`:
 
 ```yaml
 - uses: mennanov/blockwatch-action@v1
 ```
 
-## Validators
+## How It Works
 
-Blocks are defined using XML-like tags in comments.
+You define rules using XML-like tags inside your comments.
 
-### Linking Code & Docs (`affects`)
+### Linking Code Blocks (`affects`)
 
-Ensure that when code changes, the documentation is updated.
+This ensures that if you change some block of code, you're forced to look at the other blocks too.
 
 **src/lib.rs**:
 
@@ -140,11 +139,11 @@ pub enum Language {
 <!-- </block> -->
 ```
 
-If you change `src/lib.rs`, BlockWatch will complain if you don't also update `README.md`.
+If you modify the enum in `src/lib.rs`, BlockWatch will fail until you touch `README.md` as well.
 
-### Enforcing Sort Order (`keep-sorted`)
+### Enforce Sort Order (`keep-sorted`)
 
-Sort lines alphabetically (`asc` or `desc`). The default is `asc`.
+Keep lists alphabetized. Default is `asc` (ascending).
 
 ```python
 # <block keep-sorted>
@@ -154,11 +153,9 @@ Sort lines alphabetically (`asc` or `desc`). The default is `asc`.
 # </block>
 ```
 
-**Advanced: Sort by Regex Match**
-Use `keep-sorted-pattern` to sort by a specific part of the line.
+#### Sort by Regex
 
-- If a named capture group `value` exists, it is used for sorting.
-- Otherwise, the entire match is used.
+You can sort by a specific part of the line using a regex capture group named `value`.
 
 ```python
 items = [
@@ -170,9 +167,9 @@ items = [
 ]
 ```
 
-### Enforcing Uniqueness (`keep-unique`)
+### Enforce Unique Lines (`keep-unique`)
 
-Ensure no duplicate lines.
+Prevent duplicates in a list.
 
 ```python
 # <block keep-unique>
@@ -182,11 +179,9 @@ Ensure no duplicate lines.
 # </block>
 ```
 
-**Advanced: Uniqueness by Regex**
-Use the attribute value as a regex to determine uniqueness.
+#### Uniqueness by Regex
 
-- If a named capture group `value` exists, it is used for comparison.
-- Otherwise, the entire match is used.
+Just like sorting, you can check uniqueness based on a specific regex match.
 
 ```python
 ids = [
@@ -211,7 +206,7 @@ slugs = [
 ]
 ```
 
-### Line Count (`line-count`)
+### Enforce Line Count (`line-count`)
 
 Enforce the number of lines in a block.
 Supported operators: `<`, `>`, `<=`, `>=`, `==`.
@@ -224,9 +219,9 @@ Supported operators: `<`, `>`, `<=`, `>=`, `==`.
 # </block>
 ```
 
-### AI Validation (`check-ai`)
+### Validate with AI (`check-ai`)
 
-Validate logic or style using an LLM.
+Use an LLM to validate logic or style.
 
 ```html
 <!-- <block check-ai="Must mention the company name 'Acme Corp'"> -->
@@ -234,9 +229,9 @@ Validate logic or style using an LLM.
 <!-- </block> -->
 ```
 
-#### Advanced: Extract Content for AI
+#### Targeted AI Checks
 
-Use `check-ai-pattern` to send only relevant parts of the text to the LLM.
+Use `check-ai-pattern` to send only specific parts of the text to the LLM.
 
 ```python
 prices = [
@@ -287,14 +282,14 @@ BlockWatch supports comments in:
 
 [//]: # (</block>)
 
-## Configuration
+## CLI Options
 
 [//]: # (<block name="cli-docs">)
 
 - **Extensions**: Map custom extensions: `blockwatch -E cxx=cpp`
 - **Disable Validators**: `blockwatch -d check-ai`
 - **Enable Validators**: `blockwatch -e keep-sorted`
-- **Ignore Files**: Ignore files matching glob patterns: `blockwatch --ignore "**/generated/**"`
+- **Ignore Files**: `blockwatch --ignore "**/generated/**"`
 
 [//]: # (</block>)
 
