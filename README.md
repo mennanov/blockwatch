@@ -47,68 +47,6 @@ cargo install blockwatch
 
 Check the [Releases](https://github.com/mennanov/blockwatch/releases) page for prebuilt binaries.
 
-## Usage
-
-### 1. Run Locally
-
-Validate all blocks in your project:
-
-```shell
-# Check everything
-blockwatch
-
-# Check specific files
-blockwatch "src/**/*.rs" "**/*.md"
-
-# Ignore stuff
-blockwatch "**/*.rs" --ignore "**/generated/**"
-```
-
-> **Tip:** Quote your glob patterns so the shell doesn't expand them before BlockWatch sees them.
-
-### 2. Check Only What Changed
-
-Pipe a git diff to BlockWatch to validate only the blocks you touched. This is perfect for pre-commit hooks.
-
-```shell
-# Check unstaged changes
-git diff --patch | blockwatch
-
-# Check staged changes
-git diff --cached --patch | blockwatch
-
-# Check changes in a specific file only
-git diff --patch path/to/file | blockwatch
-
-# Check changes and some other (possibly unchanged) files
-git diff --patch | blockwatch "src/always_checked.rs" "**/*.md"
-```
-
-### 3. CI Integration
-
-#### Pre-commit Hook
-
-Add this to `.pre-commit-config.yaml`:
-
-```yaml
-- repo: local
-  hooks:
-    - id: blockwatch
-      name: blockwatch
-      entry: bash -c 'git diff --patch --cached --unified=0 | blockwatch'
-      language: system
-      stages: [ pre-commit ]
-      pass_filenames: false
-```
-
-#### GitHub Action
-
-Add this to `.github/workflows/your_workflow.yml`:
-
-```yaml
-- uses: mennanov/blockwatch-action@v1
-```
-
 ## How It Works
 
 You define rules using XML-like tags inside your comments.
@@ -251,6 +189,68 @@ prices = [
 - `BLOCKWATCH_AI_API_URL`: Custom API URL (optional).
 
 [//]: # (</block>)
+
+## Usage
+
+### 1. Run Locally
+
+Validate all blocks in your project:
+
+```shell
+# Check everything
+blockwatch
+
+# Check specific files
+blockwatch "src/**/*.rs" "**/*.md"
+
+# Ignore stuff
+blockwatch "**/*.rs" --ignore "**/generated/**"
+```
+
+> **Tip:** Quote your glob patterns so the shell doesn't expand them before BlockWatch sees them.
+
+### 2. Check Only What Changed
+
+Pipe a git diff to BlockWatch to validate only the blocks you touched. This is perfect for pre-commit hooks.
+
+```shell
+# Check unstaged changes
+git diff --patch | blockwatch
+
+# Check staged changes
+git diff --cached --patch | blockwatch
+
+# Check changes in a specific file only
+git diff --patch path/to/file | blockwatch
+
+# Check changes and some other (possibly unchanged) files
+git diff --patch | blockwatch "src/always_checked.rs" "**/*.md"
+```
+
+### 3. CI Integration
+
+#### Pre-commit Hook
+
+Add this to `.pre-commit-config.yaml`:
+
+```yaml
+- repo: local
+  hooks:
+    - id: blockwatch
+      name: blockwatch
+      entry: bash -c 'git diff --patch --cached --unified=0 | blockwatch'
+      language: system
+      stages: [ pre-commit ]
+      pass_filenames: false
+```
+
+#### GitHub Action
+
+Add this to `.github/workflows/your_workflow.yml`:
+
+```yaml
+- uses: mennanov/blockwatch-action@v1
+```
 
 ## Supported Languages
 
