@@ -10,6 +10,8 @@ updates:
           - "*"
   - package-ecosystem: "github-actions"
     directory: "/"
+    exclude-paths:
+      - ".github/workflows/release.yml"
     schedule:
       interval: "monthly"
     groups:
