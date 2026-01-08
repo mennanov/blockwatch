@@ -1,6 +1,7 @@
 use afl::fuzz;
 use blockwatch::blocks::Block;
 use blockwatch::language_parsers;
+use regex::Regex;
 use std::ffi::OsString;
 
 fn main() {
@@ -18,19 +19,17 @@ fn main() {
         let Some((noise2_before, noise2_after)) = split_in_half(noise2) else {
             return;
         };
-        let noise1_before = noise1_before.replace("*/", "").replace("\0", "");
-        let noise1_after = noise1_after.replace("*/", "").replace("\0", "");
-        let noise2_before = noise2_before
-            .replace("//", "")
-            .replace("\n", "")
-            .replace("\0", "");
+        let noise1_before = trim_multiline_comment(noise1_before);
+        let noise1_after = trim_multiline_comment(noise1_after);
+        let noise2_before = trim_single_line_comment(noise2_before);
+        let noise2_after = trim_single_line_comment(noise2_after);
         let source = format!(
             "/* {noise1_before} <block> {noise1_after} */\nlet variable = \"value\";\n// {noise2_before} </block> {noise2_after}"
         );
 
         match parse_rust_blocks(&source) {
             Ok(blocks) => {
-                assert_eq!(blocks.len(), 1, "expected exactly one <block> ... </block>");
+                assert_eq!(blocks.len(), 1, "input: {source}");
             }
             Err(err) => {
                 panic!("parser returned error: {err}\ninput:\n{source}");
@@ -55,4 +54,13 @@ fn split_in_half(input: &str) -> Option<(&str, &str)> {
         pos -= 1;
     }
     input.split_at_checked(pos)
+}
+
+fn trim_multiline_comment(input: &str) -> String {
+    let re = Regex::new(r"(/+\*+)|(\*+/+)").unwrap();
+    re.replace_all(input, "").replace("\0", "").to_string()
+}
+
+fn trim_single_line_comment(input: &str) -> String {
+    input.replace(['\0', '\n'], "")
 }
