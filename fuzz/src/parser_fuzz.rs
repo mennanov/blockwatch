@@ -57,8 +57,9 @@ fn split_in_half(input: &str) -> Option<(&str, &str)> {
 }
 
 fn trim_multiline_comment(input: &str) -> String {
+    let input = input.replace(['\0'], "");
     let re = Regex::new(r"(/+\*+)|(\*+/+)").unwrap();
-    re.replace_all(input, "").replace("\0", "").to_string()
+    re.replace_all(&input, "").to_string()
 }
 
 fn trim_single_line_comment(input: &str) -> String {
