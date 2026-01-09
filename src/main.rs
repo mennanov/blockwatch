@@ -1,3 +1,4 @@
+use anyhow::Context;
 use blockwatch::blocks;
 use blockwatch::blocks::BlockSeverity;
 use blockwatch::diff_parser;
@@ -17,7 +18,8 @@ use std::{env, fs, process};
 fn main() -> anyhow::Result<()> {
     let args = flags::Args::parse();
     let languages = language_parsers::language_parsers()?;
-    args.validate(languages.keys().cloned().collect())?;
+    let supported_extensions = languages.keys().collect();
+    args.validate(&supported_extensions)?;
 
     let mut glob_set = args.globs()?;
     let is_terminal =
@@ -49,6 +51,13 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     let context = validators::ValidationContext::new(blocks);
+
+    if matches!(args.command, Some(flags::SubCommand::List { .. })) {
+        let report = context.to_serializable_report();
+        return serde_json::to_writer_pretty(std::io::stdout(), &report)
+            .context("Failed to list blocks");
+    }
+
     let (sync_validators, async_validators) = validators::detect_validators(
         &context,
         validators::DETECTOR_FACTORIES,

@@ -209,6 +209,40 @@ blockwatch "**/*.rs" --ignore "**/generated/**"
 
 > **Tip:** Quote your glob patterns so the shell doesn't expand them before BlockWatch sees them.
 
+### 1.1 Listing Blocks
+
+You can list all blocks that BlockWatch finds without running any validation. This is useful for auditing your blocks or debugging your configuration.
+
+```shell
+# List all blocks in the current directory
+blockwatch list
+
+# List blocks in specific files
+blockwatch list "src/**/*.rs" "**/*.md"
+
+# List only blocks affected by current changes
+git diff | blockwatch list
+```
+
+The output is a JSON object where keys are file paths and values are lists of blocks found in those files, including their names, line numbers, and attributes.
+
+#### Example Output
+
+```json
+{
+  "README.md": [
+    {
+      "name": "available-validators",
+      "line": 18,
+      "column": 10,
+      "attributes": {
+        "name": "available-validators"
+      }
+    }
+  ]
+}
+```
+
 ### 2. Check Only What Changed
 
 Pipe a git diff to BlockWatch to validate only the blocks you touched. This is perfect for pre-commit hooks.
@@ -286,6 +320,7 @@ BlockWatch supports comments in:
 
 [//]: # (<block name="cli-docs">)
 
+- **List Blocks**: `blockwatch list` outputs a JSON report of all found blocks.
 - **Extensions**: Map custom extensions: `blockwatch -E cxx=cpp`
 - **Disable Validators**: `blockwatch -d check-ai`
 - **Enable Validators**: `blockwatch -e keep-sorted`

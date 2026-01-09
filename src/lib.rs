@@ -118,7 +118,10 @@ mod test_utils {
         let line_changes: Vec<LineChange> = contents
             .lines()
             .enumerate()
-            .map(|(line, _)| LineChange { line, ranges: None })
+            .map(|(line, _)| LineChange {
+                line: line + 1,
+                ranges: None,
+            })
             .collect();
         validation_context_with_changes(file_name, contents, line_changes)
     }

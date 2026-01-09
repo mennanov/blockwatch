@@ -37,7 +37,10 @@ use std::ffi::OsString;
     blockwatch -d keep-sorted -d line-count
 
     # Enable specific validators only
-    blockwatch -e keep-sorted -e line-count",
+    blockwatch -e keep-sorted -e line-count
+
+    # List all found blocks
+    blockwatch list 'src/**/*.rs'",
 )]
 pub struct Args {
     // <block affects="README.md:cli-docs">
@@ -48,6 +51,7 @@ pub struct Args {
         value_name = "KEY=VALUE",
         action = clap::ArgAction::Append,
         value_parser = ValueParser::new(parse_extensions),
+        global = true,
     )]
     extensions: Vec<(String, String)>,
 
@@ -58,6 +62,7 @@ pub struct Args {
         value_name = "VALIDATOR",
         action = clap::ArgAction::Append,
         value_parser = ValueParser::new(parse_validator),
+        global = true,
     )]
     disabled_validators: Vec<String>,
 
@@ -68,6 +73,7 @@ pub struct Args {
         value_name = "VALIDATOR",
         action = clap::ArgAction::Append,
         value_parser = ValueParser::new(parse_validator),
+        global = true,
     )]
     enabled_validators: Vec<String>,
 
@@ -76,13 +82,26 @@ pub struct Args {
         long = "ignore",
         value_name = "GLOBS",
         action = clap::ArgAction::Append,
+        global = true,
     )]
     pub ignore: Vec<String>,
 
     /// Glob patterns to filter files.
     #[arg(value_name = "GLOBS")]
     pub globs: Vec<String>,
+
+    #[command(subcommand)]
+    pub command: Option<SubCommand>,
     // </block>
+}
+
+#[derive(clap::Subcommand, Debug, Clone)]
+pub enum SubCommand {
+    /// List all blocks found in the scanned files.
+    List {
+        #[arg(value_name = "GLOBS")]
+        globs: Vec<String>,
+    },
 }
 
 impl Args {
@@ -107,7 +126,12 @@ impl Args {
     /// Returns a compiled GlobSet from the provided glob patterns.
     pub fn globs(&self) -> anyhow::Result<GlobSet> {
         let mut builder = GlobSetBuilder::new();
-        for glob_str in &self.globs {
+        let mut globs = self.globs.clone();
+        if let Some(SubCommand::List { globs: list_globs }) = &self.command {
+            globs.extend(list_globs.clone());
+        }
+
+        for glob_str in &globs {
             let glob = Glob::new(glob_str)
                 .with_context(|| format!("Invalid glob pattern: {}", glob_str))?;
             builder.add(glob);
@@ -127,7 +151,7 @@ impl Args {
     }
 
     /// Validates all arguments.
-    pub fn validate(&self, supported_extensions: HashSet<OsString>) -> anyhow::Result<()> {
+    pub fn validate(&self, supported_extensions: &HashSet<&OsString>) -> anyhow::Result<()> {
         // Check custom extensions.
         for (key, val) in &self.extensions {
             if !supported_extensions.contains(&OsString::from(val)) {

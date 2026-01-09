@@ -81,7 +81,8 @@ impl Block {
             return false;
         }
 
-        let content_end_position = Position::from_byte_offset(range.end - 1, new_line_positions);
+        let content_end_position =
+            Position::from_byte_offset(range.end.saturating_sub(1), new_line_positions);
         if line_change.line > content_end_position.line {
             // `line_change` is after the block's content end line.
             return false;
@@ -193,6 +194,19 @@ impl Block {
         self.content_range.start += byte_offset;
         self.content_range.end += byte_offset;
     }
+
+    /// Returns a 1-based column number of the starting tag.
+    pub(crate) fn starts_at_column(&self, new_line_positions: &[usize]) -> usize {
+        let line_start_pos = if self.starts_at_line > 1 {
+            new_line_positions
+                .get(self.starts_at_line - 2) // -1 for 0-based indexing, -1 for the line before the block.
+                .map(|p| p + 1) // +1 for the first character of the line.
+                .expect("Failed to get line start position")
+        } else {
+            0 // First line case: starts at the first character of the line.
+        };
+        self.start_tag_range.start.saturating_sub(line_start_pos) + 1 // 1-based column number.
+    }
 }
 
 /// Block's severity.
@@ -223,6 +237,22 @@ pub struct FileBlocks {
 impl FileBlocks {
     fn is_empty(&self) -> bool {
         self.blocks_with_context.is_empty()
+    }
+
+    /// Converts the file blocks to a serializable report.
+    pub(crate) fn to_serializable_report(&self) -> Vec<serde_json::Value> {
+        let mut listings = Vec::new();
+        for block in &self.blocks_with_context {
+            listings.push(serde_json::json!({
+                "name": block.block.name_display(),
+                "line": block.block.starts_at_line,
+                "column": block.block.starts_at_column(&self.file_content_new_lines),
+                "attributes": block.block.attributes,
+            }));
+        }
+        // Sort by line number for deterministic output
+        listings.sort_by_key(|b| b["line"].as_u64().unwrap_or(0));
+        listings
     }
 }
 

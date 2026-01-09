@@ -132,6 +132,15 @@ impl ValidationContext {
     pub fn new(blocks: HashMap<PathBuf, FileBlocks>) -> Self {
         Self { blocks }
     }
+
+    /// Converts the validation context to a serializable report that can be displayed as JSON.
+    pub fn to_serializable_report(&self) -> HashMap<PathBuf, Vec<serde_json::Value>> {
+        let mut report = HashMap::new();
+        for (path, file_blocks) in &self.blocks {
+            report.insert(path.clone(), file_blocks.to_serializable_report());
+        }
+        report
+    }
 }
 
 /// Runs all sync validators concurrently each in a separate thread and returns violations grouped
@@ -641,6 +650,44 @@ mod tests {
             violations[&PathBuf::from("example1.py")][0].code,
             "fake-sync"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn to_serializable_report_returns_correct_listings() -> anyhow::Result<()> {
+        let contents = r#"/* <block name="top"> */ let a = "cc"; /* </block> Block on the first line. */
+// <block name="first" attr1="val1"> Block on the second line.
+fn a() {}
+// </block>
+//     <block name="second" attr2="val2"> Block with indent.
+fn b() {}
+// </block>
+/* <block name="bottom"> */ fn c() {} /* </block> Block on the last line. */"#;
+        let context = validation_context("example.rs", contents);
+        let report = context.to_serializable_report();
+
+        assert_eq!(report.len(), 1);
+        let listings = &report[&PathBuf::from("example.rs")];
+        assert_eq!(listings.len(), 4);
+
+        assert_eq!(listings[0]["name"], "top");
+        assert_eq!(listings[0]["line"], 1);
+        assert_eq!(listings[0]["column"], 4);
+
+        assert_eq!(listings[1]["name"], "first");
+        assert_eq!(listings[1]["line"], 2);
+        assert_eq!(listings[1]["column"], 4);
+        assert_eq!(listings[1]["attributes"]["attr1"], "val1");
+
+        assert_eq!(listings[2]["name"], "second");
+        assert_eq!(listings[2]["line"], 5);
+        assert_eq!(listings[2]["column"], 8);
+        assert_eq!(listings[2]["attributes"]["attr2"], "val2");
+
+        assert_eq!(listings[3]["name"], "bottom");
+        assert_eq!(listings[3]["line"], 8);
+        assert_eq!(listings[3].get("column").unwrap(), 4);
+
         Ok(())
     }
 }
