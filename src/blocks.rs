@@ -247,6 +247,7 @@ impl FileBlocks {
                 "name": block.block.name_display(),
                 "line": block.block.starts_at_line,
                 "column": block.block.starts_at_column(&self.file_content_new_lines),
+                "is_content_modified": block.is_content_modified,
                 "attributes": block.block.attributes,
             }));
         }

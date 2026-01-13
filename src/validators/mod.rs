@@ -669,24 +669,49 @@ fn b() {}
         assert_eq!(report.len(), 1);
         let listings = &report[&PathBuf::from("example.rs")];
         assert_eq!(listings.len(), 4);
-
-        assert_eq!(listings[0]["name"], "top");
-        assert_eq!(listings[0]["line"], 1);
-        assert_eq!(listings[0]["column"], 4);
-
-        assert_eq!(listings[1]["name"], "first");
-        assert_eq!(listings[1]["line"], 2);
-        assert_eq!(listings[1]["column"], 4);
-        assert_eq!(listings[1]["attributes"]["attr1"], "val1");
-
-        assert_eq!(listings[2]["name"], "second");
-        assert_eq!(listings[2]["line"], 5);
-        assert_eq!(listings[2]["column"], 8);
-        assert_eq!(listings[2]["attributes"]["attr2"], "val2");
-
-        assert_eq!(listings[3]["name"], "bottom");
-        assert_eq!(listings[3]["line"], 8);
-        assert_eq!(listings[3].get("column").unwrap(), 4);
+        assert_eq!(
+            listings,
+            &vec![
+                serde_json::json!({
+                    "name": "top",
+                    "line": 1,
+                    "column": 4,
+                    "is_content_modified": true,
+                    "attributes": {
+                        "name": "top"
+                    }
+                }),
+                serde_json::json!({
+                    "name": "first",
+                    "line": 2,
+                    "column": 4,
+                    "is_content_modified": true,
+                    "attributes": {
+                        "attr1": "val1",
+                        "name": "first",
+                    }
+                }),
+                serde_json::json!({
+                    "name": "second",
+                    "line": 5,
+                    "column": 8,
+                    "is_content_modified": true,
+                    "attributes": {
+                        "attr2": "val2",
+                        "name": "second"
+                    }
+                }),
+                serde_json::json!({
+                    "name": "bottom",
+                    "line": 8,
+                    "column": 4,
+                    "is_content_modified": true,
+                    "attributes": {
+                        "name": "bottom"
+                    }
+                })
+            ]
+        );
 
         Ok(())
     }

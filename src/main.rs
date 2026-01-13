@@ -99,7 +99,7 @@ fn process_violations(violations: HashMap<PathBuf, Vec<Violation>>) -> anyhow::R
 fn repository_root_path(current_path: PathBuf) -> anyhow::Result<PathBuf> {
     current_path
         .ancestors()
-        .find(|path| path.join(".git").is_dir())
+        .find(|path| path.join(".git").is_dir() || path.join(".hg").is_dir())
         .map(|path| path.to_path_buf())
         .ok_or_else(|| anyhow::anyhow!("Could not find the repository root directory"))
 }
