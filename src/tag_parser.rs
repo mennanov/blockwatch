@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Range;
 use winnow::Result as PResult;
 use winnow::ascii::{multispace0, multispace1};
 use winnow::combinator::{alt, delimited, opt, preceded, repeat};
@@ -17,11 +18,9 @@ pub(crate) trait BlockTagParser {
 pub(crate) enum BlockTag {
     /// A start tag like.
     Start {
-        /// Byte position where the tag starts in the source
-        start_position: usize,
-        /// Byte position where the tag ends in the source
-        end_position: usize,
-        /// Attribute name-value pairs (duplicate keys use last value)
+        /// Position of the start tag in a comment.
+        tag_range: Range<usize>,
+        /// Attribute name-value pairs (duplicate keys use last value).
         attributes: HashMap<String, String>,
     },
     /// An end tag like.
@@ -69,8 +68,7 @@ impl<'source> BlockTagParser for WinnowBlockTagParser<'source> {
                     let end_position = start_position + match_len;
                     self.cursor = end_position;
                     return Ok(Some(BlockTag::Start {
-                        start_position,
-                        end_position,
+                        tag_range: start_position..end_position,
                         attributes,
                     }));
                 }

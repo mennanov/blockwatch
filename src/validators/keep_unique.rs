@@ -84,7 +84,11 @@ impl ValidatorSync for KeepUniqueValidator {
                                 "Invalid keep-unique regex pattern for block {}:{} defined at line {}: {}",
                                 file_path.display(),
                                 block_with_context.block.name_display(),
-                                block_with_context.block.starts_at_line,
+                                block_with_context
+                                    .block
+                                    .start_tag_position_range
+                                    .start()
+                                    .line,
                                 e
                             ));
                         }
@@ -92,8 +96,12 @@ impl ValidatorSync for KeepUniqueValidator {
                     if let Some((matched_line, line_range)) = line_match
                         && !seen.insert(matched_line)
                     {
-                        let violation_line_number =
-                            block_with_context.block.starts_at_line + line_number;
+                        let violation_line_number = block_with_context
+                            .block
+                            .start_tag_position_range
+                            .start()
+                            .line
+                            + line_number;
                         let line_character_start = *line_range.start(); // Start position is 1-based.
                         let line_character_end = *line_range.end(); // End position is 1-based and inclusive.
                         violations
@@ -153,7 +161,7 @@ fn create_violation(
         "Block {}:{} defined at line {} has a duplicated line {}",
         block_file_path.display(),
         block.name_display(),
-        block.starts_at_line,
+        block.start_tag_position_range.start().line,
         violation_line_number,
     );
     Ok(Violation::new(

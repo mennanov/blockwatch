@@ -8,27 +8,16 @@ pub mod language_parsers;
 mod tag_parser;
 pub mod validators;
 
-#[derive(Serialize, Debug, PartialEq)]
+#[derive(Serialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Position {
+    // 1-based line number.
     line: usize,
+    // 1-based character (column) number.
     character: usize,
 }
 
 impl Position {
     pub fn new(line: usize, character: usize) -> Self {
-        Self { line, character }
-    }
-
-    pub fn from_byte_offset(offset: usize, new_line_positions: &[usize]) -> Self {
-        let line_idx = new_line_positions
-            .binary_search(&offset)
-            .unwrap_or_else(|i| i);
-        let line = line_idx + 1; // Line number is 1-based.
-        let character = if line_idx > 0 {
-            offset - new_line_positions[line_idx - 1]
-        } else {
-            offset
-        };
         Self { line, character }
     }
 }
@@ -51,17 +40,6 @@ mod test_utils {
     /// * `substr` - The substring to find
     pub(crate) fn substr_range(input: &str, substr: &str) -> Range<usize> {
         let pos = input.find(substr).unwrap();
-        pos..(pos + substr.len())
-    }
-
-    /// Finds the byte range of the nth occurrence of a substring within a string.
-    ///
-    /// # Arguments
-    /// * `input` - The string to search in
-    /// * `substr` - The substring to find
-    /// * `nth` - The zero-based index of the occurrence to find
-    pub(crate) fn substr_range_nth(input: &str, substr: &str, nth: usize) -> Range<usize> {
-        let (pos, _) = input.match_indices(substr).nth(nth).unwrap();
         pos..(pos + substr.len())
     }
 
@@ -160,7 +138,6 @@ mod test_utils {
                     .entry(file_path.clone())
                     .or_insert_with(|| FileBlocks {
                         file_content: file_blocks.file_content.clone(),
-                        file_content_new_lines: file_blocks.file_content_new_lines.clone(),
                         blocks_with_context: vec![],
                     })
                     .blocks_with_context
@@ -168,39 +145,5 @@ mod test_utils {
             }
         }
         Arc::new(ValidationContext::new(merged_modified_blocks))
-    }
-}
-
-#[cfg(test)]
-mod position_from_byte_offset_tests {
-    use super::*;
-
-    #[test]
-    fn with_single_line_returns_correct_position() {
-        // A single line file has no new lines.
-        let result = Position::from_byte_offset(10, &[]);
-        assert_eq!(result.line, 1);
-        assert_eq!(result.character, 10);
-    }
-
-    #[test]
-    fn with_multiple_lines_returns_correct_position_on_first_line() {
-        let result = Position::from_byte_offset(10, &[20]);
-        assert_eq!(result.line, 1);
-        assert_eq!(result.character, 10);
-    }
-
-    #[test]
-    fn with_multiple_lines_returns_correct_position_on_middle_line() {
-        let result = Position::from_byte_offset(25, &[20, 30]);
-        assert_eq!(result.line, 2);
-        assert_eq!(result.character, 5);
-    }
-
-    #[test]
-    fn with_multiple_lines_returns_correct_position_on_last_line() {
-        let result = Position::from_byte_offset(21, &[20]);
-        assert_eq!(result.line, 2);
-        assert_eq!(result.character, 1);
     }
 }

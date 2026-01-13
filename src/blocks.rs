@@ -8,7 +8,7 @@ use serde_repr::Serialize_repr;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::ops::Range;
+use std::ops::{Range, RangeInclusive};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::str::FromStr;
@@ -19,16 +19,15 @@ const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
 /// Represents a `block` tag parsed from the source file comments.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Block {
-    // Source line number with the `block` tag.
-    pub(crate) starts_at_line: usize,
-    // Source line number with the corresponding closed `block` tag.
-    pub(crate) ends_at_line: usize,
     // Optional attributes in the `block` tag.
     pub(crate) attributes: HashMap<String, String>,
-    // Block's start tag range in the original source code.
-    pub(crate) start_tag_range: Range<usize>,
+    // Block's start tag position range ("<" symbol to ">" symbol).
+    pub(crate) start_tag_position_range: RangeInclusive<Position>,
     // Block's content substring range in the original source code.
-    pub(crate) content_range: Range<usize>,
+    pub(crate) content_bytes_range: Range<usize>,
+    // Block's content position range in the original source code (from the end of the comment with
+    // the start tag to the beginning of the comment with the end tag).
+    pub(crate) content_position_range: Range<Position>,
 }
 
 impl PartialOrd for Block {
@@ -39,74 +38,96 @@ impl PartialOrd for Block {
 
 impl Ord for Block {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.start_tag_range
-            .start
-            .cmp(&other.start_tag_range.start)
-            .then_with(|| self.start_tag_range.end.cmp(&other.start_tag_range.end))
+        self.start_tag_position_range
+            .start()
+            .cmp(other.start_tag_position_range.start())
     }
 }
 
 impl Block {
     /// Creates a new `Block` with the given attributes and content indexes.
     pub(crate) fn new(
-        starts_at_line: usize,
-        ends_at_line: usize,
         attributes: HashMap<String, String>,
-        start_tag_range: Range<usize>,
+        start_tag_position_range: RangeInclusive<Position>,
         content_range: Range<usize>,
+        content_position_range: Range<Position>,
     ) -> Self {
         Self {
-            starts_at_line,
-            ends_at_line,
             attributes,
-            start_tag_range,
-            content_range,
+            start_tag_position_range,
+            content_bytes_range: content_range,
+            content_position_range,
         }
     }
 
-    /// Whether the `Block` intersects with the given `line_change`.
-    fn intersects_with_line_change(
-        &self,
-        range: &Range<usize>,
-        line_change: &LineChange,
-        new_line_positions: &[usize],
-    ) -> bool {
-        if line_change.line < self.starts_at_line || line_change.line > self.ends_at_line {
-            // `line_change` is outside the block's start and end tags.
-            return false;
-        }
-        let content_start_position = Position::from_byte_offset(range.start, new_line_positions);
-        if line_change.line < content_start_position.line {
-            // `line_change` is before the block's content start line.
-            return false;
-        }
+    /// Whether the `Block`'s content intersects with any of the **ordered** `line_changes`.
+    ///
+    /// `new_line_positions` is used for locating a starting position of a line in the source code.
+    fn content_intersects_with_any(&self, line_changes: &[LineChange]) -> bool {
+        line_changes
+            .binary_search_by(|line_change: &LineChange| {
+                if Self::intersects_with_line_change(&self.content_position_range, line_change) {
+                    Ordering::Equal
+                } else if line_change.line < self.content_position_range.start.line {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            })
+            .is_ok()
+    }
 
-        let content_end_position =
-            Position::from_byte_offset(range.end.saturating_sub(1), new_line_positions);
-        if line_change.line > content_end_position.line {
-            // `line_change` is after the block's content end line.
+    /// Whether the `Block`'s start tag intersects with any of the **ordered** `line_changes`.
+    ///
+    /// `new_line_positions` is used for locating a starting position of a line in the source code.
+    fn start_tag_intersects_with_any(&self, line_changes: &[LineChange]) -> bool {
+        line_changes
+            .binary_search_by(|line_change: &LineChange| {
+                if Self::intersects_with_line_change_inclusive(
+                    &self.start_tag_position_range,
+                    line_change,
+                ) {
+                    Ordering::Equal
+                } else if line_change.line < self.start_tag_position_range.start().line {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            })
+            .is_ok()
+    }
+
+    /// Whether the `position_range` intersects with the given `line_change`.
+    fn intersects_with_line_change_inclusive(
+        position_range: &RangeInclusive<Position>,
+        line_change: &LineChange,
+    ) -> bool {
+        if line_change.line < position_range.start().line {
+            return false;
+        }
+        if line_change.line > position_range.end().line {
             return false;
         }
 
         if let Some(ranges) = &line_change.ranges {
-            let line_start_character = if line_change.line == content_start_position.line {
-                content_start_position.character
+            let start_character = if line_change.line == position_range.start().line {
+                position_range.start().character - 1 // LineChange.ranges are 0-based
             } else {
                 0
             };
-            let line_end_character = if line_change.line < content_end_position.line {
+            let end_character = if line_change.line < position_range.end().line {
                 usize::MAX
             } else {
-                content_end_position.character
+                position_range.end().character - 1 // LineChange.ranges are 0-based
             };
 
             ranges
                 .binary_search_by(|range| {
-                    if range.end > line_start_character && range.start <= line_end_character {
-                        // Intersection between [line_start_character, line_end_character]
+                    if range.end > start_character && range.start <= end_character {
+                        // Intersection between [start_character, end_character]
                         // and half-open [range.start, range.end).
                         Ordering::Equal
-                    } else if range.end <= line_start_character {
+                    } else if range.end <= start_character {
                         Ordering::Less
                     } else {
                         Ordering::Greater
@@ -118,46 +139,46 @@ impl Block {
         }
     }
 
-    /// Whether the `Block`'s content intersects with any of the **ordered** `line_changes`.
-    ///
-    /// `new_line_positions` is used for locating a starting position of a line in the source code.
-    fn content_intersects_with_any(
-        &self,
-        line_changes: &[LineChange],
-        new_line_positions: &[usize],
+    /// Whether the `position_range` intersects with the given `line_change`.
+    fn intersects_with_line_change(
+        position_range: &Range<Position>,
+        line_change: &LineChange,
     ) -> bool {
-        self.intersects_with_any(&self.content_range, line_changes, new_line_positions)
-    }
+        if line_change.line < position_range.start.line {
+            return false;
+        }
+        if line_change.line > position_range.end.line {
+            return false;
+        }
 
-    /// Whether the `Block`'s start tag intersects with any of the **ordered** `line_changes`.
-    ///
-    /// `new_line_positions` is used for locating a starting position of a line in the source code.
-    fn start_tag_intersects_with_any(
-        &self,
-        line_changes: &[LineChange],
-        new_line_positions: &[usize],
-    ) -> bool {
-        self.intersects_with_any(&self.start_tag_range, line_changes, new_line_positions)
-    }
+        if let Some(ranges) = &line_change.ranges {
+            let start_character = if line_change.line == position_range.start.line {
+                position_range.start.character - 1 // LineChange.ranges are 0-based
+            } else {
+                0
+            };
+            let end_character = if line_change.line < position_range.end.line {
+                usize::MAX
+            } else {
+                position_range.end.character - 1 // LineChange.ranges are 0-based
+            };
 
-    /// Whether the `Block`'s `range` intersects with any of the given `line_changes`.
-    fn intersects_with_any(
-        &self,
-        range: &Range<usize>,
-        line_changes: &[LineChange],
-        new_line_positions: &[usize],
-    ) -> bool {
-        line_changes
-            .binary_search_by(|line_change: &LineChange| {
-                if self.intersects_with_line_change(range, line_change, new_line_positions) {
-                    Ordering::Equal
-                } else if line_change.line < self.starts_at_line {
-                    Ordering::Less
-                } else {
-                    Ordering::Greater
-                }
-            })
-            .is_ok()
+            ranges
+                .binary_search_by(|range| {
+                    if range.end > start_character && range.start < end_character {
+                        // Intersection between closed-open [start_character, end_character)
+                        // and closed-open [range.start, range.end).
+                        Ordering::Equal
+                    } else if range.end <= start_character {
+                        Ordering::Less
+                    } else {
+                        Ordering::Greater
+                    }
+                })
+                .is_ok()
+        } else {
+            true
+        }
     }
 
     /// Returns the optional value of the `name` attribute for this block.
@@ -172,7 +193,7 @@ impl Block {
 
     /// Returns the block's content from the given `source`.
     pub(crate) fn content<'source>(&self, source: &'source str) -> &'source str {
-        &source[self.content_range.clone()]
+        &source[self.content_bytes_range.clone()]
     }
 
     /// Returns the block's severity.
@@ -183,29 +204,6 @@ impl Block {
                 BlockSeverity::from_str(s.as_str())
                     .context("Failed to parse \"severity\" attribute")
             })
-    }
-
-    /// Adds the given `line_offset` and `byte_offset` to the block's ranges.
-    pub(crate) fn add_offsets(&mut self, line_offset: usize, byte_offset: usize) {
-        self.starts_at_line += line_offset;
-        self.ends_at_line += line_offset;
-        self.start_tag_range.start += byte_offset;
-        self.start_tag_range.end += byte_offset;
-        self.content_range.start += byte_offset;
-        self.content_range.end += byte_offset;
-    }
-
-    /// Returns a 1-based column number of the starting tag.
-    pub(crate) fn starts_at_column(&self, new_line_positions: &[usize]) -> usize {
-        let line_start_pos = if self.starts_at_line > 1 {
-            new_line_positions
-                .get(self.starts_at_line - 2) // -1 for 0-based indexing, -1 for the line before the block.
-                .map(|p| p + 1) // +1 for the first character of the line.
-                .expect("Failed to get line start position")
-        } else {
-            0 // First line case: starts at the first character of the line.
-        };
-        self.start_tag_range.start.saturating_sub(line_start_pos) + 1 // 1-based column number.
     }
 }
 
@@ -227,9 +225,6 @@ pub enum BlockSeverity {
 pub struct FileBlocks {
     /// Source file contents.
     pub(crate) file_content: String,
-    /// Newline positions in the `file_content`.
-    /// Can be used to convert a byte offset to a line number and a character position in log(N).
-    pub(crate) file_content_new_lines: Vec<usize>,
     /// Blocks to be validated.
     pub(crate) blocks_with_context: Vec<BlockWithContext>,
 }
@@ -245,8 +240,8 @@ impl FileBlocks {
         for block in &self.blocks_with_context {
             listings.push(serde_json::json!({
                 "name": block.block.name_display(),
-                "line": block.block.starts_at_line,
-                "column": block.block.starts_at_column(&self.file_content_new_lines),
+                "line": block.block.start_tag_position_range.start().line,
+                "column": block.block.start_tag_position_range.start().character,
                 "is_content_modified": block.is_content_modified,
                 "attributes": block.block.attributes,
             }));
@@ -358,10 +353,6 @@ fn parse_file(
         Some(p) => p,
     };
     let source_code = file_reader.read_to_string(file_path)?;
-    let new_line_positions: Vec<usize> = source_code
-        .match_indices('\n')
-        .map(|(idx, _)| idx)
-        .collect();
     let blocks = parser
         .parse(&source_code)
         .context(format!("Failed to parse file {file_path:?}"))?;
@@ -369,10 +360,8 @@ fn parse_file(
     let blocks_with_context = blocks
         .into_iter()
         .filter_map(|block| {
-            let is_content_modified =
-                block.content_intersects_with_any(line_changes, &new_line_positions);
-            let is_start_tag_modified =
-                block.start_tag_intersects_with_any(line_changes, &new_line_positions);
+            let is_content_modified = block.content_intersects_with_any(line_changes);
+            let is_start_tag_modified = block.start_tag_intersects_with_any(line_changes);
 
             if matches!(blocks_filter, BlocksFilter::All)
                 || is_content_modified
@@ -391,7 +380,6 @@ fn parse_file(
 
     Ok(Some(FileBlocks {
         file_content: source_code,
-        file_content_new_lines: new_line_positions,
         blocks_with_context,
     }))
 }
@@ -507,16 +495,16 @@ impl PathChecker for PathCheckerImpl {
 
 #[cfg(test)]
 mod block_severity_from_str_tests {
+    use crate::Position;
     use crate::blocks::{Block, BlockSeverity};
     use std::collections::HashMap;
 
     pub(crate) fn new_empty_block_with_severity(severity: &str) -> Block {
         Block::new(
-            0,
-            0,
             HashMap::from([("severity".into(), severity.into())]),
+            Position::new(0, 0)..=Position::new(0, 0),
             0..0,
-            0..0,
+            Position::new(0, 0)..Position::new(0, 0),
         )
     }
 
@@ -536,7 +524,12 @@ mod block_severity_from_str_tests {
 
     #[test]
     fn block_without_severity_attribute_returns_error_severity() {
-        let block = Block::new(0, 0, HashMap::new(), 0..0, 0..0);
+        let block = Block::new(
+            HashMap::new(),
+            Position::new(0, 0)..=Position::new(0, 0),
+            0..0,
+            Position::new(0, 0)..Position::new(0, 0),
+        );
 
         assert_eq!(block.severity().unwrap(), BlockSeverity::Error);
     }
@@ -951,43 +944,6 @@ mod parse_blocks_tests {
 
         let content_a = &blocks_by_file[&PathBuf::from("a.rs")].file_content;
         assert_eq!(content_a, file_a_contents);
-        Ok(())
-    }
-
-    #[test]
-    fn parsed_blocks_new_lines_contains_correct_new_lines() -> anyhow::Result<()> {
-        let file_a_contents = r#"
-        // <block name="first">
-        fn a() {}
-        // </block>
-        // <block name="second">
-        fn b() {
-            println!("hello");
-            println!("world");
-        }
-        // </block>
-        "#;
-        let file_system = FakeFileSystem::new(HashMap::from([(
-            "a.rs".to_string(),
-            file_a_contents.to_string(),
-        )]));
-        let parsers = language_parsers()?;
-
-        let blocks_by_file = parse_blocks(
-            HashMap::new(),
-            true,
-            &file_system,
-            &FakePathChecker::allow_all(),
-            parsers,
-            HashMap::new(),
-        )?;
-
-        let new_lines = &blocks_by_file[&PathBuf::from("a.rs")].file_content_new_lines;
-        let expected_new_lines: Vec<usize> = file_a_contents
-            .match_indices('\n')
-            .map(|(idx, _)| idx)
-            .collect();
-        assert_eq!(new_lines, &expected_new_lines);
         Ok(())
     }
 

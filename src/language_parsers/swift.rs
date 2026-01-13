@@ -22,7 +22,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language_parsers::Comment;
+    use crate::{Position, language_parsers::Comment};
 
     #[test]
     fn parses_swift_comments_correctly() -> anyhow::Result<()> {
@@ -55,29 +55,29 @@ mod tests {
             blocks,
             vec![
                 Comment {
-                    source_line_number: 2,
-                    source_start_position: 13,
-                    source_end_position: 55,
+                    start_position: Position::new(2, 13),
+                    end_position: Position::new(2, 55),
+                    source_range: 13..55,
                     comment_text: "   This is a single-line comment in Swift.".to_string()
                 },
                 Comment {
-                    source_line_number: 5,
-                    source_start_position: 103,
-                    source_end_position: 215,
+                    start_position: Position::new(5, 13),
+                    end_position: Position::new(8, 16),
+                    source_range: 103..215,
                     comment_text:
                         "  \n               This is a multi-line comment.\n               It spans multiple lines in Swift.\n               "
                             .to_string()
                 },
                 Comment {
-                    source_line_number: 11,
-                    source_start_position: 286,
-                    source_end_position: 321,
+                    start_position: Position::new(11, 40),
+                    end_position: Position::new(11, 75),
+                    source_range: 286..321,
                     comment_text: "   Prints a message to the console.".to_string()
                 },
                 Comment {
-                    source_line_number: 13,
-                    source_start_position: 343,
-                    source_end_position: 446,
+                    start_position: Position::new(13, 17),
+                    end_position: Position::new(16, 20),
+                    source_range: 343..446,
                     comment_text: "   Another comment\n                   split into\n                   multiple lines.\n                   ".to_string()
                 }
             ]

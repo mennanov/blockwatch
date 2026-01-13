@@ -44,7 +44,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language_parsers::Comment;
+    use crate::{Position, language_parsers::Comment};
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
@@ -82,52 +82,52 @@ mod tests {
             blocks,
             vec![
                 Comment {
-                    source_line_number: 2,
-                    source_start_position: 9,
-                    source_end_position: 58,
+                    start_position: Position::new(2, 9),
+                    end_position: Position::new(3, 1),
+                    source_range: 9..58,
                     comment_text: "    This is a crate-level documentation comment.\n".to_string()
                 },
                 Comment {
-                    source_line_number: 3,
-                    source_start_position: 66,
-                    source_end_position: 120,
+                    start_position: Position::new(3, 9),
+                    end_position: Position::new(4, 1),
+                    source_range: 66..120,
                     comment_text: "    It provides an overview of the module or library.\n".to_string()
                 },
                 Comment {
-                    source_line_number: 5,
-                    source_start_position: 137,
-                    source_end_position: 173,
+                    start_position: Position::new(5, 9),
+                    end_position: Position::new(6, 1),
+                    source_range: 137..173, // TODO: incorrect?
                     comment_text: "    This function adds two numbers.\n".to_string()
                 },
                 Comment {
-                    source_line_number: 6,
-                    source_start_position: 181,
-                    source_end_position: 185,
+                    start_position: Position::new(6, 9),
+                    end_position: Position::new(7, 1),
+                    source_range: 181..185,
                     comment_text: "   \n".to_string()
                 },
                 Comment {
-                    source_line_number: 7,
-                    source_start_position: 193,
-                    source_end_position: 229,
+                    start_position: Position::new(7, 9),
+                    end_position: Position::new(8, 1),
+                    source_range: 193..229,
                     comment_text: "    Returns the sum of `a` and `b`.\n".to_string()
                 },
                 Comment {
-                    source_line_number: 13,
-                    source_start_position: 338,
-                    source_end_position: 371,
+                    start_position: Position::new(13, 13),
+                    end_position: Position::new(13, 46),
+                    source_range: 338..371,
                     comment_text: "   This is a single-line comment.".to_string()
                 },
                 Comment {
-                    source_line_number: 16,
-                    source_start_position: 431,
-                    source_end_position: 520,
+                    start_position: Position::new(16, 13),
+                    end_position: Position::new(18, 46),
+                    source_range: 431..520,
                     comment_text: "   \n               This is a block comment.\n               It can span multiple lines.   "
                         .to_string()
                 },
                 Comment {
-                    source_line_number: 23,
-                    source_start_position: 650,
-                    source_end_position: 676,
+                    start_position: Position::new(23, 56),
+                    end_position: Position::new(23, 82),
+                    source_range: 650..676,
                     comment_text: "   Using the add function.".to_string()
                 }
             ]

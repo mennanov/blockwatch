@@ -18,7 +18,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language_parsers::Comment;
+    use crate::{Position, language_parsers::Comment};
 
     #[test]
     fn parses_cpp_comments_correctly() -> anyhow::Result<()> {
@@ -51,28 +51,28 @@ mod tests {
             blocks,
             vec![
                 Comment {
-                    source_line_number: 2,
-                    source_start_position: 13,
-                    source_end_position: 53,
+                    start_position: Position::new(2, 13),
+                    end_position: Position::new(2, 53),
+                    source_range: 13..53,
                     comment_text: "   This is a single-line comment in C++.".to_string()
                 },
                 Comment {
-                    source_line_number: 5,
-                    source_start_position: 99,
-                    source_end_position: 202,
+                    start_position: Position::new(5, 13),
+                    end_position: Position::new(8, 16),
+                    source_range: 99..202,
                     comment_text: "  \n               This is a multi-line comment.\n               It spans multiple lines.\n               "
                         .to_string()
                 },
                 Comment {
-                    source_line_number: 11,
-                    source_start_position: 286,
-                    source_end_position: 321,
+                    start_position: Position::new(11, 58),
+                    end_position: Position::new(11, 93),
+                    source_range: 286..321,
                     comment_text: "   Prints a message to the console.".to_string()
                 },
                 Comment {
-                    source_line_number: 13,
-                    source_start_position: 339,
-                    source_end_position: 435,
+                    start_position: Position::new(13, 17),
+                    end_position: Position::new(16, 20),
+                    source_range: 339..435,
                     comment_text: "   This is another\n                   multi-line\n                   comment.\n                   ".to_string()
                 },
             ]
