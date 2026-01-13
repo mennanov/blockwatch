@@ -39,38 +39,32 @@ dob = 1979-05-27T07:32:00-08:00 # Date of birth with comment
             blocks,
             vec![
                 Comment {
-                    start_position: Position::new(2, 1),
-                    end_position: Position::new(2, 22),
+                    position_range: Position::new(2, 1)..Position::new(2, 22),
                     source_range: 1..22,
                     comment_text: "  This is a TOML file".to_string()
                 },
                 Comment {
-                    start_position: Position::new(3, 24),
-                    end_position: Position::new(3, 40),
+                    position_range: Position::new(3, 24)..Position::new(3, 40),
                     source_range: 46..62,
                     comment_text: "  Inline comment".to_string()
                 },
                 Comment {
-                    start_position: Position::new(5, 1),
-                    end_position: Position::new(5, 18),
+                    position_range: Position::new(5, 1)..Position::new(5, 18),
                     source_range: 71..88,
                     comment_text: "  Owner's details".to_string()
                 },
                 Comment {
-                    start_position: Position::new(6, 29),
-                    end_position: Position::new(6, 53),
+                    position_range: Position::new(6, 29)..Position::new(6, 53),
                     source_range: 117..141,
                     comment_text: "  Another inline comment".to_string()
                 },
                 Comment {
-                    start_position: Position::new(7, 33),
-                    end_position: Position::new(7, 61),
+                    position_range: Position::new(7, 33)..Position::new(7, 61),
                     source_range: 174..202,
                     comment_text: "  Date of birth with comment".to_string()
                 },
                 Comment {
-                    start_position: Position::new(8, 1),
-                    end_position: Position::new(8, 14),
+                    position_range: Position::new(8, 1)..Position::new(8, 14),
                     source_range: 203..216,
                     comment_text: "  End of file".to_string()
                 }

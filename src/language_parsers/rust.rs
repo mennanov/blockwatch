@@ -82,51 +82,43 @@ mod tests {
             blocks,
             vec![
                 Comment {
-                    start_position: Position::new(2, 9),
-                    end_position: Position::new(3, 1),
+                    position_range: Position::new(2, 9)..Position::new(3, 1),
                     source_range: 9..58,
                     comment_text: "    This is a crate-level documentation comment.\n".to_string()
                 },
                 Comment {
-                    start_position: Position::new(3, 9),
-                    end_position: Position::new(4, 1),
+                    position_range: Position::new(3, 9)..Position::new(4, 1),
                     source_range: 66..120,
                     comment_text: "    It provides an overview of the module or library.\n".to_string()
                 },
                 Comment {
-                    start_position: Position::new(5, 9),
-                    end_position: Position::new(6, 1),
+                    position_range: Position::new(5, 9)..Position::new(6, 1),
                     source_range: 137..173, // TODO: incorrect?
                     comment_text: "    This function adds two numbers.\n".to_string()
                 },
                 Comment {
-                    start_position: Position::new(6, 9),
-                    end_position: Position::new(7, 1),
+                    position_range: Position::new(6, 9)..Position::new(7, 1),
                     source_range: 181..185,
                     comment_text: "   \n".to_string()
                 },
                 Comment {
-                    start_position: Position::new(7, 9),
-                    end_position: Position::new(8, 1),
+                    position_range: Position::new(7, 9)..Position::new(8, 1),
                     source_range: 193..229,
                     comment_text: "    Returns the sum of `a` and `b`.\n".to_string()
                 },
                 Comment {
-                    start_position: Position::new(13, 13),
-                    end_position: Position::new(13, 46),
+                    position_range: Position::new(13, 13)..Position::new(13, 46),
                     source_range: 338..371,
                     comment_text: "   This is a single-line comment.".to_string()
                 },
                 Comment {
-                    start_position: Position::new(16, 13),
-                    end_position: Position::new(18, 46),
+                    position_range: Position::new(16, 13)..Position::new(18, 46),
                     source_range: 431..520,
                     comment_text: "   \n               This is a block comment.\n               It can span multiple lines.   "
                         .to_string()
                 },
                 Comment {
-                    start_position: Position::new(23, 56),
-                    end_position: Position::new(23, 82),
+                    position_range: Position::new(23, 56)..Position::new(23, 82),
                     source_range: 650..676,
                     comment_text: "   Using the add function.".to_string()
                 }

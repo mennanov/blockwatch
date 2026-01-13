@@ -51,27 +51,23 @@ mod tests {
             blocks,
             vec![
                 Comment {
-                    start_position: Position::new(2, 13),
-                    end_position: Position::new(2, 53),
+                    position_range: Position::new(2, 13)..Position::new(2, 53),
                     source_range: 13..53,
                     comment_text: "   This is a single-line comment in C++.".to_string()
                 },
                 Comment {
-                    start_position: Position::new(5, 13),
-                    end_position: Position::new(8, 16),
+                    position_range: Position::new(5, 13)..Position::new(8, 16),
                     source_range: 99..202,
                     comment_text: "  \n               This is a multi-line comment.\n               It spans multiple lines.\n               "
                         .to_string()
                 },
                 Comment {
-                    start_position: Position::new(11, 58),
-                    end_position: Position::new(11, 93),
+                    position_range: Position::new(11, 58)..Position::new(11, 93),
                     source_range: 286..321,
                     comment_text: "   Prints a message to the console.".to_string()
                 },
                 Comment {
-                    start_position: Position::new(13, 17),
-                    end_position: Position::new(16, 20),
+                    position_range: Position::new(13, 17)..Position::new(16, 20),
                     source_range: 339..435,
                     comment_text: "   This is another\n                   multi-line\n                   comment.\n                   ".to_string()
                 },

@@ -38,20 +38,17 @@ all:
             blocks,
             vec![
                 Comment {
-                    start_position: Position::new(2, 1),
-                    end_position: Position::new(2, 20),
+                    position_range: Position::new(2, 1)..Position::new(2, 20),
                     source_range: 1..20,
                     comment_text: "  This is a comment".to_string()
                 },
                 Comment {
-                    start_position: Position::new(6, 1),
-                    end_position: Position::new(6, 18),
+                    position_range: Position::new(6, 1)..Position::new(6, 18),
                     source_range: 59..76,
                     comment_text: "  Another comment".to_string()
                 },
                 Comment {
-                    start_position: Position::new(7, 1),
-                    end_position: Position::new(7, 26),
+                    position_range: Position::new(7, 1)..Position::new(7, 26),
                     source_range: 77..102,
                     comment_text: "  spanning multiple lines".to_string()
                 },

@@ -61,48 +61,41 @@ mod tests {
             blocks,
             vec![
                 Comment {
-                    start_position: Position::new(2, 17),
-                    end_position: Position::new(6, 20),
+                    position_range: Position::new(2, 17)..Position::new(6, 20),
                     source_range: 17..158,
                     comment_text:
                         "   \n                   This is a TSX component with comments.\n                  \n                   @component TSXExample\n                   "
                             .to_string()
                 },
                 Comment {
-                    start_position: Position::new(8, 21),
-                    end_position: Position::new(8, 61),
+                    position_range: Position::new(8, 21)..Position::new(8, 61),
                     source_range: 222..262,
                     comment_text: "   This is a single-line comment in TSX.".to_string()
                 },
                 Comment {
-                    start_position: Position::new(11, 21),
-                    end_position: Position::new(14, 24),
+                    position_range: Position::new(11, 21)..Position::new(14, 24),
                     source_range: 343..476,
                     comment_text:
                         "  \n                       This is a multi-line comment\n                       used in a functional component.\n                       "
                             .to_string()
                 },
                 Comment {
-                    start_position: Position::new(16, 46),
-                    end_position: Position::new(16, 77),
+                    position_range: Position::new(16, 46)..Position::new(16, 77),
                     source_range: 568..599,
                     comment_text: "   Inline multi-line comment   ".to_string()
                 },
                 Comment {
-                    start_position: Position::new(19, 21),
-                    end_position: Position::new(19, 44),
+                    position_range: Position::new(19, 21)..Position::new(19, 44),
                     source_range: 644..667,
                     comment_text: "   Render the component".to_string()
                 },
                 Comment {
-                    start_position: Position::new(22, 30),
-                    end_position: Position::new(22, 59),
+                    position_range: Position::new(22, 30)..Position::new(22, 59),
                     source_range: 756..785,
                     comment_text: "   JSX single-line comment   ".to_string()
                 },
                 Comment {
-                    start_position: Position::new(24, 30),
-                    end_position: Position::new(25, 39),
+                    position_range: Position::new(24, 30)..Position::new(25, 39),
                     source_range: 874..931,
                     comment_text: "   JSX multi-line \n                            comment   ".to_string()
                 }

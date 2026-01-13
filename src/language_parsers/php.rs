@@ -68,34 +68,29 @@ mod tests {
             blocks,
             vec![
                 Comment {
-                    start_position: Position::new(2, 13),
-                    end_position: Position::new(2, 52),
+                    position_range: Position::new(2, 13)..Position::new(2, 52),
                     source_range: 18..57,
                     comment_text: "   This is a single-line comment in PHP".to_string()
                 },
                 Comment {
-                    start_position: Position::new(4, 13),
-                    end_position: Position::new(7, 16),
+                    position_range: Position::new(4, 13)..Position::new(7, 16),
                     source_range: 75..185,
                     comment_text:
                         "  \n               This is a multi-line comment.\n               It spans multiple lines in PHP.\n               "
                             .to_string()
                 },
                 Comment {
-                    start_position: Position::new(10, 37),
-                    end_position: Position::new(10, 71),
+                    position_range: Position::new(10, 37)..Position::new(10, 71),
                     source_range: 257..291,
                     comment_text: "  Prints a message to the console.".to_string()
                 },
                 Comment {
-                    start_position: Position::new(12, 17),
-                    end_position: Position::new(15, 20),
+                    position_range: Position::new(12, 17)..Position::new(15, 20),
                     source_range: 313..416,
                     comment_text: "   Another comment\n                   split into\n                   multiple lines.\n                   ".to_string()
                 },
                 Comment {
-                    start_position: Position::new(20, 34),
-                    end_position: Position::new(20, 52),
+                    position_range: Position::new(20, 34)..Position::new(20, 52),
                     source_range: 523..541,
                     comment_text: "  inlined comment ".to_string()
                 },

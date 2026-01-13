@@ -149,16 +149,14 @@ impl CommentsParser for TreeSitterCommentsParser {
                     if let Some(processor) = post_processor {
                         if let Some(out) = processor(capture.index as usize, comment_text, &node)? {
                             blocks.push(Comment {
-                                start_position,
-                                end_position,
+                                position_range: start_position..end_position,
                                 source_range: start_byte..end_byte,
                                 comment_text: out,
                             });
                         }
                     } else {
                         blocks.push(Comment {
-                            start_position,
-                            end_position,
+                            position_range: start_position..end_position,
                             source_range: start_byte..end_byte,
                             comment_text: comment_text.to_string(),
                         });
@@ -179,10 +177,8 @@ impl CommentsParser for TreeSitterCommentsParser {
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct Comment {
-    // Starting position of the comment in the source.
-    pub(crate) start_position: Position,
-    // Ending position of the comment in the source.
-    pub(crate) end_position: Position,
+    // Position range of the comment in the source.
+    pub(crate) position_range: Range<Position>,
     // Byte offset (i.e. position) of the comment in the source.
     pub(crate) source_range: Range<usize>,
     // The `comment_string` is expected to be the content of the comment with all language specific

@@ -53,38 +53,32 @@ VALUE=42  # Comment after code
             blocks,
             vec![
                 Comment {
-                    start_position: Position::new(2, 1),
-                    end_position: Position::new(2, 32),
+                    position_range: Position::new(2, 1)..Position::new(2, 32),
                     source_range: 12..43,
                     comment_text: "  This is a single line comment".to_string()
                 },
                 Comment {
-                    start_position: Position::new(3, 15),
-                    end_position: Position::new(3, 42),
+                    position_range: Position::new(3, 15)..Position::new(3, 42),
                     source_range: 58..85,
                     comment_text: "  This is an inline comment".to_string()
                 },
                 Comment {
-                    start_position: Position::new(5, 1),
-                    end_position: Position::new(5, 23),
+                    position_range: Position::new(5, 1)..Position::new(5, 23),
                     source_range: 87..109,
                     comment_text: "  This is a multi-line".to_string()
                 },
                 Comment {
-                    start_position: Position::new(6, 1),
-                    end_position: Position::new(6, 21),
+                    position_range: Position::new(6, 1)..Position::new(6, 21),
                     source_range: 110..130,
                     comment_text: "  comment that spans".to_string()
                 },
                 Comment {
-                    start_position: Position::new(7, 1),
-                    end_position: Position::new(7, 16),
+                    position_range: Position::new(7, 1)..Position::new(7, 16),
                     source_range: 131..146,
                     comment_text: "  several lines".to_string()
                 },
                 Comment {
-                    start_position: Position::new(9, 11),
-                    end_position: Position::new(9, 31),
+                    position_range: Position::new(9, 11)..Position::new(9, 31),
                     source_range: 158..178,
                     comment_text: "  Comment after code".to_string()
                 },

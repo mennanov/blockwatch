@@ -54,28 +54,24 @@ mod tests {
             blocks,
             vec![
                 Comment {
-                    start_position: Position::new(2, 13),
-                    end_position: Position::new(2, 55),
+                    position_range: Position::new(2, 13)..Position::new(2, 55),
                     source_range: 13..55,
                     comment_text: "   This is a single-line comment in Kotlin".to_string()
                 },
                 Comment {
-                    start_position: Position::new(5, 13),
-                    end_position: Position::new(8, 16),
+                    position_range: Position::new(5, 13)..Position::new(8, 16),
                     source_range: 110..223,
                     comment_text:
                         "  \n               This is a multi-line comment.\n               It spans multiple lines in Kotlin.\n               "
                             .to_string()
                 },
                 Comment {
-                    start_position: Position::new(10, 43),
-                    end_position: Position::new(10, 62),
+                    position_range: Position::new(10, 43)..Position::new(10, 62),
                     source_range: 279..298,
                     comment_text: "   Prints a message".to_string()
                 },
                 Comment {
-                    start_position: Position::new(12, 17),
-                    end_position: Position::new(15, 20),
+                    position_range: Position::new(12, 17)..Position::new(15, 20),
                     source_range: 332..434,
                     comment_text: "   Another comment\n                   split into\n                   multiple lines\n                   ".to_string()
                 },

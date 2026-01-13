@@ -55,42 +55,36 @@ mod tests {
             blocks,
             vec![
                 Comment {
-                    start_position: Position::new(2, 13),
-                    end_position: Position::new(6, 16),
+                    position_range: Position::new(2, 13)..Position::new(6, 16),
                     source_range: 13..142,
                     comment_text:
                         "   \n               This is a TypeScript class example with comments.\n              \n               @class Example\n               "
                             .to_string()
                 },
                 Comment {
-                    start_position: Position::new(8, 17),
-                    end_position: Position::new(8, 64),
+                    position_range: Position::new(8, 17)..Position::new(8, 64),
                     source_range: 187..234,
                     comment_text: "   This is a single-line comment in TypeScript.".to_string()
                 },
                 Comment {
-                    start_position: Position::new(11, 17),
-                    end_position: Position::new(14, 20),
+                    position_range: Position::new(11, 17)..Position::new(14, 20),
                     source_range: 291..413,
                     comment_text:
                         "  \n                   This is a multi-line comment\n                   that spans across several lines.\n                   "
                             .to_string()
                 },
                 Comment {
-                    start_position: Position::new(16, 41),
-                    end_position: Position::new(16, 72),
+                    position_range: Position::new(16, 41)..Position::new(16, 72),
                     source_range: 499..530,
                     comment_text: "   Inline multi-line comment   ".to_string()
                 },
                 Comment {
-                    start_position: Position::new(19, 17),
-                    end_position: Position::new(19, 43),
+                    position_range: Position::new(19, 17)..Position::new(19, 43),
                     source_range: 566..592,
                     comment_text: "   Method to get the value".to_string()
                 },
                 Comment {
-                    start_position: Position::new(21, 40),
-                    end_position: Position::new(21, 84),
+                    position_range: Position::new(21, 40)..Position::new(21, 84),
                     source_range: 676..720,
                     comment_text: "   Inline comment next to a return statement".to_string()
                 }

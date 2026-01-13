@@ -50,8 +50,8 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
                 // content.
                 0..0
             };
-            let content_start_position = block_builder.comment.end_position.clone();
-            let content_end_position = comment.start_position.clone();
+            let content_start_position = block_builder.comment.position_range.end.clone();
+            let content_end_position = comment.position_range.start.clone();
             blocks.push(
                 block_builder.build(content_range, content_start_position..content_end_position),
             );
@@ -59,23 +59,23 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
         } else {
             Err(anyhow::anyhow!(
                 "Unexpected closed block at line {}, position {}",
-                comment.start_position.line,
+                comment.position_range.start.line,
                 comment.source_range.start + start_position
             ))
         }
     }
 
     fn source_position_at(position_in_comment: usize, comment: &Comment) -> Position {
-        let line_number = comment.start_position.line
+        let line_number = comment.position_range.start.line
             + comment.comment_text[..position_in_comment + 1]
                 .lines()
                 .count()
             - 1;
         Position::new(
             line_number,
-            if line_number == comment.start_position.line {
+            if line_number == comment.position_range.start.line {
                 // The given `position_in_comment` is in the same line as the comment's start.
-                comment.start_position.character + position_in_comment
+                comment.position_range.start.character + position_in_comment
             } else {
                 position_in_comment
                     - comment.comment_text[..position_in_comment]
@@ -112,7 +112,7 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
         if let Some(unclosed_block) = stack.pop() {
             return Err(anyhow::anyhow!(format!(
                 "Block at line {} is not closed",
-                unclosed_block.comment.start_position.line
+                unclosed_block.comment.position_range.start.line
             )));
         }
         blocks.sort_by(|a, b| {

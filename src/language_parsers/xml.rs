@@ -42,26 +42,22 @@ mod tests {
             blocks,
             vec![
                 Comment {
-                    start_position: Position::new(2, 13),
-                    end_position: Position::new(2, 39),
+                    position_range: Position::new(2, 13)..Position::new(2, 39),
                     source_range: 13..39,
                     comment_text: "     This is a comment    ".to_string()
                 },
                 Comment {
-                    start_position: Position::new(4, 17),
-                    end_position: Position::new(4, 41),
+                    position_range: Position::new(4, 17)..Position::new(4, 41),
                     source_range: 75..99,
                     comment_text: "     Another comment    ".to_string()
                 },
                 Comment {
-                    start_position: Position::new(6, 17),
-                    end_position: Position::new(9, 20),
+                    position_range: Position::new(6, 17)..Position::new(9, 20),
                     source_range: 153..244,
                     comment_text: "     \n                Multiline comment \n                <foo>bar</foo>\n                   ".to_string()
                 },
                 Comment {
-                    start_position: Position::new(11, 13),
-                    end_position: Position::new(11, 35),
+                    position_range: Position::new(11, 13)..Position::new(11, 35),
                     source_range: 277..299,
                     comment_text: "     Final comment    ".to_string()
                 }

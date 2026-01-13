@@ -40,32 +40,27 @@ list:
             blocks,
             vec![
                 Comment {
-                    start_position: Position::new(2, 1),
-                    end_position: Position::new(2, 25),
+                    position_range: Position::new(2, 1)..Position::new(2, 25),
                     source_range: 1..25,
                     comment_text: "  This is a YAML comment".to_string()
                 },
                 Comment {
-                    start_position: Position::new(3, 13),
-                    end_position: Position::new(3, 49),
+                    position_range: Position::new(3, 13)..Position::new(3, 49),
                     source_range: 38..74,
                     comment_text: "  Inline comment on a key-value pair".to_string()
                 },
                 Comment {
-                    start_position: Position::new(5, 1),
-                    end_position: Position::new(5, 18),
+                    position_range: Position::new(5, 1)..Position::new(5, 18),
                     source_range: 76..93,
                     comment_text: "  Another comment".to_string()
                 },
                 Comment {
-                    start_position: Position::new(7, 12),
-                    end_position: Position::new(7, 31),
+                    position_range: Position::new(7, 12)..Position::new(7, 31),
                     source_range: 111..130,
                     comment_text: "  Comment in a list".to_string()
                 },
                 Comment {
-                    start_position: Position::new(9, 1),
-                    end_position: Position::new(9, 18),
+                    position_range: Position::new(9, 1)..Position::new(9, 18),
                     source_range: 141..158,
                     comment_text: "  End of comments".to_string()
                 }

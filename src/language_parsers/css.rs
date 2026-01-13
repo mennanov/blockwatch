@@ -58,21 +58,18 @@ mod tests {
             blocks,
             vec![
                 Comment {
-                    start_position: Position::new(6, 13),
-                    end_position: Position::new(6, 40),
+                    position_range: Position::new(6, 13)..Position::new(6, 40),
                     source_range: 81..108,
                     comment_text: "   This is a CSS comment   ".to_string()
                 },
                 Comment {
-                    start_position: Position::new(8, 17),
-                    end_position: Position::new(11, 20),
+                    position_range: Position::new(8, 17)..Position::new(11, 20),
                     source_range: 147..266,
                     comment_text: "   This is a multi-line\n                   CSS comment that spans\n                   multiple lines\n                   "
                         .to_string()
                 },
                 Comment {
-                    start_position: Position::new(15, 13),
-                    end_position: Position::new(17, 39),
+                    position_range: Position::new(15, 13)..Position::new(17, 39),
                     source_range: 339..431,
                     comment_text: "   Another multi-line\n               CSS comment with\n               different formatting   "
                         .to_string()

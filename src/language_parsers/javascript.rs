@@ -48,34 +48,29 @@ mod tests {
             blocks,
             vec![
                 Comment {
-                    start_position: Position::new(2, 13),
-                    end_position: Position::new(6, 16),
+                    position_range: Position::new(2, 13)..Position::new(6, 16),
                     source_range: 13..156,
                     comment_text: "   \n               This is a JavaScript function demonstration with comments.\n              \n               @author Author name\n               ".to_string()
                 },
                 Comment {
-                    start_position: Position::new(8, 17),
-                    end_position: Position::new(8, 64),
+                    position_range: Position::new(8, 17)..Position::new(8, 64),
                     source_range: 206..253,
                     comment_text: "   This is a single-line comment in JavaScript."
                         .to_string()
                 },
                 Comment {
-                    start_position: Position::new(9, 52),
-                    end_position: Position::new(9, 88),
+                    position_range: Position::new(9, 52)..Position::new(9, 88),
                     source_range: 305..341,
                     comment_text: "   Inline comment after a statement.".to_string()
                 },
                 Comment {
-                    start_position: Position::new(11, 17),
-                    end_position: Position::new(14, 20),
+                    position_range: Position::new(11, 17)..Position::new(14, 20),
                     source_range: 359..479,
                     comment_text: "  \n                   This is a multi-line comment.\n                   It also spans multiple lines.\n                   "
                         .to_string()
                 },
                 Comment {
-                    start_position: Position::new(15, 34),
-                    end_position: Position::new(15, 65),
+                    position_range: Position::new(15, 34)..Position::new(15, 65),
                     source_range: 513..544,
                     comment_text: "   Inline multi-line comment   ".to_string()
                 },
