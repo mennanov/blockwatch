@@ -1,6 +1,6 @@
 use crate::blocks::{Block, BlockWithContext};
+use crate::validators;
 use crate::validators::{ValidatorType, Violation, ViolationRange};
-use crate::{Position, validators};
 use anyhow::Context;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -63,7 +63,6 @@ impl validators::ValidatorSync for AffectsValidator {
                                 .push(create_violation(
                                     modified_block_file_path,
                                     &block_with_context.block,
-                                    &file_blocks.file_content_new_lines,
                                     &affected_file_path,
                                     affected_block_name.as_str(),
                                 )?);
@@ -102,7 +101,6 @@ impl validators::ValidatorDetector for AffectsValidatorDetector {
 fn create_violation(
     modified_block_file_path: &Path,
     modified_block: &Block,
-    modified_block_new_line_positions: &[usize],
     affected_block_file_path: &Path,
     affected_block_name: &str,
 ) -> anyhow::Result<Violation> {
@@ -110,7 +108,7 @@ fn create_violation(
         "Block {}:{} at line {} is modified, but {}:{} is not",
         modified_block_file_path.display(),
         modified_block.name_display(),
-        modified_block.starts_at_line,
+        modified_block.start_tag_position_range.start().line,
         affected_block_file_path.display(),
         affected_block_name
     );
@@ -121,14 +119,8 @@ fn create_violation(
     .context("failed to serialize AffectsViolation block")?;
     Ok(Violation::new(
         ViolationRange::new(
-            Position::from_byte_offset(
-                modified_block.start_tag_range.start,
-                modified_block_new_line_positions,
-            ),
-            Position::from_byte_offset(
-                modified_block.start_tag_range.end - 1, // start_tag_range is non-inclusive.
-                modified_block_new_line_positions,
-            ),
+            modified_block.start_tag_position_range.start().clone(),
+            modified_block.start_tag_position_range.end().clone(),
         ),
         "affects".to_string(),
         message,

@@ -75,7 +75,11 @@ impl ValidatorSync for KeepSortedValidator {
                             keep_sorted,
                             file_path.display(),
                             block_with_context.block.name_display(),
-                            block_with_context.block.starts_at_line
+                            block_with_context
+                                .block
+                                .start_tag_position_range
+                                .start()
+                                .line
                         ));
                     }
                     // Optional regex pattern similar to keep-unique: if provided, we compare extracted matches.
@@ -113,7 +117,11 @@ impl ValidatorSync for KeepSortedValidator {
                                     "Invalid keep-sorted-pattern expression in block {}:{} defined at line {}: {}",
                                     file_path.display(),
                                     block_with_context.block.name_display(),
-                                    block_with_context.block.starts_at_line,
+                                    block_with_context
+                                        .block
+                                        .start_tag_position_range
+                                        .start()
+                                        .line,
                                     e
                                 ));
                             }
@@ -123,8 +131,12 @@ impl ValidatorSync for KeepSortedValidator {
                             if let Some((prev_val, _prev_range)) = &prev_value {
                                 let cmp = (*prev_val).cmp(curr_val);
                                 if cmp == violating_ord {
-                                    let violation_line_number =
-                                        block_with_context.block.starts_at_line + line_number;
+                                    let violation_line_number = block_with_context
+                                        .block
+                                        .start_tag_position_range
+                                        .start()
+                                        .line
+                                        + line_number;
                                     let line_character_start = *curr_range.start();
                                     let line_character_end = *curr_range.end();
                                     violations
@@ -191,7 +203,7 @@ fn create_violation(
         "Block {}:{} defined at line {} has an out-of-order line {violation_line_number} ({keep_sorted_value})",
         block_file_path.display(),
         block.name_display(),
-        block.starts_at_line,
+        block.start_tag_position_range.start().line,
     );
     Ok(Violation::new(
         ViolationRange::new(

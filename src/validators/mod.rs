@@ -325,7 +325,12 @@ mod tests {
     use std::sync::Arc;
 
     fn empty_testing_block() -> Block {
-        Block::new(0, 0, HashMap::new(), 0..0, 0..0)
+        Block::new(
+            HashMap::new(),
+            Position::new(0, 0)..=Position::new(0, 0),
+            0..0,
+            Position::new(0, 0)..Position::new(0, 0),
+        )
     }
 
     fn empty_testing_violation_range() -> ViolationRange {

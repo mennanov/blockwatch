@@ -33,7 +33,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language_parsers::Comment;
+    use crate::{Position, language_parsers::Comment};
 
     #[test]
     fn parses_php_comments_correctly() -> anyhow::Result<()> {
@@ -68,35 +68,30 @@ mod tests {
             blocks,
             vec![
                 Comment {
-                    source_line_number: 2,
-                    source_start_position: 18,
-                    source_end_position: 57,
+                    position_range: Position::new(2, 13)..Position::new(2, 52),
+                    source_range: 18..57,
                     comment_text: "   This is a single-line comment in PHP".to_string()
                 },
                 Comment {
-                    source_line_number: 4,
-                    source_start_position: 75,
-                    source_end_position: 185,
+                    position_range: Position::new(4, 13)..Position::new(7, 16),
+                    source_range: 75..185,
                     comment_text:
                         "  \n               This is a multi-line comment.\n               It spans multiple lines in PHP.\n               "
                             .to_string()
                 },
                 Comment {
-                    source_line_number: 10,
-                    source_start_position: 257,
-                    source_end_position: 291,
+                    position_range: Position::new(10, 37)..Position::new(10, 71),
+                    source_range: 257..291,
                     comment_text: "  Prints a message to the console.".to_string()
                 },
                 Comment {
-                    source_line_number: 12,
-                    source_start_position: 313,
-                    source_end_position: 416,
+                    position_range: Position::new(12, 17)..Position::new(15, 20),
+                    source_range: 313..416,
                     comment_text: "   Another comment\n                   split into\n                   multiple lines.\n                   ".to_string()
                 },
                 Comment {
-                    source_line_number: 20,
-                    source_start_position: 523,
-                    source_end_position: 541,
+                    position_range: Position::new(20, 34)..Position::new(20, 52),
+                    source_range: 523..541,
                     comment_text: "  inlined comment ".to_string()
                 },
             ]

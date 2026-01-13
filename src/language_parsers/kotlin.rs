@@ -22,7 +22,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language_parsers::Comment;
+    use crate::{Position, language_parsers::Comment};
 
     #[test]
     fn parses_kotlin_comments_correctly() -> anyhow::Result<()> {
@@ -54,29 +54,25 @@ mod tests {
             blocks,
             vec![
                 Comment {
-                    source_line_number: 2,
-                    source_start_position: 13,
-                    source_end_position: 55,
+                    position_range: Position::new(2, 13)..Position::new(2, 55),
+                    source_range: 13..55,
                     comment_text: "   This is a single-line comment in Kotlin".to_string()
                 },
                 Comment {
-                    source_line_number: 5,
-                    source_start_position: 110,
-                    source_end_position: 223,
+                    position_range: Position::new(5, 13)..Position::new(8, 16),
+                    source_range: 110..223,
                     comment_text:
                         "  \n               This is a multi-line comment.\n               It spans multiple lines in Kotlin.\n               "
                             .to_string()
                 },
                 Comment {
-                    source_line_number: 10,
-                    source_start_position: 279,
-                    source_end_position: 298,
+                    position_range: Position::new(10, 43)..Position::new(10, 62),
+                    source_range: 279..298,
                     comment_text: "   Prints a message".to_string()
                 },
                 Comment {
-                    source_line_number: 12,
-                    source_start_position: 332,
-                    source_end_position: 434,
+                    position_range: Position::new(12, 17)..Position::new(15, 20),
+                    source_range: 332..434,
                     comment_text: "   Another comment\n                   split into\n                   multiple lines\n                   ".to_string()
                 },
             ]

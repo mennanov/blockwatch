@@ -23,9 +23,11 @@ mod typescript;
 mod xml;
 mod yaml;
 
+use crate::Position;
 use crate::block_parser::BlocksParser;
 use std::collections::HashMap;
 use std::ffi::OsString;
+use std::ops::Range;
 use std::rc::Rc;
 use std::string::ToString;
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator};
@@ -135,24 +137,27 @@ impl CommentsParser for TreeSitterCommentsParser {
             while let Some(query_match) = matches.next() {
                 for capture in query_match.captures {
                     let node = capture.node;
-                    let start_line = node.start_position().row + 1; // Convert to 1-based indexing
-                    let start_position = node.start_byte();
-                    let end_position = node.end_byte();
+                    let start_position = Position::new(
+                        node.start_position().row + 1,
+                        node.start_position().column + 1,
+                    );
+                    let end_position =
+                        Position::new(node.end_position().row + 1, node.end_position().column + 1);
+                    let start_byte = node.start_byte();
+                    let end_byte = node.end_byte();
                     let comment_text = &source_code[node.start_byte()..node.end_byte()];
                     if let Some(processor) = post_processor {
                         if let Some(out) = processor(capture.index as usize, comment_text, &node)? {
                             blocks.push(Comment {
-                                source_line_number: start_line,
-                                source_start_position: start_position,
-                                source_end_position: end_position,
+                                position_range: start_position..end_position,
+                                source_range: start_byte..end_byte,
                                 comment_text: out,
                             });
                         }
                     } else {
                         blocks.push(Comment {
-                            source_line_number: start_line,
-                            source_start_position: start_position,
-                            source_end_position: end_position,
+                            position_range: start_position..end_position,
+                            source_range: start_byte..end_byte,
                             comment_text: comment_text.to_string(),
                         });
                     }
@@ -162,8 +167,9 @@ impl CommentsParser for TreeSitterCommentsParser {
 
         blocks.sort_by(|comment1, comment2| {
             comment1
-                .source_start_position
-                .cmp(&comment2.source_start_position)
+                .source_range
+                .start
+                .cmp(&comment2.source_range.start)
         });
         Ok(blocks)
     }
@@ -171,12 +177,10 @@ impl CommentsParser for TreeSitterCommentsParser {
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct Comment {
-    // 1-based line number of the start of this comment in the source.
-    pub(crate) source_line_number: usize,
-    // Byte offset (i.e. position) of the start of this comment in the source.
-    pub(crate) source_start_position: usize,
-    // Byte offset (i.e. position) of the end of this comment in the source.
-    pub(crate) source_end_position: usize,
+    // Position range of the comment in the source.
+    pub(crate) position_range: Range<Position>,
+    // Byte offset (i.e. position) of the comment in the source.
+    pub(crate) source_range: Range<usize>,
     // The `comment_string` is expected to be the content of the comment with all language specific
     // comment symbols like "//", "/**", "#", etc replaced with the corresponding number of
     // whitespaces ("  " for "//", "   " for "/**", etc.) so that the length of the comment is

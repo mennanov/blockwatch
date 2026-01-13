@@ -17,7 +17,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language_parsers::Comment;
+    use crate::{Position, language_parsers::Comment};
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
@@ -38,21 +38,18 @@ all:
             blocks,
             vec![
                 Comment {
-                    source_line_number: 2,
-                    source_start_position: 1,
-                    source_end_position: 20,
+                    position_range: Position::new(2, 1)..Position::new(2, 20),
+                    source_range: 1..20,
                     comment_text: "  This is a comment".to_string()
                 },
                 Comment {
-                    source_line_number: 6,
-                    source_start_position: 59,
-                    source_end_position: 76,
+                    position_range: Position::new(6, 1)..Position::new(6, 18),
+                    source_range: 59..76,
                     comment_text: "  Another comment".to_string()
                 },
                 Comment {
-                    source_line_number: 7,
-                    source_start_position: 77,
-                    source_end_position: 102,
+                    position_range: Position::new(7, 1)..Position::new(7, 26),
+                    source_range: 77..102,
                     comment_text: "  spanning multiple lines".to_string()
                 },
             ]

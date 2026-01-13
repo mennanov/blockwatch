@@ -36,7 +36,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language_parsers::Comment;
+    use crate::{Position, language_parsers::Comment};
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
@@ -64,46 +64,39 @@ SELECT COUNT(*) FROM orders; /* Inline block comment */
             blocks,
             vec![
                 Comment {
-                    source_line_number: 3,
-                    source_start_position: 21,
-                    source_end_position: 53,
+                    position_range: Position::new(3, 1)..Position::new(3, 33),
+                    source_range: 21..53,
                     comment_text: "   This is a single line comment".to_string()
                 },
                 Comment {
-                    source_line_number: 4,
-                    source_start_position: 69,
-                    source_end_position: 97,
+                    position_range: Position::new(4, 16)..Position::new(4, 44),
+                    source_range: 69..97,
                     comment_text: "   This is an inline comment".to_string()
                 },
                 Comment {
-                    source_line_number: 6,
-                    source_start_position: 99,
-                    source_end_position: 122,
+                    position_range: Position::new(6, 1)..Position::new(6, 24),
+                    source_range: 99..122,
                     comment_text: "   This is a multi-line".to_string()
                 },
                 Comment {
-                    source_line_number: 7,
-                    source_start_position: 123,
-                    source_end_position: 144,
+                    position_range: Position::new(7, 1)..Position::new(7, 22),
+                    source_range: 123..144,
                     comment_text: "   comment that spans".to_string()
                 },
                 Comment {
-                    source_line_number: 8,
-                    source_start_position: 145,
-                    source_end_position: 161,
+                    position_range: Position::new(8, 1)..Position::new(8, 17),
+                    source_range: 145..161,
                     comment_text: "   several lines".to_string()
                 },
                 Comment {
-                    source_line_number: 10,
-                    source_start_position: 163,
-                    source_end_position: 219,
+                    position_range: Position::new(10, 1)..Position::new(12, 3),
+                    source_range: 163..219,
                     comment_text: "   This is a block comment \nthat spans multiple lines\n  "
                         .to_string()
                 },
                 Comment {
-                    source_line_number: 14,
-                    source_start_position: 250,
-                    source_end_position: 276,
+                    position_range: Position::new(14, 30)..Position::new(14, 56),
+                    source_range: 250..276,
                     comment_text: "   Inline block comment   ".to_string()
                 }
             ]

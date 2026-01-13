@@ -1,8 +1,10 @@
+use crate::Position;
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::blocks::Block;
 use crate::language_parsers::{CommentsParser, TreeSitterCommentsParser, html};
 use anyhow::Context;
 use itertools::Itertools;
+use std::ops::RangeInclusive;
 use tree_sitter::{Query, StreamingIterator};
 
 /// Returns a [`BlocksParser`] for Markdown.
@@ -12,6 +14,9 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
     Ok(MdParser::new(md_blocks_parser, html_blocks_parser))
 }
 
+/// Parses Markdown and HTML comments from Markdown.
+///
+/// HTML comments are parsed from valid [HTML blocks](https://github.github.com/gfm/#html-block).
 struct MdParser<C: CommentsParser, HtmlParser: BlocksParser> {
     md_parser: BlocksFromCommentsParser<C>,
     html_parser: HtmlParser,
@@ -48,13 +53,30 @@ impl<C: CommentsParser, HtmlParser: BlocksParser> MdParser<C, HtmlParser> {
                 .html_parser
                 .parse(html_block)?
                 .into_iter()
-                .map(|mut block| {
-                    block.add_offsets(node.start_position().row + 1, node.start_byte());
-                    block
+                .map(|block| {
+                    Self::block_with_offsets(block, node.start_position().row, node.start_byte())
                 });
             html_blocks.extend(blocks);
         }
         Ok(html_blocks)
+    }
+
+    fn block_with_offsets(mut block: Block, line_offset: usize, byte_offset: usize) -> Block {
+        block.start_tag_position_range = RangeInclusive::new(
+            Position::new(
+                line_offset + block.start_tag_position_range.start().line,
+                block.start_tag_position_range.start().character,
+            ),
+            Position::new(
+                line_offset + block.start_tag_position_range.end().line,
+                block.start_tag_position_range.end().character,
+            ),
+        );
+        block.content_bytes_range.start += byte_offset;
+        block.content_bytes_range.end += byte_offset;
+        block.content_position_range.start.line += line_offset;
+        block.content_position_range.end.line += line_offset;
+        block
     }
 }
 
@@ -118,6 +140,7 @@ fn markdown_comments_parser() -> anyhow::Result<impl CommentsParser> {
                 // Replace the close delimiter with a space.
                 result.push(' ');
                 if close_idx + 1 < comment.len() {
+                    // Copy the rest of the comment after the close delimiter.
                     result.push_str(&comment[close_idx + 1..]);
                 }
                 Ok(Some(result))
@@ -161,28 +184,25 @@ Some text here 3
             blocks,
             vec![
                 Block::new(
-                    5,
-                    8,
                     HashMap::from([("name".to_string(), "md_block".to_string())]),
-                    test_utils::substr_range(content, "<block name=\"md_block\">"),
-                    test_utils::substr_range(content, "Some text here\n\n")
+                    Position::new(5, 10)..=Position::new(5, 32),
+                    test_utils::substr_range(content, "Some text here\n\n"),
+                    Position::new(6, 1)..Position::new(8, 1),
                 ),
                 Block::new(
-                    10,
-                    17,
                     HashMap::from([("name".to_string(), "md_block_2".to_string())]),
-                    test_utils::substr_range(content, "<block name=\"md_block_2\">"),
+                    Position::new(10, 10)..=Position::new(10, 34),
                     test_utils::substr_range(
                         content,
                         "Some text here 2\n\n[//]: # (<block name=\"md_block_3\">)\nSome text here 3\n\n[//]: # (</block>)\n"
-                    )
+                    ),
+                    Position::new(11, 1)..Position::new(17, 1),
                 ),
                 Block::new(
-                    13,
-                    16,
                     HashMap::from([("name".to_string(), "md_block_3".to_string())]),
-                    test_utils::substr_range(content, "<block name=\"md_block_3\">"),
-                    test_utils::substr_range(content, "Some text here 3\n\n")
+                    Position::new(13, 10)..=Position::new(13, 34),
+                    test_utils::substr_range(content, "Some text here 3\n\n"),
+                    Position::new(14, 1)..Position::new(16, 1),
                 )
             ]
         );
@@ -207,6 +227,8 @@ Some html content
 Some markdown content
 
 [//]: # (</block>)
+
+<!-- <block name="html_block2"> -->Not wrapped in HTML tags<!-- </block> -->
 "#;
         let blocks = parser.parse(content)?;
 
@@ -214,19 +236,23 @@ Some markdown content
             blocks,
             vec![
                 Block::new(
-                    6,
-                    8,
                     HashMap::from([("name".to_string(), "html_block".to_string())]),
-                    test_utils::substr_range(content, "<block name=\"html_block\">"),
-                    test_utils::substr_range(content, "\nSome html content\n")
+                    Position::new(5, 6)..=Position::new(5, 30),
+                    test_utils::substr_range(content, "\nSome html content\n"),
+                    Position::new(5, 35)..Position::new(7, 1),
                 ),
                 Block::new(
-                    10,
-                    13,
                     HashMap::from([("name".to_string(), "md_block".to_string())]),
-                    test_utils::substr_range(content, "<block name=\"md_block\">"),
-                    test_utils::substr_range(content, "Some markdown content\n\n")
-                )
+                    Position::new(10, 10)..=Position::new(10, 32),
+                    test_utils::substr_range(content, "Some markdown content\n\n"),
+                    Position::new(11, 1)..Position::new(13, 1),
+                ),
+                Block::new(
+                    HashMap::from([("name".to_string(), "html_block2".to_string())]),
+                    Position::new(15, 6)..=Position::new(15, 31),
+                    test_utils::substr_range(content, "Not wrapped in HTML tags"),
+                    Position::new(15, 36)..Position::new(15, 60),
+                ),
             ]
         );
 

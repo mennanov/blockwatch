@@ -18,7 +18,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language_parsers::Comment;
+    use crate::{Position, language_parsers::Comment};
 
     #[test]
     fn parses_tsx_comments_correctly() -> anyhow::Result<()> {
@@ -61,49 +61,42 @@ mod tests {
             blocks,
             vec![
                 Comment {
-                    source_line_number: 2,
-                    source_start_position: 17,
-                    source_end_position: 158,
+                    position_range: Position::new(2, 17)..Position::new(6, 20),
+                    source_range: 17..158,
                     comment_text:
                         "   \n                   This is a TSX component with comments.\n                  \n                   @component TSXExample\n                   "
                             .to_string()
                 },
                 Comment {
-                    source_line_number: 8,
-                    source_start_position: 222,
-                    source_end_position: 262,
+                    position_range: Position::new(8, 21)..Position::new(8, 61),
+                    source_range: 222..262,
                     comment_text: "   This is a single-line comment in TSX.".to_string()
                 },
                 Comment {
-                    source_line_number: 11,
-                    source_start_position: 343,
-                    source_end_position: 476,
+                    position_range: Position::new(11, 21)..Position::new(14, 24),
+                    source_range: 343..476,
                     comment_text:
                         "  \n                       This is a multi-line comment\n                       used in a functional component.\n                       "
                             .to_string()
                 },
                 Comment {
-                    source_line_number: 16,
-                    source_start_position: 568,
-                    source_end_position: 599,
+                    position_range: Position::new(16, 46)..Position::new(16, 77),
+                    source_range: 568..599,
                     comment_text: "   Inline multi-line comment   ".to_string()
                 },
                 Comment {
-                    source_line_number: 19,
-                    source_start_position: 644,
-                    source_end_position: 667,
+                    position_range: Position::new(19, 21)..Position::new(19, 44),
+                    source_range: 644..667,
                     comment_text: "   Render the component".to_string()
                 },
                 Comment {
-                    source_line_number: 22,
-                    source_start_position: 756,
-                    source_end_position: 785,
+                    position_range: Position::new(22, 30)..Position::new(22, 59),
+                    source_range: 756..785,
                     comment_text: "   JSX single-line comment   ".to_string()
                 },
                 Comment {
-                    source_line_number: 24,
-                    source_start_position: 874,
-                    source_end_position: 931,
+                    position_range: Position::new(24, 30)..Position::new(25, 39),
+                    source_range: 874..931,
                     comment_text: "   JSX multi-line \n                            comment   ".to_string()
                 }
             ]

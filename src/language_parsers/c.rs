@@ -18,7 +18,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language_parsers::Comment;
+    use crate::{Position, language_parsers::Comment};
 
     #[test]
     fn parses_c_comments_correctly() -> anyhow::Result<()> {
@@ -41,7 +41,7 @@ mod tests {
                  * split into
                  * multiple lines.
                  */
-                 
+
                 return 0;
             }
             "#,
@@ -51,29 +51,25 @@ mod tests {
             blocks,
             vec![
                 Comment {
-                    source_line_number: 2,
-                    source_start_position: 13,
-                    source_end_position: 51,
+                    position_range: Position::new(2, 13)..Position::new(2, 51),
+                    source_range: 13..51,
                     comment_text: "   This is a single-line comment in C.".to_string()
                 },
                 Comment {
-                    source_line_number: 5,
-                    source_start_position: 96,
-                    source_end_position: 204,
+                    position_range: Position::new(5, 13)..Position::new(8, 16),
+                    source_range: 96..204,
                     comment_text:
                         "  \n               This is a multi-line comment.\n               It spans multiple lines in C.\n               "
                             .to_string()
                 },
                 Comment {
-                    source_line_number: 11,
-                    source_start_position: 270,
-                    source_end_position: 305,
+                    position_range: Position::new(11, 40)..Position::new(11, 75),
+                    source_range: 270..305,
                     comment_text: "   Prints a message to the console.".to_string()
                 },
                 Comment {
-                    source_line_number: 13,
-                    source_start_position: 323,
-                    source_end_position: 426,
+                    position_range: Position::new(13, 17)..Position::new(16, 20),
+                    source_range: 323..426,
                     comment_text: "   Another comment\n                   split into\n                   multiple lines.\n                   ".to_string()
                 },
             ]

@@ -17,7 +17,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language_parsers::Comment;
+    use crate::{Position, language_parsers::Comment};
 
     #[test]
     fn parses_toml_comments_correctly() -> anyhow::Result<()> {
@@ -39,39 +39,33 @@ dob = 1979-05-27T07:32:00-08:00 # Date of birth with comment
             blocks,
             vec![
                 Comment {
-                    source_line_number: 2,
-                    source_start_position: 1,
-                    source_end_position: 22,
+                    position_range: Position::new(2, 1)..Position::new(2, 22),
+                    source_range: 1..22,
                     comment_text: "  This is a TOML file".to_string()
                 },
                 Comment {
-                    source_line_number: 3,
-                    source_start_position: 46,
-                    source_end_position: 62,
+                    position_range: Position::new(3, 24)..Position::new(3, 40),
+                    source_range: 46..62,
                     comment_text: "  Inline comment".to_string()
                 },
                 Comment {
-                    source_line_number: 5,
-                    source_start_position: 71,
-                    source_end_position: 88,
+                    position_range: Position::new(5, 1)..Position::new(5, 18),
+                    source_range: 71..88,
                     comment_text: "  Owner's details".to_string()
                 },
                 Comment {
-                    source_line_number: 6,
-                    source_start_position: 117,
-                    source_end_position: 141,
+                    position_range: Position::new(6, 29)..Position::new(6, 53),
+                    source_range: 117..141,
                     comment_text: "  Another inline comment".to_string()
                 },
                 Comment {
-                    source_line_number: 7,
-                    source_start_position: 174,
-                    source_end_position: 202,
+                    position_range: Position::new(7, 33)..Position::new(7, 61),
+                    source_range: 174..202,
                     comment_text: "  Date of birth with comment".to_string()
                 },
                 Comment {
-                    source_line_number: 8,
-                    source_start_position: 203,
-                    source_end_position: 216,
+                    position_range: Position::new(8, 1)..Position::new(8, 14),
+                    source_range: 203..216,
                     comment_text: "  End of file".to_string()
                 }
             ]

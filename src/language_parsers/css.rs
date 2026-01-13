@@ -27,7 +27,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language_parsers::Comment;
+    use crate::{Position, language_parsers::Comment};
 
     #[test]
     fn parses_css_comments_correctly() -> anyhow::Result<()> {
@@ -58,22 +58,19 @@ mod tests {
             blocks,
             vec![
                 Comment {
-                    source_line_number: 6,
-                    source_start_position: 81,
-                    source_end_position: 108,
+                    position_range: Position::new(6, 13)..Position::new(6, 40),
+                    source_range: 81..108,
                     comment_text: "   This is a CSS comment   ".to_string()
                 },
                 Comment {
-                    source_line_number: 8,
-                    source_start_position: 147,
-                    source_end_position: 266,
+                    position_range: Position::new(8, 17)..Position::new(11, 20),
+                    source_range: 147..266,
                     comment_text: "   This is a multi-line\n                   CSS comment that spans\n                   multiple lines\n                   "
                         .to_string()
                 },
                 Comment {
-                    source_line_number: 15,
-                    source_start_position: 339,
-                    source_end_position: 431,
+                    position_range: Position::new(15, 13)..Position::new(17, 39),
+                    source_range: 339..431,
                     comment_text: "   Another multi-line\n               CSS comment with\n               different formatting   "
                         .to_string()
                 },

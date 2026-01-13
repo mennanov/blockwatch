@@ -1,5 +1,4 @@
-use crate::Position;
-use crate::blocks::{Block, BlockWithContext, FileBlocks};
+use crate::blocks::{Block, BlockWithContext};
 use crate::validators::{
     ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorType, Violation, ViolationRange,
 };
@@ -53,7 +52,11 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
                             "check-ai requires a non-empty condition in {}:{} at line {}",
                             file_path.display(),
                             block_with_context.block.name_display(),
-                            block_with_context.block.starts_at_line
+                            block_with_context
+                                .block
+                                .start_tag_position_range
+                                .start()
+                                .line
                         ));
                     };
                 } else {
@@ -70,7 +73,7 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
                     let content = block_content(block_with_context, &file_blocks.file_content)?;
 
                     let result = client.check_block(condition, content).await;
-                    Self::process_ai_response(file_path, file_blocks, block_with_context, result)
+                    Self::process_ai_response(file_path, block_with_context, result)
                 });
             }
         }
@@ -139,7 +142,6 @@ fn block_content<'c>(
 fn create_violation(
     file_path: &Path,
     block: &Block,
-    new_line_positions: &[usize],
     ai_message: &str,
 ) -> anyhow::Result<Violation> {
     let details = serde_json::to_value(CheckAiViolation {
@@ -155,12 +157,12 @@ fn create_violation(
         "Block {}:{} defined at line {} failed AI check: {ai_message}",
         file_path.display(),
         block.name_display(),
-        block.starts_at_line,
+        block.start_tag_position_range.start().line,
     );
     Ok(Violation::new(
         ViolationRange::new(
-            Position::from_byte_offset(block.start_tag_range.start, new_line_positions),
-            Position::from_byte_offset(block.start_tag_range.end - 1, new_line_positions),
+            block.start_tag_position_range.start().clone(),
+            block.start_tag_position_range.end().clone(),
         ),
         "check-ai".to_string(),
         error_message,
@@ -178,7 +180,6 @@ impl<C: AiClient> CheckAiValidator<C> {
 
     fn process_ai_response(
         file_path: PathBuf,
-        file_blocks: &FileBlocks,
         block_with_context: &BlockWithContext,
         result: anyhow::Result<Option<String>>,
     ) -> anyhow::Result<Option<(PathBuf, Violation)>> {
@@ -186,16 +187,15 @@ impl<C: AiClient> CheckAiValidator<C> {
             "check-ai API error in {}:{} at line {}",
             file_path.display(),
             block_with_context.block.name_display(),
-            block_with_context.block.starts_at_line
+            block_with_context
+                .block
+                .start_tag_position_range
+                .start()
+                .line
         ))? {
             None => Ok(None),
             Some(msg) => {
-                let violation = create_violation(
-                    &file_path,
-                    &block_with_context.block,
-                    &file_blocks.file_content_new_lines,
-                    &msg,
-                )?;
+                let violation = create_violation(&file_path, &block_with_context.block, &msg)?;
                 Ok(Some((file_path, violation)))
             }
         }

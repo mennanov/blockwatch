@@ -1,8 +1,8 @@
 use crate::blocks::{Block, BlockWithContext};
+use crate::validators;
 use crate::validators::{
     ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
 };
-use crate::{Position, validators};
 use anyhow::anyhow;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -40,7 +40,7 @@ impl ValidatorSync for LineCountValidator {
                     expr,
                     file_path.display(),
                     block_with_context.block.name_display(),
-                    block_with_context.block.starts_at_line,
+                    block_with_context.block.start_tag_position_range.start().line,
                     e
                 ))?;
                 let actual = if block_with_context
@@ -71,7 +71,6 @@ impl ValidatorSync for LineCountValidator {
                         .push(create_violation(
                             file_path,
                             &block_with_context.block,
-                            &file_blocks.file_content_new_lines,
                             op,
                             expected,
                             actual,
@@ -86,7 +85,6 @@ impl ValidatorSync for LineCountValidator {
 fn create_violation(
     block_file_path: &Path,
     block: &Block,
-    new_line_positions: &[usize],
     operation: Op,
     expected: usize,
     actual: usize,
@@ -95,15 +93,15 @@ fn create_violation(
         "Block {}:{} defined at line {} has {} lines, which does not satisfy {}{}",
         block_file_path.display(),
         block.name_display(),
-        block.starts_at_line,
+        block.start_tag_position_range.start().line,
         actual,
         operation.as_str(),
         expected
     );
     Ok(Violation::new(
         ViolationRange::new(
-            Position::from_byte_offset(block.start_tag_range.start, new_line_positions),
-            Position::from_byte_offset(block.start_tag_range.end - 1, new_line_positions),
+            block.start_tag_position_range.start().clone(),
+            block.start_tag_position_range.end().clone(),
         ),
         "line-count".to_string(),
         message,

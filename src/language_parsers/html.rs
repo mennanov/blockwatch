@@ -17,7 +17,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language_parsers::Comment;
+    use crate::{Position, language_parsers::Comment};
 
     #[test]
     fn parses_html_comments_correctly() -> anyhow::Result<()> {
@@ -42,27 +42,23 @@ mod tests {
             blocks,
             vec![
                 Comment {
-                    source_line_number: 2,
-                    source_start_position: 28,
-                    source_end_position: 51,
+                    position_range: Position::new(2, 13)..Position::new(2, 36),
+                    source_range: 28..51,
                     comment_text: "     Simple comment    ".to_string()
                 },
                 Comment {
-                    source_line_number: 4,
-                    source_start_position: 86,
-                    source_end_position: 110,
+                    position_range: Position::new(4, 17)..Position::new(4, 41),
+                    source_range: 86..110,
                     comment_text: "     Another comment    ".to_string()
                 },
                 Comment {
-                    source_line_number: 6,
-                    source_start_position: 160,
-                    source_end_position: 255,
+                    position_range: Position::new(6, 17)..Position::new(9, 20),
+                    source_range: 160..255,
                     comment_text: "    \n                Multi-line comment\n                with multiple lines\n                   ".to_string()
                 },
                 Comment {
-                    source_line_number: 11,
-                    source_start_position: 287,
-                    source_end_position: 309,
+                    position_range: Position::new(11, 13)..Position::new(11, 35),
+                    source_range: 287..309,
                     comment_text: "     Final comment    ".to_string()
                 },
             ]

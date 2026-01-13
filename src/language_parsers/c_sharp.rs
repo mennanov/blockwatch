@@ -33,7 +33,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language_parsers::Comment;
+    use crate::{Position, language_parsers::Comment};
 
     #[test]
     fn parses_c_sharp_comments_correctly() -> anyhow::Result<()> {
@@ -67,45 +67,38 @@ namespace HelloWorld
             blocks,
             vec![
                 Comment {
-                    source_line_number: 2,
-                    source_start_position: 1,
-                    source_end_position: 23,
+                    position_range: Position::new(2, 1)..Position::new(2, 23),
+                    source_range: 1..23,
                     comment_text: "   Single line comment".to_string()
                 },
                 Comment {
-                    source_line_number: 7,
-                    source_start_position: 66,
-                    source_end_position: 111,
+                    position_range: Position::new(7, 5)..Position::new(9, 8),
+                    source_range: 66..111,
                     comment_text: "   Multi-line\n       comment example.\n       ".to_string()
                 },
                 Comment {
-                    source_line_number: 12,
-                    source_start_position: 144,
-                    source_end_position: 157,
+                    position_range: Position::new(12, 9)..Position::new(12, 22),
+                    source_range: 144..157,
                     comment_text: "    <summary>".to_string()
                 },
                 Comment {
-                    source_line_number: 13,
-                    source_start_position: 166,
-                    source_end_position: 186,
+                    position_range: Position::new(13, 9)..Position::new(13, 29),
+                    source_range: 166..186,
                     comment_text: "    XML Doc comment.".to_string()
                 },
                 Comment {
-                    source_line_number: 14,
-                    source_start_position: 195,
-                    source_end_position: 209,
+                    position_range: Position::new(14, 9)..Position::new(14, 23),
+                    source_range: 195..209,
                     comment_text: "    </summary>".to_string()
                 },
                 Comment {
-                    source_line_number: 17,
-                    source_start_position: 307,
-                    source_end_position: 329,
+                    position_range: Position::new(17, 48)..Position::new(17, 70),
+                    source_range: 307..329,
                     comment_text: "   Another single line".to_string()
                 },
                 Comment {
-                    source_line_number: 18,
-                    source_start_position: 342,
-                    source_end_position: 360,
+                    position_range: Position::new(18, 13)..Position::new(18, 31),
+                    source_range: 342..360,
                     comment_text: "   Simple block   ".to_string()
                 }
             ]

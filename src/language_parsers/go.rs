@@ -18,7 +18,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language_parsers::Comment;
+    use crate::{Position, language_parsers::Comment};
 
     #[test]
     fn parses_go_comments_correctly() -> anyhow::Result<()> {
@@ -47,28 +47,24 @@ func main() {
             blocks,
             vec![
                 Comment {
-                    source_line_number: 2,
-                    source_start_position: 1,
-                    source_end_position: 39,
+                    position_range: Position::new(2, 1)..Position::new(2, 39),
+                    source_range: 1..39,
                     comment_text: "   This is a single line comment in Go".to_string()
                 },
                 Comment {
-                    source_line_number: 5,
-                    source_start_position: 54,
-                    source_end_position: 111,
+                    position_range: Position::new(5, 1)..Position::new(8, 3),
+                    source_range: 54..111,
                     comment_text: "  \nThis is a multi-line comment\nspanning several lines\n  "
                         .to_string()
                 },
                 Comment {
-                    source_line_number: 13,
-                    source_start_position: 174,
-                    source_end_position: 191,
+                    position_range: Position::new(13, 34)..Position::new(13, 51),
+                    source_range: 174..191,
                     comment_text: "   Inline comment".to_string()
                 },
                 Comment {
-                    source_line_number: 14,
-                    source_start_position: 196,
-                    source_end_position: 226,
+                    position_range: Position::new(14, 5)..Position::new(14, 35),
+                    source_range: 196..226,
                     comment_text: "   Another single line comment".to_string()
                 },
             ]
@@ -105,27 +101,23 @@ exclude github.com/bad/dependency v0.0.0
             blocks,
             vec![
                 Comment {
-                    source_line_number: 6,
-                    source_start_position: 40,
-                    source_end_position: 70,
+                    position_range: Position::new(6, 1)..Position::new(6, 31),
+                    source_range: 40..70,
                     comment_text: "   This is a comment in go.mod".to_string()
                 },
                 Comment {
-                    source_line_number: 8,
-                    source_start_position: 119,
-                    source_end_position: 136,
+                    position_range: Position::new(8, 39)..Position::new(8, 56),
+                    source_range: 119..136,
                     comment_text: "   Inline comment".to_string()
                 },
                 Comment {
-                    source_line_number: 11,
-                    source_start_position: 140,
-                    source_end_position: 164,
+                    position_range: Position::new(11, 1)..Position::new(14, 3),
+                    source_range: 140..164,
                     comment_text: "  \nMulti-line\ncomment\n  ".to_string()
                 },
                 Comment {
-                    source_line_number: 15,
-                    source_start_position: 165,
-                    source_end_position: 183,
+                    position_range: Position::new(15, 1)..Position::new(15, 19),
+                    source_range: 165..183,
                     comment_text: "   Another comment".to_string()
                 },
             ]
@@ -161,27 +153,23 @@ use ./module3
             blocks,
             vec![
                 Comment {
-                    source_line_number: 4,
-                    source_start_position: 10,
-                    source_end_position: 41,
+                    position_range: Position::new(4, 1)..Position::new(4, 32),
+                    source_range: 10..41,
                     comment_text: "   This is a comment in go.work".to_string()
                 },
                 Comment {
-                    source_line_number: 7,
-                    source_start_position: 76,
-                    source_end_position: 93,
+                    position_range: Position::new(7, 15)..Position::new(7, 32),
+                    source_range: 76..93,
                     comment_text: "   Inline comment".to_string()
                 },
                 Comment {
-                    source_line_number: 10,
-                    source_start_position: 97,
-                    source_end_position: 131,
+                    position_range: Position::new(10, 1)..Position::new(13, 3),
+                    source_range: 97..131,
                     comment_text: "  \nMulti-line\nworkspace comment\n  ".to_string()
                 },
                 Comment {
-                    source_line_number: 14,
-                    source_start_position: 132,
-                    source_end_position: 150,
+                    position_range: Position::new(14, 1)..Position::new(14, 19),
+                    source_range: 132..150,
                     comment_text: "   Another comment".to_string()
                 },
             ]
@@ -213,27 +201,23 @@ github.com/another/pkg v2.0.0 h1:xyz789
             blocks,
             vec![
                 Comment {
-                    source_line_number: 2,
-                    source_start_position: 1,
-                    source_end_position: 31,
+                    position_range: Position::new(2, 1)..Position::new(2, 31),
+                    source_range: 1..31,
                     comment_text: "   This is a comment in go.sum".to_string()
                 },
                 Comment {
-                    source_line_number: 4,
-                    source_start_position: 119,
-                    source_end_position: 134,
+                    position_range: Position::new(4, 48)..Position::new(4, 63),
+                    source_range: 119..134,
                     comment_text: "   Hash comment".to_string()
                 },
                 Comment {
-                    source_line_number: 6,
-                    source_start_position: 136,
-                    source_end_position: 170,
+                    position_range: Position::new(6, 1)..Position::new(9, 3),
+                    source_range: 136..170,
                     comment_text: "  \nMulti-line comment\nin go.sum\n  ".to_string()
                 },
                 Comment {
-                    source_line_number: 10,
-                    source_start_position: 171,
-                    source_end_position: 187,
+                    position_range: Position::new(10, 1)..Position::new(10, 17),
+                    source_range: 171..187,
                     comment_text: "   Final comment".to_string()
                 },
             ]

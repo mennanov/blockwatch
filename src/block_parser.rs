@@ -1,8 +1,9 @@
+use crate::Position;
 use crate::blocks::Block;
 use crate::language_parsers::{Comment, CommentsParser};
 use crate::tag_parser::{BlockTag, BlockTagParser, WinnowBlockTagParser};
 use std::collections::HashMap;
-use std::ops::Range;
+use std::ops::{Range, RangeInclusive};
 
 /// Parses [`Blocks`] from a source code.
 pub trait BlocksParser {
@@ -24,20 +25,14 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
     fn process_start_tag<'c>(
         comment: &'c Comment,
         stack: &mut Vec<BlockBuilder<'c>>,
-        start_position: usize,
-        end_position: usize,
+        position: Range<usize>,
         attributes: HashMap<String, String>,
     ) {
-        let start_tag_range = comment.source_start_position + start_position
-            ..comment.source_start_position + end_position;
-        let starts_at_line = comment.source_line_number
-            + comment.comment_text[..start_position + 1].lines().count()
-            - 1;
         stack.push(BlockBuilder::new(
-            starts_at_line,
             comment,
             attributes,
-            start_tag_range,
+            Self::source_position_at(position.start, comment)
+                ..=Self::source_position_at(position.end - 1, comment),
         ));
     }
 
@@ -49,24 +44,45 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
     ) -> anyhow::Result<()> {
         if let Some(block_builder) = stack.pop() {
             let content_range = if !std::ptr::eq(comment, block_builder.comment) {
-                block_builder.comment.source_end_position..comment.source_start_position
+                block_builder.comment.source_range.end..comment.source_range.start
             } else {
                 // Block that starts and ends in the same comment can't have any
                 // content.
                 0..0
             };
-            let end_line_number = comment.source_line_number
-                + comment.comment_text[..start_position + 1].lines().count()
-                - 1;
-            blocks.push(block_builder.build(end_line_number, content_range));
+            let content_start_position = block_builder.comment.position_range.end.clone();
+            let content_end_position = comment.position_range.start.clone();
+            blocks.push(
+                block_builder.build(content_range, content_start_position..content_end_position),
+            );
             Ok(())
         } else {
             Err(anyhow::anyhow!(
                 "Unexpected closed block at line {}, position {}",
-                comment.source_line_number,
-                comment.source_start_position + start_position
+                comment.position_range.start.line,
+                comment.source_range.start + start_position
             ))
         }
+    }
+
+    fn source_position_at(position_in_comment: usize, comment: &Comment) -> Position {
+        let line_number = comment.position_range.start.line
+            + comment.comment_text[..position_in_comment + 1]
+                .lines()
+                .count()
+            - 1;
+        Position::new(
+            line_number,
+            if line_number == comment.position_range.start.line {
+                // The given `position_in_comment` is in the same line as the comment's start.
+                comment.position_range.start.character + position_in_comment
+            } else {
+                position_in_comment
+                    - comment.comment_text[..position_in_comment]
+                        .rfind('\n')
+                        .unwrap_or(0)
+            },
+        )
     }
 }
 
@@ -81,17 +97,10 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
             while let Some(tag) = parser.next()? {
                 match tag {
                     BlockTag::Start {
-                        start_position,
-                        end_position,
+                        tag_range: position,
                         attributes,
                     } => {
-                        Self::process_start_tag(
-                            comment,
-                            &mut stack,
-                            start_position,
-                            end_position,
-                            attributes,
-                        );
+                        Self::process_start_tag(comment, &mut stack, position, attributes);
                     }
                     BlockTag::End { start_position, .. } => {
                         Self::process_end_tag(comment, &mut stack, &mut blocks, start_position)?;
@@ -103,45 +112,49 @@ impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
         if let Some(unclosed_block) = stack.pop() {
             return Err(anyhow::anyhow!(format!(
                 "Block at line {} is not closed",
-                unclosed_block.comment.source_line_number
+                unclosed_block.comment.position_range.start.line
             )));
         }
-        blocks.sort_by(|a, b| a.starts_at_line.cmp(&b.starts_at_line));
+        blocks.sort_by(|a, b| {
+            a.start_tag_position_range
+                .start()
+                .cmp(b.start_tag_position_range.start())
+        });
 
         Ok(blocks)
     }
 }
 
 struct BlockBuilder<'c> {
-    starts_at_line: usize,
     comment: &'c Comment,
     attributes: HashMap<String, String>,
-    start_tag_range: Range<usize>,
+    start_tag_position_range: RangeInclusive<Position>,
 }
 
 impl<'c> BlockBuilder<'c> {
     fn new(
-        starts_at_line: usize,
         comment: &'c Comment,
         attributes: HashMap<String, String>,
-        start_tag_range: Range<usize>,
+        start_tag_position_range: RangeInclusive<Position>,
     ) -> Self {
         Self {
-            starts_at_line,
             comment,
             attributes,
-            start_tag_range,
+            start_tag_position_range,
         }
     }
 
     /// Finalizes the block with the given end line and captured content, producing a `Block`.
-    pub(crate) fn build(self, ends_at_line: usize, content_range: Range<usize>) -> Block {
+    pub(crate) fn build(
+        self,
+        content_range: Range<usize>,
+        content_position_range: Range<Position>,
+    ) -> Block {
         Block::new(
-            self.starts_at_line,
-            ends_at_line,
             self.attributes,
-            self.start_tag_range,
+            self.start_tag_position_range,
             content_range,
+            content_position_range,
         )
     }
 }
@@ -150,7 +163,7 @@ impl<'c> BlockBuilder<'c> {
 mod tests {
     use crate::block_parser::BlocksParser;
     use crate::blocks::Block;
-    use crate::{language_parsers, test_utils};
+    use crate::{Position, language_parsers, test_utils};
     use std::collections::HashMap;
 
     fn create_parser() -> impl BlocksParser {
@@ -174,16 +187,15 @@ mod tests {
     #[test]
     fn single_block_with_single_line_content() -> anyhow::Result<()> {
         let parser = create_parser();
-        let contents = "/* <block> */ let say = \"hi\"; /* </block> */";
+        let contents = r#"/* <block> */ let say = "hi"; /* </block> */"#;
         let blocks = parser.parse(contents)?;
         assert_eq!(
             blocks,
             vec![Block::new(
-                1,
-                1,
                 HashMap::new(),
-                test_utils::substr_range(contents, "<block>"),
+                Position::new(1, 4)..=Position::new(1, 10),
                 test_utils::substr_range(contents, " let say = \"hi\"; "),
+                Position::new(1, 14)..Position::new(1, 31),
             ),]
         );
         Ok(())
@@ -197,11 +209,10 @@ mod tests {
         assert_eq!(
             blocks,
             vec![Block::new(
-                1,
-                3,
                 HashMap::new(),
-                test_utils::substr_range(contents, "<block>"),
-                test_utils::substr_range(contents, "\nlet say = \"hi\";\n")
+                Position::new(1, 4)..=Position::new(1, 10),
+                test_utils::substr_range(contents, "\nlet say = \"hi\";\n"),
+                Position::new(1, 11)..Position::new(3, 1)
             ),]
         );
         Ok(())
@@ -215,11 +226,10 @@ mod tests {
         assert_eq!(
             blocks,
             vec![Block::new(
-                1,
-                2,
                 HashMap::new(),
-                test_utils::substr_range(contents, "<block\n>"),
-                test_utils::substr_range(contents, " let say = \"hi\"; ")
+                Position::new(1, 4)..=Position::new(2, 1),
+                test_utils::substr_range(contents, " let say = \"hi\"; "),
+                Position::new(2, 5)..Position::new(2, 22),
             ),]
         );
         Ok(())
@@ -233,11 +243,10 @@ mod tests {
         assert_eq!(
             blocks,
             vec![Block::new(
-                1,
-                1,
                 HashMap::new(),
-                test_utils::substr_range(contents, "<block>"),
-                test_utils::substr_range(contents, " let say = \"hi\"; ")
+                Position::new(1, 4)..=Position::new(1, 10),
+                test_utils::substr_range(contents, " let say = \"hi\"; "),
+                Position::new(1, 14)..Position::new(1, 31),
             ),]
         );
         Ok(())
@@ -246,25 +255,27 @@ mod tests {
     #[test]
     fn multiple_blocks_on_separate_lines() -> anyhow::Result<()> {
         let parser = create_parser();
-        let contents = "// <block>\nprintln!(\"hello1\");\n// </block>
-            // <block>\nprintln!(\"hello2\");\n// </block>";
+        let contents = r#"// <block>
+println!("hello1");
+// </block>
+// <block>
+println!("hello2");
+// </block>"#;
         let blocks = parser.parse(contents)?;
         assert_eq!(
             blocks,
             vec![
                 Block::new(
-                    1,
-                    3,
                     HashMap::new(),
-                    test_utils::substr_range(contents, "<block>"),
+                    Position::new(1, 4)..=Position::new(1, 10),
                     test_utils::substr_range(contents, "\nprintln!(\"hello1\");\n"),
+                    Position::new(1, 11)..Position::new(3, 1),
                 ),
                 Block::new(
-                    4,
-                    6,
                     HashMap::new(),
-                    test_utils::substr_range_nth(contents, "<block>", 1),
-                    test_utils::substr_range(contents, "\nprintln!(\"hello2\");\n")
+                    Position::new(4, 4)..=Position::new(4, 10),
+                    test_utils::substr_range(contents, "\nprintln!(\"hello2\");\n"),
+                    Position::new(4, 11)..Position::new(6, 1),
                 )
             ]
         );
@@ -280,18 +291,16 @@ mod tests {
             blocks,
             vec![
                 Block::new(
-                    1,
-                    3,
                     HashMap::new(),
-                    test_utils::substr_range_nth(contents, "<block>", 0),
+                    Position::new(1, 4)..=Position::new(1, 10),
                     test_utils::substr_range(contents, "\nprintln!(\"hello1\");\n"),
+                    Position::new(1, 11)..Position::new(3, 1),
                 ),
                 Block::new(
-                    3,
-                    5,
                     HashMap::new(),
-                    test_utils::substr_range_nth(contents, "<block>", 1),
+                    Position::new(3, 12)..=Position::new(3, 18),
                     test_utils::substr_range(contents, "\nprintln!(\"hello2\");\n"),
+                    Position::new(3, 22)..Position::new(5, 1),
                 )
             ]
         );
@@ -307,18 +316,16 @@ mod tests {
             blocks,
             vec![
                 Block::new(
-                    1,
-                    1,
                     HashMap::new(),
-                    test_utils::substr_range_nth(contents, "<block>", 0),
-                    test_utils::substr_range(contents, "println!(\"hello1\");")
+                    Position::new(1, 4)..=Position::new(1, 10),
+                    test_utils::substr_range(contents, "println!(\"hello1\");"),
+                    Position::new(1, 14)..Position::new(1, 33),
                 ),
                 Block::new(
-                    1,
-                    1,
                     HashMap::new(),
-                    test_utils::substr_range_nth(contents, "<block>", 1),
-                    test_utils::substr_range(contents, "println!(\"hello2\");")
+                    Position::new(1, 44)..=Position::new(1, 50),
+                    test_utils::substr_range(contents, "println!(\"hello2\");"),
+                    Position::new(1, 54)..Position::new(1, 73),
                 )
             ]
         );
@@ -333,11 +340,10 @@ mod tests {
         assert_eq!(
             blocks,
             vec![Block::new(
-                2,
-                2,
                 HashMap::new(),
-                test_utils::substr_range_nth(contents, "<block>", 0),
-                test_utils::substr_range(contents, "println!(\"hello1\");")
+                Position::new(2, 1)..=Position::new(2, 7),
+                test_utils::substr_range(contents, "println!(\"hello1\");"),
+                Position::new(2, 11)..Position::new(2, 30),
             ),]
         );
         Ok(())
@@ -351,11 +357,10 @@ mod tests {
         assert_eq!(
             blocks,
             vec![Block::new(
-                1,
-                2,
                 HashMap::new(),
-                test_utils::substr_range_nth(contents, "<block>", 0),
-                test_utils::substr_range(contents, "println!(\"hello1\");")
+                Position::new(1, 4)..=Position::new(1, 10),
+                test_utils::substr_range(contents, "println!(\"hello1\");"),
+                Position::new(1, 14)..Position::new(1, 33),
             ),]
         );
         Ok(())
@@ -397,39 +402,34 @@ mod tests {
             blocks,
             vec![
                 Block::new(
-                    2,
-                    25,
                     HashMap::from([("name".to_string(), "foo".to_string())]),
-                    test_utils::substr_range(contents, "<block name=\"foo\">"),
-                    30..620
+                    Position::new(2, 12)..=Position::new(2, 29),
+                    30..620,
+                    Position::new(2, 30)..Position::new(25, 9),
                 ),
                 Block::new(
-                    7,
-                    17,
                     HashMap::from([("name".to_string(), "bar".to_string())]),
-                    test_utils::substr_range(contents, "<block name=\"bar\">"),
-                    142..440
+                    Position::new(7, 16)..=Position::new(7, 33),
+                    142..440,
+                    Position::new(7, 34)..Position::new(17, 13),
                 ),
                 Block::new(
-                    11,
-                    15,
                     HashMap::from([("name".to_string(), "bar-bar".to_string())]),
-                    test_utils::substr_range(contents, "<block name=\"bar-bar\">"),
-                    281..415
+                    Position::new(11, 20)..=Position::new(11, 41),
+                    281..415,
+                    Position::new(11, 42)..Position::new(15, 17),
                 ),
                 Block::new(
-                    19,
-                    23,
                     HashMap::from([("name".to_string(), "buzz".to_string())]),
-                    test_utils::substr_range(contents, "<block name=\"buzz\">"),
-                    487..599
+                    Position::new(19, 16)..=Position::new(19, 34),
+                    487..599,
+                    Position::new(19, 35)..Position::new(23, 13),
                 ),
                 Block::new(
-                    26,
-                    27,
                     HashMap::from([("name".to_string(), "fizz".to_string())]),
-                    test_utils::substr_range(contents, "<block name=\"fizz\">"),
-                    662..671
+                    Position::new(26, 12)..=Position::new(26, 30),
+                    662..671,
+                    Position::new(26, 31)..Position::new(27, 9),
                 ),
             ]
         );
@@ -471,11 +471,10 @@ mod tests {
         assert_eq!(
             blocks,
             vec![Block::new(
-                1,
-                3,
                 HashMap::from([("name".to_string(), "foo".to_string())]),
-                test_utils::substr_range(contents, "<block name=\"foo\">"),
-                test_utils::substr_range(contents, "\n        let word = \"hello\";\n        ")
+                Position::new(1, 4)..=Position::new(1, 21),
+                test_utils::substr_range(contents, "\n        let word = \"hello\";\n        "),
+                Position::new(1, 42)..Position::new(3, 9),
             ),]
         );
         Ok(())

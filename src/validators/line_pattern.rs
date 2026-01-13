@@ -41,7 +41,7 @@ impl ValidatorSync for LinePatternValidator {
                         pattern,
                         file_path.display(),
                         block_with_context.block.name_display(),
-                        block_with_context.block.starts_at_line,
+                        block_with_context.block.start_tag_position_range.start().line,
                         e
                     )
                 })?;
@@ -56,8 +56,12 @@ impl ValidatorSync for LinePatternValidator {
                         continue;
                     }
                     if !re.is_match(trimmed_line) {
-                        let violation_line_number =
-                            block_with_context.block.starts_at_line + line_number;
+                        let violation_line_number = block_with_context
+                            .block
+                            .start_tag_position_range
+                            .start()
+                            .line
+                            + line_number;
                         let line_character_start =
                             trimmed_line.as_ptr() as usize - line.as_ptr() as usize + 1; // Start position is 1-based.
                         let line_character_end = line_character_start + trimmed_line.len() - 1; // End position is 1-based and inclusive.
@@ -120,7 +124,7 @@ fn create_violation(
         "Block {}:{} defined at line {} has a non-matching line {} (pattern: /{}/)",
         block_file_path.display(),
         block.name_display(),
-        block.starts_at_line,
+        block.start_tag_position_range.start().line,
         violation_line_number,
         pattern
     );

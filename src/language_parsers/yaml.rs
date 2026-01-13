@@ -17,7 +17,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language_parsers::Comment;
+    use crate::{Position, language_parsers::Comment};
 
     #[test]
     fn parses_yaml_comments_correctly() -> anyhow::Result<()> {
@@ -40,33 +40,28 @@ list:
             blocks,
             vec![
                 Comment {
-                    source_line_number: 2,
-                    source_start_position: 1,
-                    source_end_position: 25,
+                    position_range: Position::new(2, 1)..Position::new(2, 25),
+                    source_range: 1..25,
                     comment_text: "  This is a YAML comment".to_string()
                 },
                 Comment {
-                    source_line_number: 3,
-                    source_start_position: 38,
-                    source_end_position: 74,
+                    position_range: Position::new(3, 13)..Position::new(3, 49),
+                    source_range: 38..74,
                     comment_text: "  Inline comment on a key-value pair".to_string()
                 },
                 Comment {
-                    source_line_number: 5,
-                    source_start_position: 76,
-                    source_end_position: 93,
+                    position_range: Position::new(5, 1)..Position::new(5, 18),
+                    source_range: 76..93,
                     comment_text: "  Another comment".to_string()
                 },
                 Comment {
-                    source_line_number: 7,
-                    source_start_position: 111,
-                    source_end_position: 130,
+                    position_range: Position::new(7, 12)..Position::new(7, 31),
+                    source_range: 111..130,
                     comment_text: "  Comment in a list".to_string()
                 },
                 Comment {
-                    source_line_number: 9,
-                    source_start_position: 141,
-                    source_end_position: 158,
+                    position_range: Position::new(9, 1)..Position::new(9, 18),
+                    source_range: 141..158,
                     comment_text: "  End of comments".to_string()
                 }
             ]
