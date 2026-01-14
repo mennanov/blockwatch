@@ -239,11 +239,13 @@ impl FileBlocks {
         let mut listings = Vec::new();
         for block in &self.blocks_with_context {
             listings.push(serde_json::json!({
+                // <block affects="README.md:list-output-example">
                 "name": block.block.name_display(),
                 "line": block.block.start_tag_position_range.start().line,
                 "column": block.block.start_tag_position_range.start().character,
                 "is_content_modified": block.is_content_modified,
                 "attributes": block.block.attributes,
+                // </block>
             }));
         }
         // Sort by line number for deterministic output

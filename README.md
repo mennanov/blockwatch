@@ -47,9 +47,53 @@ cargo install blockwatch
 
 Check the [Releases](https://github.com/mennanov/blockwatch/releases) page for prebuilt binaries.
 
+## Quick start example
+
+1. Add a special `block` tag in the comments in any supported file ([See *Supported Languages*](#supported-languages))
+   like this:
+
+   ```python
+   user_ids = [
+       # <block keep-sorted keep-unique>
+       "cherry",
+       "apple",
+       "apple",
+       "banana",
+       # </block>
+   ]
+   ```
+
+2. Run `blockwatch`:
+
+   ```shell
+   blockwatch
+   ```
+
+   BlockWatch will fail and tell you that the list is not sorted and has duplicate entries.
+
+3. Fix the order and uniqueness:
+
+   ```python
+   user_ids = [
+       # <block keep-sorted keep-unique>
+       "apple",
+       "banana",
+       "cherry",
+       # </block>
+   ]
+   ```
+
+4. Run `blockwatch` again:
+
+   ```shell
+   blockwatch
+   ```
+
+   Now it passes!
+
 ## How It Works
 
-You define rules using XML-like tags inside your comments.
+You define rules using HTML-like tags inside your comments.
 
 ### Linking Code Blocks (`affects`)
 
@@ -58,7 +102,7 @@ This ensures that if you change some block of code, you're forced to look at the
 **src/lib.rs**:
 
 ```rust
-// <block affects="README.md:supported-langs">
+// <block affects="README.html:supported-langs">
 pub enum Language {
     Rust,
     Python,
@@ -70,14 +114,15 @@ pub enum Language {
 
 ```html
 <!-- <block name="supported-langs"> -->
-
-- Rust
-- Python
-
+<ul>
+    <li>Rust</li>
+    <li>Python</li>
+</ul>
 <!-- </block> -->
 ```
 
-If you modify the enum in `src/lib.rs`, BlockWatch will fail until you touch `README.md` as well.
+If you modify the enum in `src/lib.rs`, BlockWatch will fail until you touch the corresponding block `supported-langs`
+in `README.html` as well.
 
 ### Enforce Sort Order (`keep-sorted`)
 
@@ -90,6 +135,8 @@ Keep lists alphabetized. Default is `asc` (ascending).
 "cherry",
 # </block>
 ```
+
+If the list is not sorted alphabetically, BlockWatch will fail until you fix the order.
 
 #### Sort by Regex
 
@@ -180,19 +227,19 @@ prices = [
 ]
 ```
 
-#### `check-ai` configuration
+#### Supported environment variables
 
 [//]: # (<block name="check-ai-env-vars">)
 
-- `BLOCKWATCH_AI_API_KEY`: API Key (OpenAI compatible).
+- `BLOCKWATCH_AI_API_KEY`: API Key.
 - `BLOCKWATCH_AI_MODEL`: Model name (default: `gpt-5-nano`).
-- `BLOCKWATCH_AI_API_URL`: Custom API URL (optional).
+- `BLOCKWATCH_AI_API_URL`: Custom OpenAI compatible API URL (optional).
 
 [//]: # (</block>)
 
 ## Usage
 
-### 1. Run Locally
+### Run Locally
 
 Validate all blocks in your project:
 
@@ -207,43 +254,9 @@ blockwatch "src/**/*.rs" "**/*.md"
 blockwatch "**/*.rs" --ignore "**/generated/**"
 ```
 
-> **Tip:** Quote your glob patterns so the shell doesn't expand them before BlockWatch sees them.
+> **Tip:** Glob patterns should be quoted to avoid shell expanding them.
 
-### 1.1 Listing Blocks
-
-You can list all blocks that BlockWatch finds without running any validation. This is useful for auditing your blocks or debugging your configuration.
-
-```shell
-# List all blocks in the current directory
-blockwatch list
-
-# List blocks in specific files
-blockwatch list "src/**/*.rs" "**/*.md"
-
-# List only blocks affected by current changes
-git diff | blockwatch list
-```
-
-The output is a JSON object where keys are file paths and values are lists of blocks found in those files, including their names, line numbers, and attributes.
-
-#### Example Output
-
-```json
-{
-  "README.md": [
-    {
-      "name": "available-validators",
-      "line": 18,
-      "column": 10,
-      "attributes": {
-        "name": "available-validators"
-      }
-    }
-  ]
-}
-```
-
-### 2. Check Only What Changed
+### Check Only What Changed
 
 Pipe a git diff to BlockWatch to validate only the blocks you touched. This is perfect for pre-commit hooks.
 
@@ -261,7 +274,47 @@ git diff --patch path/to/file | blockwatch
 git diff --patch | blockwatch "src/always_checked.rs" "**/*.md"
 ```
 
-### 3. CI Integration
+### Listing Blocks
+
+You can list all blocks that BlockWatch finds without running any validation. This is useful for auditing your blocks or
+debugging your configuration.
+
+```shell
+# List all blocks in the current directory
+blockwatch list
+
+# List blocks in specific files
+blockwatch list "src/**/*.rs" "**/*.md"
+
+# List only blocks affected by current changes
+git diff | blockwatch list
+```
+
+The output is a JSON object.
+
+#### Example Output
+
+[//]: # (<block name="list-output-example">)
+
+```json
+{
+  "README.md": [
+    {
+      "name": "available-validators",
+      "line": 18,
+      "column": 10,
+      "is_content_modified": false,
+      "attributes": {
+        "name": "available-validators"
+      }
+    }
+  ]
+}
+```
+
+[//]: # (</block>)
+
+### CI Integration
 
 #### Pre-commit Hook
 
