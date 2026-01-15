@@ -105,6 +105,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, Rc<Box<dyn BlocksP
 /// Parses comment strings from a source code.
 pub(crate) trait CommentsParser {
     /// Returns a `Vec` of `Comment`s.
+    // TODO: Return an iterator instead of a Vec.
     fn parse(&self, source_code: &str) -> anyhow::Result<Vec<Comment>>;
 }
 

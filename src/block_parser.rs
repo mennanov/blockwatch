@@ -21,50 +21,130 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
     pub(crate) fn new(comments_parser: C) -> Self {
         Self { comments_parser }
     }
+}
 
-    fn process_start_tag<'c>(
-        comment: &'c Comment,
-        stack: &mut Vec<BlockBuilder<'c>>,
-        position: Range<usize>,
-        attributes: HashMap<String, String>,
-    ) {
-        stack.push(BlockBuilder::new(
-            comment,
-            attributes,
-            Self::source_position_at(position.start, comment)
-                ..=Self::source_position_at(position.end - 1, comment),
-        ));
+impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
+    fn parse(&self, contents: &str) -> anyhow::Result<Vec<Block>> {
+        let comments = self.comments_parser.parse(contents)?;
+        let mut blocks = Vec::new();
+        let mut block_starts = Vec::new();
+        for partial_block in PartialBlocksIterator::new(comments.iter()) {
+            match partial_block? {
+                PartialBlock::Start(block_start) => {
+                    block_starts.push(block_start);
+                }
+                PartialBlock::End(block_end) => {
+                    if let Some(block_start) = block_starts.pop() {
+                        blocks.push(block_end.into_block(block_start));
+                    } else {
+                        return Err(anyhow::anyhow!(
+                            "Unexpected closed block at line {}, position {}",
+                            block_end.comment.position_range.start.line,
+                            block_end.comment.source_range.start + block_end.start_position
+                        ));
+                    }
+                }
+            }
+        }
+
+        if let Some(unclosed_block) = block_starts.pop() {
+            return Err(anyhow::anyhow!(format!(
+                "Block at line {} is not closed",
+                unclosed_block.comment.position_range.start.line
+            )));
+        }
+        blocks.sort_by(|a, b| {
+            a.start_tag_position_range
+                .start()
+                .cmp(b.start_tag_position_range.start())
+        });
+
+        Ok(blocks)
     }
+}
 
-    fn process_end_tag<'c>(
-        comment: &'c Comment,
-        stack: &mut Vec<BlockBuilder<'c>>,
-        blocks: &mut Vec<Block>,
-        start_position: usize,
-    ) -> anyhow::Result<()> {
-        if let Some(block_builder) = stack.pop() {
-            let content_range = if !std::ptr::eq(comment, block_builder.comment) {
-                block_builder.comment.source_range.end..comment.source_range.start
-            } else {
-                // Block that starts and ends in the same comment can't have any
-                // content.
-                0..0
-            };
-            let content_start_position = block_builder.comment.position_range.end.clone();
-            let content_end_position = comment.position_range.start.clone();
-            blocks.push(
-                block_builder.build(content_range, content_start_position..content_end_position),
-            );
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!(
-                "Unexpected closed block at line {}, position {}",
-                comment.position_range.start.line,
-                comment.source_range.start + start_position
-            ))
+struct PartialBlocksIterator<'c, I: Iterator<Item = &'c Comment>> {
+    comments: I,
+    comment: Option<&'c Comment>,
+    tags_parser: Option<WinnowBlockTagParser<'c>>,
+}
+
+impl<'c, I: Iterator<Item = &'c Comment>> PartialBlocksIterator<'c, I> {
+    fn new(comments: I) -> Self {
+        Self {
+            comments,
+            comment: None,
+            tags_parser: None,
         }
     }
+}
 
+impl<'c, I: Iterator<Item = &'c Comment>> Iterator for PartialBlocksIterator<'c, I> {
+    type Item = anyhow::Result<PartialBlock<'c, 'c>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.tags_parser.is_none() {
+                if self.comment.is_none() {
+                    self.comment = Some(self.comments.next()?);
+                }
+                self.tags_parser = Some(WinnowBlockTagParser::new(
+                    &self.comment.unwrap().comment_text,
+                ));
+            }
+            return match self.tags_parser.as_mut().unwrap().next() {
+                Ok(Some(tag)) => match tag {
+                    BlockTag::Start {
+                        tag_range,
+                        attributes,
+                    } => Some(Ok(PartialBlock::Start(BlockStart::new(
+                        self.comment.unwrap(),
+                        attributes,
+                        tag_range,
+                    )))),
+                    BlockTag::End { start_position } => Some(Ok(PartialBlock::End(BlockEnd::new(
+                        self.comment.unwrap(),
+                        start_position,
+                    )))),
+                },
+                Ok(None) => {
+                    self.tags_parser = None;
+                    self.comment = None;
+                    continue;
+                }
+                Err(e) => Some(Err(e)),
+            };
+        }
+    }
+}
+
+enum PartialBlock<'s, 'e> {
+    Start(BlockStart<'s>),
+    End(BlockEnd<'e>),
+}
+
+struct BlockStart<'c> {
+    comment: &'c Comment,
+    attributes: HashMap<String, String>,
+    start_tag_position_range: RangeInclusive<Position>,
+}
+
+impl<'c> BlockStart<'c> {
+    fn new(
+        comment: &'c Comment,
+        attributes: HashMap<String, String>,
+        position_in_comment_range: Range<usize>,
+    ) -> Self {
+        Self {
+            comment,
+            attributes,
+            start_tag_position_range: Self::source_position_at(
+                position_in_comment_range.start,
+                comment,
+            )
+                ..=Self::source_position_at(position_in_comment_range.end - 1, comment),
+        }
+    }
     fn source_position_at(position_in_comment: usize, comment: &Comment) -> Position {
         let line_number = comment.position_range.start.line
             + comment.comment_text[..position_in_comment + 1]
@@ -86,75 +166,35 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
     }
 }
 
-impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
-    fn parse(&self, contents: &str) -> anyhow::Result<Vec<Block>> {
-        let comments = self.comments_parser.parse(contents)?;
-        let mut blocks = Vec::new();
-        let mut stack = Vec::new();
-        for comment in &comments {
-            let mut parser = WinnowBlockTagParser::new(&comment.comment_text);
-
-            while let Some(tag) = parser.next()? {
-                match tag {
-                    BlockTag::Start {
-                        tag_range: position,
-                        attributes,
-                    } => {
-                        Self::process_start_tag(comment, &mut stack, position, attributes);
-                    }
-                    BlockTag::End { start_position, .. } => {
-                        Self::process_end_tag(comment, &mut stack, &mut blocks, start_position)?;
-                    }
-                }
-            }
-        }
-
-        if let Some(unclosed_block) = stack.pop() {
-            return Err(anyhow::anyhow!(format!(
-                "Block at line {} is not closed",
-                unclosed_block.comment.position_range.start.line
-            )));
-        }
-        blocks.sort_by(|a, b| {
-            a.start_tag_position_range
-                .start()
-                .cmp(b.start_tag_position_range.start())
-        });
-
-        Ok(blocks)
-    }
-}
-
-struct BlockBuilder<'c> {
+/// Represents the end of a block, capturing its content range and position range.
+struct BlockEnd<'c> {
     comment: &'c Comment,
-    attributes: HashMap<String, String>,
-    start_tag_position_range: RangeInclusive<Position>,
+    start_position: usize,
 }
 
-impl<'c> BlockBuilder<'c> {
-    fn new(
-        comment: &'c Comment,
-        attributes: HashMap<String, String>,
-        start_tag_position_range: RangeInclusive<Position>,
-    ) -> Self {
+impl<'c> BlockEnd<'c> {
+    fn new(end_tag_comment: &'c Comment, start_position: usize) -> Self {
         Self {
-            comment,
-            attributes,
-            start_tag_position_range,
+            comment: end_tag_comment,
+            start_position,
         }
     }
 
-    /// Finalizes the block with the given end line and captured content, producing a `Block`.
-    pub(crate) fn build(
-        self,
-        content_range: Range<usize>,
-        content_position_range: Range<Position>,
-    ) -> Block {
+    fn into_block(self, block_start: BlockStart) -> Block {
+        let content_range = if !std::ptr::eq(self.comment, block_start.comment) {
+            block_start.comment.source_range.end..self.comment.source_range.start
+        } else {
+            // Block that starts and ends in the same comment can't have any
+            // content.
+            0..0
+        };
+        let content_start_position = block_start.comment.position_range.end.clone();
+        let content_end_position = self.comment.position_range.start.clone();
         Block::new(
-            self.attributes,
-            self.start_tag_position_range,
+            block_start.attributes,
+            block_start.start_tag_position_range,
             content_range,
-            content_position_range,
+            content_start_position..content_end_position,
         )
     }
 }
