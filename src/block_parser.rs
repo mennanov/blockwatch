@@ -26,51 +26,58 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
 impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
     fn parse(&mut self, contents: &str) -> anyhow::Result<Vec<Block>> {
         let comments = self.comments_parser.parse(contents)?;
-        let mut blocks = Vec::new();
-        let mut block_starts = Vec::new();
-        for partial_block in PartialBlocksIterator::new(comments.iter()) {
-            match partial_block? {
-                PartialBlock::Start(block_start) => {
-                    block_starts.push(block_start);
-                }
-                PartialBlock::End(block_end) => {
-                    if let Some(block_start) = block_starts.pop() {
-                        blocks.push(block_end.into_block(block_start));
-                    } else {
-                        return Err(anyhow::anyhow!(
-                            "Unexpected closed block at line {}, position {}",
-                            block_end.comment.position_range.start.line,
-                            block_end.comment.source_range.start + block_end.start_position
-                        ));
-                    }
-                }
-            }
-        }
-
-        if let Some(unclosed_block) = block_starts.pop() {
-            return Err(anyhow::anyhow!(format!(
-                "Block at line {} is not closed",
-                unclosed_block.comment.position_range.start.line
-            )));
-        }
-        blocks.sort_by(|a, b| {
-            a.start_tag_position_range
-                .start()
-                .cmp(b.start_tag_position_range.start())
-        });
-
-        Ok(blocks)
+        parse_blocks_from_comments(comments.iter())
     }
 }
 
-struct PartialBlocksIterator<'c, I: Iterator<Item = &'c Comment>> {
+/// Parses blocks from comments iterator.
+pub(crate) fn parse_blocks_from_comments<'c>(
+    comments: impl Iterator<Item = &'c Comment>,
+) -> anyhow::Result<Vec<Block>> {
+    let mut blocks = Vec::new();
+    let mut block_starts = Vec::new();
+    for partial_block in PartialBlocksIterator::new(comments) {
+        match partial_block? {
+            PartialBlock::Start(block_start) => {
+                block_starts.push(block_start);
+            }
+            PartialBlock::End(block_end) => {
+                if let Some(block_start) = block_starts.pop() {
+                    blocks.push(block_end.into_block(block_start));
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "Unexpected closed block at line {}, position {}",
+                        block_end.comment.position_range.start.line,
+                        block_end.comment.source_range.start + block_end.start_position
+                    ));
+                }
+            }
+        }
+    }
+
+    if let Some(unclosed_block) = block_starts.pop() {
+        return Err(anyhow::anyhow!(format!(
+            "Block at line {} is not closed",
+            unclosed_block.comment.position_range.start.line
+        )));
+    }
+    blocks.sort_by(|a, b| {
+        a.start_tag_position_range
+            .start()
+            .cmp(b.start_tag_position_range.start())
+    });
+
+    Ok(blocks)
+}
+
+pub(crate) struct PartialBlocksIterator<'c, I: Iterator<Item = &'c Comment>> {
     comments: I,
     comment: Option<&'c Comment>,
     tags_parser: Option<WinnowBlockTagParser<'c>>,
 }
 
 impl<'c, I: Iterator<Item = &'c Comment>> PartialBlocksIterator<'c, I> {
-    fn new(comments: I) -> Self {
+    pub(crate) fn new(comments: I) -> Self {
         Self {
             comments,
             comment: None,
@@ -118,15 +125,15 @@ impl<'c, I: Iterator<Item = &'c Comment>> Iterator for PartialBlocksIterator<'c,
     }
 }
 
-enum PartialBlock<'s, 'e> {
+pub(crate) enum PartialBlock<'s, 'e> {
     Start(BlockStart<'s>),
     End(BlockEnd<'e>),
 }
 
-struct BlockStart<'c> {
-    comment: &'c Comment,
-    attributes: HashMap<String, String>,
-    start_tag_position_range: RangeInclusive<Position>,
+pub(crate) struct BlockStart<'c> {
+    pub(crate) comment: &'c Comment,
+    pub(crate) attributes: HashMap<String, String>,
+    pub(crate) start_tag_position_range: RangeInclusive<Position>,
 }
 
 impl<'c> BlockStart<'c> {
@@ -167,9 +174,9 @@ impl<'c> BlockStart<'c> {
 }
 
 /// Represents the end of a block, capturing its content range and position range.
-struct BlockEnd<'c> {
-    comment: &'c Comment,
-    start_position: usize,
+pub(crate) struct BlockEnd<'c> {
+    pub(crate) comment: &'c Comment,
+    pub(crate) start_position: usize,
 }
 
 impl<'c> BlockEnd<'c> {
@@ -180,7 +187,7 @@ impl<'c> BlockEnd<'c> {
         }
     }
 
-    fn into_block(self, block_start: BlockStart) -> Block {
+    pub(crate) fn into_block(self, block_start: BlockStart) -> Block {
         let content_range = if !std::ptr::eq(self.comment, block_start.comment) {
             block_start.comment.source_range.end..self.comment.source_range.start
         } else {

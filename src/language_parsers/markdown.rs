@@ -1,47 +1,60 @@
-use crate::Position;
-use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
+use crate::block_parser::{BlocksFromCommentsParser, BlocksParser, parse_blocks_from_comments};
 use crate::blocks::Block;
-use crate::language_parsers::{CommentsParser, TreeSitterCommentsParser, html};
+use crate::language_parsers::{Comment, CommentsParser, TreeSitterCommentsParser};
 use anyhow::Context;
 use itertools::Itertools;
-use std::ops::RangeInclusive;
-use tree_sitter::{Query, StreamingIterator};
+use tree_sitter::StreamingIterator;
 
 /// Returns a [`BlocksParser`] for Markdown.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
     let md_blocks_parser = BlocksFromCommentsParser::new(markdown_comments_parser()?);
-    let html_blocks_parser = html::parser()?;
-    Ok(MdParser::new(md_blocks_parser, html_blocks_parser))
+    Ok(MdParser::new(md_blocks_parser))
 }
 
 /// Parses Markdown and HTML comments from Markdown.
 ///
 /// HTML comments are parsed from valid [HTML blocks](https://github.github.com/gfm/#html-block).
-struct MdParser<C: CommentsParser, HtmlParser: BlocksParser> {
-    md_parser: BlocksFromCommentsParser<C>,
-    html_parser: HtmlParser,
+struct MdParser<C: CommentsParser> {
+    md_blocks_parser: BlocksFromCommentsParser<C>,
+    md_tree_sitter_parser: tree_sitter::Parser,
+    md_html_blocks_query: tree_sitter::Query,
+    html_comments_parser: TreeSitterCommentsParser,
 }
 
-impl<C: CommentsParser, HtmlParser: BlocksParser> MdParser<C, HtmlParser> {
-    fn new(md_parser: BlocksFromCommentsParser<C>, html_parser: HtmlParser) -> Self {
+impl<C: CommentsParser> MdParser<C> {
+    fn new(md_parser: BlocksFromCommentsParser<C>) -> Self {
+        let mut md_tree_sitter_parser = tree_sitter::Parser::new();
+        let markdown_lang = tree_sitter_md::LANGUAGE.into();
+        md_tree_sitter_parser
+            .set_language(&markdown_lang)
+            .expect("Error setting Tree-sitter language");
+        let md_html_blocks_query =
+            tree_sitter::Query::new(&markdown_lang, "(html_block) @html_block").unwrap();
+
+        let html_lang = tree_sitter_html::LANGUAGE.into();
+        let html_comment_query = tree_sitter::Query::new(&html_lang, "(comment) @comment").unwrap();
+        let html_comments_parser =
+            TreeSitterCommentsParser::new(&html_lang, vec![(html_comment_query, None)]);
         Self {
-            md_parser,
-            html_parser,
+            md_blocks_parser: md_parser,
+            md_tree_sitter_parser,
+            md_html_blocks_query,
+            html_comments_parser,
         }
     }
 
     fn parse_html_blocks(&mut self, contents: &str) -> anyhow::Result<Vec<Block>> {
-        let mut parser = tree_sitter::Parser::new();
-        let markdown_lang = tree_sitter_md::LANGUAGE.into();
-        parser
-            .set_language(&markdown_lang)
-            .expect("Error setting Tree-sitter language");
-        let tree = parser.parse(contents, None).unwrap();
+        let html_comments = self.parse_html_comments(contents)?;
+        parse_blocks_from_comments(html_comments.iter())
+    }
+
+    fn parse_html_comments(&mut self, contents: &str) -> anyhow::Result<Vec<Comment>> {
+        let tree = self.md_tree_sitter_parser.parse(contents, None).unwrap();
         let root_node = tree.root_node();
-        let query = Query::new(&markdown_lang, "(html_block) @html_block").unwrap();
         let mut query_cursor = tree_sitter::QueryCursor::new();
-        let mut matches = query_cursor.matches(&query, root_node, contents.as_bytes());
-        let mut html_blocks = Vec::new();
+        let mut matches =
+            query_cursor.matches(&self.md_html_blocks_query, root_node, contents.as_bytes());
+        let mut all_html_comments = Vec::new();
         while let Some(query_match) = matches.next() {
             let capture = query_match
                 .captures
@@ -49,40 +62,23 @@ impl<C: CommentsParser, HtmlParser: BlocksParser> MdParser<C, HtmlParser> {
                 .context("Empty Tree-sitter html_block query match")?;
             let node = capture.node;
             let html_block = &contents[node.start_byte()..node.end_byte()];
-            let blocks = self
-                .html_parser
-                .parse(html_block)?
-                .into_iter()
-                .map(|block| {
-                    Self::block_with_offsets(block, node.start_position().row, node.start_byte())
-                });
-            html_blocks.extend(blocks);
-        }
-        Ok(html_blocks)
-    }
 
-    fn block_with_offsets(mut block: Block, line_offset: usize, byte_offset: usize) -> Block {
-        block.start_tag_position_range = RangeInclusive::new(
-            Position::new(
-                line_offset + block.start_tag_position_range.start().line,
-                block.start_tag_position_range.start().character,
-            ),
-            Position::new(
-                line_offset + block.start_tag_position_range.end().line,
-                block.start_tag_position_range.end().character,
-            ),
-        );
-        block.content_bytes_range.start += byte_offset;
-        block.content_bytes_range.end += byte_offset;
-        block.content_position_range.start.line += line_offset;
-        block.content_position_range.end.line += line_offset;
-        block
+            let mut html_comments = self.html_comments_parser.parse(html_block)?;
+            for comment in &mut html_comments {
+                comment.position_range.start.line += node.start_position().row;
+                comment.position_range.end.line += node.start_position().row;
+                comment.source_range.start += node.start_byte();
+                comment.source_range.end += node.start_byte();
+            }
+            all_html_comments.extend(html_comments);
+        }
+        Ok(all_html_comments)
     }
 }
 
-impl<C: CommentsParser, HtmlParser: BlocksParser> BlocksParser for MdParser<C, HtmlParser> {
+impl<C: CommentsParser> BlocksParser for MdParser<C> {
     fn parse(&mut self, contents: &str) -> anyhow::Result<Vec<Block>> {
-        let md_blocks = self.md_parser.parse(contents)?;
+        let md_blocks = self.md_blocks_parser.parse(contents)?;
         let html_blocks = self.parse_html_blocks(contents)?;
 
         Ok(md_blocks.into_iter().merge(html_blocks).collect())
@@ -91,7 +87,7 @@ impl<C: CommentsParser, HtmlParser: BlocksParser> BlocksParser for MdParser<C, H
 
 fn markdown_comments_parser() -> anyhow::Result<impl CommentsParser> {
     let markdown_lang = tree_sitter_md::LANGUAGE.into();
-    let block_comment_query = Query::new(
+    let block_comment_query = tree_sitter::Query::new(
         &markdown_lang,
         r#"(link_reference_definition
              (link_label) @comment_marker
@@ -153,7 +149,7 @@ fn markdown_comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils;
+    use crate::{Position, test_utils};
     use std::collections::HashMap;
 
     #[test]
@@ -229,6 +225,10 @@ Some markdown content
 [//]: # (</block>)
 
 <!-- <block name="html_block2"> -->Not wrapped in HTML tags<!-- </block> -->
+
+<!-- <block name="html_block3"> -->
+Not wrapped in HTML tags on multiple lines
+<!-- </block> -->
 "#;
         let blocks = parser.parse(content)?;
 
@@ -252,6 +252,15 @@ Some markdown content
                     Position::new(15, 6)..=Position::new(15, 31),
                     test_utils::substr_range(content, "Not wrapped in HTML tags"),
                     Position::new(15, 36)..Position::new(15, 60),
+                ),
+                Block::new(
+                    HashMap::from([("name".to_string(), "html_block3".to_string())]),
+                    Position::new(17, 6)..=Position::new(17, 31),
+                    test_utils::substr_range(
+                        content,
+                        "\nNot wrapped in HTML tags on multiple lines\n"
+                    ),
+                    Position::new(17, 36)..Position::new(19, 1),
                 ),
             ]
         );
