@@ -11,7 +11,7 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let js_language = tree_sitter_javascript::LANGUAGE.into();
     let block_comment_query = Query::new(&js_language, "(comment) @comment")?;
-    let parser = language_parsers::c_style_comments_parser(js_language, block_comment_query);
+    let parser = language_parsers::c_style_comments_parser(&js_language, block_comment_query);
     Ok(parser)
 }
 
@@ -22,7 +22,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser()?;
 
         let blocks = comments_parser.parse(
             r#"

@@ -13,7 +13,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let css_language = tree_sitter_css::LANGUAGE.into();
     let multi_line_comment_query = Query::new(&css_language, "(comment) @comment")?;
     let parser = TreeSitterCommentsParser::new(
-        css_language,
+        &css_language,
         vec![(
             multi_line_comment_query,
             Some(Box::new(|_, comment, _node| {
@@ -31,7 +31,7 @@ mod tests {
 
     #[test]
     fn parses_css_comments_correctly() -> anyhow::Result<()> {
-        let comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser()?;
 
         let blocks = comments_parser.parse(
             r#"

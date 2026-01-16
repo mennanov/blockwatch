@@ -13,7 +13,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let c_sharp = tree_sitter_c_sharp::LANGUAGE.into();
     let comment_query = Query::new(&c_sharp, "(comment) @comment")?;
     let parser = TreeSitterCommentsParser::new(
-        c_sharp,
+        &c_sharp,
         vec![(
             comment_query,
             Some(Box::new(|_, comment, _node| {
@@ -37,7 +37,7 @@ mod tests {
 
     #[test]
     fn parses_c_sharp_comments_correctly() -> anyhow::Result<()> {
-        let comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser()?;
 
         let code = r#"
 // Single line comment

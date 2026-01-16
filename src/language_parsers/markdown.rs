@@ -30,7 +30,7 @@ impl<C: CommentsParser, HtmlParser: BlocksParser> MdParser<C, HtmlParser> {
         }
     }
 
-    fn parse_html_blocks(&self, contents: &str) -> anyhow::Result<Vec<Block>> {
+    fn parse_html_blocks(&mut self, contents: &str) -> anyhow::Result<Vec<Block>> {
         let mut parser = tree_sitter::Parser::new();
         let markdown_lang = tree_sitter_md::LANGUAGE.into();
         parser
@@ -81,7 +81,7 @@ impl<C: CommentsParser, HtmlParser: BlocksParser> MdParser<C, HtmlParser> {
 }
 
 impl<C: CommentsParser, HtmlParser: BlocksParser> BlocksParser for MdParser<C, HtmlParser> {
-    fn parse(&self, contents: &str) -> anyhow::Result<Vec<Block>> {
+    fn parse(&mut self, contents: &str) -> anyhow::Result<Vec<Block>> {
         let md_blocks = self.md_parser.parse(contents)?;
         let html_blocks = self.parse_html_blocks(contents)?;
 
@@ -100,7 +100,7 @@ fn markdown_comments_parser() -> anyhow::Result<impl CommentsParser> {
     )?;
 
     let parser = TreeSitterCommentsParser::new(
-        markdown_lang,
+        &markdown_lang,
         vec![(
             block_comment_query,
             Some(Box::new(|capture_idx, comment, _node| {
@@ -158,7 +158,7 @@ mod tests {
 
     #[test]
     fn parses_markdown_blocks_correctly() -> anyhow::Result<()> {
-        let parser = parser()?;
+        let mut parser = parser()?;
 
         let content = r#"
 # Header
@@ -212,7 +212,7 @@ Some text here 3
 
     #[test]
     fn parses_html_blocks_correctly() -> anyhow::Result<()> {
-        let parser = parser()?;
+        let mut parser = parser()?;
 
         let content = r#"
 # Header

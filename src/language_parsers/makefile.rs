@@ -10,7 +10,7 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let language = tree_sitter_make::LANGUAGE.into();
     let comment_query = Query::new(&language, "(comment) @comment")?;
-    let parser = python_style_comments_parser(language, comment_query);
+    let parser = python_style_comments_parser(&language, comment_query);
     Ok(parser)
 }
 
@@ -21,7 +21,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser()?;
 
         let blocks = comments_parser.parse(
             r#"

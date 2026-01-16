@@ -11,7 +11,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let bash_language = tree_sitter_bash::LANGUAGE.into();
     let comment_query = Query::new(&bash_language, "(comment) @comment")?;
     let parser = TreeSitterCommentsParser::new(
-        bash_language,
+        &bash_language,
         vec![(
             comment_query,
             Some(Box::new(|_, comment, _node| {
@@ -34,7 +34,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser()?;
 
         let blocks = comments_parser.parse(
             r#"#!/bin/bash

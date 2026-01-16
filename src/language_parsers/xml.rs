@@ -10,7 +10,7 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let xml_language = tree_sitter_xml::LANGUAGE_XML.into();
     let line_comment_query = Query::new(&xml_language, "(Comment) @comment")?;
-    let parser = xml_style_comments_parser(xml_language, line_comment_query);
+    let parser = xml_style_comments_parser(&xml_language, line_comment_query);
     Ok(parser)
 }
 
@@ -21,7 +21,7 @@ mod tests {
 
     #[test]
     fn parses_xml_comments_correctly() -> anyhow::Result<()> {
-        let comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser()?;
 
         let blocks = comments_parser.parse(
             r#"

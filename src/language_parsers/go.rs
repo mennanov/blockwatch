@@ -11,7 +11,7 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let go_language = tree_sitter_go::LANGUAGE.into();
     let comment_query = Query::new(&go_language, "(comment) @comment")?;
-    let parser = language_parsers::c_style_comments_parser(go_language, comment_query);
+    let parser = language_parsers::c_style_comments_parser(&go_language, comment_query);
     Ok(parser)
 }
 
@@ -22,7 +22,7 @@ mod tests {
 
     #[test]
     fn parses_go_comments_correctly() -> anyhow::Result<()> {
-        let comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser()?;
 
         let blocks = comments_parser.parse(
             r#"
@@ -75,7 +75,7 @@ func main() {
 
     #[test]
     fn parses_go_mod_comments_correctly() -> anyhow::Result<()> {
-        let comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser()?;
 
         let blocks = comments_parser.parse(
             r#"
@@ -128,7 +128,7 @@ exclude github.com/bad/dependency v0.0.0
 
     #[test]
     fn parses_go_work_comments_correctly() -> anyhow::Result<()> {
-        let comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser()?;
 
         let blocks = comments_parser.parse(
             r#"
@@ -180,7 +180,7 @@ use ./module3
 
     #[test]
     fn parses_go_sum_comments_correctly() -> anyhow::Result<()> {
-        let comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser()?;
 
         let blocks = comments_parser.parse(
             r#"

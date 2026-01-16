@@ -10,7 +10,7 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let yaml_language = tree_sitter_yaml::LANGUAGE.into();
     let line_comment_query = Query::new(&yaml_language, "(comment) @comment")?;
-    let parser = python_style_comments_parser(yaml_language, line_comment_query);
+    let parser = python_style_comments_parser(&yaml_language, line_comment_query);
     Ok(parser)
 }
 
@@ -21,7 +21,7 @@ mod tests {
 
     #[test]
     fn parses_yaml_comments_correctly() -> anyhow::Result<()> {
-        let comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser()?;
 
         let blocks = comments_parser.parse(
             r#"

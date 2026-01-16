@@ -14,7 +14,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let line_comment_query = Query::new(&rust_language, "(line_comment) @comment")?;
     let block_comment_query = Query::new(&rust_language, "(block_comment) @comment")?;
     let parser = TreeSitterCommentsParser::new(
-        rust_language,
+        &rust_language,
         vec![
             (
                 line_comment_query,
@@ -48,7 +48,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser()?;
 
         let blocks = comments_parser.parse(
             r#"

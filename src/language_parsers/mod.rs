@@ -25,6 +25,7 @@ mod yaml;
 
 use crate::Position;
 use crate::block_parser::BlocksParser;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::ops::Range;
@@ -32,31 +33,77 @@ use std::rc::Rc;
 use std::string::ToString;
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator};
 
+pub(crate) type LanguageParser = Rc<RefCell<Box<dyn BlocksParser>>>;
+
 /// Returns a map of all available language parsers by their file extensions.
-pub fn language_parsers() -> anyhow::Result<HashMap<OsString, Rc<Box<dyn BlocksParser>>>> {
-    let bash_parser = Rc::new(Box::new(bash::parser()?) as Box<dyn BlocksParser>);
-    let c_parser = Rc::new(Box::new(c::parser()?) as Box<dyn BlocksParser>);
-    let c_sharp_parser = Rc::new(Box::new(c_sharp::parser()?) as Box<dyn BlocksParser>);
-    let cpp_parser = Rc::new(Box::new(cpp::parser()?) as Box<dyn BlocksParser>);
-    let css_parser = Rc::new(Box::new(css::parser()?) as Box<dyn BlocksParser>);
-    let go_parser = Rc::new(Box::new(go::parser()?) as Box<dyn BlocksParser>);
-    let html_parser = Rc::new(Box::new(html::parser()?) as Box<dyn BlocksParser>);
-    let java_parser = Rc::new(Box::new(java::parser()?) as Box<dyn BlocksParser>);
-    let js_parser = Rc::new(Box::new(javascript::parser()?) as Box<dyn BlocksParser>);
-    let kotlin_parser = Rc::new(Box::new(kotlin::parser()?) as Box<dyn BlocksParser>);
-    let makefile_parser = Rc::new(Box::new(makefile::parser()?) as Box<dyn BlocksParser>);
-    let markdown_parser = Rc::new(Box::new(markdown::parser()?) as Box<dyn BlocksParser>);
-    let php_parser = Rc::new(Box::new(php::parser()?) as Box<dyn BlocksParser>);
-    let python_parser = Rc::new(Box::new(python::parser()?) as Box<dyn BlocksParser>);
-    let ruby_parser = Rc::new(Box::new(ruby::parser()?) as Box<dyn BlocksParser>);
-    let rust_parser = Rc::new(Box::new(rust::parser()?) as Box<dyn BlocksParser>);
-    let sql_parser = Rc::new(Box::new(sql::parser()?) as Box<dyn BlocksParser>);
-    let swift_parser = Rc::new(Box::new(swift::parser()?) as Box<dyn BlocksParser>);
-    let toml_parser = Rc::new(Box::new(toml::parser()?) as Box<dyn BlocksParser>);
-    let typescript_parser = Rc::new(Box::new(typescript::parser()?) as Box<dyn BlocksParser>);
-    let typescript_tsx_parser = Rc::new(Box::new(tsx::parser()?) as Box<dyn BlocksParser>);
-    let xml_parser = Rc::new(Box::new(xml::parser()?) as Box<dyn BlocksParser>);
-    let yaml_parser = Rc::new(Box::new(yaml::parser()?) as Box<dyn BlocksParser>);
+pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
+    let bash_parser = Rc::new(RefCell::new(
+        Box::new(bash::parser()?) as Box<dyn BlocksParser>
+    ));
+    let c_parser = Rc::new(RefCell::new(Box::new(c::parser()?) as Box<dyn BlocksParser>));
+    let c_sharp_parser = Rc::new(RefCell::new(
+        Box::new(c_sharp::parser()?) as Box<dyn BlocksParser>
+    ));
+    let cpp_parser = Rc::new(RefCell::new(
+        Box::new(cpp::parser()?) as Box<dyn BlocksParser>
+    ));
+    let css_parser = Rc::new(RefCell::new(
+        Box::new(css::parser()?) as Box<dyn BlocksParser>
+    ));
+    let go_parser = Rc::new(RefCell::new(
+        Box::new(go::parser()?) as Box<dyn BlocksParser>
+    ));
+    let html_parser = Rc::new(RefCell::new(
+        Box::new(html::parser()?) as Box<dyn BlocksParser>
+    ));
+    let java_parser = Rc::new(RefCell::new(
+        Box::new(java::parser()?) as Box<dyn BlocksParser>
+    ));
+    let js_parser = Rc::new(RefCell::new(
+        Box::new(javascript::parser()?) as Box<dyn BlocksParser>
+    ));
+    let kotlin_parser = Rc::new(RefCell::new(
+        Box::new(kotlin::parser()?) as Box<dyn BlocksParser>
+    ));
+    let makefile_parser = Rc::new(RefCell::new(
+        Box::new(makefile::parser()?) as Box<dyn BlocksParser>
+    ));
+    let markdown_parser = Rc::new(RefCell::new(
+        Box::new(markdown::parser()?) as Box<dyn BlocksParser>
+    ));
+    let php_parser = Rc::new(RefCell::new(
+        Box::new(php::parser()?) as Box<dyn BlocksParser>
+    ));
+    let python_parser = Rc::new(RefCell::new(
+        Box::new(python::parser()?) as Box<dyn BlocksParser>
+    ));
+    let ruby_parser = Rc::new(RefCell::new(
+        Box::new(ruby::parser()?) as Box<dyn BlocksParser>
+    ));
+    let rust_parser = Rc::new(RefCell::new(
+        Box::new(rust::parser()?) as Box<dyn BlocksParser>
+    ));
+    let sql_parser = Rc::new(RefCell::new(
+        Box::new(sql::parser()?) as Box<dyn BlocksParser>
+    ));
+    let swift_parser = Rc::new(RefCell::new(
+        Box::new(swift::parser()?) as Box<dyn BlocksParser>
+    ));
+    let toml_parser = Rc::new(RefCell::new(
+        Box::new(toml::parser()?) as Box<dyn BlocksParser>
+    ));
+    let typescript_parser = Rc::new(RefCell::new(
+        Box::new(typescript::parser()?) as Box<dyn BlocksParser>
+    ));
+    let typescript_tsx_parser = Rc::new(RefCell::new(
+        Box::new(tsx::parser()?) as Box<dyn BlocksParser>
+    ));
+    let xml_parser = Rc::new(RefCell::new(
+        Box::new(xml::parser()?) as Box<dyn BlocksParser>
+    ));
+    let yaml_parser = Rc::new(RefCell::new(
+        Box::new(yaml::parser()?) as Box<dyn BlocksParser>
+    ));
     Ok(HashMap::from([
         // <block affects="README.md:supported-grammar, src/blocks.rs:supported-extensions" keep-sorted="asc">
         ("Makefile".into(), Rc::clone(&makefile_parser)),
@@ -106,31 +153,30 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, Rc<Box<dyn BlocksP
 pub(crate) trait CommentsParser {
     /// Returns a `Vec` of `Comment`s.
     // TODO: Return an iterator instead of a Vec.
-    fn parse(&self, source_code: &str) -> anyhow::Result<Vec<Comment>>;
+    fn parse(&mut self, source_code: &str) -> anyhow::Result<Vec<Comment>>;
 }
 
 type CaptureProcessor = Box<dyn Fn(usize, &str, &Node) -> anyhow::Result<Option<String>>>;
 
 struct TreeSitterCommentsParser {
-    language: Language,
+    parser: Parser,
     queries: Vec<(Query, Option<CaptureProcessor>)>,
 }
 
 impl TreeSitterCommentsParser {
-    fn new(language: Language, queries: Vec<(Query, Option<CaptureProcessor>)>) -> Self {
-        Self { language, queries }
+    fn new(language: &Language, queries: Vec<(Query, Option<CaptureProcessor>)>) -> Self {
+        let mut parser = Parser::new();
+        parser
+            .set_language(language)
+            .expect("Error setting Tree-sitter language");
+        Self { parser, queries }
     }
 }
 
 impl CommentsParser for TreeSitterCommentsParser {
-    fn parse(&self, source_code: &str) -> anyhow::Result<Vec<Comment>> {
-        let mut parser = Parser::new();
-        parser
-            .set_language(&self.language)
-            .expect("Error setting Tree-sitter language");
-        let tree = parser.parse(source_code, None).unwrap();
+    fn parse(&mut self, source_code: &str) -> anyhow::Result<Vec<Comment>> {
+        let tree = self.parser.parse(source_code, None).unwrap();
         let root_node = tree.root_node();
-
         let mut blocks = vec![];
         for (query, post_processor) in self.queries.iter() {
             let mut query_cursor = QueryCursor::new();
@@ -190,7 +236,7 @@ pub(crate) struct Comment {
 }
 
 /// C-style comments parser for a query that returns both line and block comments.
-fn c_style_comments_parser(language: Language, query: Query) -> TreeSitterCommentsParser {
+fn c_style_comments_parser(language: &Language, query: Query) -> TreeSitterCommentsParser {
     TreeSitterCommentsParser::new(
         language,
         vec![(
@@ -209,7 +255,7 @@ fn c_style_comments_parser(language: Language, query: Query) -> TreeSitterCommen
 
 /// C-style comments parser for the separate line and block comment queries.
 fn c_style_line_and_block_comments_parser(
-    language: Language,
+    language: &Language,
     line_comment_query: Query,
     block_comment_query: Query,
 ) -> TreeSitterCommentsParser {
@@ -234,7 +280,7 @@ fn c_style_line_and_block_comments_parser(
 
 /// Python-style comments parser.
 fn python_style_comments_parser(
-    language: Language,
+    language: &Language,
     comment_query: Query,
 ) -> TreeSitterCommentsParser {
     TreeSitterCommentsParser::new(
@@ -249,7 +295,10 @@ fn python_style_comments_parser(
 }
 
 /// XML-style comments parser.
-fn xml_style_comments_parser(language: Language, comment_query: Query) -> TreeSitterCommentsParser {
+fn xml_style_comments_parser(
+    language: &Language,
+    comment_query: Query,
+) -> TreeSitterCommentsParser {
     TreeSitterCommentsParser::new(
         language,
         vec![(

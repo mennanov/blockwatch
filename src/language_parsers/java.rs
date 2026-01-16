@@ -12,7 +12,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let line_comment_query = Query::new(&java_language, "(line_comment) @comment")?;
     let block_comment_query = Query::new(&java_language, "(block_comment) @comment")?;
     let parser = c_style_line_and_block_comments_parser(
-        java_language,
+        &java_language,
         line_comment_query,
         block_comment_query,
     );
@@ -26,7 +26,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser()?;
 
         let blocks = comments_parser.parse(
             r#"

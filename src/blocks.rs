@@ -1,6 +1,6 @@
 use crate::Position;
-use crate::block_parser::BlocksParser;
 use crate::diff_parser::LineChange;
+use crate::language_parsers::LanguageParser;
 use anyhow::{Context, anyhow};
 use globset::GlobSet;
 use ignore::Walk;
@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::ops::{Range, RangeInclusive};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::str::FromStr;
 use strum_macros::EnumString;
 
@@ -278,7 +277,7 @@ pub fn parse_blocks(
     should_scan_files: bool,
     file_system: &impl FileSystem,
     path_checker: &impl PathChecker,
-    parsers: HashMap<OsString, Rc<Box<dyn BlocksParser>>>,
+    parsers: HashMap<OsString, LanguageParser>,
     extra_file_extensions: HashMap<OsString, OsString>,
 ) -> anyhow::Result<HashMap<PathBuf, FileBlocks>> {
     let mut blocks = HashMap::new();
@@ -347,7 +346,7 @@ fn parse_file(
     line_changes: &[LineChange],
     blocks_filter: BlocksFilter,
     file_reader: &impl FileSystem,
-    parsers: &HashMap<OsString, Rc<Box<dyn BlocksParser>>>,
+    parsers: &HashMap<OsString, LanguageParser>,
     extra_file_extensions: &HashMap<OsString, OsString>,
 ) -> anyhow::Result<Option<FileBlocks>> {
     let parser = match parser_for_file_path(file_path, parsers, extra_file_extensions) {
@@ -356,6 +355,7 @@ fn parse_file(
     };
     let source_code = file_reader.read_to_string(file_path)?;
     let blocks = parser
+        .borrow_mut()
         .parse(&source_code)
         .context(format!("Failed to parse file {file_path:?}"))?;
 
@@ -388,9 +388,9 @@ fn parse_file(
 
 fn parser_for_file_path<'p>(
     file_path: &Path,
-    parsers: &'p HashMap<OsString, Rc<Box<dyn BlocksParser>>>,
+    parsers: &'p HashMap<OsString, LanguageParser>,
     extra_file_extensions: &HashMap<OsString, OsString>,
-) -> Option<&'p Rc<Box<dyn BlocksParser>>> {
+) -> Option<&'p LanguageParser> {
     let file_name = file_path.file_name()?.to_str()?;
 
     for (i, _) in file_name.match_indices('.').rev() {
@@ -407,9 +407,9 @@ fn parser_for_file_path<'p>(
 
 fn try_parser_for_extension<'p>(
     extension: &OsString,
-    parsers: &'p HashMap<OsString, Rc<Box<dyn BlocksParser>>>,
+    parsers: &'p HashMap<OsString, LanguageParser>,
     extra_file_extensions: &HashMap<OsString, OsString>,
-) -> Option<&'p Rc<Box<dyn BlocksParser>>> {
+) -> Option<&'p LanguageParser> {
     let ext = if let Some(ext) = extra_file_extensions.get(extension) {
         ext
     } else {

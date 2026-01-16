@@ -14,7 +14,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let line_comment_query = Query::new(&sql_language, "(comment) @comment")?;
     let block_comment_query = Query::new(&sql_language, "(marginalia) @comment")?;
     let parser = TreeSitterCommentsParser::new(
-        sql_language,
+        &sql_language,
         vec![
             (
                 line_comment_query,
@@ -40,7 +40,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser()?;
 
         let blocks = comments_parser.parse(
             r#"
