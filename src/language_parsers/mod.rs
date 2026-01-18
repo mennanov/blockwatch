@@ -171,54 +171,91 @@ impl TreeSitterCommentsParser {
             .expect("Error setting Tree-sitter language");
         Self { parser, queries }
     }
+
+    fn node_to_comment(
+        node: &Node,
+        source_code: &str,
+        capture_index: usize,
+        post_processor: &Option<CaptureProcessor>,
+    ) -> anyhow::Result<Option<Comment>> {
+        let start_position = Position::new(
+            node.start_position().row + 1,
+            node.start_position().column + 1,
+        );
+        let end_position =
+            Position::new(node.end_position().row + 1, node.end_position().column + 1);
+        let start_byte = node.start_byte();
+        let end_byte = node.end_byte();
+        let comment_text = &source_code[start_byte..end_byte];
+
+        let processed_text = if let Some(processor) = post_processor {
+            processor(capture_index, comment_text, node)?
+        } else {
+            Some(comment_text.to_string())
+        };
+
+        Ok(processed_text.map(|comment_text| Comment {
+            position_range: start_position..end_position,
+            source_range: start_byte..end_byte,
+            comment_text,
+        }))
+    }
+
+    fn collect_comments_for_query(
+        &self,
+        query: &Query,
+        post_processor: &Option<CaptureProcessor>,
+        root_node: Node,
+        source_code: &str,
+    ) -> anyhow::Result<Vec<Comment>> {
+        let mut comments = vec![];
+        let mut query_cursor = QueryCursor::new();
+        let mut matches = query_cursor.matches(query, root_node, source_code.as_bytes());
+        while let Some(query_match) = matches.next() {
+            for capture in query_match.captures {
+                if let Some(comment) = Self::node_to_comment(
+                    &capture.node,
+                    source_code,
+                    capture.index as usize,
+                    post_processor,
+                )? {
+                    comments.push(comment);
+                }
+            }
+        }
+        Ok(comments)
+    }
+
+    fn collect_all_comments(
+        &self,
+        root_node: Node,
+        source_code: &str,
+    ) -> anyhow::Result<Vec<Comment>> {
+        let mut comments = vec![];
+        for (query, post_processor) in self.queries.iter() {
+            comments.extend(self.collect_comments_for_query(
+                query,
+                post_processor,
+                root_node,
+                source_code,
+            )?);
+        }
+        Ok(comments)
+    }
 }
 
 impl CommentsParser for TreeSitterCommentsParser {
     fn parse(&mut self, source_code: &str) -> anyhow::Result<Vec<Comment>> {
         let tree = self.parser.parse(source_code, None).unwrap();
-        let root_node = tree.root_node();
-        let mut blocks = vec![];
-        for (query, post_processor) in self.queries.iter() {
-            let mut query_cursor = QueryCursor::new();
-            let mut matches = query_cursor.matches(query, root_node, source_code.as_bytes());
-            while let Some(query_match) = matches.next() {
-                for capture in query_match.captures {
-                    let node = capture.node;
-                    let start_position = Position::new(
-                        node.start_position().row + 1,
-                        node.start_position().column + 1,
-                    );
-                    let end_position =
-                        Position::new(node.end_position().row + 1, node.end_position().column + 1);
-                    let start_byte = node.start_byte();
-                    let end_byte = node.end_byte();
-                    let comment_text = &source_code[node.start_byte()..node.end_byte()];
-                    if let Some(processor) = post_processor {
-                        if let Some(out) = processor(capture.index as usize, comment_text, &node)? {
-                            blocks.push(Comment {
-                                position_range: start_position..end_position,
-                                source_range: start_byte..end_byte,
-                                comment_text: out,
-                            });
-                        }
-                    } else {
-                        blocks.push(Comment {
-                            position_range: start_position..end_position,
-                            source_range: start_byte..end_byte,
-                            comment_text: comment_text.to_string(),
-                        });
-                    }
-                }
-            }
-        }
+        let mut comments = self.collect_all_comments(tree.root_node(), source_code)?;
 
-        blocks.sort_by(|comment1, comment2| {
+        comments.sort_by(|comment1, comment2| {
             comment1
                 .source_range
                 .start
                 .cmp(&comment2.source_range.start)
         });
-        Ok(blocks)
+        Ok(comments)
     }
 }
 
