@@ -37,75 +37,36 @@ pub(crate) type LanguageParser = Rc<RefCell<Box<dyn BlocksParser>>>;
 
 /// Returns a map of all available language parsers by their file extensions.
 pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
-    let bash_parser = Rc::new(RefCell::new(
-        Box::new(bash::parser()?) as Box<dyn BlocksParser>
-    ));
-    let c_parser = Rc::new(RefCell::new(Box::new(c::parser()?) as Box<dyn BlocksParser>));
-    let c_sharp_parser = Rc::new(RefCell::new(
-        Box::new(c_sharp::parser()?) as Box<dyn BlocksParser>
-    ));
-    let cpp_parser = Rc::new(RefCell::new(
-        Box::new(cpp::parser()?) as Box<dyn BlocksParser>
-    ));
-    let css_parser = Rc::new(RefCell::new(
-        Box::new(css::parser()?) as Box<dyn BlocksParser>
-    ));
-    let go_parser = Rc::new(RefCell::new(
-        Box::new(go::parser()?) as Box<dyn BlocksParser>
-    ));
-    let html_parser = Rc::new(RefCell::new(
-        Box::new(html::parser()?) as Box<dyn BlocksParser>
-    ));
-    let java_parser = Rc::new(RefCell::new(
-        Box::new(java::parser()?) as Box<dyn BlocksParser>
-    ));
-    let js_parser = Rc::new(RefCell::new(
-        Box::new(javascript::parser()?) as Box<dyn BlocksParser>
-    ));
-    let kotlin_parser = Rc::new(RefCell::new(
-        Box::new(kotlin::parser()?) as Box<dyn BlocksParser>
-    ));
-    let makefile_parser = Rc::new(RefCell::new(
-        Box::new(makefile::parser()?) as Box<dyn BlocksParser>
-    ));
-    let markdown_parser = Rc::new(RefCell::new(
-        Box::new(markdown::parser()?) as Box<dyn BlocksParser>
-    ));
-    let php_parser = Rc::new(RefCell::new(
-        Box::new(php::parser()?) as Box<dyn BlocksParser>
-    ));
-    let python_parser = Rc::new(RefCell::new(
-        Box::new(python::parser()?) as Box<dyn BlocksParser>
-    ));
-    let ruby_parser = Rc::new(RefCell::new(
-        Box::new(ruby::parser()?) as Box<dyn BlocksParser>
-    ));
-    let rust_parser = Rc::new(RefCell::new(
-        Box::new(rust::parser()?) as Box<dyn BlocksParser>
-    ));
-    let sql_parser = Rc::new(RefCell::new(
-        Box::new(sql::parser()?) as Box<dyn BlocksParser>
-    ));
-    let swift_parser = Rc::new(RefCell::new(
-        Box::new(swift::parser()?) as Box<dyn BlocksParser>
-    ));
-    let toml_parser = Rc::new(RefCell::new(
-        Box::new(toml::parser()?) as Box<dyn BlocksParser>
-    ));
-    let typescript_parser = Rc::new(RefCell::new(
-        Box::new(typescript::parser()?) as Box<dyn BlocksParser>
-    ));
-    let typescript_tsx_parser = Rc::new(RefCell::new(
-        Box::new(tsx::parser()?) as Box<dyn BlocksParser>
-    ));
-    let xml_parser = Rc::new(RefCell::new(
-        Box::new(xml::parser()?) as Box<dyn BlocksParser>
-    ));
-    let yaml_parser = Rc::new(RefCell::new(
-        Box::new(yaml::parser()?) as Box<dyn BlocksParser>
-    ));
+    fn parser<P: BlocksParser + 'static>(p: P) -> LanguageParser {
+        Rc::new(RefCell::new(Box::new(p) as Box<dyn BlocksParser>))
+    }
+
+    let bash_parser = parser(bash::parser()?);
+    let c_parser = parser(c::parser()?);
+    let c_sharp_parser = parser(c_sharp::parser()?);
+    let cpp_parser = parser(cpp::parser()?);
+    let css_parser = parser(css::parser()?);
+    let go_parser = parser(go::parser()?);
+    let html_parser = parser(html::parser()?);
+    let java_parser = parser(java::parser()?);
+    let js_parser = parser(javascript::parser()?);
+    let kotlin_parser = parser(kotlin::parser()?);
+    let makefile_parser = parser(makefile::parser()?);
+    let markdown_parser = parser(markdown::parser()?);
+    let php_parser = parser(php::parser()?);
+    let python_parser = parser(python::parser()?);
+    let ruby_parser = parser(ruby::parser()?);
+    let rust_parser = parser(rust::parser()?);
+    let sql_parser = parser(sql::parser()?);
+    let swift_parser = parser(swift::parser()?);
+    let toml_parser = parser(toml::parser()?);
+    let typescript_parser = parser(typescript::parser()?);
+    let typescript_tsx_parser = parser(tsx::parser()?);
+    let xml_parser = parser(xml::parser()?);
+    let yaml_parser = parser(yaml::parser()?);
+
     Ok(HashMap::from([
-        // <block affects="README.md:supported-grammar, src/blocks.rs:supported-extensions" keep-sorted="asc">
+        // <block affects="README.md:supported-grammar, src/blocks.rs:supported-extensions" keep-sorted>
         ("Makefile".into(), Rc::clone(&makefile_parser)),
         ("bash".into(), Rc::clone(&bash_parser)),
         ("c".into(), c_parser),
