@@ -31,7 +31,9 @@ use std::ffi::OsString;
 use std::ops::Range;
 use std::rc::Rc;
 use std::string::ToString;
-use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator};
+use tree_sitter::{
+    Language, Node, Parser, Query, QueryCursor, StreamingIterator, Tree, TreeCursor,
+};
 
 pub(crate) type LanguageParser = Rc<RefCell<Box<dyn BlocksParser>>>;
 
@@ -113,8 +115,16 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
 /// Parses comment strings from a source code.
 pub(crate) trait CommentsParser {
     /// Returns a `Vec` of `Comment`s.
-    // TODO: Return an iterator instead of a Vec.
     fn parse(&mut self, source_code: &str) -> anyhow::Result<Vec<Comment>>;
+}
+
+/// Parses comment string from a source code by returning an iterator of `Comment`s.
+pub(crate) trait CommentsWalker {
+    /// Returns an iterator of `Comment`s from the source code.
+    fn parse<'source>(
+        &'source mut self,
+        source_code: &'source str,
+    ) -> impl Iterator<Item = Comment> + 'source;
 }
 
 type CaptureProcessor = Box<dyn Fn(usize, &str, &Node) -> anyhow::Result<Option<String>>>;
@@ -217,6 +227,124 @@ impl CommentsParser for TreeSitterCommentsParser {
                 .cmp(&comment2.source_range.start)
         });
         Ok(comments)
+    }
+}
+
+type NodeVisitor = Box<dyn Fn(&Node, &str) -> Option<String>>;
+
+struct TreeSitterCommentsWalker {
+    parser: Parser,
+    node_visitor: NodeVisitor,
+    tree: Option<Tree>,
+}
+
+impl TreeSitterCommentsWalker {
+    fn new(language: &Language, node_visitor: NodeVisitor) -> Self {
+        let mut parser = Parser::new();
+        parser
+            .set_language(language)
+            .expect("Error setting Tree-sitter language");
+        Self {
+            parser,
+            node_visitor,
+            tree: None,
+        }
+    }
+}
+
+impl CommentsWalker for TreeSitterCommentsWalker {
+    fn parse<'a>(&'a mut self, source_code: &'a str) -> impl Iterator<Item = Comment> + 'a {
+        let tree = self.parser.parse(source_code, None).unwrap();
+        self.tree = Some(tree);
+        // It is safe to unwrap here because we just set self.tree
+        CommentsIterator::new(self.tree.as_ref().unwrap(), &self.node_visitor, source_code)
+    }
+}
+
+struct CommentsIterator<'source> {
+    cursor: TreeCursor<'source>,
+    node_visitor: &'source NodeVisitor,
+    source_code: &'source str,
+    start_visited: bool,
+}
+
+impl<'source> CommentsIterator<'source> {
+    fn new(
+        tree: &'source Tree,
+        node_visitor: &'source NodeVisitor,
+        source_code: &'source str,
+    ) -> Self {
+        let cursor = tree.walk();
+        Self {
+            cursor,
+            node_visitor,
+            source_code,
+            start_visited: false,
+        }
+    }
+
+    fn comment_from_current_node(&self) -> Option<Comment> {
+        let node = self.cursor.node();
+        let visitor = self.node_visitor;
+        if let Some(comment_text) = visitor(&node, self.source_code) {
+            let start_position = Position::new(
+                node.start_position().row + 1,
+                node.start_position().column + 1,
+            );
+            let end_position =
+                Position::new(node.end_position().row + 1, node.end_position().column + 1);
+
+            return Some(Comment {
+                position_range: start_position..end_position,
+                source_range: node.start_byte()..node.end_byte(),
+                comment_text,
+            });
+        }
+        None
+    }
+}
+
+impl<'source> Iterator for CommentsIterator<'source> {
+    type Item = Comment;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.start_visited {
+            self.start_visited = true;
+            if let Some(comment) = self.comment_from_current_node() {
+                return Some(comment);
+            }
+        }
+
+        loop {
+            // Try to go to the first child
+            if self.cursor.goto_first_child() {
+                if let Some(comment) = self.comment_from_current_node() {
+                    return Some(comment);
+                }
+                continue;
+            }
+
+            // Try to go to the next sibling
+            if self.cursor.goto_next_sibling() {
+                if let Some(comment) = self.comment_from_current_node() {
+                    return Some(comment);
+                }
+                continue;
+            }
+
+            // Go up to the parent and try next sibling
+            loop {
+                if !self.cursor.goto_parent() {
+                    return None;
+                }
+                if self.cursor.goto_next_sibling() {
+                    if let Some(comment) = self.comment_from_current_node() {
+                        return Some(comment);
+                    }
+                    break;
+                }
+            }
+        }
     }
 }
 

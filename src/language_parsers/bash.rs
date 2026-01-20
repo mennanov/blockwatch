@@ -1,5 +1,7 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
-use crate::language_parsers::{CommentsParser, TreeSitterCommentsParser};
+use crate::language_parsers::{
+    CommentsParser, CommentsWalker, TreeSitterCommentsParser, TreeSitterCommentsWalker,
+};
 use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for Bash.
@@ -22,6 +24,27 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
                 }
             })),
         )],
+    );
+    Ok(parser)
+}
+
+fn comments_walker() -> anyhow::Result<impl CommentsWalker> {
+    let bash_language = tree_sitter_bash::LANGUAGE.into();
+    let comment_query = Query::new(&bash_language, "(comment) @comment")?;
+    let parser = TreeSitterCommentsWalker::new(
+        &bash_language,
+        Box::new(|node, source| {
+            if node.kind() != "comment" {
+                return None;
+            }
+            let comment = &source[node.start_byte()..node.end_byte()];
+            if comment.starts_with("#!") {
+                // Skip shebang.
+                None
+            } else {
+                Some(comment.replacen("#", " ", 1))
+            }
+        }),
     );
     Ok(parser)
 }
