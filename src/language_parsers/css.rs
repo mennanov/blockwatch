@@ -2,7 +2,6 @@ use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{
     CommentsParser, TreeSitterCommentsParser, c_style_multiline_comment_processor,
 };
-use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for CSS.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -11,15 +10,17 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let css_language = tree_sitter_css::LANGUAGE.into();
-    let multi_line_comment_query = Query::new(&css_language, "(comment) @comment")?;
     let parser = TreeSitterCommentsParser::new(
         &css_language,
-        vec![(
-            multi_line_comment_query,
-            Some(Box::new(|_, comment, _node| {
-                Ok(Some(c_style_multiline_comment_processor(comment)))
-            })),
-        )],
+        Box::new(|node, source_code| {
+            if node.kind() == "comment" {
+                Some(c_style_multiline_comment_processor(
+                    &source_code[node.byte_range()],
+                ))
+            } else {
+                None
+            }
+        }),
     );
     Ok(parser)
 }
@@ -33,8 +34,9 @@ mod tests {
     fn parses_css_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"
             body {
                 color: black;
             }
@@ -52,7 +54,8 @@ mod tests {
                CSS comment with
                different formatting */
             "#,
-        )?;
+            )
+            .collect();
 
         assert_eq!(
             blocks,

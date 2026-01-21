@@ -1,6 +1,5 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{CommentsParser, c_style_line_and_block_comments_parser};
-use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for Swift.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -9,13 +8,8 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let swift_language = tree_sitter_swift::LANGUAGE.into();
-    let line_comment_query = Query::new(&swift_language, "(comment) @comment")?;
-    let block_comment_query = Query::new(&swift_language, "(multiline_comment) @comment")?;
-    let parser = c_style_line_and_block_comments_parser(
-        &swift_language,
-        line_comment_query,
-        block_comment_query,
-    );
+    let parser =
+        c_style_line_and_block_comments_parser(&swift_language, "comment", "multiline_comment");
     Ok(parser)
 }
 
@@ -28,8 +22,9 @@ mod tests {
     fn parses_swift_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"
             // This is a single-line comment in Swift.
             import Foundation
     
@@ -49,7 +44,8 @@ mod tests {
                 return
             }
             "#,
-        )?;
+            )
+            .collect();
 
         assert_eq!(
             blocks,

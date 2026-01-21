@@ -1,6 +1,5 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{CommentsParser, python_style_comments_parser};
-use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for Yaml.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -9,8 +8,7 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let yaml_language = tree_sitter_yaml::LANGUAGE.into();
-    let line_comment_query = Query::new(&yaml_language, "(comment) @comment")?;
-    let parser = python_style_comments_parser(&yaml_language, line_comment_query);
+    let parser = python_style_comments_parser(&yaml_language, "comment");
     Ok(parser)
 }
 
@@ -23,8 +21,9 @@ mod tests {
     fn parses_yaml_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"
 # This is a YAML comment
 key: value  # Inline comment on a key-value pair
 
@@ -34,7 +33,8 @@ list:
   - item2
 # End of comments
 "#,
-        )?;
+            )
+            .collect();
 
         assert_eq!(
             blocks,

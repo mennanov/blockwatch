@@ -1,7 +1,6 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers;
 use crate::language_parsers::CommentsParser;
-use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for TypeScript.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -10,8 +9,7 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let ts_language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-    let block_comment_query = Query::new(&ts_language, "(comment) @comment")?;
-    let parser = language_parsers::c_style_comments_parser(&ts_language, block_comment_query);
+    let parser = language_parsers::c_style_comments_parser(&ts_language, "comment");
     Ok(parser)
 }
 
@@ -24,8 +22,9 @@ mod tests {
     fn parses_typescript_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"
             /**
              * This is a TypeScript class example with comments.
              *
@@ -49,7 +48,8 @@ mod tests {
                 }
             }
             "#,
-        )?;
+            )
+            .collect();
 
         assert_eq!(
             blocks,

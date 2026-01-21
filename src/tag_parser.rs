@@ -37,8 +37,12 @@ pub(crate) struct WinnowBlockTagParser<'source> {
 }
 
 impl<'source> WinnowBlockTagParser<'source> {
-    pub(crate) fn new(source: &'source str) -> Self {
-        Self { source, cursor: 0 }
+    pub(crate) fn new(source: &'source str, cursor: usize) -> Self {
+        Self { source, cursor }
+    }
+
+    pub(crate) fn cursor(&self) -> usize {
+        self.cursor
     }
 }
 

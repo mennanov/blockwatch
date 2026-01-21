@@ -32,9 +32,16 @@ impl<C: CommentsParser> MdParser<C> {
             tree_sitter::Query::new(&markdown_lang, "(html_block) @html_block").unwrap();
 
         let html_lang = tree_sitter_html::LANGUAGE.into();
-        let html_comment_query = tree_sitter::Query::new(&html_lang, "(comment) @comment").unwrap();
-        let html_comments_parser =
-            TreeSitterCommentsParser::new(&html_lang, vec![(html_comment_query, None)]);
+        let html_comments_parser = TreeSitterCommentsParser::new(
+            &html_lang,
+            Box::new(|node, source_code| {
+                if node.kind() == "comment" {
+                    Some(source_code[node.byte_range()].to_string())
+                } else {
+                    None
+                }
+            }),
+        );
         Self {
             md_blocks_parser: md_parser,
             md_tree_sitter_parser,
@@ -45,7 +52,7 @@ impl<C: CommentsParser> MdParser<C> {
 
     fn parse_html_blocks(&mut self, contents: &str) -> anyhow::Result<Vec<Block>> {
         let html_comments = self.parse_html_comments(contents)?;
-        parse_blocks_from_comments(html_comments.iter())
+        parse_blocks_from_comments(html_comments.into_iter())
     }
 
     fn parse_html_comments(&mut self, contents: &str) -> anyhow::Result<Vec<Comment>> {
@@ -63,14 +70,14 @@ impl<C: CommentsParser> MdParser<C> {
             let node = capture.node;
             let html_block = &contents[node.start_byte()..node.end_byte()];
 
-            let mut html_comments = self.html_comments_parser.parse(html_block)?;
-            for comment in &mut html_comments {
+            let mut html_comments = self.html_comments_parser.parse(html_block);
+            for mut comment in &mut html_comments {
                 comment.position_range.start.line += node.start_position().row;
                 comment.position_range.end.line += node.start_position().row;
                 comment.source_range.start += node.start_byte();
                 comment.source_range.end += node.start_byte();
+                all_html_comments.push(comment);
             }
-            all_html_comments.extend(html_comments);
         }
         Ok(all_html_comments)
     }
@@ -87,62 +94,50 @@ impl<C: CommentsParser> BlocksParser for MdParser<C> {
 
 fn markdown_comments_parser() -> anyhow::Result<impl CommentsParser> {
     let markdown_lang = tree_sitter_md::LANGUAGE.into();
-    let block_comment_query = tree_sitter::Query::new(
-        &markdown_lang,
-        r#"(link_reference_definition
-             (link_label) @comment_marker
-             (#eq? @comment_marker "[//]")
-         ) @comment"#,
-    )?;
-
     let parser = TreeSitterCommentsParser::new(
         &markdown_lang,
-        vec![(
-            block_comment_query,
-            Some(Box::new(|capture_idx, comment, _node| {
-                if capture_idx != 1 {
-                    return Ok(None);
-                }
-                let mut result = String::with_capacity(comment.len());
-                let prefix_idx = comment
-                    .find("[//]:")
-                    .expect("comment is expected to start with '[//]:'");
+        Box::new(|node, source_code| {
+            if node.kind() != "link_reference_definition" {
+                return None;
+            }
+            let comment = &source_code[node.byte_range()];
+            let prefix_idx = comment.find("[//]:")?;
+            let start_search = prefix_idx + 5;
+            let open_idx = comment[start_search..]
+                .find(|c| ['(', '"', '\''].contains(&c))
+                .map(|i| i + start_search)
+                .expect("comment is expected to have a title delimiter");
 
-                let start_search = prefix_idx + 5;
-                let open_idx = comment[start_search..]
-                    .find(|c| ['(', '"', '\''].contains(&c))
-                    .map(|i| i + start_search)
-                    .expect("comment is expected to have a title delimiter");
+            let open_char = comment.chars().nth(open_idx).unwrap();
+            let close_char = match open_char {
+                '(' => ')',
+                '"' => '"',
+                '\'' => '\'',
+                _ => unreachable!(),
+            };
 
-                let open_char = comment.chars().nth(open_idx).unwrap();
-                let close_char = match open_char {
-                    '(' => ')',
-                    '"' => '"',
-                    '\'' => '\'',
-                    _ => unreachable!(),
-                };
+            let close_idx = comment
+                .rfind(close_char)
+                .expect("comment is expected to end with matching delimiter");
 
-                let close_idx = comment
-                    .rfind(close_char)
-                    .expect("comment is expected to end with matching delimiter");
-
-                result.push_str(&comment[..prefix_idx]);
-                // Replace "[//]:" with spaces.
-                result.push_str("     ");
-                // Replace everything before the open delimiter with spaces (including the delimiter).
-                result.push_str(" ".repeat(open_idx - (prefix_idx + 5) + 1).as_str());
-                // Copy the comment's content.
-                result.push_str(&comment[open_idx + 1..close_idx]);
-                // Replace the close delimiter with a space.
-                result.push(' ');
-                if close_idx + 1 < comment.len() {
-                    // Copy the rest of the comment after the close delimiter.
-                    result.push_str(&comment[close_idx + 1..]);
-                }
-                Ok(Some(result))
-            })),
-        )],
+            let mut result = String::with_capacity(comment.len());
+            result.push_str(&comment[..prefix_idx]);
+            // Replace "[//]:" with spaces.
+            result.push_str("     ");
+            // Replace everything before the open delimiter with spaces (including the delimiter).
+            result.push_str(" ".repeat(open_idx - (prefix_idx + 5) + 1).as_str());
+            // Copy the comment's content.
+            result.push_str(&comment[open_idx + 1..close_idx]);
+            // Replace the close delimiter with a space.
+            result.push(' ');
+            if close_idx + 1 < comment.len() {
+                // Copy the rest of the comment after the close delimiter.
+                result.push_str(&comment[close_idx + 1..]);
+            }
+            Some(result)
+        }),
     );
+
     Ok(parser)
 }
 

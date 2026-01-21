@@ -1,6 +1,5 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{CommentsParser, xml_style_comments_parser};
-use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for HTML.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -9,8 +8,7 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let html_language = tree_sitter_html::LANGUAGE.into();
-    let comment_query = Query::new(&html_language, "(comment) @comment")?;
-    let parser = xml_style_comments_parser(&html_language, comment_query);
+    let parser = xml_style_comments_parser(&html_language, "comment");
     Ok(parser)
 }
 
@@ -23,8 +21,9 @@ mod tests {
     fn parses_html_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"<!DOCTYPE html>
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"<!DOCTYPE html>
             <!-- Simple comment -->
             <div>
                 <!-- Another comment -->
@@ -36,7 +35,8 @@ mod tests {
             </div>
             <!-- Final comment -->
             "#,
-        )?;
+            )
+            .collect();
 
         assert_eq!(
             blocks,

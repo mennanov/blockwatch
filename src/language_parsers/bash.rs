@@ -1,8 +1,5 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
-use crate::language_parsers::{
-    CommentsParser, CommentsWalker, TreeSitterCommentsParser, TreeSitterCommentsWalker,
-};
-use tree_sitter::Query;
+use crate::language_parsers::{CommentsParser, TreeSitterCommentsParser};
 
 /// Returns a [`BlocksParser`] for Bash.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -11,33 +8,13 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let bash_language = tree_sitter_bash::LANGUAGE.into();
-    let comment_query = Query::new(&bash_language, "(comment) @comment")?;
     let parser = TreeSitterCommentsParser::new(
-        &bash_language,
-        vec![(
-            comment_query,
-            Some(Box::new(|_, comment, _node| {
-                if comment.starts_with("#!") {
-                    Ok(None)
-                } else {
-                    Ok(Some(comment.replacen("#", " ", 1)))
-                }
-            })),
-        )],
-    );
-    Ok(parser)
-}
-
-fn comments_walker() -> anyhow::Result<impl CommentsWalker> {
-    let bash_language = tree_sitter_bash::LANGUAGE.into();
-    let comment_query = Query::new(&bash_language, "(comment) @comment")?;
-    let parser = TreeSitterCommentsWalker::new(
         &bash_language,
         Box::new(|node, source| {
             if node.kind() != "comment" {
                 return None;
             }
-            let comment = &source[node.start_byte()..node.end_byte()];
+            let comment = &source[node.byte_range()];
             if comment.starts_with("#!") {
                 // Skip shebang.
                 None
@@ -59,8 +36,9 @@ mod tests {
     fn parses_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"#!/bin/bash
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"#!/bin/bash
 # This is a single line comment
 echo "Hello"  # This is an inline comment
 
@@ -70,7 +48,8 @@ echo "Hello"  # This is an inline comment
 
 VALUE=42  # Comment after code
 "#,
-        )?;
+            )
+            .collect();
 
         assert_eq!(
             blocks,

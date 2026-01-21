@@ -1,6 +1,5 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{CommentsParser, python_style_comments_parser};
-use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for Makefile.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -9,8 +8,7 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let language = tree_sitter_make::LANGUAGE.into();
-    let comment_query = Query::new(&language, "(comment) @comment")?;
-    let parser = python_style_comments_parser(&language, comment_query);
+    let parser = python_style_comments_parser(&language, "comment");
     Ok(parser)
 }
 
@@ -23,8 +21,9 @@ mod tests {
     fn parses_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"
 # This is a comment
 all:
 	@echo "Hello" # Inline comment
@@ -32,7 +31,8 @@ all:
 # Another comment
 # spanning multiple lines
 "#,
-        )?;
+            )
+            .collect();
 
         assert_eq!(
             blocks,

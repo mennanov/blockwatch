@@ -2,7 +2,6 @@ use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{
     CommentsParser, TreeSitterCommentsParser, c_style_multiline_comment_processor,
 };
-use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for Rust.
 pub(crate) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -11,32 +10,26 @@ pub(crate) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let rust_language = tree_sitter_rust::LANGUAGE.into();
-    let line_comment_query = Query::new(&rust_language, "(line_comment) @comment")?;
-    let block_comment_query = Query::new(&rust_language, "(block_comment) @comment")?;
     let parser = TreeSitterCommentsParser::new(
         &rust_language,
-        vec![
-            (
-                line_comment_query,
-                Some(Box::new(|_, comment, _node| {
-                    Ok(Some(if comment.starts_with("///") {
-                        comment.replacen("///", "   ", 1)
-                    } else if comment.starts_with("//!") {
-                        comment.replacen("//!", "   ", 1)
-                    } else if comment.starts_with("//") {
-                        comment.replacen("//", "  ", 1)
-                    } else {
-                        comment.to_string()
-                    }))
-                })),
-            ),
-            (
-                block_comment_query,
-                Some(Box::new(|_, comment, _node| {
-                    Ok(Some(c_style_multiline_comment_processor(comment)))
-                })),
-            ),
-        ],
+        Box::new(|node, source_code| match node.kind() {
+            "line_comment" => {
+                let comment = &source_code[node.byte_range()];
+                Some(if comment.starts_with("///") {
+                    comment.replacen("///", "   ", 1)
+                } else if comment.starts_with("//!") {
+                    comment.replacen("//!", "   ", 1)
+                } else if comment.starts_with("//") {
+                    comment.replacen("//", "  ", 1)
+                } else {
+                    comment.to_string()
+                })
+            }
+            "block_comment" => Some(c_style_multiline_comment_processor(
+                &source_code[node.byte_range()],
+            )),
+            _ => None,
+        }),
     );
     Ok(parser)
 }
@@ -50,8 +43,9 @@ mod tests {
     fn parses_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"
         //! This is a crate-level documentation comment.
         //! It provides an overview of the module or library.
         
@@ -76,7 +70,8 @@ mod tests {
             println!("{} + {} = {}", x, y, add(x, y)); // Using the add function.
         }
         "#,
-        )?;
+            )
+            .collect();
 
         assert_eq!(
             blocks,

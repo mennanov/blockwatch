@@ -1,7 +1,6 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers;
 use crate::language_parsers::CommentsParser;
-use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for JavaScript.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -10,8 +9,7 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let js_language = tree_sitter_javascript::LANGUAGE.into();
-    let block_comment_query = Query::new(&js_language, "(comment) @comment")?;
-    let parser = language_parsers::c_style_comments_parser(&js_language, block_comment_query);
+    let parser = language_parsers::c_style_comments_parser(&js_language, "comment");
     Ok(parser)
 }
 
@@ -24,8 +22,9 @@ mod tests {
     fn parses_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"
             /**
              * This is a JavaScript function demonstration with comments.
              *
@@ -42,7 +41,8 @@ mod tests {
                 let number = 42; /* Inline multi-line comment */
             }
             "#,
-        )?;
+            )
+            .collect();
 
         assert_eq!(
             blocks,

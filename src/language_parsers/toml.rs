@@ -1,6 +1,5 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{CommentsParser, python_style_comments_parser};
-use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for Toml.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -9,8 +8,7 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let toml_language = tree_sitter_toml_ng::LANGUAGE.into();
-    let line_comment_query = Query::new(&toml_language, "(comment) @comment")?;
-    let parser = python_style_comments_parser(&toml_language, line_comment_query);
+    let parser = python_style_comments_parser(&toml_language, "comment");
     Ok(parser)
 }
 
@@ -23,8 +21,9 @@ mod tests {
     fn parses_toml_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"
 # This is a TOML file
 title = "TOML Example" # Inline comment
 [owner]
@@ -33,7 +32,8 @@ name = "Tom Preston-Werner" # Another inline comment
 dob = 1979-05-27T07:32:00-08:00 # Date of birth with comment
 # End of file
 "#,
-        )?;
+            )
+            .collect();
 
         assert_eq!(
             blocks,

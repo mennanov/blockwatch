@@ -1,6 +1,5 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{CommentsParser, python_style_comments_parser};
-use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for Ruby.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -9,8 +8,7 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let ruby_language = tree_sitter_ruby::LANGUAGE.into();
-    let line_comment_query = Query::new(&ruby_language, "(comment) @comment")?;
-    let parser = python_style_comments_parser(&ruby_language, line_comment_query);
+    let parser = python_style_comments_parser(&ruby_language, "comment");
     Ok(parser)
 }
 
@@ -23,8 +21,9 @@ mod tests {
     fn parses_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"
 def main
     # This is a single line comment
     puts "Hello, # this is not a comment"  # This is an inline comment
@@ -35,7 +34,8 @@ def main
 
 value = 42  # Comment after code
 "#,
-        )?;
+            )
+            .collect();
 
         assert_eq!(
             blocks,

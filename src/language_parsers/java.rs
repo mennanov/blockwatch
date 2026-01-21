@@ -1,6 +1,5 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{CommentsParser, c_style_line_and_block_comments_parser};
-use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for Java.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -9,13 +8,8 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let java_language = tree_sitter_java::LANGUAGE.into();
-    let line_comment_query = Query::new(&java_language, "(line_comment) @comment")?;
-    let block_comment_query = Query::new(&java_language, "(block_comment) @comment")?;
-    let parser = c_style_line_and_block_comments_parser(
-        &java_language,
-        line_comment_query,
-        block_comment_query,
-    );
+    let parser =
+        c_style_line_and_block_comments_parser(&java_language, "line_comment", "block_comment");
     Ok(parser)
 }
 
@@ -28,8 +22,9 @@ mod tests {
     fn parses_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"
         /**
          * This is a simple Java program demonstrating different types of comments.
          * 
@@ -59,7 +54,8 @@ mod tests {
             }
         }
         "#,
-        )?;
+            )
+            .collect();
 
         assert_eq!(
             blocks,

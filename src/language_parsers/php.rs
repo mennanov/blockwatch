@@ -2,7 +2,6 @@ use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{
     CommentsParser, TreeSitterCommentsParser, c_style_multiline_comment_processor,
 };
-use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for PHP.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -11,21 +10,21 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let php_language = tree_sitter_php::LANGUAGE_PHP.into();
-    let block_comment_query = Query::new(&php_language, "(comment) @comment")?;
     let parser = TreeSitterCommentsParser::new(
         &php_language,
-        vec![(
-            block_comment_query,
-            Some(Box::new(|_, comment, _node| {
-                Ok(Some(if comment.starts_with("//") {
-                    comment.replacen("//", "  ", 1)
-                } else if comment.starts_with("#") {
-                    comment.replacen("#", " ", 1)
-                } else {
-                    c_style_multiline_comment_processor(comment)
-                }))
-            })),
-        )],
+        Box::new(|node, source_code| {
+            if node.kind() != "comment" {
+                return None;
+            }
+            let comment = &source_code[node.byte_range()];
+            Some(if comment.starts_with("//") {
+                comment.replacen("//", "  ", 1)
+            } else if comment.starts_with("#") {
+                comment.replacen("#", " ", 1)
+            } else {
+                c_style_multiline_comment_processor(comment)
+            })
+        }),
     );
     Ok(parser)
 }
@@ -39,8 +38,9 @@ mod tests {
     fn parses_php_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"<?php
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"<?php
             // This is a single-line comment in PHP
     
             /*
@@ -62,7 +62,8 @@ mod tests {
             <h1>This is an <?php # inlined comment ?> example</h1>
             <p>The header above will say 'This is an  example'.</p>
             "#,
-        )?;
+            )
+            .collect();
 
         assert_eq!(
             blocks,

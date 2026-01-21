@@ -30,10 +30,7 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::ops::Range;
 use std::rc::Rc;
-use std::string::ToString;
-use tree_sitter::{
-    Language, Node, Parser, Query, QueryCursor, StreamingIterator, Tree, TreeCursor,
-};
+use tree_sitter::{Language, Node, Parser, Tree, TreeCursor};
 
 pub(crate) type LanguageParser = Rc<RefCell<Box<dyn BlocksParser>>>;
 
@@ -112,14 +109,8 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
     ]))
 }
 
-/// Parses comment strings from a source code.
-pub(crate) trait CommentsParser {
-    /// Returns a `Vec` of `Comment`s.
-    fn parse(&mut self, source_code: &str) -> anyhow::Result<Vec<Comment>>;
-}
-
 /// Parses comment string from a source code by returning an iterator of `Comment`s.
-pub(crate) trait CommentsWalker {
+pub(crate) trait CommentsParser {
     /// Returns an iterator of `Comment`s from the source code.
     fn parse<'source>(
         &'source mut self,
@@ -127,118 +118,15 @@ pub(crate) trait CommentsWalker {
     ) -> impl Iterator<Item = Comment> + 'source;
 }
 
-type CaptureProcessor = Box<dyn Fn(usize, &str, &Node) -> anyhow::Result<Option<String>>>;
-
-struct TreeSitterCommentsParser {
-    parser: Parser,
-    queries: Vec<(Query, Option<CaptureProcessor>)>,
-}
-
-impl TreeSitterCommentsParser {
-    fn new(language: &Language, queries: Vec<(Query, Option<CaptureProcessor>)>) -> Self {
-        let mut parser = Parser::new();
-        parser
-            .set_language(language)
-            .expect("Error setting Tree-sitter language");
-        Self { parser, queries }
-    }
-
-    fn node_to_comment(
-        node: &Node,
-        source_code: &str,
-        capture_index: usize,
-        post_processor: &Option<CaptureProcessor>,
-    ) -> anyhow::Result<Option<Comment>> {
-        let start_position = Position::new(
-            node.start_position().row + 1,
-            node.start_position().column + 1,
-        );
-        let end_position =
-            Position::new(node.end_position().row + 1, node.end_position().column + 1);
-        let start_byte = node.start_byte();
-        let end_byte = node.end_byte();
-        let comment_text = &source_code[start_byte..end_byte];
-
-        let processed_text = if let Some(processor) = post_processor {
-            processor(capture_index, comment_text, node)?
-        } else {
-            Some(comment_text.to_string())
-        };
-
-        Ok(processed_text.map(|comment_text| Comment {
-            position_range: start_position..end_position,
-            source_range: start_byte..end_byte,
-            comment_text,
-        }))
-    }
-
-    fn collect_comments_for_query(
-        &self,
-        query: &Query,
-        post_processor: &Option<CaptureProcessor>,
-        root_node: Node,
-        source_code: &str,
-    ) -> anyhow::Result<Vec<Comment>> {
-        let mut comments = vec![];
-        let mut query_cursor = QueryCursor::new();
-        let mut matches = query_cursor.matches(query, root_node, source_code.as_bytes());
-        while let Some(query_match) = matches.next() {
-            for capture in query_match.captures {
-                if let Some(comment) = Self::node_to_comment(
-                    &capture.node,
-                    source_code,
-                    capture.index as usize,
-                    post_processor,
-                )? {
-                    comments.push(comment);
-                }
-            }
-        }
-        Ok(comments)
-    }
-
-    fn collect_all_comments(
-        &self,
-        root_node: Node,
-        source_code: &str,
-    ) -> anyhow::Result<Vec<Comment>> {
-        let mut comments = vec![];
-        for (query, post_processor) in self.queries.iter() {
-            comments.extend(self.collect_comments_for_query(
-                query,
-                post_processor,
-                root_node,
-                source_code,
-            )?);
-        }
-        Ok(comments)
-    }
-}
-
-impl CommentsParser for TreeSitterCommentsParser {
-    fn parse(&mut self, source_code: &str) -> anyhow::Result<Vec<Comment>> {
-        let tree = self.parser.parse(source_code, None).unwrap();
-        let mut comments = self.collect_all_comments(tree.root_node(), source_code)?;
-
-        comments.sort_by(|comment1, comment2| {
-            comment1
-                .source_range
-                .start
-                .cmp(&comment2.source_range.start)
-        });
-        Ok(comments)
-    }
-}
-
 type NodeVisitor = Box<dyn Fn(&Node, &str) -> Option<String>>;
 
-struct TreeSitterCommentsWalker {
+struct TreeSitterCommentsParser {
     parser: Parser,
     node_visitor: NodeVisitor,
     tree: Option<Tree>,
 }
 
-impl TreeSitterCommentsWalker {
+impl TreeSitterCommentsParser {
     fn new(language: &Language, node_visitor: NodeVisitor) -> Self {
         let mut parser = Parser::new();
         parser
@@ -252,7 +140,7 @@ impl TreeSitterCommentsWalker {
     }
 }
 
-impl CommentsWalker for TreeSitterCommentsWalker {
+impl CommentsParser for TreeSitterCommentsParser {
     fn parse<'a>(&'a mut self, source_code: &'a str) -> impl Iterator<Item = Comment> + 'a {
         let tree = self.parser.parse(source_code, None).unwrap();
         self.tree = Some(tree);
@@ -307,6 +195,7 @@ impl<'source> CommentsIterator<'source> {
 impl<'source> Iterator for CommentsIterator<'source> {
     type Item = Comment;
 
+    /// Traverses the tree-sitter AST via DFS and extracts comments.
     fn next(&mut self) -> Option<Self::Item> {
         if !self.start_visited {
             self.start_visited = true;
@@ -316,7 +205,6 @@ impl<'source> Iterator for CommentsIterator<'source> {
         }
 
         loop {
-            // Try to go to the first child
             if self.cursor.goto_first_child() {
                 if let Some(comment) = self.comment_from_current_node() {
                     return Some(comment);
@@ -324,7 +212,6 @@ impl<'source> Iterator for CommentsIterator<'source> {
                 continue;
             }
 
-            // Try to go to the next sibling
             if self.cursor.goto_next_sibling() {
                 if let Some(comment) = self.comment_from_current_node() {
                     return Some(comment);
@@ -332,7 +219,6 @@ impl<'source> Iterator for CommentsIterator<'source> {
                 continue;
             }
 
-            // Go up to the parent and try next sibling
             loop {
                 if !self.cursor.goto_parent() {
                     return None;
@@ -362,74 +248,76 @@ pub(crate) struct Comment {
 }
 
 /// C-style comments parser for a query that returns both line and block comments.
-fn c_style_comments_parser(language: &Language, query: Query) -> TreeSitterCommentsParser {
+fn c_style_comments_parser(
+    language: &Language,
+    comment_node_kind: &'static str,
+) -> TreeSitterCommentsParser {
     TreeSitterCommentsParser::new(
         language,
-        vec![(
-            query,
-            Some(Box::new(|_, comment, _node| {
-                let result = if comment.starts_with("//") {
-                    comment.replacen("//", "  ", 1)
-                } else {
-                    c_style_multiline_comment_processor(comment)
-                };
-                Ok(Some(result))
-            })),
-        )],
+        Box::new(move |node, source_code| {
+            if node.kind() != comment_node_kind {
+                return None;
+            }
+            let comment = source_code.get(node.byte_range()).unwrap();
+            Some(if comment.starts_with("//") {
+                comment.replacen("//", "  ", 1)
+            } else {
+                c_style_multiline_comment_processor(comment)
+            })
+        }),
     )
 }
 
 /// C-style comments parser for the separate line and block comment queries.
 fn c_style_line_and_block_comments_parser(
     language: &Language,
-    line_comment_query: Query,
-    block_comment_query: Query,
+    line_comment_node_kind: &'static str,
+    block_comment_node_kind: &'static str,
 ) -> TreeSitterCommentsParser {
     TreeSitterCommentsParser::new(
         language,
-        vec![
-            (
-                line_comment_query,
-                Some(Box::new(|_, comment, _node| {
-                    Ok(Some(comment.replacen("//", "  ", 1)))
-                })),
-            ),
-            (
-                block_comment_query,
-                Some(Box::new(|_, comment, _node| {
-                    Ok(Some(c_style_multiline_comment_processor(comment)))
-                })),
-            ),
-        ],
+        Box::new(move |node, source_code| {
+            let kind = node.kind();
+            if kind == line_comment_node_kind {
+                Some(source_code[node.byte_range()].replacen("//", "  ", 1))
+            } else if kind == block_comment_node_kind {
+                Some(c_style_multiline_comment_processor(
+                    &source_code[node.byte_range()],
+                ))
+            } else {
+                None
+            }
+        }),
     )
 }
 
 /// Python-style comments parser.
 fn python_style_comments_parser(
     language: &Language,
-    comment_query: Query,
+    comment_node_kind: &'static str,
 ) -> TreeSitterCommentsParser {
     TreeSitterCommentsParser::new(
         language,
-        vec![(
-            comment_query,
-            Some(Box::new(|_, comment, _node| {
-                Ok(Some(comment.replacen("#", " ", 1)))
-            })),
-        )],
+        Box::new(move |node, source_code| {
+            if node.kind() == comment_node_kind {
+                Some(source_code[node.byte_range()].replacen("#", " ", 1))
+            } else {
+                None
+            }
+        }),
     )
 }
 
 /// XML-style comments parser.
 fn xml_style_comments_parser(
     language: &Language,
-    comment_query: Query,
+    comment_node_kind: &'static str,
 ) -> TreeSitterCommentsParser {
     TreeSitterCommentsParser::new(
         language,
-        vec![(
-            comment_query,
-            Some(Box::new(|_, comment, _node| {
+        Box::new(move |node, source_code| {
+            if node.kind() == comment_node_kind {
+                let comment = &source_code[node.byte_range()];
                 let open_idx = comment.find("<!--").expect("open comment tag is expected");
                 let close_idx = comment.rfind("-->").expect("close comment tag is expected");
                 let mut result = String::with_capacity(comment.len());
@@ -440,9 +328,11 @@ fn xml_style_comments_parser(
                 // Replace "-->" with spaces.
                 result.push_str("   ");
                 result.push_str(&comment[close_idx + 3..]);
-                Ok(Some(result))
-            })),
-        )],
+                Some(result)
+            } else {
+                None
+            }
+        }),
     )
 }
 

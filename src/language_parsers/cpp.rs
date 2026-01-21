@@ -1,7 +1,6 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers;
 use crate::language_parsers::CommentsParser;
-use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for C++.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -10,8 +9,7 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let cpp_language = tree_sitter_cpp::LANGUAGE.into();
-    let comment_query = Query::new(&cpp_language, "(comment) @comment")?;
-    let parser = language_parsers::c_style_comments_parser(&cpp_language, comment_query);
+    let parser = language_parsers::c_style_comments_parser(&cpp_language, "comment");
     Ok(parser)
 }
 
@@ -24,8 +22,9 @@ mod tests {
     fn parses_cpp_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"
             // This is a single-line comment in C++.
             #include <iostream>
 
@@ -45,7 +44,8 @@ mod tests {
                 return 0;
             }
             "#,
-        )?;
+            )
+            .collect();
 
         assert_eq!(
             blocks,

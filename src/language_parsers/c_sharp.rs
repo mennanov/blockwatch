@@ -2,7 +2,6 @@ use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{
     CommentsParser, TreeSitterCommentsParser, c_style_multiline_comment_processor,
 };
-use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for C++.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -11,21 +10,22 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let c_sharp = tree_sitter_c_sharp::LANGUAGE.into();
-    let comment_query = Query::new(&c_sharp, "(comment) @comment")?;
     let parser = TreeSitterCommentsParser::new(
         &c_sharp,
-        vec![(
-            comment_query,
-            Some(Box::new(|_, comment, _node| {
-                Ok(Some(if comment.starts_with("///") {
+        Box::new(|node, source_code| {
+            if node.kind() == "comment" {
+                let comment = &source_code[node.byte_range()];
+                Some(if comment.starts_with("///") {
                     comment.replacen("///", "   ", 1)
                 } else if comment.starts_with("//") {
                     comment.replacen("//", "  ", 1)
                 } else {
                     c_style_multiline_comment_processor(comment)
-                }))
-            })),
-        )],
+                })
+            } else {
+                None
+            }
+        }),
     );
     Ok(parser)
 }
@@ -61,7 +61,7 @@ namespace HelloWorld
     }
 }
 "#;
-        let blocks = comments_parser.parse(code)?;
+        let blocks: Vec<Comment> = comments_parser.parse(code).collect();
 
         assert_eq!(
             blocks,

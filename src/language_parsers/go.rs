@@ -1,7 +1,6 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers;
 use crate::language_parsers::CommentsParser;
-use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for Golang.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -10,8 +9,7 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let go_language = tree_sitter_go::LANGUAGE.into();
-    let comment_query = Query::new(&go_language, "(comment) @comment")?;
-    let parser = language_parsers::c_style_comments_parser(&go_language, comment_query);
+    let parser = language_parsers::c_style_comments_parser(&go_language, "comment");
     Ok(parser)
 }
 
@@ -24,8 +22,9 @@ mod tests {
     fn parses_go_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"
 // This is a single line comment in Go
 package main
 
@@ -41,7 +40,8 @@ func main() {
     // Another single line comment
 }
 "#,
-        )?;
+            )
+            .collect();
 
         assert_eq!(
             blocks,
@@ -77,8 +77,9 @@ func main() {
     fn parses_go_mod_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"
 module example.com/my/module
 
 go 1.21
@@ -95,7 +96,8 @@ comment
 // Another comment
 exclude github.com/bad/dependency v0.0.0
 "#,
-        )?;
+            )
+            .collect();
 
         assert_eq!(
             blocks,
@@ -130,8 +132,9 @@ exclude github.com/bad/dependency v0.0.0
     fn parses_go_work_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"
 go 1.21
 
 // This is a comment in go.work
@@ -147,7 +150,8 @@ workspace comment
 // Another comment
 use ./module3
 "#,
-        )?;
+            )
+            .collect();
 
         assert_eq!(
             blocks,
@@ -182,8 +186,9 @@ use ./module3
     fn parses_go_sum_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"
 // This is a comment in go.sum
 github.com/example/pkg v1.0.0 h1:abc123
 github.com/example/pkg v1.0.0/go.mod h1:def456 // Hash comment
@@ -195,7 +200,8 @@ in go.sum
 // Final comment
 github.com/another/pkg v2.0.0 h1:xyz789
 "#,
-        )?;
+            )
+            .collect();
 
         assert_eq!(
             blocks,

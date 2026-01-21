@@ -2,7 +2,6 @@ use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{
     CommentsParser, TreeSitterCommentsParser, c_style_multiline_comment_processor,
 };
-use tree_sitter::Query;
 
 /// Returns a [`BlocksParser`] for SQL.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -11,24 +10,15 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let sql_language = tree_sitter_sequel::LANGUAGE.into();
-    let line_comment_query = Query::new(&sql_language, "(comment) @comment")?;
-    let block_comment_query = Query::new(&sql_language, "(marginalia) @comment")?;
     let parser = TreeSitterCommentsParser::new(
         &sql_language,
-        vec![
-            (
-                line_comment_query,
-                Some(Box::new(|_, comment, _node| {
-                    Ok(Some(comment.replacen("--", "  ", 1)))
-                })),
-            ),
-            (
-                block_comment_query,
-                Some(Box::new(|_, comment, _node| {
-                    Ok(Some(c_style_multiline_comment_processor(comment)))
-                })),
-            ),
-        ],
+        Box::new(|node, source_code| match node.kind() {
+            "comment" => Some(source_code[node.byte_range()].replacen("--", "  ", 1)),
+            "marginalia" => Some(c_style_multiline_comment_processor(
+                &source_code[node.byte_range()],
+            )),
+            _ => None,
+        }),
     );
     Ok(parser)
 }
@@ -42,8 +32,9 @@ mod tests {
     fn parses_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
-        let blocks = comments_parser.parse(
-            r#"
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"
 SELECT * FROM users
 -- This is a single line comment
 WHERE id = 1;  -- This is an inline comment
@@ -58,7 +49,8 @@ that spans multiple lines
 
 SELECT COUNT(*) FROM orders; /* Inline block comment */
 "#,
-        )?;
+            )
+            .collect();
 
         assert_eq!(
             blocks,

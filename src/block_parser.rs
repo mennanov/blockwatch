@@ -4,6 +4,7 @@ use crate::language_parsers::{Comment, CommentsParser};
 use crate::tag_parser::{BlockTag, BlockTagParser, WinnowBlockTagParser};
 use std::collections::HashMap;
 use std::ops::{Range, RangeInclusive};
+use std::rc::Rc;
 
 /// Parses [`Blocks`] from a source code.
 pub trait BlocksParser {
@@ -25,14 +26,13 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
 
 impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
     fn parse(&mut self, contents: &str) -> anyhow::Result<Vec<Block>> {
-        let comments = self.comments_parser.parse(contents)?;
-        parse_blocks_from_comments(comments.iter())
+        parse_blocks_from_comments(self.comments_parser.parse(contents))
     }
 }
 
 /// Parses blocks from comments iterator.
-pub(crate) fn parse_blocks_from_comments<'c>(
-    comments: impl Iterator<Item = &'c Comment>,
+pub(crate) fn parse_blocks_from_comments(
+    comments: impl Iterator<Item = Comment>,
 ) -> anyhow::Result<Vec<Block>> {
     let mut blocks = Vec::new();
     let mut block_starts = Vec::new();
@@ -70,52 +70,58 @@ pub(crate) fn parse_blocks_from_comments<'c>(
     Ok(blocks)
 }
 
-pub(crate) struct PartialBlocksIterator<'c, I: Iterator<Item = &'c Comment>> {
+pub(crate) struct PartialBlocksIterator<I: Iterator<Item = Comment>> {
     comments: I,
-    comment: Option<&'c Comment>,
-    tags_parser: Option<WinnowBlockTagParser<'c>>,
+    comment: Option<Rc<Comment>>,
+    tags_parser_cursor: usize,
 }
 
-impl<'c, I: Iterator<Item = &'c Comment>> PartialBlocksIterator<'c, I> {
+impl<I: Iterator<Item = Comment>> PartialBlocksIterator<I> {
     pub(crate) fn new(comments: I) -> Self {
         Self {
             comments,
             comment: None,
-            tags_parser: None,
+            tags_parser_cursor: 0,
         }
     }
 }
 
-impl<'c, I: Iterator<Item = &'c Comment>> Iterator for PartialBlocksIterator<'c, I> {
-    type Item = anyhow::Result<PartialBlock<'c, 'c>>;
+impl<I: Iterator<Item = Comment>> Iterator for PartialBlocksIterator<I> {
+    type Item = anyhow::Result<PartialBlock>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if self.tags_parser.is_none() {
-                if self.comment.is_none() {
-                    self.comment = Some(self.comments.next()?);
+            if self.comment.is_none() {
+                match self.comments.next() {
+                    Some(c) => {
+                        self.comment = Some(Rc::new(c));
+                        self.tags_parser_cursor = 0;
+                    }
+                    None => return None,
                 }
-                self.tags_parser = Some(WinnowBlockTagParser::new(
-                    &self.comment.unwrap().comment_text,
-                ));
             }
-            return match self.tags_parser.as_mut().unwrap().next() {
+
+            let comment_rc = self.comment.as_ref().unwrap();
+            let mut tags_parser =
+                WinnowBlockTagParser::new(&comment_rc.comment_text, self.tags_parser_cursor);
+            let block_tag_result = tags_parser.next();
+            self.tags_parser_cursor = tags_parser.cursor();
+            return match block_tag_result {
                 Ok(Some(tag)) => match tag {
                     BlockTag::Start {
                         tag_range,
                         attributes,
                     } => Some(Ok(PartialBlock::Start(BlockStart::new(
-                        self.comment.unwrap(),
+                        Rc::clone(self.comment.as_ref().unwrap()),
                         attributes,
                         tag_range,
                     )))),
                     BlockTag::End { start_position } => Some(Ok(PartialBlock::End(BlockEnd::new(
-                        self.comment.unwrap(),
+                        Rc::clone(self.comment.as_ref().unwrap()),
                         start_position,
                     )))),
                 },
                 Ok(None) => {
-                    self.tags_parser = None;
                     self.comment = None;
                     continue;
                 }
@@ -125,31 +131,30 @@ impl<'c, I: Iterator<Item = &'c Comment>> Iterator for PartialBlocksIterator<'c,
     }
 }
 
-pub(crate) enum PartialBlock<'s, 'e> {
-    Start(BlockStart<'s>),
-    End(BlockEnd<'e>),
+pub(crate) enum PartialBlock {
+    Start(BlockStart),
+    End(BlockEnd),
 }
 
-pub(crate) struct BlockStart<'c> {
-    pub(crate) comment: &'c Comment,
+pub(crate) struct BlockStart {
+    pub(crate) comment: Rc<Comment>,
     pub(crate) attributes: HashMap<String, String>,
     pub(crate) start_tag_position_range: RangeInclusive<Position>,
 }
 
-impl<'c> BlockStart<'c> {
+impl BlockStart {
     fn new(
-        comment: &'c Comment,
+        comment: Rc<Comment>,
         attributes: HashMap<String, String>,
         position_in_comment_range: Range<usize>,
     ) -> Self {
+        let start_tag_position_range =
+            Self::source_position_at(position_in_comment_range.start, &comment)
+                ..=Self::source_position_at(position_in_comment_range.end - 1, &comment);
         Self {
             comment,
             attributes,
-            start_tag_position_range: Self::source_position_at(
-                position_in_comment_range.start,
-                comment,
-            )
-                ..=Self::source_position_at(position_in_comment_range.end - 1, comment),
+            start_tag_position_range,
         }
     }
     fn source_position_at(position_in_comment: usize, comment: &Comment) -> Position {
@@ -174,13 +179,13 @@ impl<'c> BlockStart<'c> {
 }
 
 /// Represents the end of a block, capturing its content range and position range.
-pub(crate) struct BlockEnd<'c> {
-    pub(crate) comment: &'c Comment,
+pub(crate) struct BlockEnd {
+    pub(crate) comment: Rc<Comment>,
     pub(crate) start_position: usize,
 }
 
-impl<'c> BlockEnd<'c> {
-    fn new(end_tag_comment: &'c Comment, start_position: usize) -> Self {
+impl BlockEnd {
+    fn new(end_tag_comment: Rc<Comment>, start_position: usize) -> Self {
         Self {
             comment: end_tag_comment,
             start_position,
@@ -188,7 +193,7 @@ impl<'c> BlockEnd<'c> {
     }
 
     pub(crate) fn into_block(self, block_start: BlockStart) -> Block {
-        let content_range = if !std::ptr::eq(self.comment, block_start.comment) {
+        let content_range = if !Rc::ptr_eq(&self.comment, &block_start.comment) {
             block_start.comment.source_range.end..self.comment.source_range.start
         } else {
             // Block that starts and ends in the same comment can't have any
