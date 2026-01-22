@@ -5,7 +5,12 @@
 [![Crates.io](https://img.shields.io/crates/v/blockwatch)](https://crates.io/crates/blockwatch)
 [![Downloads](https://img.shields.io/crates/d/blockwatch)](https://crates.io/crates/blockwatch)
 
-BlockWatch is a linter that keeps your code, documentation, and configuration in sync.
+BlockWatch is a linter that keeps your code, documentation, and configuration in sync and enforces strict formatting and
+validation rules.
+
+<p>
+  <img src="demo.gif" alt="BlockWatch Demo">
+</p>
 
 It helps you avoid broken docs and messy config files by enforcing rules directly in your comments. You can link code to
 documentation, auto-sort lists, ensure uniqueness, and even validate content with Regex or AI.
@@ -33,7 +38,7 @@ your VCS diffs.
 ### Homebrew (macOS/Linux)
 
 ```shell
-brew tap mennanov/tap
+brew tap mennanov/blockwatch
 brew install blockwatch
 ```
 
