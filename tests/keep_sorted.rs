@@ -149,6 +149,79 @@ index 1111111..2222222 100644
 }
 
 #[test]
+fn with_numeric_format_in_order_succeeds() {
+    let diff_content = r#"
+diff --git a/tests/testdata/keep_sorted.py b/tests/testdata/keep_sorted.py
+index 1111111..2222222 100644
+--- a/tests/testdata/keep_sorted.py
++++ b/tests/testdata/keep_sorted.py
+@@ -41,6 +41,7 @@ defaults_unsorted = [
+ numeric_sorted = [
+     # <block keep-sorted="asc" keep-sorted-format="numeric" keep-sorted-pattern="(?P<value>\d+)">
+     "item 2",
++    "item 10",
+     "item 20",
+     # </block>
+ ]"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    let output = cmd.write_stdin(diff_content).output().unwrap();
+
+    output.assert().success();
+}
+
+#[test]
+fn with_numeric_format_out_of_order_fails() {
+    let diff_content = r#"
+diff --git a/tests/testdata/keep_sorted.py b/tests/testdata/keep_sorted.py
+index 1111111..2222222 100644
+--- a/tests/testdata/keep_sorted.py
++++ b/tests/testdata/keep_sorted.py
+@@ -49,6 +49,7 @@ numeric_sorted = [
+ numeric_unsorted = [
+     # <block keep-sorted="asc" keep-sorted-format="numeric" keep-sorted-pattern="(?P<value>\d+)">
+     "item 2",
++    "item 20",
+     "item 10",
+     # </block>
+ ]"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    let output = cmd.write_stdin(diff_content).output().unwrap();
+
+    output.assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::function(|output: &str| {
+            let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
+            let value: serde_json::Value  = json!({
+              "tests/testdata/keep_sorted.py": [
+                {
+                  "range": {
+                    "start": {
+                        "line": 53,
+                        "character": 11
+                    },
+                    "end": {
+                        "line": 53,
+                        "character": 12
+                    }
+                  },
+                  "code": "keep-sorted",
+                  "message": "Block tests/testdata/keep_sorted.py:(unnamed) defined at line 50 has an out-of-order line 53 (asc)",
+                  "severity": 1,
+                  "data": {
+                    "order_by": "asc",
+                  }
+                }
+              ]
+            });
+            assert_eq!(output_json, value);
+            true
+        }));
+}
+
+#[test]
 fn with_empty_keep_sorted_value_defaults_to_asc() {
     let diff_content = r#"
 diff --git a/tests/testdata/keep_sorted.py b/tests/testdata/keep_sorted.py

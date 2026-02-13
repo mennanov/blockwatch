@@ -37,3 +37,19 @@ defaults_unsorted = [
     'c'
     # </block>
 ]
+
+numeric_sorted = [
+    # <block keep-sorted="asc" keep-sorted-format="numeric" keep-sorted-pattern="(?P<value>\d+)">
+    "item 2",
+    "item 10",
+    "item 20",
+    # </block>
+]
+
+numeric_unsorted = [
+    # <block keep-sorted="asc" keep-sorted-format="numeric" keep-sorted-pattern="(?P<value>\d+)">
+    "item 2",
+    "item 20",
+    "item 10",
+    # </block>
+]

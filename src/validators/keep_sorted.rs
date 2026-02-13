@@ -9,7 +9,34 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::Arc;
+use strum_macros::EnumString;
+
+#[derive(Default, EnumString)]
+#[strum(ascii_case_insensitive)]
+enum SortFormat {
+    #[default]
+    Lexicographic,
+    Numeric,
+}
+
+impl SortFormat {
+    fn cmp(&self, a: &str, b: &str) -> anyhow::Result<Ordering> {
+        match self {
+            Self::Lexicographic => Ok(a.cmp(b)),
+            Self::Numeric => {
+                let a_num: f64 = a
+                    .parse()
+                    .map_err(|_| anyhow!("\"{}\" is not a valid number", a))?;
+                let b_num: f64 = b
+                    .parse()
+                    .map_err(|_| anyhow!("\"{}\" is not a valid number", b))?;
+                Ok(a_num.total_cmp(&b_num))
+            }
+        }
+    }
+}
 
 pub(crate) struct KeepSortedValidator {}
 
@@ -95,6 +122,30 @@ impl ValidatorSync for KeepSortedValidator {
                         Some(regex::Regex::new(&pattern))
                     };
 
+                    let format_raw = block_with_context
+                        .block
+                        .attributes
+                        .get("keep-sorted-format")
+                        .map(|s| s.trim())
+                        .unwrap_or_default();
+                    let sort_format = if format_raw.is_empty() {
+                        SortFormat::default()
+                    } else {
+                        SortFormat::from_str(format_raw).map_err(|_| {
+                            anyhow!(
+                                "keep-sorted-format has an unsupported value \"{}\" in {}:{} at line {}",
+                                format_raw,
+                                file_path.display(),
+                                block_with_context.block.name_display(),
+                                block_with_context
+                                    .block
+                                    .start_tag_position_range
+                                    .start()
+                                    .line
+                            )
+                        })?
+                    };
+
                     let violating_ord = if keep_sorted_normalized == "asc" {
                         Ordering::Greater
                     } else {
@@ -129,7 +180,19 @@ impl ValidatorSync for KeepSortedValidator {
 
                         if let Some((curr_val, curr_range)) = value {
                             if let Some((prev_val, _prev_range)) = &prev_value {
-                                let cmp = (*prev_val).cmp(curr_val);
+                                let cmp =
+                                    sort_format.cmp(prev_val, curr_val).with_context(|| {
+                                        format!(
+                                            "in block {}:{} defined at line {}",
+                                            file_path.display(),
+                                            block_with_context.block.name_display(),
+                                            block_with_context
+                                                .block
+                                                .start_tag_position_range
+                                                .start()
+                                                .line,
+                                        )
+                                    })?;
                                 if cmp == violating_ord {
                                     let violation_line_number = block_with_context
                                         .block
@@ -538,6 +601,217 @@ mod validate_tests {
                 .contains("Invalid keep-sorted-pattern expression")
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_asc_sorted_returns_no_violations() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc" keep-sorted-format="numeric">
+        2
+        10
+        20
+        # </block>"#,
+        );
+        let violations = validator.validate(context)?;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_asc_unsorted_returns_violations() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc" keep-sorted-format="numeric">
+        2
+        20
+        10
+        # </block>"#,
+        );
+        let violations = validator.validate(context)?;
+        assert_eq!(violations.len(), 1);
+        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
+        assert_eq!(file_violations.len(), 1);
+        assert_eq!(
+            file_violations[0].message,
+            "Block example.py:(unnamed) defined at line 1 has an out-of-order line 4 (asc)"
+        );
+        assert_eq!(file_violations[0].code, "keep-sorted");
+        assert_eq!(
+            file_violations[0].data,
+            Some(json!({
+                "order_by": "asc"
+            }))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_desc_sorted_returns_no_violations() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="desc" keep-sorted-format="numeric">
+        20
+        10
+        2
+        # </block>"#,
+        );
+        let violations = validator.validate(context)?;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_desc_unsorted_returns_violations() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="desc" keep-sorted-format="numeric">
+        20
+        2
+        10
+        # </block>"#,
+        );
+        let violations = validator.validate(context)?;
+        assert_eq!(violations.len(), 1);
+        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
+        assert_eq!(file_violations.len(), 1);
+        assert_eq!(
+            file_violations[0].message,
+            "Block example.py:(unnamed) defined at line 1 has an out-of-order line 4 (desc)"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_with_pattern_sorted_returns_no_violations() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc" keep-sorted-format="numeric" keep-sorted-pattern="id: (?P<value>\d+)">
+        B_id_2 = "id: 2"
+        A_id_3 = "id: 3"
+        C_id_10 = "id: 10"
+        # </block>"#,
+        );
+        let violations = validator.validate(context)?;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_with_pattern_unsorted_returns_violations() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc" keep-sorted-format="numeric" keep-sorted-pattern="id: (?P<value>\d+)">
+        B_id_2 = "id: 2"
+        C_id_10 = "id: 10"
+        A_id_3 = "id: 3"
+        # </block>"#,
+        );
+        let violations = validator.validate(context)?;
+        assert_eq!(violations.len(), 1);
+        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
+        assert_eq!(file_violations.len(), 1);
+        assert_eq!(
+            file_violations[0].message,
+            "Block example.py:(unnamed) defined at line 1 has an out-of-order line 4 (asc)"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_with_floats_sorted_returns_no_violations() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc" keep-sorted-format="numeric">
+        1.5
+        2.3
+        10.1
+        # </block>"#,
+        );
+        let violations = validator.validate(context)?;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_with_negative_numbers_sorted_returns_no_violations() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc" keep-sorted-format="numeric">
+        -5
+        0
+        3
+        # </block>"#,
+        );
+        let violations = validator.validate(context)?;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_with_equal_values_returns_no_violations() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc" keep-sorted-format="numeric">
+        5
+        5
+        10
+        # </block>"#,
+        );
+        let violations = validator.validate(context)?;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_with_non_numeric_value_returns_error() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc" keep-sorted-format="numeric">
+        2
+        abc
+        10
+        # </block>"#,
+        );
+        let result = validator.validate(context);
+        assert!(result.is_err());
+        let err = format!("{:#}", result.unwrap_err());
+        assert!(
+            err.contains("is not a valid number"),
+            "unexpected error: {err}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_format_value_returns_error() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc" keep-sorted-format="alphabetical">
+        a
+        b
+        # </block>"#,
+        );
+        let result = validator.validate(context);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("keep-sorted-format has an unsupported value")
+        );
         Ok(())
     }
 }
