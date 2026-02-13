@@ -157,6 +157,36 @@ items = [
 ]
 ```
 
+#### Numeric Sort (`keep-sorted-format`)
+
+By default, values are compared lexicographically (as strings). This means `"10"` sorts before `"2"` because `"1" < "2"`
+character-by-character. Use `keep-sorted-format="numeric"` to compare values as numbers instead.
+
+```python
+numbers = [
+    # <block keep-sorted keep-sorted-format="numeric">
+    2
+    10
+    20
+    # </block>
+]
+```
+
+This works with `keep-sorted-pattern` to extract numeric values from lines with mixed content:
+
+```python
+items = [
+    # <block keep-sorted keep-sorted-format="numeric" keep-sorted-pattern="id: (?P<value>\d+)">
+    "id: 2  banana",
+    "id: 10 orange",
+    "id: 20 apple",
+    # </block>
+]
+```
+
+Without `keep-sorted-format="numeric"`, the example above would fail because `"10"` is lexicographically less than
+`"2"`.
+
 ### Enforce Unique Lines (`keep-unique`)
 
 Prevent duplicates in a list.
