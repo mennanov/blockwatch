@@ -13,7 +13,7 @@ validation rules.
 </p>
 
 It helps you avoid broken docs and messy config files by enforcing rules directly in your comments. You can link code to
-documentation, auto-sort lists, ensure uniqueness, and even validate content with Regex or AI.
+documentation, auto-sort lists, ensure uniqueness, and even validate content with Regex, AI, or custom Lua scripts.
 
 It works with almost any language (Rust, Python, JS, Go, Markdown, YAML, etc.) and can run on your entire repo or just
 your VCS diffs.
@@ -29,6 +29,7 @@ your VCS diffs.
 - **Content Validation**: Check lines against Regex patterns (`line-pattern`) or enforce block size limits (
   `line-count`).
 - **AI Rules**: Use natural language to validate code or text (e.g., "Must mention 'banana'").
+- **Lua Scripting**: Write custom validation logic in Lua scripts (`check-lua`).
 - **Flexible**: Run it on specific files, glob patterns, or just your unstaged changes.
 
 [//]: # (</block>)
@@ -271,6 +272,40 @@ prices = [
 - `BLOCKWATCH_AI_API_URL`: Custom OpenAI compatible API URL (optional).
 
 [//]: # (</block>)
+
+### Validate with Lua Scripts (`check-lua`)
+
+Run custom validation logic using a Lua script. The script must define a global `validate(ctx, content)` function that
+returns `nil` if validation passes or a string error message if it fails.
+
+```python
+colors = [
+    # <block check-lua="scripts/validate_colors.lua">
+    'red',
+    'green',
+    'blue',
+    # </block>
+]
+```
+
+**scripts/validate_colors.lua**:
+
+```lua
+function validate(ctx, content)
+    if content:find("purple") then
+        return "purple is not an allowed color"
+    end
+    return nil
+end
+```
+
+The `validate` function receives two arguments:
+
+- `ctx` — a table with the following fields:
+    - `ctx.file` — the source file path.
+    - `ctx.line` — the line number of the block's start tag.
+    - `ctx.attrs` — a table of all block attributes.
+- `content` — the trimmed text content of the block.
 
 ## Usage
 

@@ -1,5 +1,6 @@
 mod affects;
 mod check_ai;
+mod check_lua;
 mod keep_sorted;
 mod keep_unique;
 mod line_count;
@@ -9,6 +10,7 @@ use crate::Position;
 use crate::blocks::{BlockSeverity, BlockWithContext, FileBlocks};
 use crate::validators::affects::AffectsValidatorDetector;
 use crate::validators::check_ai::CheckAiValidatorDetector;
+use crate::validators::check_lua::CheckLuaValidatorDetector;
 use crate::validators::keep_sorted::KeepSortedValidatorDetector;
 use crate::validators::keep_unique::KeepUniqueValidatorDetector;
 use crate::validators::line_count::LineCountValidatorDetector;
@@ -262,6 +264,7 @@ pub const DETECTOR_FACTORIES: &[(&str, DetectorFactory)] = &[
     }),
     ("line-count", || Box::new(LineCountValidatorDetector::new())),
     ("check-ai", || Box::new(CheckAiValidatorDetector::new())),
+    ("check-lua", || Box::new(CheckLuaValidatorDetector::new())),
     // </block>
 ];
 
