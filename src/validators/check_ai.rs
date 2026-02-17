@@ -23,7 +23,7 @@ const DEFAULT_SYSTEM_PROMPT: &str = r"You are a strict validator. You are given 
 - Do not include quotes, labels, or extra text.";
 
 // <block check-lua="scripts/check_latest_gpt_nano_model.lua" check-lua-pattern='str = "(?P<value>[^"]+)"'>
-const DEFAULT_MODEL_NAME: &str = "gpt-5-nano";
+const DEFAULT_MODEL_NAME: &str = "gpt-5-nano"; // testing...
 // </block>
 
 // <block affects="README.md:check-ai-env-vars, tests/check_ai.rs:check-ai-env-vars">
