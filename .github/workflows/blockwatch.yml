@@ -15,5 +15,8 @@ jobs:
 
     steps:
       - uses: mennanov/blockwatch-action@v1
+        env:
+          BLOCKWATCH_LUA_MODE: safe
+          BLOCKWATCH_AI_API_KEY: ${{ secrets.BLOCKWATCH_AI_API_KEY }}
         with:
           ignore: "tests/testdata/**"

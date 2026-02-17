@@ -22,7 +22,9 @@ const DEFAULT_SYSTEM_PROMPT: &str = r"You are a strict validator. You are given 
 - If the BLOCK violates the CONDITION, reply ONLY with a short, meaningful, and actionable error message describing what must be changed.
 - Do not include quotes, labels, or extra text.";
 
+// <block check-lua="scripts/check_latest_gpt_nano_model.lua" check-lua-pattern='str = "(?P<value>[^"]+)"'>
 const DEFAULT_MODEL_NAME: &str = "gpt-5-nano";
+// </block>
 
 // <block affects="README.md:check-ai-env-vars, tests/check_ai.rs:check-ai-env-vars">
 const API_KEY_ENV_VAR_NAME: &str = "BLOCKWATCH_AI_API_KEY";
