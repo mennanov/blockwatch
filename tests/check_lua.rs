@@ -86,6 +86,50 @@ index 1111111..2222222 100644
 }
 
 #[test]
+fn with_pattern_extracts_matching_content() {
+    let diff_content = r#"
+diff --git a/tests/testdata/check_lua_pattern.py b/tests/testdata/check_lua_pattern.py
+index 1111111..2222222 100644
+--- a/tests/testdata/check_lua_pattern.py
++++ b/tests/testdata/check_lua_pattern.py
+@@ -1,5 +1,5 @@
+ data = [
+     # <block check-lua="tests/testdata/check_lua_echo.lua" check-lua-pattern="id: (?P<value>\d+)" expected="42">
+-    name: Alice, id: 42
++    name: Bob, id: 42
+     # </block>
+ ]
+"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    let output = cmd.write_stdin(diff_content).output().unwrap();
+
+    output.assert().success();
+}
+
+#[test]
+fn with_pattern_no_match_passes_empty_content() {
+    let diff_content = r#"
+diff --git a/tests/testdata/check_lua_pattern.py b/tests/testdata/check_lua_pattern.py
+index 1111111..2222222 100644
+--- a/tests/testdata/check_lua_pattern.py
++++ b/tests/testdata/check_lua_pattern.py
+@@ -1,5 +1,5 @@
+ data = [
+     # <block check-lua="tests/testdata/check_lua_echo.lua" check-lua-pattern="zzz_no_match" expected="">
+-    name: Alice, id: 42
++    name: Bob, id: 42
+     # </block>
+ ]
+"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    let output = cmd.write_stdin(diff_content).output().unwrap();
+
+    output.assert().success();
+}
+
+#[test]
 fn lua_script_using_os_fails_in_sandboxed_mode() {
     let diff_content = r#"
 diff --git a/tests/testdata/check_lua_mode.py b/tests/testdata/check_lua_mode.py

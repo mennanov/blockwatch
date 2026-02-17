@@ -78,10 +78,7 @@ impl ValidatorAsync for CheckLuaValidator {
                     let file_blocks = &context.blocks[&file_path];
                     let block_with_context = &file_blocks.blocks_with_context[block_idx];
                     let script_path = &block_with_context.block.attributes["check-lua"];
-                    let content = block_with_context
-                        .block
-                        .content(&file_blocks.file_content)
-                        .trim();
+                    let content = block_content(block_with_context, &file_blocks.file_content)?;
 
                     let result =
                         run_lua_script(script_path, &file_path, block_with_context, content).await;
@@ -214,6 +211,30 @@ fn create_violation(
         block.severity()?,
         Some(details),
     ))
+}
+
+fn block_content<'c>(
+    block_with_context: &BlockWithContext,
+    file_content: &'c str,
+) -> anyhow::Result<&'c str> {
+    let content = if let Some(pattern) =
+        block_with_context.block.attributes.get("check-lua-pattern")
+    {
+        let re = regex::Regex::new(pattern).context("check-lua-pattern is not a valid regex")?;
+        if let Some(c) = re.captures(block_with_context.block.content(file_content)) {
+            // If named group "value" exists use it, otherwise use the whole match
+            if let Some(m) = c.name("value") {
+                m.as_str()
+            } else {
+                c.get(0).map_or("", |m| m.as_str())
+            }
+        } else {
+            ""
+        }
+    } else {
+        block_with_context.block.content(file_content).trim()
+    };
+    Ok(content)
 }
 
 pub(crate) struct CheckLuaValidatorDetector;
@@ -359,6 +380,88 @@ text
         let err_chain = format!("{err:#}");
         assert!(
             err_chain.contains("failed to read Lua script"),
+            "unexpected error: {err_chain}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn pattern_match_is_used_as_block_content() -> anyhow::Result<()> {
+        let script = write_temp_lua_script(
+            r#"
+function validate(ctx, content)
+    if content ~= "id: 42" then
+        return "expected 'id: 42' but got '" .. content .. "'"
+    end
+    return nil
+end
+"#,
+        );
+        let script_path = script.path().to_str().unwrap();
+        let context = validation_context(
+            "example.py",
+            &format!(
+                r#"# <block check-lua="{script_path}" check-lua-pattern="id: \d+">
+name: Alice, id: 42
+# </block>"#,
+            ),
+        );
+        let validator = CheckLuaValidator::new();
+        let violations = validator.validate(context).await?;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn pattern_group_match_is_used_as_block_content() -> anyhow::Result<()> {
+        let script = write_temp_lua_script(
+            r#"
+function validate(ctx, content)
+    if content ~= "42" then
+        return "expected '42' but got '" .. content .. "'"
+    end
+    return nil
+end
+"#,
+        );
+        let script_path = script.path().to_str().unwrap();
+        let context = validation_context(
+            "example.py",
+            &format!(
+                r#"# <block check-lua="{script_path}" check-lua-pattern="id: (?P<value>\d+)">
+name: Alice, id: 42
+# </block>"#,
+            ),
+        );
+        let validator = CheckLuaValidator::new();
+        let violations = validator.validate(context).await?;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn invalid_pattern_returns_error() -> anyhow::Result<()> {
+        let script = write_temp_lua_script(
+            r#"
+function validate(ctx, content)
+    return nil
+end
+"#,
+        );
+        let script_path = script.path().to_str().unwrap();
+        let context = validation_context(
+            "example.py",
+            &format!(
+                r#"# <block check-lua="{script_path}" check-lua-pattern="[invalid">
+some content
+# </block>"#,
+            ),
+        );
+        let validator = CheckLuaValidator::new();
+        let err = validator.validate(context).await.unwrap_err();
+        let err_chain = format!("{err:#}");
+        assert!(
+            err_chain.contains("check-lua-pattern is not a valid regex"),
             "unexpected error: {err_chain}"
         );
         Ok(())
