@@ -307,6 +307,32 @@ The `validate` function receives two arguments:
     - `ctx.attrs` — a table of all block attributes.
 - `content` — the trimmed text content of the block.
 
+<!-- <block name="lua-safety-modes"> -->
+
+#### Lua safety mode
+
+By default, Lua scripts run in a **sandboxed** mode with only the `coroutine`, `table`, `string`, `utf8`, and `math`
+standard libraries available. The `io`, `os`, and `package` libraries are **not** loaded, preventing file system access,
+command execution, and loading of external modules.
+
+You can change the security level by setting the `BLOCKWATCH_LUA_MODE` environment variable:
+
+```shell
+# Allow IO and OS libraries (memory-safe, but with file/system access)
+BLOCKWATCH_LUA_MODE=safe blockwatch
+
+# Allow all libraries including C module loading (unsafe)
+BLOCKWATCH_LUA_MODE=unsafe blockwatch
+```
+
+| `BLOCKWATCH_LUA_MODE` | Libraries available                                                   | Security Level                      |
+|-----------------------|-----------------------------------------------------------------------|-------------------------------------|
+| `sandboxed` (default) | `coroutine`, `table`, `string`, `utf8`, `math`                        | Most secure - No file/OS access     |
+| `safe`                | All memory-safe libraries (including `io`, `os`, `package`)           | Memory-safe - Allows file/OS access |
+| `unsafe`              | All Lua standard libraries with no restrictions (including C modules) | Unsafe - Full system access         |
+
+<!-- </block> -->
+
 ## Usage
 
 ### Run Locally

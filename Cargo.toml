@@ -18,7 +18,7 @@ clap = { version = "4.5", features = ["cargo", "derive"] }
 globset = "0.4.18"
 ignore = "0.4"
 itertools = "0.14"
-mlua = { version = "0.11.6", features = ["lua54", "vendored", "async", "send"] }
+mlua = { version = "0.11", features = ["lua54", "vendored", "async", "send"] }
 regex = "1.12"
 secrecy = "0.10"
 serde = { version = "1.0.228", features = ["derive"] }

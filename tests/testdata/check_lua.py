@@ -1,5 +1,5 @@
 colors = [
-    # <block check-lua="tests/testdata/check_lua_validate.lua">
+    # <block check-lua="tests/testdata/check_lua_success.lua">
     'red',
     'green',
     'blue',

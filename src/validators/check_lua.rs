@@ -4,11 +4,36 @@ use crate::validators::{
 };
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+use mlua::{Lua, StdLib};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::task::JoinSet;
+
+const LUA_STDLIB_ENV_VAR: &str = "BLOCKWATCH_LUA_MODE";
+
+/// Returns the Lua standard library set based on the `BLOCKWATCH_LUA_MODE` environment variable.
+///
+/// - `sandboxed` (default): Most restrictive, blocks file/OS access.
+/// - `safe`: Memory-safe but includes IO/OS (useful for trusted scripts).
+/// - `unsafe`: Fully unsafe, allows C module loading.
+fn lua_from_env() -> Lua {
+    // <block affects="README.md:lua-safety-modes">
+    match std::env::var(LUA_STDLIB_ENV_VAR)
+        .as_deref()
+        .unwrap_or("sandboxed")
+    {
+        "unsafe" => unsafe { Lua::unsafe_new() },
+        "safe" => Lua::new(),
+        _ => Lua::new_with(
+            StdLib::COROUTINE | StdLib::TABLE | StdLib::STRING | StdLib::UTF8 | StdLib::MATH,
+            Default::default(),
+        )
+        .expect("failed to start Lua"),
+    }
+    // </block>
+}
 
 pub(crate) struct CheckLuaValidator;
 
@@ -107,7 +132,7 @@ async fn run_lua_script(
     block_with_context: &BlockWithContext,
     content: &str,
 ) -> anyhow::Result<Option<String>> {
-    let lua = mlua::Lua::new();
+    let lua = lua_from_env();
 
     let script_content = std::fs::read_to_string(script_path)
         .with_context(|| format!("failed to read Lua script: {script_path}"))?;
