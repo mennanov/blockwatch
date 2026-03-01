@@ -9,7 +9,7 @@ license = "MIT"
 
 [dependencies]
 anyhow = "1.0"
-async-openai = { version = "0.32", features = [
+async-openai = { version = "0.33", features = [
     "completion-types",
     "chat-completion",
 ] }
@@ -25,8 +25,8 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0"
 serde_repr = "0.1"
 similar = { version = "2.7" }
-strum = "0.27"
-strum_macros = "0.27"
+strum = "0.28"
+strum_macros = "0.28"
 tokio = { version = "1.49", features = ["full"] }
 tree-sitter = "0.26"
 tree-sitter-bash = "0.25"
@@ -58,7 +58,7 @@ winnow = "0.7"
 assert_cmd = "2.1"
 axum = "0.8"
 predicates = "3.1"
-tempfile = "3.25.0"
+tempfile = "3.26.0"
 
 [profile.dist]
 inherits = "release"
