@@ -13,7 +13,7 @@ validation rules.
 </p>
 
 It helps you avoid broken docs and messy config files by enforcing rules directly in your comments. You can link code to
-documentation, auto-sort lists, ensure uniqueness, and even validate content with Regex, AI, or custom Lua scripts.
+documentation, enforce sorted lists, ensure uniqueness, and even validate content with Regex, AI, or custom Lua scripts.
 
 It works with almost any language (Rust, Python, JS, Go, Markdown, YAML, etc.) and can run on your entire repo or just
 your VCS diffs.
