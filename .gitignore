@@ -17,3 +17,13 @@ target/
 .idea/
 
 tests/testdata/list/.hg/wcache/
+
+# AI agents
+.claude/
+.cursor/
+.aider*
+.continue/
+.windsurf/
+.codeium/
+.gemini/
+.github/copilot/
