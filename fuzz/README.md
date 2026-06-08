@@ -1,5 +1,10 @@
 # Running fuzz tests
 
+`fuzz` is a member of the root Cargo workspace, so build artifacts go to the
+shared `target/` directory at the repository root (not `fuzz/target/`). The
+commands below assume you run them from this `fuzz/` directory, hence the
+`../target/...` binary paths.
+
 Make sure `cargo version` is nightly.
 
 Set up the environment:
@@ -13,7 +18,7 @@ cargo afl config --build
 # Build the fuzz target
 AFL_NO_BUILTIN=1 cargo afl build
 # Run fuzzer on 1 CPU
-cargo afl fuzz -i in -o out target/debug/parser_fuzz
+cargo afl fuzz -i in -o out ../target/debug/parser_fuzz
 ```
 
 ## Running multiple fuzzers in parallel

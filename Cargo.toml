@@ -7,6 +7,13 @@ description = "Language agnostic linter that keeps your code and documentation i
 homepage = "https://github.com/mennanov/blockwatch"
 license = "MIT"
 
+[workspace]
+members = ["fuzz"]
+# Only build/test the blockwatch crate by default. The `fuzz` member (and its
+# heavy `afl` dependency) is opt-in via `-p fuzz` / `--workspace`, so plain
+# `cargo build` and `cargo test` never compile it.
+default-members = ["."]
+
 [dependencies]
 anyhow = "1.0"
 async-openai = { version = "0.40", features = [
