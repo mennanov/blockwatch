@@ -1,0 +1,7 @@
+- id: blockwatch
+  name: blockwatch
+  description: Validate <block> rules on staged changes (pipes the staged diff into blockwatch).
+  entry: bash -c 'git diff --cached --patch --unified=0 | blockwatch'
+  language: rust
+  pass_filenames: false
+  stages: [ pre-commit ]
