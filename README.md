@@ -485,7 +485,7 @@ If you already have the `blockwatch` binary installed (e.g. via Homebrew), you c
   hooks:
     - id: blockwatch
       name: blockwatch
-      entry: bash -c 'git diff --patch --cached --unified=0 | blockwatch'
+      entry: bash -c 'git diff --cached --patch --unified=0 | blockwatch'
       language: system
       stages: [ pre-commit ]
       pass_filenames: false
