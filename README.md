@@ -34,14 +34,25 @@ the agent where blocks are worth adding, documents the tag syntax, and explains 
 cargo install blockwatch   # or: brew install mennanov/blockwatch/blockwatch
 ```
 
-**2. Give the skill to your agent** by placing `SKILL.md` where your tool looks for instructions:
+**2. Give the skill to your agent.**
 
-| Agent              | Where to put the skill                                                            |
-|--------------------|-----------------------------------------------------------------------------------|
-| **Claude Code**    | `.claude/skills/blockwatch/SKILL.md` (project) or `~/.claude/skills/...` (global) |
-| **Cursor**         | `.cursor/rules/blockwatch.mdc`                                                    |
-| **GitHub Copilot** | append to `.github/copilot-instructions.md`                                       |
-| **Codex / others** | append to `AGENTS.md`                                                             |
+**Claude Code users:** install the plugin once and the skill is available in every project — no
+per-project setup:
+
+```text
+/plugin marketplace add mennanov/blockwatch
+/plugin install blockwatch@blockwatch
+```
+
+For other agents (or if you prefer a project-local copy), place `SKILL.md` where your tool looks
+for instructions:
+
+| Agent              | Where to put the skill                                                                                                   |
+|--------------------|--------------------------------------------------------------------------------------------------------------------------|
+| **Claude Code**    | Use the plugin above (recommended), or `.claude/skills/blockwatch/SKILL.md` (project) / `~/.claude/skills/...` (global) |
+| **Cursor**         | `.cursor/rules/blockwatch.mdc`                                                                                           |
+| **GitHub Copilot** | append to `.github/copilot-instructions.md`                                                                              |
+| **Codex / others** | append to `AGENTS.md`                                                                                                    |
 
 You can pull the file straight from this repo:
 
@@ -458,7 +469,16 @@ The output is a JSON object.
 
 #### Pre-commit Hook
 
-Add this to `.pre-commit-config.yaml`:
+Add this to `.pre-commit-config.yaml` (pre-commit builds blockwatch from source with cargo on first run):
+
+```yaml
+- repo: https://github.com/mennanov/blockwatch
+  rev: v0.2.27  # use the latest release tag
+  hooks:
+    - id: blockwatch
+```
+
+If you already have the `blockwatch` binary installed (e.g. via Homebrew), you can use the local form instead:
 
 ```yaml
 - repo: local
