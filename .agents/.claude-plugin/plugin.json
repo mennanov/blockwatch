@@ -1,0 +1,13 @@
+{
+  "name": "blockwatch",
+  "displayName": "BlockWatch",
+  "description": "Keep co-dependent code, docs, and config in sync with BlockWatch <block> annotations: drift detection (affects), sorted/unique lists, regex/line-count/AI/Lua validation. Includes a skill that teaches agents when and how to add and maintain blocks.",
+  "author": {
+    "name": "Renat Mennanov",
+    "url": "https://github.com/mennanov"
+  },
+  "homepage": "https://github.com/mennanov/blockwatch",
+  "repository": "https://github.com/mennanov/blockwatch",
+  "license": "MIT",
+  "keywords": ["linter", "sync", "drift-detection", "keep-sorted", "documentation"]
+}
