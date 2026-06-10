@@ -27,3 +27,5 @@ tests/testdata/list/.hg/wcache/
 .codeium/
 .gemini/
 .github/copilot/
+# Local-only docs (design notes, plans, maintainer checklists)
+/docs/
