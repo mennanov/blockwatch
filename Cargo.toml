@@ -6,6 +6,8 @@ repository = "https://github.com/mennanov/blockwatch"
 description = "Language agnostic linter that keeps your code and documentation in sync and valid"
 homepage = "https://github.com/mennanov/blockwatch"
 license = "MIT"
+keywords = ["linter", "sync", "drift", "comments", "agents"]
+categories = ["development-tools", "command-line-utilities"]
 
 [workspace]
 members = ["fuzz"]
