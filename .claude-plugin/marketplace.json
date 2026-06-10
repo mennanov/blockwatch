@@ -1,0 +1,17 @@
+{
+  "name": "blockwatch",
+  "owner": {
+    "name": "Renat Mennanov",
+    "email": "mennanov@gmail.com"
+  },
+  "description": "BlockWatch: a language-agnostic linter that keeps co-dependent code, docs, and config in sync via <block> annotations in comments.",
+  "plugins": [
+    {
+      "name": "blockwatch",
+      "source": "./.agents",
+      "description": "Skill that makes agents link co-dependent code with <block affects=...> tags, keep lists sorted/unique, and validate blocks with blockwatch.",
+      "category": "linting",
+      "tags": ["linter", "sync", "drift", "keep-sorted", "code-quality"]
+    }
+  ]
+}
