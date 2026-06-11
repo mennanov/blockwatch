@@ -47,12 +47,12 @@ per-project setup:
 For other agents (or if you prefer a project-local copy), place `SKILL.md` where your tool looks
 for instructions:
 
-| Agent              | Where to put the skill                                                                                                   |
-|--------------------|--------------------------------------------------------------------------------------------------------------------------|
+| Agent              | Where to put the skill                                                                                                  |
+|--------------------|-------------------------------------------------------------------------------------------------------------------------|
 | **Claude Code**    | Use the plugin above (recommended), or `.claude/skills/blockwatch/SKILL.md` (project) / `~/.claude/skills/...` (global) |
-| **Cursor**         | `.cursor/rules/blockwatch.mdc`                                                                                           |
-| **GitHub Copilot** | append to `.github/copilot-instructions.md`                                                                              |
-| **Codex / others** | append to `AGENTS.md`                                                                                                    |
+| **Cursor**         | `.cursor/rules/blockwatch.mdc`                                                                                          |
+| **GitHub Copilot** | append to `.github/copilot-instructions.md`                                                                             |
+| **Codex / others** | append to `AGENTS.md`                                                                                                   |
 
 You can pull the file straight from this repo:
 
@@ -94,8 +94,15 @@ Review the diff before you commit it: the agent's choices are a starting point.
 ### Homebrew (macOS/Linux)
 
 ```shell
-brew tap mennanov/blockwatch
-brew install blockwatch
+brew install mennanov/blockwatch/blockwatch
+```
+
+The fully-qualified name keeps working once Homebrew starts requiring
+[explicit trust](https://docs.brew.sh/Tap-Trust) for third-party taps: it trusts only the
+`blockwatch` formula, not the whole tap. If you install via a `Brewfile`, use:
+
+```ruby
+brew "mennanov/blockwatch/blockwatch", trusted: true
 ```
 
 ### From Source (Rust)
