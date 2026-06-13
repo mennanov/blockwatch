@@ -1,6 +1,9 @@
 use assert_cmd::assert::OutputAssertExt;
+use assert_cmd::cargo::CommandCargoExt;
 use assert_cmd::cargo_bin_cmd;
 use serde_json::{Value, json};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 #[test]
 fn list_subcommand_with_specific_file_returns_correct_json_from_that_file_only() {
@@ -106,7 +109,7 @@ index 2fcfa70..eea9cf4 100644
 "#;
 
     let mut cmd = cargo_bin_cmd!();
-    cmd.arg("list").arg("tests/testdata/list/**");
+    cmd.arg("list").arg("--diff").arg("tests/testdata/list/**");
     let output = cmd
         .write_stdin(diff_content)
         .output()
@@ -129,4 +132,76 @@ index 2fcfa70..eea9cf4 100644
             .as_bool()
             .unwrap()
     );
+}
+
+#[test]
+fn list_subcommand_ignores_piped_diff_without_diff_flag() {
+    let diff_content = r#"
+diff --git a/tests/testdata/list/a.py b/tests/testdata/list/a.py
+index 2fcfa70..eea9cf4 100644
+--- a/tests/testdata/list/a.py
++++ b/tests/testdata/list/a.py
+@@ -1,3 +1,3 @@
+ # <block name="a" attr="val">
+-pass old
++pass
+ # </block>
+"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("list").arg("tests/testdata/list/**");
+    let output = cmd
+        .write_stdin(diff_content)
+        .output()
+        .expect("Failed to get command output");
+
+    output.clone().assert().success();
+
+    let actual: Value =
+        serde_json::from_slice(&output.stdout).expect("Failed to parse JSON output");
+    let report = actual.as_object().expect("Output should be a JSON object");
+
+    // Without `--diff`, the piped diff is ignored entirely, so no block is
+    // reported as modified.
+    assert_eq!(report.len(), 2);
+    assert!(
+        !report["tests/testdata/list/a.py"][0]["is_content_modified"]
+            .as_bool()
+            .unwrap()
+    );
+    assert!(
+        !report["tests/testdata/list/b.py"][0]["is_content_modified"]
+            .as_bool()
+            .unwrap()
+    );
+}
+
+#[test]
+fn list_subcommand_finishes_without_waiting_for_stdin() {
+    // `blockwatch list` (without `--diff`) takes its file set from the glob
+    // arguments, so it must complete without consuming stdin. We give it a stdin
+    // pipe that never receives any data and is never closed; if `list` tried to
+    // read it, the process would never exit and the deadline below would trip.
+    let mut child = Command::cargo_bin("blockwatch")
+        .expect("blockwatch binary should be built")
+        .args(["list", "tests/testdata/list/**"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to spawn blockwatch");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("failed to poll blockwatch") {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            child.kill().ok();
+            panic!("blockwatch list is still running; it appears to be waiting on stdin");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+
+    assert!(status.success());
 }
