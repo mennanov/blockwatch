@@ -444,9 +444,16 @@ blockwatch list
 # List blocks in specific files
 blockwatch list "src/**/*.rs" "**/*.md"
 
-# List only blocks affected by current changes
-git diff | blockwatch list
+# List only blocks affected by current changes (reads the diff from stdin)
+git diff | blockwatch list --diff
 ```
+
+`blockwatch list` does not read stdin by default, so it never blocks waiting for
+input. This makes it safe to run non-interactively — in CI, or when invoked by
+another program such as an AI agent — and to feed its JSON output into a pipe,
+e.g. `blockwatch list "src/**/*.ts" | jq`. Pass `--diff` to opt in to reading a
+unified diff from stdin; `list` then reports which blocks the diff touched via
+the `is_content_modified` field.
 
 The output is a JSON object.
 

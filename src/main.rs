@@ -24,16 +24,26 @@ fn main() -> anyhow::Result<()> {
     let mut glob_set = args.globs()?;
     let is_terminal =
         std::io::stdin().is_terminal() || env::var("BLOCKWATCH_TERMINAL_MODE").is_ok();
-    if glob_set.is_empty() && is_terminal {
-        // Match all files when there is no diff input in stdin and no globs in args.
-        // This allows running `blockwatch` with no args and input.
+    // The default (validate) command always consumes a piped diff. For `list` the
+    // diff is optional enrichment (it only populates `is_content_modified`), so it
+    // reads stdin only when `--diff` is given. By default `list` never reads stdin
+    // and therefore never blocks when stdin is a non-interactive stream that never
+    // closes (CI, or when spawned by another program such as an AI agent).
+    let wants_diff_from_stdin = match &args.command {
+        Some(flags::SubCommand::List { diff, .. }) => *diff,
+        None => true,
+    };
+    let read_diff_from_stdin = wants_diff_from_stdin && !is_terminal;
+    if glob_set.is_empty() && !read_diff_from_stdin {
+        // Match all files when there is no diff input to scope the run.
+        // This allows running `blockwatch` (or `blockwatch list`) with no globs.
         glob_set = GlobSet::new([globset::Glob::new("**")?])?
     }
     let should_scan_files = !glob_set.is_empty();
     let path_checker = blocks::PathCheckerImpl::new(glob_set, args.ignored_globs()?);
     let root_path = repository_root_path(fs::canonicalize(env::current_dir()?)?)?;
     let file_system = blocks::FileSystemImpl::new(root_path);
-    let modified_lines_by_file = if !is_terminal {
+    let modified_lines_by_file = if read_diff_from_stdin {
         let mut diff = String::new();
         std::io::stdin().read_to_string(&mut diff)?;
         diff_parser::line_changes_from_diff(diff.as_str())?

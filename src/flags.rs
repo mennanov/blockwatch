@@ -40,7 +40,10 @@ use std::ffi::OsString;
     blockwatch -e keep-sorted -e line-count
 
     # List all found blocks
-    blockwatch list 'src/**/*.rs'",
+    blockwatch list 'src/**/*.rs'
+
+    # List blocks and mark those touched by a diff (reads stdin)
+    git diff --patch | blockwatch list --diff",
 )]
 pub struct Args {
     // <block affects="README.md:cli-docs">
@@ -99,6 +102,11 @@ pub struct Args {
 pub enum SubCommand {
     /// List all blocks found in the scanned files.
     List {
+        /// Read a unified diff from stdin to populate `is_content_modified`.
+        /// Without this flag, `list` never reads stdin.
+        #[arg(long)]
+        diff: bool,
+
         #[arg(value_name = "GLOBS")]
         globs: Vec<String>,
     },
@@ -127,7 +135,10 @@ impl Args {
     pub fn globs(&self) -> anyhow::Result<GlobSet> {
         let mut builder = GlobSetBuilder::new();
         let mut globs = self.globs.clone();
-        if let Some(SubCommand::List { globs: list_globs }) = &self.command {
+        if let Some(SubCommand::List {
+            globs: list_globs, ..
+        }) = &self.command
+        {
             globs.extend(list_globs.clone());
         }
 
