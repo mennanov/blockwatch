@@ -25,20 +25,10 @@ jobs:
         with:
           toolchain: stable
           components: llvm-tools-preview, clippy, rustfmt
-      - name: Cache ~/.cargo/bin
-        uses: actions/cache@v5
-        with:
-          path: ~/.cargo/bin/
-          key: ${{ runner.os }}-cargo-bin
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
-        run: |
-          if [ ! -f ~/.cargo/bin/cargo-llvm-cov ]; then
-            cargo install cargo-llvm-cov
-          else
-            echo "cargo-llvm-cov found in cache."
-          fi
-      - name: Build
-        run: cargo build
+        uses: taiki-e/install-action@cargo-llvm-cov
       - name: Check formatting
         run: cargo fmt --check
       - name: Run Clippy lint
