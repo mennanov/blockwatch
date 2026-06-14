@@ -78,11 +78,8 @@ fn list_subcommand_with_no_args_checks_all_files() {
     let mut cmd = cargo_bin_cmd!();
     cmd.current_dir("tests/testdata/list");
     cmd.arg("list");
-    // BLOCKWATCH_TERMINAL_MODE is required to simulate a TTY input.
-    cmd.env("BLOCKWATCH_TERMINAL_MODE", "true");
 
     let output = cmd.output().expect("Failed to get command output");
-
     output.clone().assert().success();
 
     let actual: Value =

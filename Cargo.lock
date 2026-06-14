@@ -255,6 +255,7 @@ dependencies = [
  "globset",
  "ignore",
  "itertools",
+ "libc",
  "mlua",
  "predicates",
  "regex",

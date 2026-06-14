@@ -2,6 +2,8 @@ use assert_cmd::assert::OutputAssertExt;
 use assert_cmd::cargo_bin_cmd;
 use predicates::prelude::{PredicateBooleanExt, predicate};
 
+mod common;
+
 #[test]
 fn custom_extensions_arg_provided_run_recognizes_custom_extensions() {
     let diff_content = r#"
@@ -260,16 +262,13 @@ fn recursive_glob_pattern_provided_run_checks_matching_files_recursively() {
         ));
 }
 
-// Emulates running `blockwatch` with no args and input.
+// Emulates running `blockwatch` with no args in an interactive terminal (no diff piped in).
+#[cfg(unix)]
 #[test]
 fn no_globs_no_diff_input_provided_run_checks_for_all_paths() {
-    let mut cmd = cargo_bin_cmd!();
-    // BLOCKWATCH_TERMINAL_MODE is required to simulate a TTY input.
-    cmd.env("BLOCKWATCH_TERMINAL_MODE", "true");
+    // A terminal stdin and no globs makes blockwatch validate the whole tree.
     // check-ai is disabled to avoid errors caused by the missing environment variables.
-    cmd.arg("--disable=check-ai");
-
-    let output = cmd.output().expect("Failed to get command output");
+    let output = common::run_with_tty_stdin(&["--disable=check-ai"], None);
 
     output
         .assert()

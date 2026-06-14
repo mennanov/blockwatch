@@ -94,11 +94,9 @@ fn build_context(
     Ok(validators::ValidationContext::new(blocks))
 }
 
-/// Whether stdin is connected to an interactive terminal.
-///
-/// `BLOCKWATCH_TERMINAL_MODE` forces this to `true` so tests can simulate a TTY.
+/// Whether stdin is connected to an interactive terminal, i.e. no diff is piped in.
 fn stdin_is_terminal() -> bool {
-    std::io::stdin().is_terminal() || env::var("BLOCKWATCH_TERMINAL_MODE").is_ok()
+    std::io::stdin().is_terminal()
 }
 
 /// Reads a unified diff from stdin and parses it into per-file line changes.
