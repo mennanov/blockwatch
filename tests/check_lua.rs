@@ -182,6 +182,66 @@ index 1111111..2222222 100644
 }
 
 #[test]
+fn ctx_affects_exposes_in_sync_affected_blocks_succeeds() {
+    // The diff touches both the check-lua block and the affected docs block so the `affects`
+    // validator is satisfied and the check-lua script runs against an in-sync pair.
+    let diff_content = r#"
+diff --git a/tests/testdata/check_lua_affects.py b/tests/testdata/check_lua_affects.py
+index 1111111..2222222 100644
+--- a/tests/testdata/check_lua_affects.py
++++ b/tests/testdata/check_lua_affects.py
+@@ -3,3 +3,3 @@
+     'blue',
+-    'yellow',
++    'green',
+     'red',
+@@ -12,3 +12,3 @@
+     'blue',
+-    'yellow',
++    'green',
+     'red',
+"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    let output = cmd.write_stdin(diff_content).output().unwrap();
+
+    output.assert().success();
+}
+
+#[test]
+fn ctx_affects_detects_out_of_sync_affected_block_fails() {
+    // Both blocks are touched (so the `affects` validator passes), but their content has drifted
+    // apart on disk, so the check-lua script reports the mismatch via ctx.affects.
+    let diff_content = r#"
+diff --git a/tests/testdata/check_lua_affects_drift.py b/tests/testdata/check_lua_affects_drift.py
+index 1111111..2222222 100644
+--- a/tests/testdata/check_lua_affects_drift.py
++++ b/tests/testdata/check_lua_affects_drift.py
+@@ -3,3 +3,3 @@
+     'blue',
+-    'yellow',
++    'green',
+     'red',
+@@ -12,3 +12,3 @@
+     'blue',
+-    'orange',
++    'purple',
+     'red',
+"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    let output = cmd.write_stdin(diff_content).output().unwrap();
+
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "block 'allowed-colors-docs' in tests/testdata/check_lua_affects_drift.py is out of sync",
+        ));
+}
+
+#[test]
 fn lua_script_using_os_succeeds_in_unsafe_mode() {
     let diff_content = r#"
 diff --git a/tests/testdata/check_lua_mode.py b/tests/testdata/check_lua_mode.py
