@@ -355,7 +355,9 @@ struct CheckLuaViolation<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{merge_validation_contexts, validation_context};
+    use crate::test_utils::{
+        merge_validation_contexts, validation_context, validation_context_with_changes,
+    };
     use serde_json::json;
     use std::io::Write;
 
@@ -637,6 +639,47 @@ local content
                 r#"# <block name="remote-block">
 remote content
 # </block>"#,
+            ),
+        ]);
+        let validator = CheckLuaValidator::new();
+        let violations = validator.validate(context).await?;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ctx_affects_excludes_blocks_absent_from_the_diff() -> anyhow::Result<()> {
+        // The affected block lives in a file that has no diff changes, so it is filtered out of the
+        // validation context entirely. It must therefore NOT appear in ctx.affects.
+        let script = write_temp_lua_script(
+            r#"
+function validate(ctx, content)
+    if ctx.affects == nil then
+        return "ctx.affects is nil"
+    end
+    if #ctx.affects ~= 0 then
+        return "expected 0 affected blocks, got " .. tostring(#ctx.affects)
+    end
+    return nil
+end
+"#,
+        );
+        let script_path = script.path().to_str().unwrap();
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "example.py",
+                &format!(
+                    r#"# <block check-lua="{script_path}" affects="other.py:remote-block">
+some content
+# </block>"#,
+                ),
+            ),
+            validation_context_with_changes(
+                "other.py",
+                r#"# <block name="remote-block">
+remote content
+# </block>"#,
+                vec![], // No changes: this block is absent from the diff.
             ),
         ]);
         let validator = CheckLuaValidator::new();
