@@ -1,4 +1,5 @@
 use crate::blocks::{Block, BlockWithContext};
+use crate::validators::parse_affects_attribute;
 use crate::validators::{
     ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorType, Violation, ViolationRange,
 };
@@ -79,9 +80,17 @@ impl ValidatorAsync for CheckLuaValidator {
                     let block_with_context = &file_blocks.blocks_with_context[block_idx];
                     let script_path = &block_with_context.block.attributes["check-lua"];
                     let content = block_content(block_with_context, &file_blocks.file_content)?;
+                    let affected_blocks =
+                        resolve_affected_blocks(&context, &file_path, &block_with_context.block)?;
 
-                    let result =
-                        run_lua_script(script_path, &file_path, block_with_context, content).await;
+                    let result = run_lua_script(
+                        script_path,
+                        &file_path,
+                        block_with_context,
+                        content,
+                        &affected_blocks,
+                    )
+                    .await;
 
                     match result.context(format!(
                         "check-lua script error in {}:{} at line {}",
@@ -128,6 +137,7 @@ async fn run_lua_script(
     file_path: &Path,
     block_with_context: &BlockWithContext,
     content: &str,
+    affected_blocks: &[AffectedBlock],
 ) -> anyhow::Result<Option<String>> {
     let lua = lua_from_env();
 
@@ -168,6 +178,34 @@ async fn run_lua_script(
     ctx_table
         .set("attrs", attrs_table)
         .context("failed to set ctx.attrs")?;
+
+    // When the block carries an `affects` attribute, expose the affected blocks as
+    // `ctx.affects = [{ file, name, content }, …]` so scripts can inspect them in sandboxed mode.
+    if block_with_context.block.attributes.contains_key("affects") {
+        let affects_table = lua
+            .create_table()
+            .context("failed to create affects table")?;
+        for (i, affected) in affected_blocks.iter().enumerate() {
+            let entry = lua
+                .create_table()
+                .context("failed to create affects entry table")?;
+            entry
+                .set("file", affected.file.to_string_lossy().as_ref())
+                .context("failed to set ctx.affects[].file")?;
+            entry
+                .set("name", affected.name.as_str())
+                .context("failed to set ctx.affects[].name")?;
+            entry
+                .set("content", affected.content.as_str())
+                .context("failed to set ctx.affects[].content")?;
+            affects_table
+                .set(i + 1, entry)
+                .context("failed to set ctx.affects entry")?;
+        }
+        ctx_table
+            .set("affects", affects_table)
+            .context("failed to set ctx.affects")?;
+    }
 
     let result: mlua::Value = validate_fn
         .call_async((ctx_table, content.to_string()))
@@ -211,6 +249,50 @@ fn create_violation(
         block.severity()?,
         Some(details),
     ))
+}
+
+/// A block referenced by the validated block's `affects` attribute, exposed to Lua scripts.
+struct AffectedBlock {
+    file: PathBuf,
+    name: String,
+    content: String,
+}
+
+/// Resolves the blocks referenced by the `affects` attribute of `block` to their `(file, name,
+/// content)` so they can be exposed to the Lua script.
+///
+/// References to blocks that don't exist in the validation context are skipped (the `affects`
+/// validator is responsible for reporting those). The content is trimmed to mirror how the
+/// validated block's own content is presented.
+fn resolve_affected_blocks(
+    context: &ValidationContext,
+    current_file_path: &Path,
+    block: &Block,
+) -> anyhow::Result<Vec<AffectedBlock>> {
+    let mut result = Vec::new();
+    let Some(affects) = block.attributes.get("affects") else {
+        return Ok(result);
+    };
+    for (file, name) in parse_affects_attribute(affects)? {
+        let file = file.unwrap_or_else(|| current_file_path.to_path_buf());
+        let Some(file_blocks) = context.blocks.get(&file) else {
+            continue;
+        };
+        for block_with_context in &file_blocks.blocks_with_context {
+            if block_with_context.block.name() == Some(name.as_str()) {
+                result.push(AffectedBlock {
+                    file: file.clone(),
+                    name: name.clone(),
+                    content: block_with_context
+                        .block
+                        .content(&file_blocks.file_content)
+                        .trim()
+                        .to_string(),
+                });
+            }
+        }
+    }
+    Ok(result)
 }
 
 fn block_content<'c>(
@@ -273,7 +355,9 @@ struct CheckLuaViolation<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::validation_context;
+    use crate::test_utils::{
+        merge_validation_contexts, validation_context, validation_context_with_changes,
+    };
     use serde_json::json;
     use std::io::Write;
 
@@ -483,6 +567,164 @@ function validate(ctx, content)
     end
     if ctx.attrs["check-lua"] == nil then
         return "ctx.attrs['check-lua'] is nil"
+    end
+    return nil
+end
+"#,
+        );
+        let script_path = script.path().to_str().unwrap();
+        let context = validation_context(
+            "example.py",
+            &format!(
+                r#"# <block check-lua="{script_path}">
+some content
+# </block>"#,
+            ),
+        );
+        let validator = CheckLuaValidator::new();
+        let violations = validator.validate(context).await?;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ctx_affects_exposes_affected_blocks() -> anyhow::Result<()> {
+        let script = write_temp_lua_script(
+            r#"
+function validate(ctx, content)
+    if ctx.affects == nil then
+        return "ctx.affects is nil"
+    end
+    if #ctx.affects ~= 2 then
+        return "expected 2 affected blocks, got " .. tostring(#ctx.affects)
+    end
+    if ctx.affects[1].file ~= "example.py" then
+        return "ctx.affects[1].file is '" .. tostring(ctx.affects[1].file) .. "'"
+    end
+    if ctx.affects[1].name ~= "local-block" then
+        return "ctx.affects[1].name is '" .. tostring(ctx.affects[1].name) .. "'"
+    end
+    if ctx.affects[1].content ~= "local content" then
+        return "ctx.affects[1].content is '" .. tostring(ctx.affects[1].content) .. "'"
+    end
+    if ctx.affects[2].file ~= "other.py" then
+        return "ctx.affects[2].file is '" .. tostring(ctx.affects[2].file) .. "'"
+    end
+    if ctx.affects[2].name ~= "remote-block" then
+        return "ctx.affects[2].name is '" .. tostring(ctx.affects[2].name) .. "'"
+    end
+    if ctx.affects[2].content ~= "remote content" then
+        return "ctx.affects[2].content is '" .. tostring(ctx.affects[2].content) .. "'"
+    end
+    return nil
+end
+"#,
+        );
+        let script_path = script.path().to_str().unwrap();
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "example.py",
+                &format!(
+                    r#"# <block check-lua="{script_path}" affects=":local-block, other.py:remote-block">
+some content
+# </block>
+
+# <block name="local-block">
+local content
+# </block>"#,
+                ),
+            ),
+            validation_context(
+                "other.py",
+                r#"# <block name="remote-block">
+remote content
+# </block>"#,
+            ),
+        ]);
+        let validator = CheckLuaValidator::new();
+        let violations = validator.validate(context).await?;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ctx_affects_excludes_blocks_absent_from_the_diff() -> anyhow::Result<()> {
+        // The affected block lives in a file that has no diff changes, so it is filtered out of the
+        // validation context entirely. It must therefore NOT appear in ctx.affects.
+        let script = write_temp_lua_script(
+            r#"
+function validate(ctx, content)
+    if ctx.affects == nil then
+        return "ctx.affects is nil"
+    end
+    if #ctx.affects ~= 0 then
+        return "expected 0 affected blocks, got " .. tostring(#ctx.affects)
+    end
+    return nil
+end
+"#,
+        );
+        let script_path = script.path().to_str().unwrap();
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "example.py",
+                &format!(
+                    r#"# <block check-lua="{script_path}" affects="other.py:remote-block">
+some content
+# </block>"#,
+                ),
+            ),
+            validation_context_with_changes(
+                "other.py",
+                r#"# <block name="remote-block">
+remote content
+# </block>"#,
+                vec![], // No changes: this block is absent from the diff.
+            ),
+        ]);
+        let validator = CheckLuaValidator::new();
+        let violations = validator.validate(context).await?;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ctx_affects_skips_unresolved_references() -> anyhow::Result<()> {
+        let script = write_temp_lua_script(
+            r#"
+function validate(ctx, content)
+    if ctx.affects == nil then
+        return "ctx.affects is nil"
+    end
+    if #ctx.affects ~= 0 then
+        return "expected 0 affected blocks, got " .. tostring(#ctx.affects)
+    end
+    return nil
+end
+"#,
+        );
+        let script_path = script.path().to_str().unwrap();
+        let context = validation_context(
+            "example.py",
+            &format!(
+                r#"# <block check-lua="{script_path}" affects=":does-not-exist">
+some content
+# </block>"#,
+            ),
+        );
+        let validator = CheckLuaValidator::new();
+        let violations = validator.validate(context).await?;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ctx_affects_is_nil_without_affects_attribute() -> anyhow::Result<()> {
+        let script = write_temp_lua_script(
+            r#"
+function validate(ctx, content)
+    if ctx.affects ~= nil then
+        return "ctx.affects should be nil"
     end
     return nil
 end

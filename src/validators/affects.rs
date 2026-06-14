@@ -49,7 +49,7 @@ impl validators::ValidatorSync for AffectsValidator {
                     continue;
                 }
                 if let Some(affects) = block_with_context.block.attributes.get("affects") {
-                    let affected_blocks = parse_affects_attribute(affects)?;
+                    let affected_blocks = validators::parse_affects_attribute(affects)?;
                     for (affected_file_path, affected_block_name) in affected_blocks {
                         let affected_file_path =
                             affected_file_path.unwrap_or_else(|| modified_block_file_path.clone());
@@ -127,26 +127,6 @@ fn create_violation(
         modified_block.severity()?,
         Some(details),
     ))
-}
-
-fn parse_affects_attribute(value: &str) -> anyhow::Result<Vec<(Option<PathBuf>, String)>> {
-    let mut result = Vec::new();
-    for block_ref in value.split(',') {
-        let block = block_ref.trim();
-        let (mut filename, block_name) = block
-            .split_once(":")
-            .context(format!("Invalid \"affects\" attribute value: \"{block}\"",))?;
-        filename = filename.trim();
-        result.push((
-            if filename.is_empty() {
-                None
-            } else {
-                Some(filename.into())
-            },
-            block_name.trim().to_string(),
-        ));
-    }
-    Ok(result)
 }
 
 #[cfg(test)]
@@ -482,8 +462,7 @@ pass
 
 #[cfg(test)]
 mod parse_affects_attribute_tests {
-    use super::*;
-
+    use crate::validators::parse_affects_attribute;
     #[test]
     fn single_reference() -> anyhow::Result<()> {
         let result = parse_affects_attribute("file.rs:block_name")?;

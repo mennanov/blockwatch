@@ -15,6 +15,7 @@ use crate::validators::keep_sorted::KeepSortedValidatorDetector;
 use crate::validators::keep_unique::KeepUniqueValidatorDetector;
 use crate::validators::line_count::LineCountValidatorDetector;
 use crate::validators::line_pattern::LinePatternValidatorDetector;
+use anyhow::Context;
 use async_trait::async_trait;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -311,6 +312,28 @@ pub fn detect_validators(
         }
     }
     Ok((sync_validators, async_validators))
+}
+
+pub(in crate::validators) fn parse_affects_attribute(
+    value: &str,
+) -> anyhow::Result<Vec<(Option<PathBuf>, String)>> {
+    let mut result = Vec::new();
+    for block_ref in value.split(',') {
+        let block = block_ref.trim();
+        let (mut filename, block_name) = block
+            .split_once(":")
+            .context(format!("Invalid \"affects\" attribute value: \"{block}\"",))?;
+        filename = filename.trim();
+        result.push((
+            if filename.is_empty() {
+                None
+            } else {
+                Some(filename.into())
+            },
+            block_name.trim().to_string(),
+        ));
+    }
+    Ok(result)
 }
 
 #[cfg(test)]

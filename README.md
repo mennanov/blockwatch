@@ -367,7 +367,47 @@ The `validate` function receives two arguments:
     - `ctx.file` — the source file path.
     - `ctx.line` — the line number of the block's start tag.
     - `ctx.attrs` — a table of all block attributes.
+    - `ctx.affects` — only present when the block also has an [`affects`](#linking-code-blocks-affects)
+      attribute. A list (1-based array) of the blocks this block affects, each a table with `file`,
+      `name`, and (trimmed) `content` fields. References to blocks that don't exist are skipped.
 - `content` — the trimmed text content of the block.
+
+#### Checking affected blocks (`affects` + `check-lua`)
+
+Combining `affects` with `check-lua` lets a script inspect the blocks it affects through `ctx.affects`
+— without any file IO, so it works in the default sandboxed mode. This is handy for keeping two blocks
+in sync deterministically:
+
+```python
+allowed_colors = [
+    # <block check-lua="scripts/in_sync.lua" affects=":allowed-colors-docs">
+    'blue',
+    'green',
+    'red',
+    # </block>
+]
+
+docs = [
+    # <block name="allowed-colors-docs">
+    'blue',
+    'green',
+    'red',
+    # </block>
+]
+```
+
+**scripts/in_sync.lua**:
+
+```lua
+function validate(ctx, content)
+    for _, affected in ipairs(ctx.affects) do
+        if affected.content ~= content then
+            return "block '" .. affected.name .. "' in " .. affected.file .. " is out of sync"
+        end
+    end
+    return nil
+end
+```
 
 <!-- <block name="lua-safety-modes"> -->
 
