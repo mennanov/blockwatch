@@ -1,7 +1,7 @@
 use similar::DiffOp;
 use std::collections::{HashMap, VecDeque};
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 use unidiff::{Line, PatchSet, PatchedFile};
 
@@ -28,12 +28,29 @@ pub fn line_changes_from_diff(
             // Deleted files are ignored.
             continue;
         }
-        result.insert(
-            patched_file.target_file.trim_start_matches("b/").into(),
-            line_changes(&patched_file),
-        );
+        let target_path: PathBuf = patched_file.target_file.trim_start_matches("b/").into();
+        if !is_within_repo_root(&target_path) {
+            // Reject target paths that would escape the repository root, e.g. a crafted diff with
+            // `../` traversal or an absolute path. A normal `git diff` only ever produces
+            // repository-relative paths, so this never rejects legitimate changes.
+            anyhow::bail!(
+                "diff target path \"{}\" escapes the repository root folder",
+                target_path.display()
+            );
+        }
+        result.insert(target_path, line_changes(&patched_file));
     }
     Ok(result)
+}
+
+/// Whether `path` stays within the repository root.
+///
+/// I.e. it is a relative path with no `..` component and no absolute/root prefix.
+/// Used to reject diff target paths that would otherwise be joined onto the repository root and
+/// read from outside the repository.
+fn is_within_repo_root(path: &Path) -> bool {
+    path.components()
+        .all(|c| matches!(c, Component::CurDir | Component::Normal(_)))
 }
 
 fn line_changes(patched_file: &PatchedFile) -> Vec<LineChange> {
@@ -732,5 +749,42 @@ index f384549..0000000
         )?;
         assert!(line_changes.is_empty());
         Ok(())
+    }
+    #[test]
+    fn diff_with_parent_dir_traversal_target_path_returns_error() {
+        let err = line_changes_from_diff(
+            r#"diff --git a/../../../etc/passwd b/../../../etc/passwd
+new file mode 100644
+index 0000000..710d1d9
+--- /dev/null
++++ b/../../../etc/passwd
+@@ -0,0 +1,1 @@
++pwned
+"#,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("escapes the repository root"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn diff_with_absolute_target_path_returns_error() {
+        let err = line_changes_from_diff(
+            r#"diff --git a/etc/passwd b/etc/passwd
+new file mode 100644
+index 0000000..710d1d9
+--- /dev/null
++++ /etc/passwd
+@@ -0,0 +1,1 @@
++pwned
+"#,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("escapes the repository root"),
+            "unexpected error: {err}"
+        );
     }
 }
