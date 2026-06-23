@@ -12,11 +12,19 @@ permissions:
 jobs:
   blockwatch:
     runs-on: ubuntu-latest
+    env:
+      # A run is "trusted" when it is a push (which requires write access) or a pull request whose
+      # branch lives in this repository (i.e. not a fork). Only trusted runs may execute Lua scripts
+      # in `safe` mode (which exposes `io`/`os`) and receive the API key, since `check-lua` scripts
+      # come from the scanned files and would otherwise let a fork PR run arbitrary commands.
+      TRUSTED: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
 
     steps:
       - uses: mennanov/blockwatch-action@v1
         env:
-          BLOCKWATCH_LUA_MODE: safe
-          BLOCKWATCH_AI_API_KEY: ${{ secrets.BLOCKWATCH_AI_API_KEY }}
+          # Untrusted (fork) PRs are still linted, but only in the sandboxed mode (no file/OS access)
+          # and without any secrets.
+          BLOCKWATCH_LUA_MODE: ${{ env.TRUSTED == 'true' && 'safe' || 'sandboxed' }}
+          BLOCKWATCH_AI_API_KEY: ${{ env.TRUSTED == 'true' && secrets.BLOCKWATCH_AI_API_KEY || '' }}
         with:
           ignore: "tests/testdata/**"
