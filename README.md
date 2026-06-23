@@ -340,6 +340,8 @@ prices = [
 Run custom validation logic using a Lua script. The script must define a global `validate(ctx, content)` function that
 returns `nil` if validation passes or a string error message if it fails.
 
+The script path is resolved relative to the project root and must point to a file inside the repository; paths that escape it (absolute paths outside the project, `../` traversal, or symlinks pointing outside) are rejected.
+
 ```python
 colors = [
     # <block check-lua="scripts/validate_colors.lua">

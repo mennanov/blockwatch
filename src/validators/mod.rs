@@ -126,14 +126,17 @@ impl SimpleDiagnostic<'_> {
 
 #[derive(Debug)]
 pub struct ValidationContext {
+    // Repository (project) root the scanned paths are relative to. Used to confine file references
+    // such as `check-lua` script paths to within the repository.
+    pub(crate) root_path: PathBuf,
     // Blocks with their corresponding source file contents grouped by filename.
     pub(crate) blocks: HashMap<PathBuf, FileBlocks>,
 }
 
 impl ValidationContext {
     /// Creates a new validation context with modified blocks grouped by filename.
-    pub fn new(blocks: HashMap<PathBuf, FileBlocks>) -> Self {
-        Self { blocks }
+    pub fn new(root_path: PathBuf, blocks: HashMap<PathBuf, FileBlocks>) -> Self {
+        Self { root_path, blocks }
     }
 
     /// Converts the validation context to a serializable report that can be displayed as JSON.

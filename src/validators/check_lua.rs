@@ -85,6 +85,7 @@ impl ValidatorAsync for CheckLuaValidator {
 
                     let result = run_lua_script(
                         script_path,
+                        &context.root_path,
                         &file_path,
                         block_with_context,
                         content,
@@ -132,8 +133,47 @@ impl ValidatorAsync for CheckLuaValidator {
     }
 }
 
+/// Resolves a `check-lua` `script_path` against the repository `root_path` and verifies it points
+/// to an existing file located inside the repository.
+///
+/// Relative paths are resolved against `root_path`; absolute paths are used as-is. The candidate is
+/// canonicalized (resolving symlinks and `..`) and must remain within the canonicalized
+/// `root_path`. This prevents a scanned (and potentially untrusted) source file from pointing
+/// `check-lua` at a script outside the project, e.g. via an absolute path, `../` traversal, or a
+/// symlink that escapes the repository.
+fn resolve_script_path(root_path: &Path, script_path: &str) -> anyhow::Result<PathBuf> {
+    let candidate = {
+        let path = Path::new(script_path);
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            root_path.join(path)
+        }
+    };
+    let canonical_root = std::fs::canonicalize(root_path).with_context(|| {
+        format!(
+            "failed to canonicalize repository root: {}",
+            root_path.display()
+        )
+    })?;
+    let canonical_script = std::fs::canonicalize(&candidate)
+        .with_context(|| format!("failed to canonicalize Lua script path: {script_path}"))?;
+    if !canonical_script.starts_with(&canonical_root) {
+        return Err(anyhow!(
+            "check-lua script \"{script_path}\" resolves to \"{}\" which is outside the repository root \"{}\"",
+            canonical_script.display(),
+            canonical_root.display(),
+        ));
+    }
+    if !canonical_script.is_file() {
+        return Err(anyhow!("check-lua script \"{script_path}\" is not a file"));
+    }
+    Ok(canonical_script)
+}
+
 async fn run_lua_script(
     script_path: &str,
+    root_path: &Path,
     file_path: &Path,
     block_with_context: &BlockWithContext,
     content: &str,
@@ -141,7 +181,8 @@ async fn run_lua_script(
 ) -> anyhow::Result<Option<String>> {
     let lua = lua_from_env();
 
-    let script_content = std::fs::read_to_string(script_path)
+    let resolved_script_path = resolve_script_path(root_path, script_path)?;
+    let script_content = std::fs::read_to_string(&resolved_script_path)
         .with_context(|| format!("failed to read Lua script: {script_path}"))?;
 
     lua.load(&script_content)
@@ -357,6 +398,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{
         merge_validation_contexts, validation_context, validation_context_with_changes,
+        validation_context_with_root,
     };
     use serde_json::json;
     use std::io::Write;
@@ -368,17 +410,132 @@ mod tests {
         file
     }
 
+    /// A Lua script written into a temporary directory that doubles as the repository root.
+    ///
+    /// Holding the [`tempfile::TempDir`] keeps the script (and its root) alive for the duration of
+    /// the test.
+    struct TempScript {
+        root: tempfile::TempDir,
+        path: PathBuf,
+    }
+
+    impl TempScript {
+        /// Writes `content` as `script.lua` inside a fresh temporary repository root.
+        fn new(content: &str) -> Self {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("script.lua");
+            std::fs::write(&path, content).unwrap();
+            Self { root, path }
+        }
+
+        /// The repository root the script lives in.
+        fn root(&self) -> &Path {
+            self.root.path()
+        }
+
+        /// The absolute path to the script.
+        fn path(&self) -> &str {
+            self.path.to_str().unwrap()
+        }
+    }
+
+    #[test]
+    fn resolve_script_path_resolves_relative_path_inside_root() -> anyhow::Result<()> {
+        let script = TempScript::new("-- ok");
+
+        let resolved = resolve_script_path(script.root(), "script.lua")?;
+
+        assert_eq!(
+            resolved,
+            std::fs::canonicalize(script.root().join("script.lua"))?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn resolve_script_path_resolves_absolute_path_inside_root() -> anyhow::Result<()> {
+        let script = TempScript::new("-- ok");
+
+        let resolved = resolve_script_path(script.root(), script.path())?;
+
+        assert_eq!(resolved, std::fs::canonicalize(script.path())?);
+        Ok(())
+    }
+
+    #[test]
+    fn resolve_script_path_rejects_absolute_path_outside_root() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let outside = write_temp_lua_script("-- evil");
+
+        let err = resolve_script_path(root.path(), outside.path().to_str().unwrap()).unwrap_err();
+
+        assert!(
+            err.to_string().contains("outside the repository root"),
+            "unexpected error: {err}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn resolve_script_path_rejects_relative_path_escaping_root() -> anyhow::Result<()> {
+        let parent = tempfile::tempdir()?;
+        std::fs::write(parent.path().join("evil.lua"), "-- evil")?;
+        let root = parent.path().join("repo");
+        std::fs::create_dir(&root)?;
+
+        let err = resolve_script_path(&root, "../evil.lua").unwrap_err();
+
+        assert!(
+            err.to_string().contains("outside the repository root"),
+            "unexpected error: {err}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn resolve_script_path_rejects_missing_script() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+
+        let err = resolve_script_path(root.path(), "does_not_exist.lua").unwrap_err();
+
+        let err_chain = format!("{err:#}");
+        assert!(
+            err_chain.contains("failed to canonicalize Lua script path"),
+            "unexpected error: {err_chain}"
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_script_path_rejects_symlink_escaping_root() -> anyhow::Result<()> {
+        let parent = tempfile::tempdir()?;
+        std::fs::write(parent.path().join("secret.lua"), "-- secret")?;
+        let root = parent.path().join("repo");
+        std::fs::create_dir(&root)?;
+        std::os::unix::fs::symlink(parent.path().join("secret.lua"), root.join("link.lua"))?;
+
+        let err = resolve_script_path(&root, "link.lua").unwrap_err();
+
+        assert!(
+            err.to_string().contains("outside the repository root"),
+            "unexpected error: {err}"
+        );
+        Ok(())
+    }
+
     #[tokio::test]
     async fn when_lua_returns_nil_returns_no_violations() -> anyhow::Result<()> {
-        let script = write_temp_lua_script(
+        let script = TempScript::new(
             r#"
 function validate(ctx, content)
     return nil
 end
 "#,
         );
-        let script_path = script.path().to_str().unwrap();
-        let context = validation_context(
+        let script_path = script.path();
+        let context = validation_context_with_root(
+            script.root(),
             "example.py",
             &format!(
                 r#"# <block check-lua="{script_path}">
@@ -395,16 +552,51 @@ some content
     }
 
     #[tokio::test]
+    async fn script_outside_repository_root_returns_error() -> anyhow::Result<()> {
+        // The repository root is a temp dir, but the script lives outside it. Even though the script
+        // exists and is valid, it must be rejected because it is not within the repository.
+        let root = tempfile::tempdir()?;
+        let outside = write_temp_lua_script(
+            r#"
+function validate(ctx, content)
+    return nil
+end
+"#,
+        );
+        let script_path = outside.path().to_str().unwrap();
+        let context = validation_context_with_root(
+            root.path(),
+            "example.py",
+            &format!(
+                r#"# <block check-lua="{script_path}">
+some content
+# </block>"#,
+            ),
+        );
+        let validator = CheckLuaValidator::new();
+
+        let err = validator.validate(context).await.unwrap_err();
+
+        let err_chain = format!("{err:#}");
+        assert!(
+            err_chain.contains("outside the repository root"),
+            "unexpected error: {err_chain}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn when_lua_returns_error_message_returns_violation() -> anyhow::Result<()> {
-        let script = write_temp_lua_script(
+        let script = TempScript::new(
             r#"
 function validate(ctx, content)
     return "block content is invalid"
 end
 "#,
         );
-        let script_path = script.path().to_str().unwrap();
-        let context = validation_context(
+        let script_path = script.path();
+        let context = validation_context_with_root(
+            script.root(),
             "example.py",
             &format!(
                 r#"# <block check-lua="{script_path}">
@@ -463,7 +655,7 @@ text
         let err = validator.validate(context).await.unwrap_err();
         let err_chain = format!("{err:#}");
         assert!(
-            err_chain.contains("failed to read Lua script"),
+            err_chain.contains("failed to canonicalize Lua script path"),
             "unexpected error: {err_chain}"
         );
         Ok(())
@@ -471,7 +663,7 @@ text
 
     #[tokio::test]
     async fn pattern_match_is_used_as_block_content() -> anyhow::Result<()> {
-        let script = write_temp_lua_script(
+        let script = TempScript::new(
             r#"
 function validate(ctx, content)
     if content ~= "id: 42" then
@@ -481,8 +673,9 @@ function validate(ctx, content)
 end
 "#,
         );
-        let script_path = script.path().to_str().unwrap();
-        let context = validation_context(
+        let script_path = script.path();
+        let context = validation_context_with_root(
+            script.root(),
             "example.py",
             &format!(
                 r#"# <block check-lua="{script_path}" check-lua-pattern="id: \d+">
@@ -498,7 +691,7 @@ name: Alice, id: 42
 
     #[tokio::test]
     async fn pattern_group_match_is_used_as_block_content() -> anyhow::Result<()> {
-        let script = write_temp_lua_script(
+        let script = TempScript::new(
             r#"
 function validate(ctx, content)
     if content ~= "42" then
@@ -508,8 +701,9 @@ function validate(ctx, content)
 end
 "#,
         );
-        let script_path = script.path().to_str().unwrap();
-        let context = validation_context(
+        let script_path = script.path();
+        let context = validation_context_with_root(
+            script.root(),
             "example.py",
             &format!(
                 r#"# <block check-lua="{script_path}" check-lua-pattern="id: (?P<value>\d+)">
@@ -553,7 +747,7 @@ some content
 
     #[tokio::test]
     async fn ctx_fields_are_accessible() -> anyhow::Result<()> {
-        let script = write_temp_lua_script(
+        let script = TempScript::new(
             r#"
 function validate(ctx, content)
     if ctx.file ~= "example.py" then
@@ -572,8 +766,9 @@ function validate(ctx, content)
 end
 "#,
         );
-        let script_path = script.path().to_str().unwrap();
-        let context = validation_context(
+        let script_path = script.path();
+        let context = validation_context_with_root(
+            script.root(),
             "example.py",
             &format!(
                 r#"# <block check-lua="{script_path}">
@@ -589,7 +784,7 @@ some content
 
     #[tokio::test]
     async fn ctx_affects_exposes_affected_blocks() -> anyhow::Result<()> {
-        let script = write_temp_lua_script(
+        let script = TempScript::new(
             r#"
 function validate(ctx, content)
     if ctx.affects == nil then
@@ -620,9 +815,10 @@ function validate(ctx, content)
 end
 "#,
         );
-        let script_path = script.path().to_str().unwrap();
+        let script_path = script.path();
         let context = merge_validation_contexts(vec![
-            validation_context(
+            validation_context_with_root(
+                script.root(),
                 "example.py",
                 &format!(
                     r#"# <block check-lua="{script_path}" affects=":local-block, other.py:remote-block">
@@ -651,7 +847,7 @@ remote content
     async fn ctx_affects_excludes_blocks_absent_from_the_diff() -> anyhow::Result<()> {
         // The affected block lives in a file that has no diff changes, so it is filtered out of the
         // validation context entirely. It must therefore NOT appear in ctx.affects.
-        let script = write_temp_lua_script(
+        let script = TempScript::new(
             r#"
 function validate(ctx, content)
     if ctx.affects == nil then
@@ -664,9 +860,10 @@ function validate(ctx, content)
 end
 "#,
         );
-        let script_path = script.path().to_str().unwrap();
+        let script_path = script.path();
         let context = merge_validation_contexts(vec![
-            validation_context(
+            validation_context_with_root(
+                script.root(),
                 "example.py",
                 &format!(
                     r#"# <block check-lua="{script_path}" affects="other.py:remote-block">
@@ -690,7 +887,7 @@ remote content
 
     #[tokio::test]
     async fn ctx_affects_skips_unresolved_references() -> anyhow::Result<()> {
-        let script = write_temp_lua_script(
+        let script = TempScript::new(
             r#"
 function validate(ctx, content)
     if ctx.affects == nil then
@@ -703,8 +900,9 @@ function validate(ctx, content)
 end
 "#,
         );
-        let script_path = script.path().to_str().unwrap();
-        let context = validation_context(
+        let script_path = script.path();
+        let context = validation_context_with_root(
+            script.root(),
             "example.py",
             &format!(
                 r#"# <block check-lua="{script_path}" affects=":does-not-exist">
@@ -720,7 +918,7 @@ some content
 
     #[tokio::test]
     async fn ctx_affects_is_nil_without_affects_attribute() -> anyhow::Result<()> {
-        let script = write_temp_lua_script(
+        let script = TempScript::new(
             r#"
 function validate(ctx, content)
     if ctx.affects ~= nil then
@@ -730,8 +928,9 @@ function validate(ctx, content)
 end
 "#,
         );
-        let script_path = script.path().to_str().unwrap();
-        let context = validation_context(
+        let script_path = script.path();
+        let context = validation_context_with_root(
+            script.root(),
             "example.py",
             &format!(
                 r#"# <block check-lua="{script_path}">

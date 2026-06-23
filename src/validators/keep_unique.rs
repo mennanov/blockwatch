@@ -184,7 +184,10 @@ mod validate_tests {
     #[test]
     fn empty_blocks_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepUniqueValidator::new();
-        let context = Arc::new(validators::ValidationContext::new(HashMap::new()));
+        let context = Arc::new(validators::ValidationContext::new(
+            PathBuf::from("."),
+            HashMap::new(),
+        ));
 
         let violations = validator.validate(context)?;
 

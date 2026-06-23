@@ -81,7 +81,7 @@ fn build_context(
 
     let path_checker = blocks::PathCheckerImpl::new(glob_set, args.ignored_globs()?);
     let root_path = repository_root_path(fs::canonicalize(env::current_dir()?)?)?;
-    let file_system = blocks::FileSystemImpl::new(root_path);
+    let file_system = blocks::FileSystemImpl::new(root_path.clone());
 
     let blocks = blocks::parse_blocks(
         modified_lines_by_file,
@@ -91,7 +91,7 @@ fn build_context(
         languages,
         args.extensions(),
     )?;
-    Ok(validators::ValidationContext::new(blocks))
+    Ok(validators::ValidationContext::new(root_path, blocks))
 }
 
 /// Whether stdin is connected to an interactive terminal, i.e. no diff is piped in.
