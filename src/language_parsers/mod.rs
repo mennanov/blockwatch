@@ -4,6 +4,7 @@ mod c_sharp;
 mod cpp;
 mod css;
 mod go;
+mod hcl;
 mod html;
 mod java;
 mod javascript;
@@ -46,6 +47,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
     let cpp_parser = parser(cpp::parser()?);
     let css_parser = parser(css::parser()?);
     let go_parser = parser(go::parser()?);
+    let hcl_parser = parser(hcl::parser()?);
     let html_parser = parser(html::parser()?);
     let java_parser = parser(java::parser()?);
     let js_parser = parser(javascript::parser()?);
@@ -79,6 +81,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
         ("go.sum".into(), Rc::clone(&go_parser)),
         ("go.work".into(), go_parser),
         ("h".into(), cpp_parser),
+        ("hcl".into(), Rc::clone(&hcl_parser)),
         ("htm".into(), Rc::clone(&html_parser)),
         ("html".into(), html_parser),
         ("java".into(), java_parser),
@@ -99,6 +102,8 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
         ("sh".into(), bash_parser),
         ("sql".into(), sql_parser),
         ("swift".into(), swift_parser),
+        ("tf".into(), Rc::clone(&hcl_parser)),
+        ("tfvars".into(), hcl_parser),
         ("toml".into(), toml_parser),
         ("ts".into(), typescript_parser),
         ("tsx".into(), typescript_tsx_parser),
@@ -287,6 +292,30 @@ fn c_style_line_and_block_comments_parser(
             } else {
                 None
             }
+        }),
+    )
+}
+
+/// Comments parser for languages that support `#` line comments in addition to the C-style
+/// `//` and `/* */` comments.
+fn hash_and_c_style_comments_parser(
+    language: &Language,
+    comment_node_kind: &'static str,
+) -> TreeSitterCommentsParser {
+    TreeSitterCommentsParser::new(
+        language,
+        Box::new(move |node, source_code| {
+            if node.kind() != comment_node_kind {
+                return None;
+            }
+            let comment = &source_code[node.byte_range()];
+            Some(if comment.starts_with("//") {
+                comment.replacen("//", "  ", 1)
+            } else if comment.starts_with("#") {
+                comment.replacen("#", " ", 1)
+            } else {
+                c_style_multiline_comment_processor(comment)
+            })
         }),
     )
 }

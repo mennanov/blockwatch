@@ -566,6 +566,7 @@ BlockWatch supports comments in:
 - C/C++
 - CSS
 - Go (with `go.mod`, `go.sum` and `go.work` support)
+- HCL (Terraform: `.tf`, `.tfvars`, `.hcl`)
 - HTML
 - Java
 - JavaScript

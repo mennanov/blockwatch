@@ -1113,6 +1113,10 @@ mod supported_languages_tests {
                 "// <block>\nvoid foo();\n// </block>".to_string(),
             ),
             (
+                "hcl.hcl".to_string(),
+                "// <block>\nregion = \"eu-west-1\"\n// </block>".to_string(),
+            ),
+            (
                 "htm.htm".to_string(),
                 "<!-- <block> -->\n<div>Content</div>\n<!-- </block> -->".to_string(),
             ),
@@ -1195,6 +1199,14 @@ mod supported_languages_tests {
             (
                 "swift.swift".to_string(),
                 "// <block>\nfunc main() {}\n// </block>".to_string(),
+            ),
+            (
+                "tf.tf".to_string(),
+                "# <block>\nregion = \"us-east-1\"\n# </block>".to_string(),
+            ),
+            (
+                "tfvars.tfvars".to_string(),
+                "# <block>\nregion = \"us-west-2\"\n# </block>".to_string(),
             ),
             (
                 "toml.toml".to_string(),

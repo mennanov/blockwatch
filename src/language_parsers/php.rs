@@ -1,7 +1,6 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
-use crate::language_parsers::{
-    CommentsParser, TreeSitterCommentsParser, c_style_multiline_comment_processor,
-};
+use crate::language_parsers;
+use crate::language_parsers::CommentsParser;
 
 /// Returns a [`BlocksParser`] for PHP.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -10,22 +9,7 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let php_language = tree_sitter_php::LANGUAGE_PHP.into();
-    let parser = TreeSitterCommentsParser::new(
-        &php_language,
-        Box::new(|node, source_code| {
-            if node.kind() != "comment" {
-                return None;
-            }
-            let comment = &source_code[node.byte_range()];
-            Some(if comment.starts_with("//") {
-                comment.replacen("//", "  ", 1)
-            } else if comment.starts_with("#") {
-                comment.replacen("#", " ", 1)
-            } else {
-                c_style_multiline_comment_processor(comment)
-            })
-        }),
-    );
+    let parser = language_parsers::hash_and_c_style_comments_parser(&php_language, "comment");
     Ok(parser)
 }
 
