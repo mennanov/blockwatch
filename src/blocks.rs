@@ -1093,6 +1093,22 @@ mod supported_languages_tests {
                 "/* <block> */\nbody { margin: 0; }\n/* </block> */".to_string(),
             ),
             (
+                "Containerfile".to_string(),
+                "# <block>\nFROM fedora\n# </block>".to_string(),
+            ),
+            (
+                "containerfile".to_string(),
+                "# <block>\nFROM centos\n# </block>".to_string(),
+            ),
+            (
+                "Dockerfile".to_string(),
+                "# <block>\nFROM alpine\n# </block>".to_string(),
+            ),
+            (
+                "app.dockerfile".to_string(),
+                "# <block>\nFROM debian\n# </block>".to_string(),
+            ),
+            (
                 "go.go".to_string(),
                 "// <block>\nfunc main() {}\n// </block>".to_string(),
             ),

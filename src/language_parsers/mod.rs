@@ -3,6 +3,7 @@ mod c;
 mod c_sharp;
 mod cpp;
 mod css;
+mod dockerfile;
 mod go;
 mod hcl;
 mod html;
@@ -48,6 +49,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
     let c_sharp_parser = parser(c_sharp::parser()?);
     let cpp_parser = parser(cpp::parser()?);
     let css_parser = parser(css::parser()?);
+    let dockerfile_parser = parser(dockerfile::parser()?);
     let go_parser = parser(go::parser()?);
     let hcl_parser = parser(hcl::parser()?);
     let html_parser = parser(html::parser()?);
@@ -72,14 +74,18 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
 
     Ok(HashMap::from([
         // <block affects="README.md:supported-grammar, src/blocks.rs:supported-extensions" keep-sorted>
+        ("Containerfile".into(), Rc::clone(&dockerfile_parser)),
+        ("Dockerfile".into(), Rc::clone(&dockerfile_parser)),
         ("Makefile".into(), Rc::clone(&makefile_parser)),
         ("bash".into(), Rc::clone(&bash_parser)),
         ("c".into(), c_parser),
         ("cc".into(), Rc::clone(&cpp_parser)),
+        ("containerfile".into(), Rc::clone(&dockerfile_parser)),
         ("cpp".into(), Rc::clone(&cpp_parser)),
         ("cs".into(), c_sharp_parser),
         ("css".into(), css_parser),
         ("d.ts".into(), Rc::clone(&typescript_parser)),
+        ("dockerfile".into(), dockerfile_parser),
         ("go".into(), Rc::clone(&go_parser)),
         ("go.mod".into(), Rc::clone(&go_parser)),
         ("go.sum".into(), Rc::clone(&go_parser)),
