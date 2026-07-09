@@ -9,6 +9,7 @@ mod html;
 mod java;
 mod javascript;
 mod kotlin;
+mod lua;
 mod makefile;
 mod markdown;
 mod php;
@@ -52,6 +53,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
     let java_parser = parser(java::parser()?);
     let js_parser = parser(javascript::parser()?);
     let kotlin_parser = parser(kotlin::parser()?);
+    let lua_parser = parser(lua::parser()?);
     let makefile_parser = parser(makefile::parser()?);
     let markdown_parser = parser(markdown::parser()?);
     let php_parser = parser(php::parser()?);
@@ -89,6 +91,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
         ("jsx".into(), js_parser),
         ("kt".into(), Rc::clone(&kotlin_parser)),
         ("kts".into(), kotlin_parser),
+        ("lua".into(), lua_parser),
         ("makefile".into(), Rc::clone(&makefile_parser)),
         ("markdown".into(), Rc::clone(&markdown_parser)),
         ("md".into(), markdown_parser),

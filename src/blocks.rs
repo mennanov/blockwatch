@@ -1145,6 +1145,10 @@ mod supported_languages_tests {
                 "// <block>\nplugins { }\n// </block>".to_string(),
             ),
             (
+                "lua.lua".to_string(),
+                "-- <block>\nlocal x = 1\n-- </block>".to_string(),
+            ),
+            (
                 "makefile".to_string(),
                 "# <block>\nall:\n\t@echo \"hello\"\n# </block>".to_string(),
             ),
