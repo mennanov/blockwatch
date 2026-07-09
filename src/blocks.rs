@@ -1193,6 +1193,14 @@ mod supported_languages_tests {
                 r#"/* <block> */fn a() {}/* </block> */"#.to_string(),
             ),
             (
+                "sbt.sbt".to_string(),
+                "// <block>\nname := \"app\"\n// </block>".to_string(),
+            ),
+            (
+                "scala.scala".to_string(),
+                "// <block>\nval x = 1\n// </block>".to_string(),
+            ),
+            (
                 "sh.sh".to_string(),
                 "# <block>\necho \"hello\"\n# </block>".to_string(),
             ),

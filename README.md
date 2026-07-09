@@ -579,6 +579,7 @@ BlockWatch supports comments in:
 - Ruby
 - Rust
 - SQL
+- Scala (with `.sbt` support)
 - Swift
 - TOML
 - TypeScript

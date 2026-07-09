@@ -17,6 +17,7 @@ mod python;
 mod ruby;
 // pub(crate) visibility is needed by the unit tests in block_parser.rs
 pub(crate) mod rust;
+mod scala;
 mod sql;
 mod swift;
 mod toml;
@@ -60,6 +61,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
     let python_parser = parser(python::parser()?);
     let ruby_parser = parser(ruby::parser()?);
     let rust_parser = parser(rust::parser()?);
+    let scala_parser = parser(scala::parser()?);
     let sql_parser = parser(sql::parser()?);
     let swift_parser = parser(swift::parser()?);
     let toml_parser = parser(toml::parser()?);
@@ -102,6 +104,8 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
         ("pyi".into(), python_parser),
         ("rb".into(), ruby_parser),
         ("rs".into(), rust_parser),
+        ("sbt".into(), Rc::clone(&scala_parser)),
+        ("scala".into(), scala_parser),
         ("sh".into(), bash_parser),
         ("sql".into(), sql_parser),
         ("swift".into(), swift_parser),
