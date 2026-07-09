@@ -5,6 +5,7 @@ mod cpp;
 mod css;
 mod dockerfile;
 mod go;
+mod groovy;
 mod hcl;
 mod html;
 mod java;
@@ -51,6 +52,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
     let css_parser = parser(css::parser()?);
     let dockerfile_parser = parser(dockerfile::parser()?);
     let go_parser = parser(go::parser()?);
+    let groovy_parser = parser(groovy::parser()?);
     let hcl_parser = parser(hcl::parser()?);
     let html_parser = parser(html::parser()?);
     let java_parser = parser(java::parser()?);
@@ -76,6 +78,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
         // <block affects="README.md:supported-grammar, src/blocks.rs:supported-extensions" keep-sorted>
         ("Containerfile".into(), Rc::clone(&dockerfile_parser)),
         ("Dockerfile".into(), Rc::clone(&dockerfile_parser)),
+        ("Jenkinsfile".into(), Rc::clone(&groovy_parser)),
         ("Makefile".into(), Rc::clone(&makefile_parser)),
         ("bash".into(), Rc::clone(&bash_parser)),
         ("c".into(), c_parser),
@@ -90,11 +93,14 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
         ("go.mod".into(), Rc::clone(&go_parser)),
         ("go.sum".into(), Rc::clone(&go_parser)),
         ("go.work".into(), go_parser),
+        ("gradle".into(), Rc::clone(&groovy_parser)),
+        ("groovy".into(), Rc::clone(&groovy_parser)),
         ("h".into(), cpp_parser),
         ("hcl".into(), Rc::clone(&hcl_parser)),
         ("htm".into(), Rc::clone(&html_parser)),
         ("html".into(), html_parser),
         ("java".into(), java_parser),
+        ("jenkinsfile".into(), groovy_parser),
         ("js".into(), Rc::clone(&js_parser)),
         ("jsx".into(), js_parser),
         ("kt".into(), Rc::clone(&kotlin_parser)),

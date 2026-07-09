@@ -567,6 +567,7 @@ BlockWatch supports comments in:
 - CSS
 - Dockerfile (with `Containerfile` and `.dockerfile` support)
 - Go (with `go.mod`, `go.sum` and `go.work` support)
+- Groovy (with `.gradle` and `Jenkinsfile` support)
 - HCL (Terraform: `.tf`, `.tfvars`, `.hcl`)
 - HTML
 - Java

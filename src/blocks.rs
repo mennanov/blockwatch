@@ -1125,6 +1125,14 @@ mod supported_languages_tests {
                 "// <block>\nuse ./mod\n// </block>".to_string(),
             ),
             (
+                "gradle.gradle".to_string(),
+                "// <block>\nversion = '1.0'\n// </block>".to_string(),
+            ),
+            (
+                "groovy.groovy".to_string(),
+                "// <block>\ndef x = 1\n// </block>".to_string(),
+            ),
+            (
                 "h.h".to_string(),
                 "// <block>\nvoid foo();\n// </block>".to_string(),
             ),
@@ -1143,6 +1151,14 @@ mod supported_languages_tests {
             (
                 "java.java".to_string(),
                 "// <block>\nclass App {}\n// </block>".to_string(),
+            ),
+            (
+                "Jenkinsfile".to_string(),
+                "// <block>\npipeline { }\n// </block>".to_string(),
+            ),
+            (
+                "jenkinsfile".to_string(),
+                "// <block>\nnode { }\n// </block>".to_string(),
             ),
             (
                 "js.js".to_string(),
