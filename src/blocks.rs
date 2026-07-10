@@ -1109,6 +1109,10 @@ mod supported_languages_tests {
                 "# <block>\nFROM debian\n# </block>".to_string(),
             ),
             (
+                "dart.dart".to_string(),
+                "// <block>\nvoid main() {}\n// </block>".to_string(),
+            ),
+            (
                 "go.go".to_string(),
                 "// <block>\nfunc main() {}\n// </block>".to_string(),
             ),

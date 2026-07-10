@@ -565,6 +565,7 @@ BlockWatch supports comments in:
 - C#
 - C/C++
 - CSS
+- Dart
 - Dockerfile (with `Containerfile` and `.dockerfile` support)
 - Go (with `go.mod`, `go.sum` and `go.work` support)
 - Groovy (with `.gradle` and `Jenkinsfile` support)

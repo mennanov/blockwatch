@@ -3,6 +3,7 @@ mod c;
 mod c_sharp;
 mod cpp;
 mod css;
+mod dart;
 mod dockerfile;
 mod go;
 mod groovy;
@@ -51,6 +52,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
     let c_sharp_parser = parser(c_sharp::parser()?);
     let cpp_parser = parser(cpp::parser()?);
     let css_parser = parser(css::parser()?);
+    let dart_parser = parser(dart::parser()?);
     let dockerfile_parser = parser(dockerfile::parser()?);
     let go_parser = parser(go::parser()?);
     let groovy_parser = parser(groovy::parser()?);
@@ -90,6 +92,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
         ("cs".into(), c_sharp_parser),
         ("css".into(), css_parser),
         ("d.ts".into(), Rc::clone(&typescript_parser)),
+        ("dart".into(), dart_parser),
         ("dockerfile".into(), dockerfile_parser),
         ("go".into(), Rc::clone(&go_parser)),
         ("go.mod".into(), Rc::clone(&go_parser)),
@@ -314,6 +317,30 @@ fn c_style_line_and_block_comments_parser(
             } else {
                 None
             }
+        }),
+    )
+}
+
+/// C-style comments parser that additionally blanks the full `///` doc-comment marker, for
+/// languages where `///` is the primary documentation style (e.g. Dart, C#).
+fn c_style_and_doc_comments_parser(
+    language: &Language,
+    comment_node_kind: &'static str,
+) -> TreeSitterCommentsParser {
+    TreeSitterCommentsParser::new(
+        language,
+        Box::new(move |node, source_code| {
+            if node.kind() != comment_node_kind {
+                return None;
+            }
+            let comment = &source_code[node.byte_range()];
+            Some(if comment.starts_with("///") {
+                comment.replacen("///", "   ", 1)
+            } else if comment.starts_with("//") {
+                comment.replacen("//", "  ", 1)
+            } else {
+                c_style_multiline_comment_processor(comment)
+            })
         }),
     )
 }
