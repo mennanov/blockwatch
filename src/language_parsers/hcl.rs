@@ -33,6 +33,7 @@ variable "region" {
 /* This is a block comment
 spanning multiple lines
 */
+/// Triple slash comment.
 "#,
             )
             .collect();
@@ -55,6 +56,11 @@ spanning multiple lines
                     source_range: 89..142,
                     comment_text: "   This is a block comment\nspanning multiple lines\n  "
                         .to_string()
+                },
+                Comment {
+                    position_range: Position::new(10, 1)..Position::new(10, 26),
+                    source_range: 143..168,
+                    comment_text: "  / Triple slash comment.".to_string()
                 },
             ]
         );

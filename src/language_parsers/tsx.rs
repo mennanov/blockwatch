@@ -53,6 +53,7 @@ mod tests {
                         </div>
                     );
                 };
+/// Triple slash comment.
                 "#,
             )
             .collect();
@@ -98,7 +99,12 @@ mod tests {
                     position_range: Position::new(24, 30)..Position::new(25, 39),
                     source_range: 874..931,
                     comment_text: "   JSX multi-line \n                            comment   ".to_string()
-                }
+                },
+                Comment {
+                    position_range: Position::new(30, 1)..Position::new(30, 26),
+                    source_range: 1081..1106,
+                    comment_text: "  / Triple slash comment.".to_string()
+                },
             ]
         );
 

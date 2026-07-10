@@ -47,6 +47,7 @@ mod tests {
                     return this.value; // Inline comment next to a return statement
                 }
             }
+/// Triple slash comment.
             "#,
             )
             .collect();
@@ -87,7 +88,12 @@ mod tests {
                     position_range: Position::new(21, 40)..Position::new(21, 84),
                     source_range: 676..720,
                     comment_text: "   Inline comment next to a return statement".to_string()
-                }
+                },
+                Comment {
+                    position_range: Position::new(24, 1)..Position::new(24, 26),
+                    source_range: 753..778,
+                    comment_text: "  / Triple slash comment.".to_string()
+                },
             ]
         );
 

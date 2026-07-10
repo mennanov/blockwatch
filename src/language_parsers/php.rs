@@ -45,6 +45,9 @@ mod tests {
             ?>
             <h1>This is an <?php # inlined comment ?> example</h1>
             <p>The header above will say 'This is an  example'.</p>
+<?php
+/// Triple slash comment.
+?>
             "#,
             )
             .collect();
@@ -78,6 +81,11 @@ mod tests {
                     position_range: Position::new(20, 34)..Position::new(20, 52),
                     source_range: 523..541,
                     comment_text: "  inlined comment ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(23, 1)..Position::new(23, 26),
+                    source_range: 631..656,
+                    comment_text: "  / Triple slash comment.".to_string()
                 },
             ]
         );

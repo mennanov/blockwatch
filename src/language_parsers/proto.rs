@@ -35,6 +35,7 @@ message User {
 /* This is a block comment
 spanning multiple lines
 */
+/// Triple slash comment.
 "#,
             )
             .collect();
@@ -57,6 +58,11 @@ spanning multiple lines
                     source_range: 99..152,
                     comment_text: "   This is a block comment\nspanning multiple lines\n  "
                         .to_string()
+                },
+                Comment {
+                    position_range: Position::new(12, 1)..Position::new(12, 26),
+                    source_range: 153..178,
+                    comment_text: "  / Triple slash comment.".to_string()
                 },
             ]
         );

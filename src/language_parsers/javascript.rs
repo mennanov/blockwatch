@@ -40,6 +40,7 @@ mod tests {
                  */
                 let number = 42; /* Inline multi-line comment */
             }
+/// Triple slash comment.
             "#,
             )
             .collect();
@@ -73,6 +74,11 @@ mod tests {
                     position_range: Position::new(15, 34)..Position::new(15, 65),
                     source_range: 513..544,
                     comment_text: "   Inline multi-line comment   ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(17, 1)..Position::new(17, 26),
+                    source_range: 559..584,
+                    comment_text: "  / Triple slash comment.".to_string()
                 },
             ]
         );

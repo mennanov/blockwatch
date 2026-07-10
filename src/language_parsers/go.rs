@@ -39,6 +39,7 @@ func main() {
     fmt.Println("Hello, World!") // Inline comment
     // Another single line comment
 }
+/// Triple slash comment.
 "#,
             )
             .collect();
@@ -66,6 +67,11 @@ func main() {
                     position_range: Position::new(14, 5)..Position::new(14, 35),
                     source_range: 196..226,
                     comment_text: "   Another single line comment".to_string()
+                },
+                Comment {
+                    position_range: Position::new(16, 1)..Position::new(16, 26),
+                    source_range: 229..254,
+                    comment_text: "  / Triple slash comment.".to_string()
                 },
             ]
         );

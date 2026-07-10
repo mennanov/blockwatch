@@ -37,6 +37,7 @@ def x = 42 // inline comment
 spanning multiple lines
 */
 println(x)
+/// Triple slash comment.
 "#,
             )
             .collect();
@@ -59,6 +60,11 @@ println(x)
                     source_range: 78..131,
                     comment_text: "   This is a block comment\nspanning multiple lines\n  "
                         .to_string()
+                },
+                Comment {
+                    position_range: Position::new(9, 1)..Position::new(9, 26),
+                    source_range: 143..168,
+                    comment_text: "  / Triple slash comment.".to_string()
                 },
             ]
         );

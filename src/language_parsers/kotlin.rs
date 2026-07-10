@@ -42,6 +42,7 @@ mod tests {
                  
                 return
             }
+/// Triple slash comment.
             "#,
             )
             .collect();
@@ -70,6 +71,11 @@ mod tests {
                     position_range: Position::new(12, 17)..Position::new(15, 20),
                     source_range: 332..434,
                     comment_text: "   Another comment\n                   split into\n                   multiple lines\n                   ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(19, 1)..Position::new(19, 26),
+                    source_range: 490..515,
+                    comment_text: "  / Triple slash comment.".to_string()
                 },
             ]
         );

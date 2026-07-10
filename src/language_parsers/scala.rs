@@ -37,6 +37,7 @@ object Main {
   spanning multiple lines
   */
 }
+/// Triple slash comment.
 "#,
             )
             .collect();
@@ -59,6 +60,11 @@ object Main {
                     source_range: 82..139,
                     comment_text: "   This is a block comment\n  spanning multiple lines\n    "
                         .to_string()
+                },
+                Comment {
+                    position_range: Position::new(10, 1)..Position::new(10, 26),
+                    source_range: 142..167,
+                    comment_text: "  / Triple slash comment.".to_string()
                 },
             ]
         );
