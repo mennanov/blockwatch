@@ -407,11 +407,17 @@ fn python_style_comments_parser(
     TreeSitterCommentsParser::new(
         language,
         Box::new(move |node, source_code| {
-            if node.kind() == comment_node_kind {
-                Some(source_code[node.byte_range()].replacen("#", " ", 1))
-            } else {
-                None
+            if node.kind() != comment_node_kind {
+                return None;
             }
+            let comment = &source_code[node.byte_range()];
+            Some(if comment.starts_with('#') {
+                comment.replacen('#', " ", 1)
+            } else {
+                // A comment form without a leading `#`: keep it intact rather than blanking a
+                // `#` that belongs to its content.
+                comment.to_string()
+            })
         }),
     )
 }

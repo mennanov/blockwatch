@@ -1,5 +1,5 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
-use crate::language_parsers::{CommentsParser, python_style_comments_parser};
+use crate::language_parsers::{CommentsParser, TreeSitterCommentsParser};
 
 /// Returns a [`BlocksParser`] for Ruby.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -8,8 +8,39 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let ruby_language = tree_sitter_ruby::LANGUAGE.into();
-    let parser = python_style_comments_parser(&ruby_language, "comment");
+    let parser = TreeSitterCommentsParser::new(
+        &ruby_language,
+        Box::new(|node, source_code| {
+            if node.kind() != "comment" {
+                return None;
+            }
+            let comment = &source_code[node.byte_range()];
+            Some(if comment.starts_with('#') {
+                comment.replacen('#', " ", 1)
+            } else {
+                multiline_comment_processor(comment)
+            })
+        }),
+    );
     Ok(parser)
+}
+
+/// Replaces the `=begin` and `=end` markers of a Ruby multiline comment with the corresponding
+/// number of whitespaces, preserving the comment's length.
+fn multiline_comment_processor(comment: &str) -> String {
+    let mut result = String::with_capacity(comment.len());
+    // Replace the leading "=begin" with spaces; any text after it on the same line is content.
+    result.push_str("      ");
+    // The closing "=end" always starts the comment's last line.
+    let last_line_idx = comment
+        .rfind('\n')
+        .expect("expected '\\n' in a multiline comment")
+        + 1;
+    result.push_str(&comment[6..last_line_idx]);
+    // Replace "=end" with spaces.
+    result.push_str("    ");
+    result.push_str(&comment[last_line_idx + 4..]);
+    result
 }
 
 #[cfg(test)]
@@ -71,6 +102,38 @@ value = 42  # Comment after code
                     comment_text: "  Comment after code".to_string()
                 }
             ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn preserves_content_of_multiline_comments() -> anyhow::Result<()> {
+        let mut comments_parser = comments_parser()?;
+
+        // The `=begin`/`=end` markers are blanked; everything else — including a `#` and the
+        // text after `=begin` — is content and must be preserved.
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"
+=begin rdoc
+This mentions # a hash and
+pattern ^# stays intact
+=end
+value = 1
+"#,
+            )
+            .collect();
+
+        assert_eq!(
+            blocks,
+            vec![Comment {
+                position_range: Position::new(2, 1)..Position::new(5, 5),
+                source_range: 1..68,
+                comment_text:
+                    "       rdoc\nThis mentions # a hash and\npattern ^# stays intact\n    "
+                        .to_string()
+            }]
         );
 
         Ok(())
