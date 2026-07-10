@@ -1,5 +1,5 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
-use crate::language_parsers::{CommentsParser, c_style_line_and_block_comments_parser};
+use crate::language_parsers::{CommentsParser, c_style_and_doc_line_and_block_comments_parser};
 
 /// Returns a [`BlocksParser`] for Java.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -8,8 +8,11 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let java_language = tree_sitter_java::LANGUAGE.into();
-    let parser =
-        c_style_line_and_block_comments_parser(&java_language, "line_comment", "block_comment");
+    let parser = c_style_and_doc_line_and_block_comments_parser(
+        &java_language,
+        "line_comment",
+        "block_comment",
+    );
     Ok(parser)
 }
 
@@ -53,6 +56,7 @@ mod tests {
                 System.out.println("/**This is a method with a Javadoc comment.*/");
             }
         }
+        /// Markdown doc comment.
         "#,
             )
             .collect();
@@ -94,6 +98,11 @@ mod tests {
                     position_range: Position::new(23, 13)..Position::new(25, 16),
                     source_range: 735..809,
                     comment_text: "   \n               Prints a sample message to the console.\n               ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(30, 9)..Position::new(30, 34),
+                    source_range: 975..1000,
+                    comment_text: "    Markdown doc comment.".to_string()
                 }
             ]
         );
