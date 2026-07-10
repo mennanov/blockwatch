@@ -9,7 +9,8 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let ts_language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-    let parser = language_parsers::c_style_comments_parser(&ts_language, "comment");
+    let parser =
+        language_parsers::c_style_and_html_comments_parser(&ts_language, "comment", "html_comment");
     Ok(parser)
 }
 
@@ -22,6 +23,8 @@ mod tests {
     fn parses_typescript_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
+        // The HTML-like comments are single-line: the statement between the `<!--` and `-->`
+        // lines is code, not comment content.
         let blocks: Vec<Comment> = comments_parser
             .parse(
                 r#"
@@ -48,6 +51,10 @@ mod tests {
                 }
             }
 /// Triple slash comment.
+let done = 1;
+<!-- html open comment
+let between = 2;
+--> html close comment
             "#,
             )
             .collect();
@@ -93,6 +100,16 @@ mod tests {
                     position_range: Position::new(24, 1)..Position::new(24, 26),
                     source_range: 753..778,
                     comment_text: "  / Triple slash comment.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(26, 1)..Position::new(26, 23),
+                    source_range: 793..815,
+                    comment_text: "     html open comment".to_string()
+                },
+                Comment {
+                    position_range: Position::new(28, 1)..Position::new(28, 23),
+                    source_range: 833..855,
+                    comment_text: "    html close comment".to_string()
                 },
             ]
         );

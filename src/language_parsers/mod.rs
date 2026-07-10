@@ -375,6 +375,38 @@ fn c_style_and_doc_line_and_block_comments_parser(
     )
 }
 
+/// C-style comments parser that also handles the legacy JavaScript HTML-like comments
+/// (Annex B of the ECMAScript spec): single lines starting with `<!--` or `-->`.
+fn c_style_and_html_comments_parser(
+    language: &Language,
+    comment_node_kind: &'static str,
+    html_comment_node_kind: &'static str,
+) -> TreeSitterCommentsParser {
+    TreeSitterCommentsParser::new(
+        language,
+        Box::new(move |node, source_code| {
+            let kind = node.kind();
+            if kind == comment_node_kind {
+                let comment = &source_code[node.byte_range()];
+                Some(if comment.starts_with("//") {
+                    comment.replacen("//", "  ", 1)
+                } else {
+                    c_style_multiline_comment_processor(comment)
+                })
+            } else if kind == html_comment_node_kind {
+                let comment = &source_code[node.byte_range()];
+                Some(if comment.starts_with("<!--") {
+                    comment.replacen("<!--", "    ", 1)
+                } else {
+                    comment.replacen("-->", "   ", 1)
+                })
+            } else {
+                None
+            }
+        }),
+    )
+}
+
 /// Comments parser for languages that support `#` line comments in addition to the C-style
 /// `//` and `/* */` comments.
 fn hash_and_c_style_comments_parser(
