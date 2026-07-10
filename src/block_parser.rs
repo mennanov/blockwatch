@@ -92,12 +92,10 @@ impl<I: Iterator<Item = Comment>> Iterator for PartialBlocksIterator<I> {
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if self.comment.is_none() {
-                match self.comments.next() {
-                    Some(c) => {
-                        self.comment = Some(Rc::new(c));
-                        self.tags_parser_cursor = 0;
-                    }
-                    None => return None,
+                {
+                    let c = self.comments.next()?;
+                    self.comment = Some(Rc::new(c));
+                    self.tags_parser_cursor = 0;
                 }
             }
 
