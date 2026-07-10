@@ -1,32 +1,15 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
-use crate::language_parsers::{
-    CommentsParser, TreeSitterCommentsParser, c_style_multiline_comment_processor,
-};
+use crate::language_parsers;
+use crate::language_parsers::CommentsParser;
 
-/// Returns a [`BlocksParser`] for C++.
+/// Returns a [`BlocksParser`] for C#.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
     Ok(BlocksFromCommentsParser::new(comments_parser()?))
 }
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let c_sharp = tree_sitter_c_sharp::LANGUAGE.into();
-    let parser = TreeSitterCommentsParser::new(
-        &c_sharp,
-        Box::new(|node, source_code| {
-            if node.kind() == "comment" {
-                let comment = &source_code[node.byte_range()];
-                Some(if comment.starts_with("///") {
-                    comment.replacen("///", "   ", 1)
-                } else if comment.starts_with("//") {
-                    comment.replacen("//", "  ", 1)
-                } else {
-                    c_style_multiline_comment_processor(comment)
-                })
-            } else {
-                None
-            }
-        }),
-    );
+    let parser = language_parsers::c_style_and_doc_comments_parser(&c_sharp, "comment");
     Ok(parser)
 }
 
