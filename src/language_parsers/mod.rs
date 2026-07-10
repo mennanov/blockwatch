@@ -345,6 +345,36 @@ fn c_style_and_doc_comments_parser(
     )
 }
 
+/// Like [`c_style_line_and_block_comments_parser`], but additionally blanks the full `///`
+/// doc-comment marker, for languages where `///` is the primary documentation style
+/// (e.g. Swift).
+fn c_style_and_doc_line_and_block_comments_parser(
+    language: &Language,
+    line_comment_node_kind: &'static str,
+    block_comment_node_kind: &'static str,
+) -> TreeSitterCommentsParser {
+    TreeSitterCommentsParser::new(
+        language,
+        Box::new(move |node, source_code| {
+            let kind = node.kind();
+            if kind == line_comment_node_kind {
+                let comment = &source_code[node.byte_range()];
+                Some(if comment.starts_with("///") {
+                    comment.replacen("///", "   ", 1)
+                } else {
+                    comment.replacen("//", "  ", 1)
+                })
+            } else if kind == block_comment_node_kind {
+                Some(c_style_multiline_comment_processor(
+                    &source_code[node.byte_range()],
+                ))
+            } else {
+                None
+            }
+        }),
+    )
+}
+
 /// Comments parser for languages that support `#` line comments in addition to the C-style
 /// `//` and `/* */` comments.
 fn hash_and_c_style_comments_parser(

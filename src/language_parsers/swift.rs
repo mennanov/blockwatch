@@ -1,5 +1,5 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
-use crate::language_parsers::{CommentsParser, c_style_line_and_block_comments_parser};
+use crate::language_parsers::{CommentsParser, c_style_and_doc_line_and_block_comments_parser};
 
 /// Returns a [`BlocksParser`] for Swift.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -8,8 +8,11 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let swift_language = tree_sitter_swift::LANGUAGE.into();
-    let parser =
-        c_style_line_and_block_comments_parser(&swift_language, "comment", "multiline_comment");
+    let parser = c_style_and_doc_line_and_block_comments_parser(
+        &swift_language,
+        "comment",
+        "multiline_comment",
+    );
     Ok(parser)
 }
 
@@ -43,6 +46,7 @@ mod tests {
                  
                 return
             }
+            /// A documentation comment.
             "#,
             )
             .collect();
@@ -71,6 +75,11 @@ mod tests {
                     position_range: Position::new(13, 17)..Position::new(16, 20),
                     source_range: 343..446,
                     comment_text: "   Another comment\n                   split into\n                   multiple lines.\n                   ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(20, 13)..Position::new(20, 41),
+                    source_range: 514..542,
+                    comment_text: "    A documentation comment.".to_string()
                 }
             ]
         );
