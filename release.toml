@@ -1,0 +1,15 @@
+# Configuration for `cargo release`
+# (https://github.com/crate-ci/cargo-release/blob/master/docs/reference.md)
+
+allow-branch = ["main"]
+
+# `cargo release` only *warns* when the local branch is behind its upstream and
+# then proceeds: it publishes to crates.io (irreversible) and only afterwards
+# fails to push the release commit and tag (this happened with v0.3.4). A
+# pre-release hook aborts the release before publishing, so fail hard here if
+# the branch is stale.
+pre-release-hook = [
+    "sh",
+    "-c",
+    "git fetch origin && test \"$(git rev-list --count 'HEAD..@{upstream}')\" -eq 0 || { echo 'error: branch is behind its upstream; run git pull first' >&2; exit 1; }",
+]
