@@ -15,6 +15,7 @@ mod lua;
 mod makefile;
 mod markdown;
 mod php;
+mod proto;
 mod python;
 mod ruby;
 // pub(crate) visibility is needed by the unit tests in block_parser.rs
@@ -62,6 +63,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
     let makefile_parser = parser(makefile::parser()?);
     let markdown_parser = parser(markdown::parser()?);
     let php_parser = parser(php::parser()?);
+    let proto_parser = parser(proto::parser()?);
     let python_parser = parser(python::parser()?);
     let ruby_parser = parser(ruby::parser()?);
     let rust_parser = parser(rust::parser()?);
@@ -112,6 +114,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
         ("mk".into(), makefile_parser),
         ("php".into(), Rc::clone(&php_parser)),
         ("phtml".into(), php_parser),
+        ("proto".into(), proto_parser),
         ("py".into(), Rc::clone(&python_parser)),
         ("pyi".into(), python_parser),
         ("rb".into(), ruby_parser),

@@ -1209,6 +1209,10 @@ mod supported_languages_tests {
                 "<?php\n# <block>\necho 'world';\n# </block>\n?>".to_string(),
             ),
             (
+                "proto.proto".to_string(),
+                "// <block>\nsyntax = \"proto3\";\n// </block>".to_string(),
+            ),
+            (
                 "py.py".to_string(),
                 "# <block>\ndef main():\n    pass\n# </block>".to_string(),
             ),

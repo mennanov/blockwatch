@@ -577,6 +577,7 @@ BlockWatch supports comments in:
 - Makefile
 - Markdown
 - PHP
+- Protocol Buffers (`.proto`)
 - Python
 - Ruby
 - Rust
