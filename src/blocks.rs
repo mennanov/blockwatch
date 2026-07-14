@@ -1221,6 +1221,10 @@ mod supported_languages_tests {
                 "# <block>\nall:\n\t@echo \"hello\"\n# </block>".to_string(),
             ),
             (
+                "nix.nix".to_string(),
+                "# <block>\n{ pkgs = null; }\n# </block>".to_string(),
+            ),
+            (
                 "php.php".to_string(),
                 "<?php\n# <block>\necho 'hello';\n# </block>\n?>".to_string(),
             ),

@@ -17,6 +17,7 @@ mod kotlin;
 mod lua;
 mod makefile;
 mod markdown;
+mod nix;
 mod php;
 mod proto;
 mod python;
@@ -68,6 +69,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
     let lua_parser = parser(lua::parser()?);
     let makefile_parser = parser(makefile::parser()?);
     let markdown_parser = parser(markdown::parser()?);
+    let nix_parser = parser(nix::parser()?);
     let php_parser = parser(php::parser()?);
     let proto_parser = parser(proto::parser()?);
     let python_parser = parser(python::parser()?);
@@ -123,6 +125,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
         ("markdown".into(), Rc::clone(&markdown_parser)),
         ("md".into(), markdown_parser),
         ("mk".into(), makefile_parser),
+        ("nix".into(), nix_parser),
         ("php".into(), Rc::clone(&php_parser)),
         ("phtml".into(), php_parser),
         ("proto".into(), proto_parser),
