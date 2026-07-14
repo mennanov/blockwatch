@@ -1113,6 +1113,14 @@ mod supported_languages_tests {
                 "// <block>\nvoid main() {}\n// </block>".to_string(),
             ),
             (
+                "ex.ex".to_string(),
+                "# <block>\ndefmodule Foo do\nend\n# </block>".to_string(),
+            ),
+            (
+                "exs.exs".to_string(),
+                "# <block>\nIO.puts(:hello)\n# </block>".to_string(),
+            ),
+            (
                 "go.go".to_string(),
                 "// <block>\nfunc main() {}\n// </block>".to_string(),
             ),

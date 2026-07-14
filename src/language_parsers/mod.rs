@@ -5,6 +5,7 @@ mod cpp;
 mod css;
 mod dart;
 mod dockerfile;
+mod elixir;
 mod go;
 mod groovy;
 mod hcl;
@@ -54,6 +55,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
     let css_parser = parser(css::parser()?);
     let dart_parser = parser(dart::parser()?);
     let dockerfile_parser = parser(dockerfile::parser()?);
+    let elixir_parser = parser(elixir::parser()?);
     let go_parser = parser(go::parser()?);
     let groovy_parser = parser(groovy::parser()?);
     let hcl_parser = parser(hcl::parser()?);
@@ -94,6 +96,8 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
         ("d.ts".into(), Rc::clone(&typescript_parser)),
         ("dart".into(), dart_parser),
         ("dockerfile".into(), dockerfile_parser),
+        ("ex".into(), Rc::clone(&elixir_parser)),
+        ("exs".into(), elixir_parser),
         ("go".into(), Rc::clone(&go_parser)),
         ("go.mod".into(), Rc::clone(&go_parser)),
         ("go.sum".into(), Rc::clone(&go_parser)),
