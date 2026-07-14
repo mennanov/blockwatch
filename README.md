@@ -569,6 +569,7 @@ BlockWatch supports comments in:
 - Dockerfile (with `Containerfile` and `.dockerfile` support)
 - Elixir (`.ex`, `.exs`)
 - Go (with `go.mod`, `go.sum` and `go.work` support)
+- GraphQL (`.graphql`, `.gql`)
 - Groovy (with `.gradle` and `Jenkinsfile` support)
 - HCL (Terraform: `.tf`, `.tfvars`, `.hcl`)
 - HTML

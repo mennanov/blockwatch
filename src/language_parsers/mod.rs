@@ -7,6 +7,7 @@ mod dart;
 mod dockerfile;
 mod elixir;
 mod go;
+mod graphql;
 mod groovy;
 mod hcl;
 mod html;
@@ -57,6 +58,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
     let dockerfile_parser = parser(dockerfile::parser()?);
     let elixir_parser = parser(elixir::parser()?);
     let go_parser = parser(go::parser()?);
+    let graphql_parser = parser(graphql::parser()?);
     let groovy_parser = parser(groovy::parser()?);
     let hcl_parser = parser(hcl::parser()?);
     let html_parser = parser(html::parser()?);
@@ -102,7 +104,9 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
         ("go.mod".into(), Rc::clone(&go_parser)),
         ("go.sum".into(), Rc::clone(&go_parser)),
         ("go.work".into(), go_parser),
+        ("gql".into(), Rc::clone(&graphql_parser)),
         ("gradle".into(), Rc::clone(&groovy_parser)),
+        ("graphql".into(), graphql_parser),
         ("groovy".into(), Rc::clone(&groovy_parser)),
         ("h".into(), cpp_parser),
         ("hcl".into(), Rc::clone(&hcl_parser)),

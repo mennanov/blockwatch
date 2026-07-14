@@ -1137,8 +1137,16 @@ mod supported_languages_tests {
                 "// <block>\nuse ./mod\n// </block>".to_string(),
             ),
             (
+                "gql.gql".to_string(),
+                "# <block>\ntype Mutation {\n  noop: Boolean\n}\n# </block>".to_string(),
+            ),
+            (
                 "gradle.gradle".to_string(),
                 "// <block>\nversion = '1.0'\n// </block>".to_string(),
+            ),
+            (
+                "graphql.graphql".to_string(),
+                "# <block>\ntype Query {\n  hello: String\n}\n# </block>".to_string(),
             ),
             (
                 "groovy.groovy".to_string(),
