@@ -1,6 +1,7 @@
 mod bash;
 mod c;
 mod c_sharp;
+mod cmake;
 mod cpp;
 mod css;
 mod dart;
@@ -54,6 +55,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
     let bash_parser = parser(bash::parser()?);
     let c_parser = parser(c::parser()?);
     let c_sharp_parser = parser(c_sharp::parser()?);
+    let cmake_parser = parser(cmake::parser()?);
     let cpp_parser = parser(cpp::parser()?);
     let css_parser = parser(css::parser()?);
     let dart_parser = parser(dart::parser()?);
@@ -89,6 +91,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
     Ok(HashMap::from([
         // <block affects="README.md:supported-grammar, src/blocks.rs:supported-extensions" keep-sorted>
         ("BUILD".into(), Rc::clone(&starlark_parser)),
+        ("CMakeLists.txt".into(), Rc::clone(&cmake_parser)),
         ("Containerfile".into(), Rc::clone(&dockerfile_parser)),
         ("Dockerfile".into(), Rc::clone(&dockerfile_parser)),
         ("Jenkinsfile".into(), Rc::clone(&groovy_parser)),
@@ -100,6 +103,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
         ("bzlmod".into(), Rc::clone(&starlark_parser)),
         ("c".into(), c_parser),
         ("cc".into(), Rc::clone(&cpp_parser)),
+        ("cmake".into(), cmake_parser),
         ("containerfile".into(), Rc::clone(&dockerfile_parser)),
         ("cpp".into(), Rc::clone(&cpp_parser)),
         ("cs".into(), c_sharp_parser),

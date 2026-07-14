@@ -1085,6 +1085,14 @@ mod supported_languages_tests {
                 "# <block>\n# migration stub\n# </block>".to_string(),
             ),
             (
+                "CMakeLists.txt".to_string(),
+                "# <block>\nadd_library(foo foo.c)\n# </block>".to_string(),
+            ),
+            (
+                "cmake.cmake".to_string(),
+                "#[[ <block> ]]\nset(X 1)\n# </block>".to_string(),
+            ),
+            (
                 "bash.bash".to_string(),
                 "# <block>\necho \"hello\"\n# </block>".to_string(),
             ),

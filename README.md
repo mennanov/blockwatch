@@ -564,6 +564,7 @@ BlockWatch supports comments in:
 - Bash
 - C#
 - C/C++
+- CMake (`CMakeLists.txt`, `.cmake`)
 - CSS
 - Dart
 - Dockerfile (with `Containerfile` and `.dockerfile` support)
