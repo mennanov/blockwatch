@@ -26,6 +26,7 @@ mod ruby;
 pub(crate) mod rust;
 mod scala;
 mod sql;
+mod starlark;
 mod swift;
 mod toml;
 mod tsx;
@@ -77,6 +78,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
     let rust_parser = parser(rust::parser()?);
     let scala_parser = parser(scala::parser()?);
     let sql_parser = parser(sql::parser()?);
+    let starlark_parser = parser(starlark::parser()?);
     let swift_parser = parser(swift::parser()?);
     let toml_parser = parser(toml::parser()?);
     let typescript_parser = parser(typescript::parser()?);
@@ -86,11 +88,16 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
 
     Ok(HashMap::from([
         // <block affects="README.md:supported-grammar, src/blocks.rs:supported-extensions" keep-sorted>
+        ("BUILD".into(), Rc::clone(&starlark_parser)),
         ("Containerfile".into(), Rc::clone(&dockerfile_parser)),
         ("Dockerfile".into(), Rc::clone(&dockerfile_parser)),
         ("Jenkinsfile".into(), Rc::clone(&groovy_parser)),
         ("Makefile".into(), Rc::clone(&makefile_parser)),
+        ("WORKSPACE".into(), Rc::clone(&starlark_parser)),
         ("bash".into(), Rc::clone(&bash_parser)),
+        ("bazel".into(), Rc::clone(&starlark_parser)),
+        ("bzl".into(), Rc::clone(&starlark_parser)),
+        ("bzlmod".into(), Rc::clone(&starlark_parser)),
         ("c".into(), c_parser),
         ("cc".into(), Rc::clone(&cpp_parser)),
         ("containerfile".into(), Rc::clone(&dockerfile_parser)),
@@ -137,6 +144,7 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
         ("scala".into(), scala_parser),
         ("sh".into(), bash_parser),
         ("sql".into(), sql_parser),
+        ("star".into(), starlark_parser),
         ("swift".into(), swift_parser),
         ("tf".into(), Rc::clone(&hcl_parser)),
         ("tfvars".into(), hcl_parser),

@@ -587,6 +587,7 @@ BlockWatch supports comments in:
 - Rust
 - SQL
 - Scala (with `.sbt` support)
+- Starlark (Bazel: `BUILD`, `WORKSPACE`, `MODULE.bazel`, `.bzl`, `.bzlmod`, `.star`)
 - Swift
 - TOML
 - TypeScript

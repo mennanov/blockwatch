@@ -1069,8 +1069,28 @@ mod supported_languages_tests {
         let parsers = language_parsers()?;
         let files = HashMap::from([
             (
+                "BUILD".to_string(),
+                "# <block>\ncc_library(name = \"foo\")\n# </block>".to_string(),
+            ),
+            (
+                "MODULE.bazel".to_string(),
+                "# <block>\nmodule(name = \"m\")\n# </block>".to_string(),
+            ),
+            (
+                "WORKSPACE".to_string(),
+                "# <block>\nworkspace(name = \"w\")\n# </block>".to_string(),
+            ),
+            (
+                "WORKSPACE.bzlmod".to_string(),
+                "# <block>\n# migration stub\n# </block>".to_string(),
+            ),
+            (
                 "bash.bash".to_string(),
                 "# <block>\necho \"hello\"\n# </block>".to_string(),
+            ),
+            (
+                "bzl.bzl".to_string(),
+                "# <block>\ndef my_macro():\n    pass\n# </block>".to_string(),
             ),
             (
                 "c.c".to_string(),
@@ -1267,6 +1287,10 @@ mod supported_languages_tests {
             (
                 "sql.sql".to_string(),
                 "-- <block>\nSELECT * FROM users;\n-- </block>".to_string(),
+            ),
+            (
+                "star.star".to_string(),
+                "# <block>\nx = 42\n# </block>".to_string(),
             ),
             (
                 "swift.swift".to_string(),
