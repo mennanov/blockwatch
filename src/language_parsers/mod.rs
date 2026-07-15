@@ -458,6 +458,18 @@ fn c_style_and_html_comments_parser(
 
 /// Comments parser for languages that support `#` line comments in addition to the C-style
 /// `//` and `/* */` comments.
+/// Blanks the leading `//` or `#` line-comment marker, or the `/* */` block-comment delimiters,
+/// of a hash-or-C-style comment, preserving the comment's length.
+fn hash_and_c_style_comment_text(comment: &str) -> String {
+    if comment.starts_with("//") {
+        comment.replacen("//", "  ", 1)
+    } else if comment.starts_with("#") {
+        comment.replacen("#", " ", 1)
+    } else {
+        c_style_multiline_comment_processor(comment)
+    }
+}
+
 fn hash_and_c_style_comments_parser(
     language: &Language,
     comment_node_kind: &'static str,
@@ -468,14 +480,9 @@ fn hash_and_c_style_comments_parser(
             if node.kind() != comment_node_kind {
                 return None;
             }
-            let comment = &source_code[node.byte_range()];
-            Some(if comment.starts_with("//") {
-                comment.replacen("//", "  ", 1)
-            } else if comment.starts_with("#") {
-                comment.replacen("#", " ", 1)
-            } else {
-                c_style_multiline_comment_processor(comment)
-            })
+            Some(hash_and_c_style_comment_text(
+                &source_code[node.byte_range()],
+            ))
         }),
     )
 }

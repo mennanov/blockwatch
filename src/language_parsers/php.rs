@@ -1,7 +1,6 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers;
 use crate::language_parsers::{Comment, CommentsParser, TreeSitterCommentsParser};
-use itertools::Itertools;
 use tree_sitter::StreamingIterator;
 
 /// Returns a [`BlocksParser`] for PHP.
@@ -19,69 +18,29 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 /// comments in them are extracted with a separate HTML grammar pass, mirroring how markdown.rs
 /// handles its `html_block` nodes.
 struct PhpCommentsParser {
-    php_comments_parser: TreeSitterCommentsParser,
     php_tree_sitter_parser: tree_sitter::Parser,
-    text_query: tree_sitter::Query,
+    regions_query: tree_sitter::Query,
     html_comments_parser: TreeSitterCommentsParser,
 }
 
 impl PhpCommentsParser {
     fn new() -> Self {
         let php_language: tree_sitter::Language = tree_sitter_php::LANGUAGE_PHP.into();
-        let php_comments_parser =
-            language_parsers::hash_and_c_style_comments_parser(&php_language, "comment");
         let mut php_tree_sitter_parser = tree_sitter::Parser::new();
         php_tree_sitter_parser
             .set_language(&php_language)
             .expect("Error setting Tree-sitter language");
-        let text_query = tree_sitter::Query::new(&php_language, "(text) @text").unwrap();
+        let regions_query =
+            tree_sitter::Query::new(&php_language, "(comment) @comment (text) @text").unwrap();
         let html_comments_parser = language_parsers::xml_style_comments_parser(
             &tree_sitter_html::LANGUAGE.into(),
             "comment",
         );
         Self {
-            php_comments_parser,
             php_tree_sitter_parser,
-            text_query,
+            regions_query,
             html_comments_parser,
         }
-    }
-
-    fn parse_html_comments(&mut self, source_code: &str) -> Vec<Comment> {
-        // An HTML comment requires a `<!--`; without one there is nothing to extract, so skip the
-        // whole second parse and the view construction for the common (pure-PHP) case.
-        if !source_code.contains("<!--") {
-            return Vec::new();
-        }
-        let tree = self
-            .php_tree_sitter_parser
-            .parse(source_code, None)
-            .unwrap();
-        let root_node = tree.root_node();
-        let mut query_cursor = tree_sitter::QueryCursor::new();
-        let mut matches = query_cursor.matches(&self.text_query, root_node, source_code.as_bytes());
-
-        // Build an "HTML view" of the file: every byte of a PHP region is blanked to a space
-        // (line breaks kept, so rows and columns still line up), while the `text` nodes — the
-        // HTML template sections — are copied back verbatim. An HTML comment interrupted by a
-        // `<?php ?>` island therefore reforms into one comment with the island as interior
-        // whitespace, and, because the view is byte-for-byte aligned with the source, the parsed
-        // comment positions are already the source positions (no offsetting needed).
-        let mut html_view = source_code.as_bytes().to_vec();
-        language_parsers::blank_preserving_line_breaks(&mut html_view);
-        while let Some(query_match) = matches.next() {
-            let range = query_match
-                .captures
-                .first()
-                .expect("Empty Tree-sitter text query match")
-                .node
-                .byte_range();
-            html_view[range.clone()].copy_from_slice(&source_code.as_bytes()[range]);
-        }
-        let html_view =
-            String::from_utf8(html_view).expect("HTML view is built from the valid-UTF-8 source");
-
-        self.html_comments_parser.parse(&html_view).collect()
     }
 }
 
@@ -90,12 +49,56 @@ impl CommentsParser for PhpCommentsParser {
         &'source mut self,
         source_code: &'source str,
     ) -> impl Iterator<Item = Comment> + 'source {
-        let html_comments = self.parse_html_comments(source_code);
-        self.php_comments_parser
-            .parse(source_code)
-            .merge_by(html_comments, |a, b| {
-                a.source_range.start <= b.source_range.start
-            })
+        // The HTML template sections are blanked into an "HTML view" of the file (PHP regions
+        // become whitespace, line breaks kept, `text` nodes copied back verbatim), then parsed
+        // once with the HTML grammar. An HTML comment interrupted by a `<?php ?>` island reforms
+        // into one comment, and the view is byte-for-byte aligned with the source so the parsed
+        // positions are already the source positions. Skip it all when there is no `<!--`.
+        let mut html_view = source_code.contains("<!--").then(|| {
+            let mut view = source_code.as_bytes().to_vec();
+            language_parsers::blank_preserving_line_breaks(&mut view);
+            view
+        });
+
+        // A single PHP parse yields both the PHP `comment` nodes and the `text` regions that make
+        // up the HTML view.
+        let mut comments = Vec::new();
+        let tree = self
+            .php_tree_sitter_parser
+            .parse(source_code, None)
+            .unwrap();
+        let mut query_cursor = tree_sitter::QueryCursor::new();
+        let mut matches = query_cursor.matches(
+            &self.regions_query,
+            tree.root_node(),
+            source_code.as_bytes(),
+        );
+        while let Some(query_match) = matches.next() {
+            let node = query_match
+                .captures
+                .first()
+                .expect("Empty Tree-sitter region query match")
+                .node;
+            if node.kind() == "comment" {
+                let text = language_parsers::hash_and_c_style_comment_text(
+                    &source_code[node.byte_range()],
+                );
+                comments.push(language_parsers::comment_from_node(&node, text));
+            } else if let Some(view) = html_view.as_mut() {
+                // A `text` node: copy the HTML template section back into the blanked view.
+                let range = node.byte_range();
+                view[range.clone()].copy_from_slice(&source_code.as_bytes()[range]);
+            }
+        }
+        drop(matches);
+
+        if let Some(view) = html_view {
+            let view =
+                String::from_utf8(view).expect("HTML view is built from the valid-UTF-8 source");
+            comments.extend(self.html_comments_parser.parse(&view));
+        }
+        comments.sort_by_key(|comment| comment.source_range.start);
+        comments.into_iter()
     }
 }
 
