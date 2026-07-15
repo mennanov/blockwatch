@@ -226,22 +226,8 @@ impl<'source> CommentsIterator<'source> {
 
     fn comment_from_current_node(&self) -> Option<Comment> {
         let node = self.cursor.node();
-        let visitor = self.node_visitor;
-        if let Some(comment_text) = visitor(&node, self.source_code) {
-            let start_position = Position::new(
-                node.start_position().row + 1,
-                node.start_position().column + 1,
-            );
-            let end_position =
-                Position::new(node.end_position().row + 1, node.end_position().column + 1);
-
-            return Some(Comment {
-                position_range: start_position..end_position,
-                source_range: node.start_byte()..node.end_byte(),
-                comment_text,
-            });
-        }
-        None
+        let comment_text = (self.node_visitor)(&node, self.source_code)?;
+        Some(comment_from_node(&node, comment_text))
     }
 }
 
@@ -298,6 +284,46 @@ pub(crate) struct Comment {
     // whitespaces ("  " for "//", "   " for "/**", etc.) so that the length of the comment is
     // preserved.
     pub(crate) comment_text: String,
+}
+
+/// Builds a [`Comment`] spanning `node`, converting tree-sitter's 0-based rows/columns to the
+/// 1-based positions used throughout.
+fn comment_from_node(node: &Node, comment_text: String) -> Comment {
+    Comment {
+        position_range: Position::new(
+            node.start_position().row + 1,
+            node.start_position().column + 1,
+        )
+            ..Position::new(node.end_position().row + 1, node.end_position().column + 1),
+        source_range: node.start_byte()..node.end_byte(),
+        comment_text,
+    }
+}
+
+/// Shifts a `comment` that was parsed from the sub-region spanned by `region_node` into the
+/// coordinates of the full source. A region can start mid-line, so comments on its first line
+/// also need their columns shifted.
+fn offset_comment(comment: &mut Comment, region_node: &Node) {
+    if comment.position_range.start.line == 1 {
+        comment.position_range.start.character += region_node.start_position().column;
+    }
+    if comment.position_range.end.line == 1 {
+        comment.position_range.end.character += region_node.start_position().column;
+    }
+    comment.position_range.start.line += region_node.start_position().row;
+    comment.position_range.end.line += region_node.start_position().row;
+    comment.source_range.start += region_node.start_byte();
+    comment.source_range.end += region_node.start_byte();
+}
+
+/// Blanks every byte to a space, keeping line breaks (`\n`, `\r`) so that row and column offsets
+/// stay aligned with the original bytes.
+fn blank_preserving_line_breaks(bytes: &mut [u8]) {
+    for byte in bytes {
+        if *byte != b'\n' && *byte != b'\r' {
+            *byte = b' ';
+        }
+    }
 }
 
 /// C-style comments parser for a query that returns both line and block comments.

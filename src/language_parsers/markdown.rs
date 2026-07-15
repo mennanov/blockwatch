@@ -1,6 +1,7 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{
-    Comment, CommentsParser, TreeSitterCommentsParser, xml_style_comments_parser,
+    Comment, CommentsParser, TreeSitterCommentsParser, blank_preserving_line_breaks,
+    comment_from_node, offset_comment, xml_style_comments_parser,
 };
 use tree_sitter::StreamingIterator;
 
@@ -14,10 +15,8 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 /// HTML comments live either in [HTML blocks](https://github.github.com/gfm/#html-block) or in
 /// the inline content of other blocks (a comment with text before it on the same line).
 struct MdCommentsParser {
-    md_comments_parser: TreeSitterCommentsParser,
     md_tree_sitter_parser: tree_sitter::Parser,
     md_regions_query: tree_sitter::Query,
-    inline_capture_index: u32,
     inline_tree_sitter_parser: tree_sitter::Parser,
     code_span_query: tree_sitter::Query,
     html_comments_parser: TreeSitterCommentsParser,
@@ -30,12 +29,13 @@ impl MdCommentsParser {
         md_tree_sitter_parser
             .set_language(&markdown_lang)
             .expect("Error setting Tree-sitter language");
-        let md_regions_query =
-            tree_sitter::Query::new(&markdown_lang, "(html_block) @html_block (inline) @inline")
-                .unwrap();
-        let inline_capture_index = md_regions_query
-            .capture_index_for_name("inline")
-            .expect("the regions query defines an @inline capture");
+        let md_regions_query = tree_sitter::Query::new(
+            &markdown_lang,
+            "(html_block) @html_block \
+             (inline) @inline \
+             (link_reference_definition) @link_reference_definition",
+        )
+        .unwrap();
 
         let inline_lang: tree_sitter::Language = tree_sitter_md::INLINE_LANGUAGE.into();
         let mut inline_tree_sitter_parser = tree_sitter::Parser::new();
@@ -48,22 +48,17 @@ impl MdCommentsParser {
         let html_lang = tree_sitter_html::LANGUAGE.into();
         let html_comments_parser = xml_style_comments_parser(&html_lang, "comment");
         Self {
-            md_comments_parser: markdown_comments_parser(),
             md_tree_sitter_parser,
             md_regions_query,
-            inline_capture_index,
             inline_tree_sitter_parser,
             code_span_query,
             html_comments_parser,
         }
     }
 
-    /// Parses HTML comments from the `html_block` and `inline` regions of the Markdown tree.
-    fn parse_html_comments(&mut self, contents: &str) -> Vec<Comment> {
-        // An HTML comment requires a `<!--`; without one there is nothing to extract.
-        if !contents.contains("<!--") {
-            return Vec::new();
-        }
+    /// Extracts the `[//]:` comments and the HTML comments (from `html_block` and `inline`
+    /// regions) from a single parse of the Markdown tree.
+    fn parse_comments(&mut self, contents: &str) -> Vec<Comment> {
         let tree = self.md_tree_sitter_parser.parse(contents, None).unwrap();
         let mut query_cursor = tree_sitter::QueryCursor::new();
         let mut matches = query_cursor.matches(
@@ -71,50 +66,48 @@ impl MdCommentsParser {
             tree.root_node(),
             contents.as_bytes(),
         );
-        let mut all_html_comments = Vec::new();
+        let mut comments = Vec::new();
         while let Some(query_match) = matches.next() {
-            let capture = query_match
+            let node = query_match
                 .captures
                 .first()
-                .expect("Empty Tree-sitter region query match");
-            let node = capture.node;
+                .expect("Empty Tree-sitter region query match")
+                .node;
             let region = &contents[node.byte_range()];
-            // A comment requires a `<!--`; skip the HTML parse for regions without one.
-            if !region.contains("<!--") {
+
+            // `[//]:` comments are direct nodes of the Markdown tree, so their positions are
+            // already the source positions.
+            if node.kind() == "link_reference_definition" {
+                if let Some(text) = link_reference_definition_comment_text(region) {
+                    comments.push(comment_from_node(&node, text));
+                }
                 continue;
             }
 
+            // The remaining regions carry HTML comments, which require a `<!--`.
+            if !region.contains("<!--") {
+                continue;
+            }
             // Inline regions may contain code spans whose contents must not be mistaken for
-            // comments, but a code span requires a backtick; without one the region can be
-            // parsed as is.
-            let html_comments: Vec<Comment> =
-                if capture.index == self.inline_capture_index && region.contains('`') {
-                    let view = Self::inline_html_view(
-                        &mut self.inline_tree_sitter_parser,
-                        &self.code_span_query,
-                        region,
-                    );
-                    self.html_comments_parser.parse(&view).collect()
-                } else {
-                    self.html_comments_parser.parse(region).collect()
-                };
+            // comments, but a code span requires a backtick; without one the region is parsed
+            // as is.
+            let html_comments: Vec<Comment> = if node.kind() == "inline" && region.contains('`') {
+                let view = Self::inline_html_view(
+                    &mut self.inline_tree_sitter_parser,
+                    &self.code_span_query,
+                    region,
+                );
+                self.html_comments_parser.parse(&view).collect()
+            } else {
+                self.html_comments_parser.parse(region).collect()
+            };
             for mut comment in html_comments {
-                // A region can start mid-line (e.g. in a blockquote), so comments on its first
-                // line need their columns shifted as well.
-                if comment.position_range.start.line == 1 {
-                    comment.position_range.start.character += node.start_position().column;
-                }
-                if comment.position_range.end.line == 1 {
-                    comment.position_range.end.character += node.start_position().column;
-                }
-                comment.position_range.start.line += node.start_position().row;
-                comment.position_range.end.line += node.start_position().row;
-                comment.source_range.start += node.start_byte();
-                comment.source_range.end += node.start_byte();
-                all_html_comments.push(comment);
+                // The comment's positions are relative to the region; shift them to the source.
+                offset_comment(&mut comment, &node);
+                comments.push(comment);
             }
         }
-        all_html_comments
+        comments
     }
 
     /// Returns a copy of the inline `region` with its code spans blanked to whitespace (line
@@ -138,11 +131,7 @@ impl MdCommentsParser {
                 .expect("Empty Tree-sitter code_span query match")
                 .node
                 .byte_range();
-            for byte in &mut view[range] {
-                if *byte != b'\n' && *byte != b'\r' {
-                    *byte = b' ';
-                }
-            }
+            blank_preserving_line_breaks(&mut view[range]);
         }
         String::from_utf8(view).expect("view is built from the valid-UTF-8 region")
     }
@@ -153,58 +142,52 @@ impl CommentsParser for MdCommentsParser {
         &'source mut self,
         contents: &'source str,
     ) -> impl Iterator<Item = Comment> + 'source {
-        let mut comments = self.parse_html_comments(contents);
-        comments.extend(self.md_comments_parser.parse(contents));
+        // `[//]:` and HTML comments come out of the merged parse interleaved by region; sort them
+        // into a single source-ordered stream so a block can span comments of different kinds.
+        let mut comments = self.parse_comments(contents);
         comments.sort_by_key(|comment| comment.source_range.start);
         comments.into_iter()
     }
 }
 
-fn markdown_comments_parser() -> TreeSitterCommentsParser {
-    let markdown_lang = tree_sitter_md::LANGUAGE.into();
-    TreeSitterCommentsParser::new(
-        &markdown_lang,
-        Box::new(|node, source_code| {
-            if node.kind() != "link_reference_definition" {
-                return None;
-            }
-            let comment = &source_code[node.byte_range()];
-            let prefix_idx = comment.find("[//]:")?;
-            let start_search = prefix_idx + 5;
-            let open_idx = comment[start_search..]
-                .find(|c| ['(', '"', '\''].contains(&c))
-                .map(|i| i + start_search)
-                .expect("comment is expected to have a title delimiter");
+/// Extracts the content of a Markdown `[//]:` comment (a link reference definition used as a
+/// comment), blanking the `[//]:` prefix and the title delimiters so the length is preserved.
+/// Returns `None` for a link reference definition that is not a `[//]:` comment.
+fn link_reference_definition_comment_text(comment: &str) -> Option<String> {
+    let prefix_idx = comment.find("[//]:")?;
+    let start_search = prefix_idx + 5;
+    let open_idx = comment[start_search..]
+        .find(|c| ['(', '"', '\''].contains(&c))
+        .map(|i| i + start_search)
+        .expect("comment is expected to have a title delimiter");
 
-            let open_char = comment.chars().nth(open_idx).unwrap();
-            let close_char = match open_char {
-                '(' => ')',
-                '"' => '"',
-                '\'' => '\'',
-                _ => unreachable!(),
-            };
+    let open_char = comment.chars().nth(open_idx).unwrap();
+    let close_char = match open_char {
+        '(' => ')',
+        '"' => '"',
+        '\'' => '\'',
+        _ => unreachable!(),
+    };
 
-            let close_idx = comment
-                .rfind(close_char)
-                .expect("comment is expected to end with matching delimiter");
+    let close_idx = comment
+        .rfind(close_char)
+        .expect("comment is expected to end with matching delimiter");
 
-            let mut result = String::with_capacity(comment.len());
-            result.push_str(&comment[..prefix_idx]);
-            // Replace "[//]:" with spaces.
-            result.push_str("     ");
-            // Replace everything before the open delimiter with spaces (including the delimiter).
-            result.push_str(" ".repeat(open_idx - (prefix_idx + 5) + 1).as_str());
-            // Copy the comment's content.
-            result.push_str(&comment[open_idx + 1..close_idx]);
-            // Replace the close delimiter with a space.
-            result.push(' ');
-            if close_idx + 1 < comment.len() {
-                // Copy the rest of the comment after the close delimiter.
-                result.push_str(&comment[close_idx + 1..]);
-            }
-            Some(result)
-        }),
-    )
+    let mut result = String::with_capacity(comment.len());
+    result.push_str(&comment[..prefix_idx]);
+    // Replace "[//]:" with spaces.
+    result.push_str("     ");
+    // Replace everything before the open delimiter with spaces (including the delimiter).
+    result.push_str(" ".repeat(open_idx - (prefix_idx + 5) + 1).as_str());
+    // Copy the comment's content.
+    result.push_str(&comment[open_idx + 1..close_idx]);
+    // Replace the close delimiter with a space.
+    result.push(' ');
+    if close_idx + 1 < comment.len() {
+        // Copy the rest of the comment after the close delimiter.
+        result.push_str(&comment[close_idx + 1..]);
+    }
+    Some(result)
 }
 
 #[cfg(test)]

@@ -63,14 +63,12 @@ impl PhpCommentsParser {
 
         // Build an "HTML view" of the file: every byte of a PHP region is blanked to a space
         // (line breaks kept, so rows and columns still line up), while the `text` nodes — the
-        // HTML template sections — are copied verbatim. An HTML comment interrupted by a
+        // HTML template sections — are copied back verbatim. An HTML comment interrupted by a
         // `<?php ?>` island therefore reforms into one comment with the island as interior
         // whitespace, and, because the view is byte-for-byte aligned with the source, the parsed
         // comment positions are already the source positions (no offsetting needed).
-        let mut html_view: Vec<u8> = source_code
-            .bytes()
-            .map(|b| if b == b'\n' || b == b'\r' { b } else { b' ' })
-            .collect();
+        let mut html_view = source_code.as_bytes().to_vec();
+        language_parsers::blank_preserving_line_breaks(&mut html_view);
         while let Some(query_match) = matches.next() {
             let range = query_match
                 .captures
