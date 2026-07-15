@@ -1,77 +1,112 @@
-use crate::block_parser::{BlocksFromCommentsParser, BlocksParser, parse_blocks_from_comments};
-use crate::blocks::Block;
-use crate::language_parsers::{Comment, CommentsParser, TreeSitterCommentsParser};
-use anyhow::Context;
-use itertools::Itertools;
+use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
+use crate::language_parsers::{
+    Comment, CommentsParser, TreeSitterCommentsParser, xml_style_comments_parser,
+};
 use tree_sitter::StreamingIterator;
 
 /// Returns a [`BlocksParser`] for Markdown.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
-    let md_blocks_parser = BlocksFromCommentsParser::new(markdown_comments_parser()?);
-    Ok(MdParser::new(md_blocks_parser))
+    Ok(BlocksFromCommentsParser::new(MdCommentsParser::new()))
 }
 
-/// Parses Markdown and HTML comments from Markdown.
+/// Parses Markdown `[//]:` comments and the HTML comments embedded in Markdown.
 ///
-/// HTML comments are parsed from valid [HTML blocks](https://github.github.com/gfm/#html-block).
-struct MdParser<C: CommentsParser> {
-    md_blocks_parser: BlocksFromCommentsParser<C>,
+/// HTML comments live either in [HTML blocks](https://github.github.com/gfm/#html-block) or in
+/// the inline content of other blocks (a comment with text before it on the same line).
+struct MdCommentsParser {
+    md_comments_parser: TreeSitterCommentsParser,
     md_tree_sitter_parser: tree_sitter::Parser,
-    md_html_blocks_query: tree_sitter::Query,
+    md_regions_query: tree_sitter::Query,
+    inline_capture_index: u32,
+    inline_tree_sitter_parser: tree_sitter::Parser,
+    code_span_query: tree_sitter::Query,
     html_comments_parser: TreeSitterCommentsParser,
 }
 
-impl<C: CommentsParser> MdParser<C> {
-    fn new(md_parser: BlocksFromCommentsParser<C>) -> Self {
+impl MdCommentsParser {
+    fn new() -> Self {
+        let markdown_lang: tree_sitter::Language = tree_sitter_md::LANGUAGE.into();
         let mut md_tree_sitter_parser = tree_sitter::Parser::new();
-        let markdown_lang = tree_sitter_md::LANGUAGE.into();
         md_tree_sitter_parser
             .set_language(&markdown_lang)
             .expect("Error setting Tree-sitter language");
-        let md_html_blocks_query =
-            tree_sitter::Query::new(&markdown_lang, "(html_block) @html_block").unwrap();
+        let md_regions_query =
+            tree_sitter::Query::new(&markdown_lang, "(html_block) @html_block (inline) @inline")
+                .unwrap();
+        let inline_capture_index = md_regions_query
+            .capture_index_for_name("inline")
+            .expect("the regions query defines an @inline capture");
+
+        let inline_lang: tree_sitter::Language = tree_sitter_md::INLINE_LANGUAGE.into();
+        let mut inline_tree_sitter_parser = tree_sitter::Parser::new();
+        inline_tree_sitter_parser
+            .set_language(&inline_lang)
+            .expect("Error setting Tree-sitter language");
+        let code_span_query =
+            tree_sitter::Query::new(&inline_lang, "(code_span) @code_span").unwrap();
 
         let html_lang = tree_sitter_html::LANGUAGE.into();
-        let html_comments_parser = TreeSitterCommentsParser::new(
-            &html_lang,
-            Box::new(|node, source_code| {
-                if node.kind() == "comment" {
-                    Some(source_code[node.byte_range()].to_string())
-                } else {
-                    None
-                }
-            }),
-        );
+        let html_comments_parser = xml_style_comments_parser(&html_lang, "comment");
         Self {
-            md_blocks_parser: md_parser,
+            md_comments_parser: markdown_comments_parser(),
             md_tree_sitter_parser,
-            md_html_blocks_query,
+            md_regions_query,
+            inline_capture_index,
+            inline_tree_sitter_parser,
+            code_span_query,
             html_comments_parser,
         }
     }
 
-    fn parse_html_blocks(&mut self, contents: &str) -> anyhow::Result<Vec<Block>> {
-        let html_comments = self.parse_html_comments(contents)?;
-        parse_blocks_from_comments(html_comments.into_iter())
-    }
-
-    fn parse_html_comments(&mut self, contents: &str) -> anyhow::Result<Vec<Comment>> {
+    /// Parses HTML comments from the `html_block` and `inline` regions of the Markdown tree.
+    fn parse_html_comments(&mut self, contents: &str) -> Vec<Comment> {
+        // An HTML comment requires a `<!--`; without one there is nothing to extract.
+        if !contents.contains("<!--") {
+            return Vec::new();
+        }
         let tree = self.md_tree_sitter_parser.parse(contents, None).unwrap();
-        let root_node = tree.root_node();
         let mut query_cursor = tree_sitter::QueryCursor::new();
-        let mut matches =
-            query_cursor.matches(&self.md_html_blocks_query, root_node, contents.as_bytes());
+        let mut matches = query_cursor.matches(
+            &self.md_regions_query,
+            tree.root_node(),
+            contents.as_bytes(),
+        );
         let mut all_html_comments = Vec::new();
         while let Some(query_match) = matches.next() {
             let capture = query_match
                 .captures
                 .first()
-                .context("Empty Tree-sitter html_block query match")?;
+                .expect("Empty Tree-sitter region query match");
             let node = capture.node;
-            let html_block = &contents[node.start_byte()..node.end_byte()];
+            let region = &contents[node.byte_range()];
+            // A comment requires a `<!--`; skip the HTML parse for regions without one.
+            if !region.contains("<!--") {
+                continue;
+            }
 
-            let mut html_comments = self.html_comments_parser.parse(html_block);
-            for mut comment in &mut html_comments {
+            // Inline regions may contain code spans whose contents must not be mistaken for
+            // comments, but a code span requires a backtick; without one the region can be
+            // parsed as is.
+            let html_comments: Vec<Comment> =
+                if capture.index == self.inline_capture_index && region.contains('`') {
+                    let view = Self::inline_html_view(
+                        &mut self.inline_tree_sitter_parser,
+                        &self.code_span_query,
+                        region,
+                    );
+                    self.html_comments_parser.parse(&view).collect()
+                } else {
+                    self.html_comments_parser.parse(region).collect()
+                };
+            for mut comment in html_comments {
+                // A region can start mid-line (e.g. in a blockquote), so comments on its first
+                // line need their columns shifted as well.
+                if comment.position_range.start.line == 1 {
+                    comment.position_range.start.character += node.start_position().column;
+                }
+                if comment.position_range.end.line == 1 {
+                    comment.position_range.end.character += node.start_position().column;
+                }
                 comment.position_range.start.line += node.start_position().row;
                 comment.position_range.end.line += node.start_position().row;
                 comment.source_range.start += node.start_byte();
@@ -79,22 +114,55 @@ impl<C: CommentsParser> MdParser<C> {
                 all_html_comments.push(comment);
             }
         }
-        Ok(all_html_comments)
+        all_html_comments
+    }
+
+    /// Returns a copy of the inline `region` with its code spans blanked to whitespace (line
+    /// breaks kept), so that a `<!--` inside inline code is not mistaken for an HTML comment.
+    /// The copy is byte-for-byte aligned with the region, so comment positions parsed from it
+    /// are valid in the region.
+    fn inline_html_view(
+        inline_tree_sitter_parser: &mut tree_sitter::Parser,
+        code_span_query: &tree_sitter::Query,
+        region: &str,
+    ) -> String {
+        let mut view = region.as_bytes().to_vec();
+        let tree = inline_tree_sitter_parser.parse(region, None).unwrap();
+        let mut query_cursor = tree_sitter::QueryCursor::new();
+        let mut matches =
+            query_cursor.matches(code_span_query, tree.root_node(), region.as_bytes());
+        while let Some(query_match) = matches.next() {
+            let range = query_match
+                .captures
+                .first()
+                .expect("Empty Tree-sitter code_span query match")
+                .node
+                .byte_range();
+            for byte in &mut view[range] {
+                if *byte != b'\n' && *byte != b'\r' {
+                    *byte = b' ';
+                }
+            }
+        }
+        String::from_utf8(view).expect("view is built from the valid-UTF-8 region")
     }
 }
 
-impl<C: CommentsParser> BlocksParser for MdParser<C> {
-    fn parse(&mut self, contents: &str) -> anyhow::Result<Vec<Block>> {
-        let md_blocks = self.md_blocks_parser.parse(contents)?;
-        let html_blocks = self.parse_html_blocks(contents)?;
-
-        Ok(md_blocks.into_iter().merge(html_blocks).collect())
+impl CommentsParser for MdCommentsParser {
+    fn parse<'source>(
+        &'source mut self,
+        contents: &'source str,
+    ) -> impl Iterator<Item = Comment> + 'source {
+        let mut comments = self.parse_html_comments(contents);
+        comments.extend(self.md_comments_parser.parse(contents));
+        comments.sort_by_key(|comment| comment.source_range.start);
+        comments.into_iter()
     }
 }
 
-fn markdown_comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn markdown_comments_parser() -> TreeSitterCommentsParser {
     let markdown_lang = tree_sitter_md::LANGUAGE.into();
-    let parser = TreeSitterCommentsParser::new(
+    TreeSitterCommentsParser::new(
         &markdown_lang,
         Box::new(|node, source_code| {
             if node.kind() != "link_reference_definition" {
@@ -136,14 +204,13 @@ fn markdown_comments_parser() -> anyhow::Result<impl CommentsParser> {
             }
             Some(result)
         }),
-    );
-
-    Ok(parser)
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blocks::Block;
     use crate::{Position, test_utils};
     use std::collections::HashMap;
 
@@ -197,6 +264,83 @@ Some text here 3
                 )
             ]
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parses_inline_html_comments_correctly() -> anyhow::Result<()> {
+        let mut parser = parser()?;
+
+        // An HTML comment with other text before it on the same line is inline HTML, not an
+        // `html_block`. A `<!--` inside inline code is literal text, not a comment.
+        let content = r#"
+# Header
+
+Some text <!-- <block name="inline_block"> --> and
+more content here
+ending text <!-- </block> --> tail.
+
+Inline code `<!-- <block name="ignored"> -->` is not a comment.
+"#;
+        let blocks = parser.parse(content)?;
+
+        assert_eq!(
+            blocks,
+            vec![Block::new(
+                HashMap::from([("name".to_string(), "inline_block".to_string())]),
+                Position::new(4, 16)..=Position::new(4, 42),
+                test_utils::substr_range(content, " and\nmore content here\nending text "),
+                Position::new(4, 47)..Position::new(6, 13),
+            )]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parses_blocks_spanning_block_level_and_inline_html_comments() -> anyhow::Result<()> {
+        let mut parser = parser()?;
+
+        let content = r#"
+<!-- <block name="mixed"> -->
+Some content.
+Closing text <!-- </block> --> tail.
+"#;
+        let blocks = parser.parse(content)?;
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].attributes["name"], "mixed");
+
+        Ok(())
+    }
+
+    #[test]
+    fn parses_blocks_spanning_link_reference_and_html_comment_syntaxes() -> anyhow::Result<()> {
+        let mut parser = parser()?;
+
+        // The `[//]:` and `<!--` comments are merged into one source-ordered stream, so a block
+        // can open in one syntax and close in the other, in either direction.
+        let content = r#"
+[//]: # (<block name="a">)
+
+First block content.
+
+<!-- </block> -->
+
+<!-- <block name="b"> -->
+
+Second block content.
+
+[//]: # (</block>)
+"#;
+        let blocks = parser.parse(content)?;
+
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].attributes["name"], "a");
+        assert!(blocks[0].content(content).contains("First block content"));
+        assert_eq!(blocks[1].attributes["name"], "b");
+        assert!(blocks[1].content(content).contains("Second block content"));
 
         Ok(())
     }
