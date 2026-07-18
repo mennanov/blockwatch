@@ -57,21 +57,25 @@ index abc123..def456 100644
 
 #[test]
 fn diff_with_satisfied_blocks_succeeds() {
+    // The diff deletes one line inside each block, so its post-image matches the on-disk fixture
+    // and both blocks' contents count as modified.
     let diff_content = r#"
 diff --git a/tests/testdata/affects.md b/tests/testing_data
 index abc123..def456 100644
 --- a/tests/testdata/affects.md
 +++ b/tests/testdata/affects.md
-@@ -1,11 +1,9 @@
+@@ -1,13 +1,11 @@
  # Testing data for integration tests
 
  [//]: # (<block affects=":foo">)
--First block.
+-Deleted first line.
+ First block.
 
  [//]: # (</block>)
 
  [//]: # (<block name="foo">)
--Second block.
+-Deleted second line.
+ Second block.
 
  [//]: # (</block>)
 "#;
@@ -86,21 +90,24 @@ index abc123..def456 100644
 
 #[test]
 fn diff_with_satisfied_blocks_non_root_dir_succeeds() {
+    // Same post-image-consistent diff as `diff_with_satisfied_blocks_succeeds`.
     let diff_content = r#"
 diff --git a/tests/testdata/affects.md b/tests/testing_data
 index abc123..def456 100644
 --- a/tests/testdata/affects.md
 +++ b/tests/testdata/affects.md
-@@ -1,11 +1,9 @@
+@@ -1,13 +1,11 @@
  # Testing data for integration tests
 
  [//]: # (<block affects=":foo">)
--First block.
+-Deleted first line.
+ First block.
 
  [//]: # (</block>)
 
  [//]: # (<block name="foo">)
--Second block.
+-Deleted second line.
+ Second block.
 
  [//]: # (</block>)
 "#;
@@ -129,6 +136,29 @@ index abc123..def456 100644
  First block.
 
  [//]: # (</block>)
+"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.write_stdin(diff_content);
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.assert().success();
+}
+
+#[test]
+fn diff_with_only_tag_modified_in_hunk_with_more_added_than_deleted_lines_succeeds() {
+    let diff_content = r#"
+diff --git a/tests/testdata/affects.py b/tests/testdata/affects.py
+index abc123..def456 100644
+--- a/tests/testdata/affects.py
++++ b/tests/testdata/affects.py
+@@ -1,2 +1,3 @@
+-# Project dependencies.
+-# <block name="deps" affects=":deps-docs">
++# Project dependencies, kept sorted
++# and unique.
++# <block name="deps" affects=":deps-docs" keep-sorted="asc">
 "#;
 
     let mut cmd = cargo_bin_cmd!();

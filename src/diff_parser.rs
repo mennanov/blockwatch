@@ -1,5 +1,6 @@
+use anyhow::Context;
 use similar::DiffOp;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
@@ -38,7 +39,13 @@ pub fn line_changes_from_diff(
                 target_path.display()
             );
         }
-        result.insert(target_path, line_changes(&patched_file));
+        let changes = line_changes(&patched_file).with_context(|| {
+            format!(
+                "failed to extract line changes from the diff for \"{}\"",
+                target_path.display()
+            )
+        })?;
+        result.insert(target_path, changes);
     }
     Ok(result)
 }
@@ -53,37 +60,205 @@ fn is_within_repo_root(path: &Path) -> bool {
         .all(|c| matches!(c, Component::CurDir | Component::Normal(_)))
 }
 
-fn line_changes(patched_file: &PatchedFile) -> Vec<LineChange> {
+fn line_changes(patched_file: &PatchedFile) -> anyhow::Result<Vec<LineChange>> {
     let mut line_changes = Vec::new();
-    let mut deleted_lines: VecDeque<&Line> = VecDeque::new();
-    let mut prev_line = None;
+    let mut removed: Vec<&Line> = Vec::new();
+    let mut added: Vec<&Line> = Vec::new();
     for hunk in patched_file.hunks() {
+        // Target-file line of the last added/context line seen, so pure-deletion groups can be
+        // anchored in target coordinates. A zero-length target start denotes the line before the
+        // deletion gap; a non-zero start is the hunk's first target line.
+        let mut last_target_line = if hunk.target_length == 0 {
+            hunk.target_start
+        } else {
+            hunk.target_start.saturating_sub(1)
+        };
         for line in hunk.lines() {
             if line.is_added() {
-                if let Some(deleted_line) = deleted_lines.pop_front() {
-                    // This is a modified line. Find modified ranges in it.
-                    let ranges = line_diff(&deleted_line.value, &line.value);
-                    line_changes.push(LineChange {
-                        line: line.target_line_no.unwrap(),
-                        ranges: Some(ranges),
-                    });
-                } else {
-                    // This is a new (added) line.
-                    line_changes.push(LineChange {
-                        line: line.target_line_no.unwrap(),
-                        ranges: None,
-                    });
-                }
+                added.push(line);
+                last_target_line = line.target_line_no.unwrap();
             } else if line.is_removed() {
-                deleted_lines.push_back(line);
+                removed.push(line);
             } else if line.is_context() {
-                clear_or_fold_deleted_lines(&prev_line, &mut deleted_lines, &mut line_changes);
+                flush_group(
+                    &mut removed,
+                    &mut added,
+                    last_target_line + 1,
+                    &mut line_changes,
+                )?;
+                last_target_line = line.target_line_no.unwrap();
             }
-            prev_line = Some(line);
+            // Other line types (the "\ No newline at end of file" marker) can appear between the
+            // removed and added runs of a group and must not affect grouping.
         }
-        clear_or_fold_deleted_lines(&prev_line, &mut deleted_lines, &mut line_changes);
+        // Change groups never span hunks.
+        flush_group(
+            &mut removed,
+            &mut added,
+            last_target_line + 1,
+            &mut line_changes,
+        )?;
     }
-    line_changes
+    Ok(line_changes)
+}
+
+/// Appends `line_change` to `line_changes`, enforcing ascending order by line.
+///
+/// The binary searches in blocks.rs rely on this order. A valid unified diff always satisfies it;
+/// a violation means the diff's hunks are out of order or overlapping.
+fn push_line_change(
+    line_changes: &mut Vec<LineChange>,
+    line_change: LineChange,
+) -> anyhow::Result<()> {
+    if let Some(last) = line_changes.last()
+        && last.line > line_change.line
+    {
+        anyhow::bail!(
+            "diff hunks are out of order: a change at line {} follows a change at line {}",
+            line_change.line,
+            last.line
+        );
+    }
+    line_changes.push(line_change);
+    Ok(())
+}
+
+/// Emits [`LineChange`]s for a completed change group and clears the group buffers.
+///
+/// A change group is a contiguous run of removed and added lines between context lines (or hunk
+/// boundaries).
+fn flush_group(
+    removed: &mut Vec<&Line>,
+    added: &mut Vec<&Line>,
+    deletion_anchor_line: usize,
+    line_changes: &mut Vec<LineChange>,
+) -> anyhow::Result<()> {
+    if added.is_empty() {
+        // A purely deleted group is represented by a single line change at the target-file line
+        // now occupying the deleted region, since the deleted lines no longer exist there.
+        if !removed.is_empty() {
+            push_line_change(
+                line_changes,
+                LineChange {
+                    line: deletion_anchor_line,
+                    ranges: None,
+                },
+            )?;
+        }
+    } else {
+        let matched_removed_idxes = align_added_to_removed(removed, added);
+        for (i, added_line) in added.iter().enumerate() {
+            let matched = matched_removed_idxes.as_ref().and_then(|idxes| idxes[i]);
+            push_line_change(
+                line_changes,
+                LineChange {
+                    line: added_line.target_line_no.unwrap(),
+                    ranges: matched.map(|j| line_diff(&removed[j].value, &added_line.value)),
+                },
+            )?;
+        }
+        // Removed lines with no counterpart are dropped: their region is already covered by the
+        // added lines of the same group.
+    }
+    removed.clear();
+    added.clear();
+    Ok(())
+}
+
+/// Maximum `removed.len() * added.len()` of a change group for similarity-based pairing; larger
+/// groups fall back to positional pairing to bound the cost of the similarity matrix.
+const MAX_SIMILARITY_PAIRING_PAIRS: usize = 10_000;
+
+/// Maximum total bytes of a change group's lines for similarity-based pairing. Character-level
+/// diffs are super-linear in line length, and the piped diff may contain files blockwatch never
+/// validates (lockfiles, minified assets); oversized groups fall back to positional pairing.
+const MAX_SIMILARITY_PAIRING_BYTES: usize = 1 << 16;
+
+/// Pairs each added line of a change group with a removed line, preserving order.
+///
+/// Returns, for every added line, the index in `removed` it was paired with (if any). Pairs are
+/// anchored on the highest character-level similarity first (like Python's `difflib.Differ`) and
+/// the sublists on each side of an anchor are paired recursively, so pairs never cross. This keeps
+/// a lightly edited line (e.g. a block start tag gaining an attribute) paired with its old version
+/// even when the group's removed/added counts differ, instead of degrading it to a whole-line
+/// change.
+/// If no lines are removed returns `None`.
+fn align_added_to_removed(removed: &[&Line], added: &[&Line]) -> Option<Vec<Option<usize>>> {
+    if removed.is_empty() {
+        return None;
+    }
+    let total_bytes: usize = removed
+        .iter()
+        .chain(added.iter())
+        .map(|line| line.value.len())
+        .sum();
+    if removed.len() * added.len() > MAX_SIMILARITY_PAIRING_PAIRS
+        || total_bytes > MAX_SIMILARITY_PAIRING_BYTES
+    {
+        return Some(align_positionally(removed.len(), added.len()));
+    }
+    let mut result = vec![None; added.len()];
+    let ratios: Vec<Vec<f32>> = removed
+        .iter()
+        .map(|removed_line| {
+            added
+                .iter()
+                .map(|added_line| {
+                    similar::TextDiff::from_chars(
+                        removed_line.value.as_str(),
+                        added_line.value.as_str(),
+                    )
+                    .ratio()
+                })
+                .collect()
+        })
+        .collect();
+    anchor_best_pairs(&ratios, 0..removed.len(), 0..added.len(), &mut result);
+    Some(result)
+}
+
+/// Pairs each added line with the removed line at the same position within the group, leaving the
+/// excess on either side unmatched. The fallback for groups too large for similarity pairing.
+fn align_positionally(removed_count: usize, added_count: usize) -> Vec<Option<usize>> {
+    (0..added_count)
+        .map(|i| (i < removed_count).then_some(i))
+        .collect()
+}
+
+/// Pairs the most similar (removed, added) lines within the given index ranges, then recurses on
+/// the sub-ranges before and after the anchor. Ties keep the earliest pair, matching the previous
+/// positional behavior for groups of equally-similar lines.
+fn anchor_best_pairs(
+    ratios: &[Vec<f32>],
+    removed_range: Range<usize>,
+    added_range: Range<usize>,
+    result: &mut [Option<usize>],
+) {
+    if removed_range.is_empty() || added_range.is_empty() {
+        return;
+    }
+    let (mut best_removed, mut best_added, mut best_ratio) =
+        (removed_range.start, added_range.start, -1f32);
+    for i in removed_range.clone() {
+        for j in added_range.clone() {
+            if ratios[i][j] > best_ratio {
+                (best_removed, best_added, best_ratio) = (i, j, ratios[i][j]);
+            }
+        }
+    }
+    result[best_added] = Some(best_removed);
+    anchor_best_pairs(
+        ratios,
+        removed_range.start..best_removed,
+        added_range.start..best_added,
+        result,
+    );
+    anchor_best_pairs(
+        ratios,
+        best_removed + 1..removed_range.end,
+        best_added + 1..added_range.end,
+        result,
+    );
 }
 
 /// Returns sorted character ranges in `new` that represent changes from `old`.
@@ -131,32 +306,6 @@ fn push_or_merge_range(ranges: &mut Vec<Range<usize>>, mut new: Range<usize>) {
     while i > 0 && ranges[i].start < ranges[i - 1].start {
         ranges.swap(i, i - 1);
         i -= 1;
-    }
-}
-
-/// Pushes the first deleted line to the `line_changes` and deletes all the rest.
-fn fold_deleted_lines(deleted_lines: &mut VecDeque<&Line>, line_changes: &mut Vec<LineChange>) {
-    if let Some(deleted_line) = deleted_lines.pop_front() {
-        line_changes.push(LineChange {
-            line: deleted_line.source_line_no.unwrap(),
-            ranges: None,
-        })
-    }
-    deleted_lines.clear()
-}
-
-/// Clears `deleted_lines` if `prev_line` is a new line, folds them otherwise.
-fn clear_or_fold_deleted_lines(
-    prev_line: &Option<&Line>,
-    deleted_lines: &mut VecDeque<&Line>,
-    line_changes: &mut Vec<LineChange>,
-) {
-    if prev_line.is_some_and(|prev: &Line| prev.is_added()) {
-        // Consecutive deleted lines followed by a new line is a single modified line and
-        // should already be handled by the new line handler.
-        deleted_lines.clear();
-    } else {
-        fold_deleted_lines(deleted_lines, line_changes);
     }
 }
 
@@ -633,7 +782,7 @@ index f384549..8c05df4 100644
         )?;
         assert_eq!(
             line_changes[&PathBuf::from("a.txt")],
-            vec![line_change(1), line_change(3)]
+            vec![line_change(1), line_change(2)]
         );
         Ok(())
     }
@@ -709,6 +858,149 @@ index f384549..58a279e 100644
                 line_change(5)
             ]
         );
+        Ok(())
+    }
+
+    // Reproduces https://github.com/mennanov/blockwatch/issues/93: in a group with 2 deleted and
+    // 3 added lines, the edited block start tag line must pair with its old version (by
+    // similarity, not queue position) so its changed ranges stop before the closing `>` instead
+    // of degrading to a whole-line change that falsely intersects the block's content.
+    #[test]
+    fn diff_with_more_added_than_deleted_lines_pairs_modified_lines_by_similarity()
+    -> anyhow::Result<()> {
+        let line_changes = line_changes_from_diff(
+            r#"diff --git a/deps.py b/deps.py
+index abc123..def456 100644
+--- a/deps.py
++++ b/deps.py
+@@ -1,2 +1,3 @@
+-# Project dependencies.
+-# <block name="deps" affects=":deps-docs">
++# Project dependencies, kept sorted
++# and unique.
++# <block name="deps" affects=":deps-docs" keep-sorted="asc">
+"#,
+        )?;
+        let changes = &line_changes[&PathBuf::from("deps.py")];
+        assert_eq!(changes.len(), 3);
+        // Line 1 pairs with the old comment line.
+        assert_eq!(changes[0].line, 1);
+        assert!(changes[0].ranges.is_some());
+        // Line 2 is the leftover pure insertion.
+        assert_eq!(changes[1], line_change(2));
+        // Line 3 (the tag) pairs with the old tag line; its ranges must not reach the closing `>`
+        // (the last character of the line), which is where the block's content range begins.
+        assert_eq!(changes[2].line, 3);
+        let tag_line = r#"# <block name="deps" affects=":deps-docs" keep-sorted="asc">"#;
+        let tag_ranges = changes[2]
+            .ranges
+            .as_ref()
+            .expect("tag line should pair with its old version");
+        assert!(
+            tag_ranges.iter().all(|r| r.end < tag_line.len()),
+            "ranges {tag_ranges:?} must end before the closing `>` at {}",
+            tag_line.len() - 1
+        );
+        Ok(())
+    }
+    #[test]
+    fn out_of_order_hunks_returns_error() {
+        let err = line_changes_from_diff(
+            r#"diff --git a/a.txt b/a.txt
+index f384549..b4b0c67 100644
+--- a/a.txt
++++ b/a.txt
+@@ -5 +5 @@
+-five
++FIVE
+@@ -1 +1 @@
+-one
++ONE
+"#,
+        )
+        .unwrap_err();
+        assert!(
+            err.chain().any(|e| e.to_string().contains("out of order")),
+            "unexpected error: {err:#}"
+        );
+    }
+    #[test]
+    fn oversized_group_falls_back_to_positional_pairing() -> anyhow::Result<()> {
+        // The group holds three lines of this length, so their total exceeds the byte budget.
+        let line_len = MAX_SIMILARITY_PAIRING_BYTES / 3 + 1;
+        let long_line = "a".repeat(line_len);
+        let diff = format!(
+            "diff --git a/a.txt b/a.txt\n\
+             index f384549..b4b0c67 100644\n\
+             --- a/a.txt\n\
+             +++ b/a.txt\n\
+             @@ -1 +1,2 @@\n\
+             -{long_line}\n\
+             +{long_line}b\n\
+             +{long_line}\n"
+        );
+        let line_changes = line_changes_from_diff(&diff)?;
+        let changes = &line_changes[&PathBuf::from("a.txt")];
+        assert_eq!(changes.len(), 2);
+        // Similarity pairing would prefer the identical added line 2; the positional fallback
+        // pairs the removed line with added line 1 and leaves line 2 as a pure insertion.
+        assert_eq!(changes[0].line, 1);
+        assert_eq!(changes[0].ranges, Some(vec![line_len..line_len + 1]));
+        assert_eq!(changes[1], line_change(2));
+        Ok(())
+    }
+
+    #[test]
+    fn deletion_after_earlier_insertions_uses_target_line_number() -> anyhow::Result<()> {
+        let line_changes = line_changes_from_diff(
+            r#"diff --git a/a.txt b/a.txt
+index f384549..b4b0c67 100644
+--- a/a.txt
++++ b/a.txt
+@@ -0,0 +1,5 @@
++pad one
++pad two
++pad three
++pad four
++pad five
+@@ -3,1 +7,0 @@
+-deleted content
+"#,
+        )?;
+        let changes = &line_changes[&PathBuf::from("a.txt")];
+        // Source line 3 sits at target position 8 after the five inserted lines: the deletion gap
+        // is between target lines 7 and 8.
+        assert_eq!(
+            changes,
+            &vec![
+                line_change(1),
+                line_change(2),
+                line_change(3),
+                line_change(4),
+                line_change(5),
+                line_change(8),
+            ]
+        );
+        Ok(())
+    }
+    #[test]
+    fn modified_last_line_without_trailing_newline_returns_single_line_change_with_ranges()
+    -> anyhow::Result<()> {
+        let line_changes = line_changes_from_diff(
+            r#"diff --git a/a.txt b/a.txt
+index f384549..b4b0c67 100644
+--- a/a.txt
++++ b/a.txt
+@@ -5 +5 @@
+-#  </block>
+\ No newline at end of file
++# </block>
+\ No newline at end of file"#,
+        )?;
+        let changes = &line_changes[&PathBuf::from("a.txt")];
+        assert_eq!(changes.len(), 1, "unexpected changes: {changes:?}");
+        assert_eq!(changes[0].line, 5);
+        assert!(changes[0].ranges.is_some());
         Ok(())
     }
 
