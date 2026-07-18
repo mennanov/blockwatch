@@ -72,7 +72,7 @@ tree-sitter-toml-ng = "0.7"
 tree-sitter-typescript = "0.23"
 tree-sitter-xml = "0.7"
 tree-sitter-yaml = "0.7"
-unidiff = "0.4"
+unidiff = "0.4.1"
 winnow = "1.0"
 
 [dev-dependencies]
@@ -81,12 +81,6 @@ axum = "0.8"
 libc = "0.2"
 predicates = "3.1"
 tempfile = "3.27.0"
-
-[patch.crates-io]
-# Temporary: unidiff 0.4.0 misparses hunk body lines starting with `---`/`+++` as file
-# headers (https://github.com/mennanov/blockwatch/issues/94). Remove once the upstream
-# fix (https://github.com/messense/unidiff-rs/pull/10) is released on crates.io.
-unidiff = { git = "https://github.com/mennanov/unidiff-rs", branch = "fix-hunk-body-lines-parsed-as-headers" }
 
 [profile.dist]
 inherits = "release"
