@@ -62,8 +62,8 @@ fn build_context(
     args: &flags::Args,
     read_diff: bool,
 ) -> anyhow::Result<validators::ValidationContext> {
-    let languages = language_parsers::language_parsers()?;
-    let supported_extensions = languages.keys().collect();
+    let language_parsers = language_parsers::language_parsers()?;
+    let supported_extensions = language_parsers.keys().collect();
     args.validate(&supported_extensions)?;
 
     let modified_lines_by_file = if read_diff {
@@ -88,10 +88,14 @@ fn build_context(
         should_scan_files,
         &file_system,
         &path_checker,
-        languages,
+        &language_parsers,
         args.extensions(),
     )?;
-    Ok(validators::ValidationContext::new(root_path, blocks))
+    Ok(validators::ValidationContext::new(
+        root_path,
+        blocks,
+        language_parsers,
+    ))
 }
 
 /// Whether stdin is connected to an interactive terminal, i.e. no diff is piped in.

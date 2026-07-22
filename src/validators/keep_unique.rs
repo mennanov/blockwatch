@@ -187,6 +187,7 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(
             PathBuf::from("."),
             HashMap::new(),
+            HashMap::new(),
         ));
 
         let violations = validator.validate(context)?;

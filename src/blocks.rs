@@ -1,6 +1,6 @@
 use crate::Position;
 use crate::diff_parser::LineChange;
-use crate::language_parsers::LanguageParser;
+use crate::language_parsers::{LanguageParser, LanguageParsers};
 use anyhow::{Context, anyhow};
 use globset::GlobSet;
 use ignore::Walk;
@@ -277,7 +277,7 @@ pub fn parse_blocks(
     should_scan_files: bool,
     file_system: &impl FileSystem,
     path_checker: &impl PathChecker,
-    parsers: HashMap<OsString, LanguageParser>,
+    parsers: &LanguageParsers,
     extra_file_extensions: HashMap<OsString, OsString>,
 ) -> anyhow::Result<HashMap<PathBuf, FileBlocks>> {
     let mut blocks = HashMap::new();
@@ -297,7 +297,7 @@ pub fn parse_blocks(
                         line_changes,
                         BlocksFilter::All,
                         file_system,
-                        &parsers,
+                        parsers,
                         &extra_file_extensions,
                     )?;
                     if let Some(file_blocks) = file_blocks_opt
@@ -324,7 +324,7 @@ pub fn parse_blocks(
             line_changes.as_slice(),
             BlocksFilter::ModifiedOnly,
             file_system,
-            &parsers,
+            parsers,
             &extra_file_extensions,
         )?;
         if let Some(file_blocks) = file_blocks_opt
@@ -346,7 +346,7 @@ fn parse_file(
     line_changes: &[LineChange],
     blocks_filter: BlocksFilter,
     file_reader: &impl FileSystem,
-    parsers: &HashMap<OsString, LanguageParser>,
+    parsers: &LanguageParsers,
     extra_file_extensions: &HashMap<OsString, OsString>,
 ) -> anyhow::Result<Option<FileBlocks>> {
     let parser = match parser_for_file_path(file_path, parsers, extra_file_extensions) {
@@ -355,7 +355,8 @@ fn parse_file(
     };
     let source_code = file_reader.read_to_string(file_path)?;
     let blocks = parser
-        .borrow_mut()
+        .lock()
+        .expect("no active locks")
         .parse(&source_code)
         .context(format!("Failed to parse file {file_path:?}"))?;
 
@@ -388,7 +389,7 @@ fn parse_file(
 
 fn parser_for_file_path<'p>(
     file_path: &Path,
-    parsers: &'p HashMap<OsString, LanguageParser>,
+    parsers: &'p LanguageParsers,
     extra_file_extensions: &HashMap<OsString, OsString>,
 ) -> Option<&'p LanguageParser> {
     let file_name = file_path.file_name()?.to_str()?;
@@ -407,7 +408,7 @@ fn parser_for_file_path<'p>(
 
 fn try_parser_for_extension<'p>(
     extension: &OsString,
-    parsers: &'p HashMap<OsString, LanguageParser>,
+    parsers: &'p LanguageParsers,
     extra_file_extensions: &HashMap<OsString, OsString>,
 ) -> Option<&'p LanguageParser> {
     let ext = if let Some(ext) = extra_file_extensions.get(extension) {
@@ -725,7 +726,7 @@ mod parse_blocks_tests {
             false,
             &file_system,
             &FakePathChecker::allow_all(),
-            parsers,
+            &parsers,
             HashMap::new(),
         )?;
 
@@ -831,7 +832,7 @@ mod parse_blocks_tests {
             true,
             &file_system,
             &FakePathChecker::allow_all(),
-            parsers,
+            &parsers,
             HashMap::new(),
         )?;
 
@@ -893,7 +894,7 @@ mod parse_blocks_tests {
             true,
             &file_system,
             &FakePathChecker::allow_all(),
-            parsers,
+            &parsers,
             HashMap::new(),
         )?;
 
@@ -940,7 +941,7 @@ mod parse_blocks_tests {
             true,
             &file_system,
             &FakePathChecker::allow_all(),
-            parsers,
+            &parsers,
             HashMap::new(),
         )?;
 
@@ -966,7 +967,7 @@ mod parse_blocks_tests {
             true,
             &file_system,
             &FakePathChecker::allow_all(),
-            parsers,
+            &parsers,
             HashMap::from([("rust".into(), "rs".into())]),
         )?;
 
@@ -989,7 +990,7 @@ mod parse_blocks_tests {
             true,
             &FakeFileSystem::new(files),
             &FakePathChecker::allow_all(),
-            HashMap::new(),
+            &HashMap::new(),
             HashMap::new(),
         )?;
 
@@ -1028,7 +1029,7 @@ mod parse_blocks_tests {
             true,
             &file_system,
             &path_checker,
-            language_parsers()?,
+            &language_parsers()?,
             HashMap::new(),
         )?;
 
@@ -1046,7 +1047,7 @@ mod parse_blocks_tests {
             true,
             &FakeFileSystem::new(HashMap::default()),
             &FakePathChecker::allow_all(),
-            HashMap::new(),
+            &HashMap::new(),
             HashMap::new(),
         )?;
 
@@ -1348,7 +1349,7 @@ mod supported_languages_tests {
             true,
             &file_system,
             &FakePathChecker::allow_all(),
-            parsers,
+            &parsers,
             HashMap::new(),
         )?;
 

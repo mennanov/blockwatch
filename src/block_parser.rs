@@ -7,7 +7,7 @@ use std::ops::{Range, RangeInclusive};
 use std::rc::Rc;
 
 /// Parses [`Blocks`] from a source code.
-pub trait BlocksParser {
+pub trait BlocksParser: Send + Sync {
     /// Returns [`Block`]s extracted from the given `contents` string.
     ///
     /// The blocks are required to be sorted by the `starts_at` field in ascending order.

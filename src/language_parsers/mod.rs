@@ -37,19 +37,20 @@ mod yaml;
 
 use crate::Position;
 use crate::block_parser::BlocksParser;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::ops::Range;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use tree_sitter::{Language, Node, Parser, Tree, TreeCursor};
 
-pub(crate) type LanguageParser = Rc<RefCell<Box<dyn BlocksParser>>>;
+pub(crate) type LanguageParser = Arc<Mutex<Box<dyn BlocksParser>>>;
+
+pub(crate) type LanguageParsers = HashMap<OsString, LanguageParser>;
 
 /// Returns a map of all available language parsers by their file extensions.
-pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
+pub fn language_parsers() -> anyhow::Result<LanguageParsers> {
     fn parser<P: BlocksParser + 'static>(p: P) -> LanguageParser {
-        Rc::new(RefCell::new(Box::new(p) as Box<dyn BlocksParser>))
+        Arc::new(Mutex::new(Box::new(p) as Box<dyn BlocksParser>))
     }
 
     let bash_parser = parser(bash::parser()?);
@@ -90,80 +91,80 @@ pub fn language_parsers() -> anyhow::Result<HashMap<OsString, LanguageParser>> {
 
     Ok(HashMap::from([
         // <block affects="README.md:supported-grammar, src/blocks.rs:supported-extensions" keep-sorted>
-        ("BUILD".into(), Rc::clone(&starlark_parser)),
-        ("CMakeLists.txt".into(), Rc::clone(&cmake_parser)),
-        ("Containerfile".into(), Rc::clone(&dockerfile_parser)),
-        ("Dockerfile".into(), Rc::clone(&dockerfile_parser)),
-        ("Jenkinsfile".into(), Rc::clone(&groovy_parser)),
-        ("Makefile".into(), Rc::clone(&makefile_parser)),
-        ("WORKSPACE".into(), Rc::clone(&starlark_parser)),
-        ("bash".into(), Rc::clone(&bash_parser)),
-        ("bazel".into(), Rc::clone(&starlark_parser)),
-        ("bzl".into(), Rc::clone(&starlark_parser)),
-        ("bzlmod".into(), Rc::clone(&starlark_parser)),
+        ("BUILD".into(), Arc::clone(&starlark_parser)),
+        ("CMakeLists.txt".into(), Arc::clone(&cmake_parser)),
+        ("Containerfile".into(), Arc::clone(&dockerfile_parser)),
+        ("Dockerfile".into(), Arc::clone(&dockerfile_parser)),
+        ("Jenkinsfile".into(), Arc::clone(&groovy_parser)),
+        ("Makefile".into(), Arc::clone(&makefile_parser)),
+        ("WORKSPACE".into(), Arc::clone(&starlark_parser)),
+        ("bash".into(), Arc::clone(&bash_parser)),
+        ("bazel".into(), Arc::clone(&starlark_parser)),
+        ("bzl".into(), Arc::clone(&starlark_parser)),
+        ("bzlmod".into(), Arc::clone(&starlark_parser)),
         ("c".into(), c_parser),
-        ("cc".into(), Rc::clone(&cpp_parser)),
+        ("cc".into(), Arc::clone(&cpp_parser)),
         ("cmake".into(), cmake_parser),
-        ("containerfile".into(), Rc::clone(&dockerfile_parser)),
-        ("cpp".into(), Rc::clone(&cpp_parser)),
+        ("containerfile".into(), Arc::clone(&dockerfile_parser)),
+        ("cpp".into(), Arc::clone(&cpp_parser)),
         ("cs".into(), c_sharp_parser),
         ("css".into(), css_parser),
-        ("d.ts".into(), Rc::clone(&typescript_parser)),
+        ("d.ts".into(), Arc::clone(&typescript_parser)),
         ("dart".into(), dart_parser),
         ("dockerfile".into(), dockerfile_parser),
-        ("ex".into(), Rc::clone(&elixir_parser)),
+        ("ex".into(), Arc::clone(&elixir_parser)),
         ("exs".into(), elixir_parser),
-        ("go".into(), Rc::clone(&go_parser)),
-        ("go.mod".into(), Rc::clone(&go_parser)),
-        ("go.sum".into(), Rc::clone(&go_parser)),
+        ("go".into(), Arc::clone(&go_parser)),
+        ("go.mod".into(), Arc::clone(&go_parser)),
+        ("go.sum".into(), Arc::clone(&go_parser)),
         ("go.work".into(), go_parser),
-        ("gql".into(), Rc::clone(&graphql_parser)),
-        ("gradle".into(), Rc::clone(&groovy_parser)),
+        ("gql".into(), Arc::clone(&graphql_parser)),
+        ("gradle".into(), Arc::clone(&groovy_parser)),
         ("graphql".into(), graphql_parser),
-        ("groovy".into(), Rc::clone(&groovy_parser)),
+        ("groovy".into(), Arc::clone(&groovy_parser)),
         ("h".into(), cpp_parser),
-        ("hcl".into(), Rc::clone(&hcl_parser)),
-        ("htm".into(), Rc::clone(&html_parser)),
+        ("hcl".into(), Arc::clone(&hcl_parser)),
+        ("htm".into(), Arc::clone(&html_parser)),
         ("html".into(), html_parser),
         ("java".into(), java_parser),
         ("jenkinsfile".into(), groovy_parser),
-        ("js".into(), Rc::clone(&js_parser)),
+        ("js".into(), Arc::clone(&js_parser)),
         ("jsx".into(), js_parser),
-        ("kt".into(), Rc::clone(&kotlin_parser)),
+        ("kt".into(), Arc::clone(&kotlin_parser)),
         ("kts".into(), kotlin_parser),
         ("lua".into(), lua_parser),
-        ("makefile".into(), Rc::clone(&makefile_parser)),
-        ("markdown".into(), Rc::clone(&markdown_parser)),
+        ("makefile".into(), Arc::clone(&makefile_parser)),
+        ("markdown".into(), Arc::clone(&markdown_parser)),
         ("md".into(), markdown_parser),
         ("mk".into(), makefile_parser),
         ("nix".into(), nix_parser),
-        ("php".into(), Rc::clone(&php_parser)),
+        ("php".into(), Arc::clone(&php_parser)),
         ("phtml".into(), php_parser),
         ("proto".into(), proto_parser),
-        ("py".into(), Rc::clone(&python_parser)),
+        ("py".into(), Arc::clone(&python_parser)),
         ("pyi".into(), python_parser),
         ("rb".into(), ruby_parser),
         ("rs".into(), rust_parser),
-        ("sbt".into(), Rc::clone(&scala_parser)),
+        ("sbt".into(), Arc::clone(&scala_parser)),
         ("scala".into(), scala_parser),
         ("sh".into(), bash_parser),
         ("sql".into(), sql_parser),
         ("star".into(), starlark_parser),
         ("swift".into(), swift_parser),
-        ("tf".into(), Rc::clone(&hcl_parser)),
+        ("tf".into(), Arc::clone(&hcl_parser)),
         ("tfvars".into(), hcl_parser),
         ("toml".into(), toml_parser),
         ("ts".into(), typescript_parser),
         ("tsx".into(), typescript_tsx_parser),
         ("xml".into(), xml_parser),
-        ("yaml".into(), Rc::clone(&yaml_parser)),
+        ("yaml".into(), Arc::clone(&yaml_parser)),
         ("yml".into(), yaml_parser),
         // </block>
     ]))
 }
 
 /// Parses comment string from a source code by returning an iterator of `Comment`s.
-pub(crate) trait CommentsParser {
+pub(crate) trait CommentsParser: Send + Sync {
     /// Returns an iterator of `Comment`s from the source code.
     fn parse<'source>(
         &'source mut self,
@@ -171,7 +172,7 @@ pub(crate) trait CommentsParser {
     ) -> impl Iterator<Item = Comment> + 'source;
 }
 
-type NodeVisitor = Box<dyn Fn(&Node, &str) -> Option<String>>;
+type NodeVisitor = Box<dyn Fn(&Node, &str) -> Option<String> + Send + Sync>;
 
 struct TreeSitterCommentsParser {
     parser: Parser,

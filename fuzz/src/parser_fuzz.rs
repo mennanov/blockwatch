@@ -40,7 +40,10 @@ fn main() {
 
 fn parse_rust_blocks(source: &str) -> anyhow::Result<Vec<Block>> {
     let parsers = language_parsers::language_parsers()?;
-    parsers[&OsString::from("rs")].borrow_mut().parse(source)
+    parsers[&OsString::from("rs")]
+        .lock()
+        .expect("no active locks")
+        .parse(source)
 }
 
 fn split_in_half(input: &str) -> Option<(&str, &str)> {
