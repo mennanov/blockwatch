@@ -37,8 +37,6 @@ fn lua_from_env() -> Lua {
 }
 
 pub(crate) struct CheckLuaValidator<Fs: FileSystem> {
-    // Injected by the detector; used to read `check-lua` scripts. `FileSystemImpl` confines these
-    // reads to the repository root, so this validator no longer resolves paths itself.
     file_system: Arc<Fs>,
 }
 
@@ -372,9 +370,7 @@ mod tests {
     };
     use serde_json::json;
 
-    /// Builds a `CheckLuaValidator` backed by a fake filesystem seeded with `scripts` (script path →
-    /// contents). check-lua reads its script through the injected filesystem, so unit tests seed the
-    /// script here instead of writing a real temp file.
+    /// Builds a `CheckLuaValidator` backed by a fake filesystem seeded with `scripts`.
     fn validator(scripts: &[(&str, &str)]) -> CheckLuaValidator<FakeFileSystem> {
         let files = scripts
             .iter()

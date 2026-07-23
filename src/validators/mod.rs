@@ -127,11 +127,6 @@ impl SimpleDiagnostic<'_> {
 }
 
 pub struct ValidationContext {
-    // Repository (project) root the scanned paths are relative to. File-access confinement now
-    // lives in `FileSystemImpl` (which owns the same root), so no validator reads this in
-    // production; it is kept as run metadata and used by tests to root the injected filesystem.
-    #[allow(dead_code)]
-    pub(crate) root_path: PathBuf,
     // Blocks with their corresponding source file contents grouped by filename.
     pub(crate) blocks: HashMap<PathBuf, FileBlocks>,
     // A map with `BlockParsers`. Can be used to parse source files in validators.
@@ -142,16 +137,8 @@ pub struct ValidationContext {
 
 impl ValidationContext {
     /// Creates a new validation context with modified blocks grouped by filename.
-    pub fn new(
-        root_path: PathBuf,
-        blocks: HashMap<PathBuf, FileBlocks>,
-        parsers: LanguageParsers,
-    ) -> Self {
-        Self {
-            root_path,
-            blocks,
-            parsers,
-        }
+    pub fn new(blocks: HashMap<PathBuf, FileBlocks>, parsers: LanguageParsers) -> Self {
+        Self { blocks, parsers }
     }
 
     /// Returns the language parsers available to validators.

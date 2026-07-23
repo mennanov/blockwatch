@@ -93,20 +93,8 @@ mod test_utils {
     }
 
     /// Creates a [`ValidationContext`] for the given `file_name` with `contents` with all lines
-    /// modified, rooted at the current directory.
+    /// modified.
     pub(crate) fn validation_context(file_name: &str, contents: &str) -> Arc<ValidationContext> {
-        validation_context_with_root(".", file_name, contents)
-    }
-
-    /// Like [`validation_context`] but with an explicit repository `root_path`.
-    ///
-    /// Useful for validators (such as `check-lua`) that resolve file references against the
-    /// repository root.
-    pub(crate) fn validation_context_with_root(
-        root_path: impl Into<PathBuf>,
-        file_name: &str,
-        contents: &str,
-    ) -> Arc<ValidationContext> {
         let line_changes: Vec<LineChange> = contents
             .lines()
             .enumerate()
@@ -115,7 +103,7 @@ mod test_utils {
                 ranges: None,
             })
             .collect();
-        build_validation_context(root_path, file_name, contents, line_changes)
+        build_validation_context(file_name, contents, line_changes)
     }
 
     /// Creates a [`ValidationContext`] for the given `file_name` with `contents` and specified
@@ -125,11 +113,10 @@ mod test_utils {
         contents: &str,
         line_changes: Vec<LineChange>,
     ) -> Arc<ValidationContext> {
-        build_validation_context(".", file_name, contents, line_changes)
+        build_validation_context(file_name, contents, line_changes)
     }
 
     fn build_validation_context(
-        root_path: impl Into<PathBuf>,
         file_name: &str,
         contents: &str,
         line_changes: Vec<LineChange>,
@@ -141,7 +128,6 @@ mod test_utils {
         let line_changes_by_file = HashMap::from([(file_name.into(), line_changes)]);
         let parsers = language_parsers::language_parsers().unwrap();
         Arc::new(ValidationContext::new(
-            root_path.into(),
             parse_blocks(
                 line_changes_by_file,
                 false,
@@ -158,10 +144,6 @@ mod test_utils {
     pub(crate) fn merge_validation_contexts(
         contexts: Vec<Arc<ValidationContext>>,
     ) -> Arc<ValidationContext> {
-        let root_path = contexts
-            .first()
-            .map(|context| context.root_path.clone())
-            .unwrap_or_else(|| PathBuf::from("."));
         let parsers = contexts
             .first()
             .map(|context| context.parsers.clone())
@@ -179,10 +161,6 @@ mod test_utils {
                     .extend(file_blocks.blocks_with_context.clone());
             }
         }
-        Arc::new(ValidationContext::new(
-            root_path,
-            merged_modified_blocks,
-            parsers,
-        ))
+        Arc::new(ValidationContext::new(merged_modified_blocks, parsers))
     }
 }
