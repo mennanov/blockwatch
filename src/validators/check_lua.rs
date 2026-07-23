@@ -1,4 +1,4 @@
-use crate::blocks::{Block, BlockWithContext};
+use crate::blocks::{Block, BlockWithContext, FileSystem};
 use crate::validators::parse_affects_attribute;
 use crate::validators::{
     ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorType, Violation, ViolationRange,
@@ -368,10 +368,11 @@ impl CheckLuaValidatorDetector {
     }
 }
 
-impl ValidatorDetector for CheckLuaValidatorDetector {
+impl<Fs: FileSystem> ValidatorDetector<Fs> for CheckLuaValidatorDetector {
     fn detect(
         &self,
         block_with_context: &BlockWithContext,
+        _file_system: &Arc<Fs>,
     ) -> anyhow::Result<Option<ValidatorType>> {
         if block_with_context
             .block

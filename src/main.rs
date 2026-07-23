@@ -30,7 +30,9 @@ fn main() -> anyhow::Result<()> {
 /// non-interactively — piped to `jq`, in CI, or when spawned by another program such as an AI agent.
 fn run_list(args: &flags::Args, read_diff_flag: bool) -> anyhow::Result<()> {
     let read_diff = read_diff_flag && !stdin_is_terminal();
-    let context = build_context(args, read_diff)?;
+    let root_path = repository_root()?;
+    let file_system = blocks::FileSystemImpl::new(root_path.clone());
+    let context = build_context(args, read_diff, &file_system, root_path)?;
     let report = context.to_serializable_report();
     serde_json::to_writer_pretty(std::io::stdout(), &report).context("Failed to list blocks")
 }
@@ -40,12 +42,15 @@ fn run_list(args: &flags::Args, read_diff_flag: bool) -> anyhow::Result<()> {
 /// The diff to validate is read from stdin whenever stdin is not a terminal (i.e. when a
 /// `git diff` is piped in); otherwise the whole working tree is checked.
 fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
-    let context = build_context(args, !stdin_is_terminal())?;
+    let root_path = repository_root()?;
+    let file_system = Arc::new(blocks::FileSystemImpl::new(root_path.clone()));
+    let context = build_context(args, !stdin_is_terminal(), file_system.as_ref(), root_path)?;
     let (sync_validators, async_validators) = validators::detect_validators(
         &context,
-        validators::DETECTOR_FACTORIES,
+        &validators::detector_factories::<blocks::FileSystemImpl>(),
         &args.disabled_validators(),
         &args.enabled_validators(),
+        &file_system,
     )?;
     let violations = validators::run(Arc::new(context), sync_validators, async_validators)?;
     if !violations.is_empty() {
@@ -61,6 +66,8 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
 fn build_context(
     args: &flags::Args,
     read_diff: bool,
+    file_system: &impl blocks::FileSystem,
+    root_path: PathBuf,
 ) -> anyhow::Result<validators::ValidationContext> {
     let language_parsers = language_parsers::language_parsers()?;
     let supported_extensions = language_parsers.keys().collect();
@@ -80,13 +87,11 @@ fn build_context(
     let should_scan_files = !glob_set.is_empty();
 
     let path_checker = blocks::PathCheckerImpl::new(glob_set, args.ignored_globs()?);
-    let root_path = repository_root_path(fs::canonicalize(env::current_dir()?)?)?;
-    let file_system = blocks::FileSystemImpl::new(root_path.clone());
 
     let blocks = blocks::parse_blocks(
         modified_lines_by_file,
         should_scan_files,
-        &file_system,
+        file_system,
         &path_checker,
         &language_parsers,
         args.extensions(),
@@ -141,4 +146,9 @@ fn repository_root_path(current_path: PathBuf) -> anyhow::Result<PathBuf> {
         .find(|path| path.join(".git").is_dir() || path.join(".hg").is_dir())
         .map(|path| path.to_path_buf())
         .ok_or_else(|| anyhow::anyhow!("Could not find the repository root directory"))
+}
+
+/// Resolves the repository root from the current working directory.
+fn repository_root() -> anyhow::Result<PathBuf> {
+    repository_root_path(fs::canonicalize(env::current_dir()?)?)
 }

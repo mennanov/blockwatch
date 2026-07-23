@@ -7,7 +7,7 @@ mod line_count;
 mod line_pattern;
 
 use crate::Position;
-use crate::blocks::{BlockSeverity, BlockWithContext, FileBlocks};
+use crate::blocks::{BlockSeverity, BlockWithContext, FileBlocks, FileSystem};
 use crate::language_parsers::LanguageParsers;
 use crate::validators::affects::AffectsValidatorDetector;
 use crate::validators::check_ai::CheckAiValidatorDetector;
@@ -42,10 +42,11 @@ pub trait ValidatorSync: Send + Sync {
 /// Detects a [`ValidatorType`] for the given `block` (if any).
 ///
 /// This is used to determine whether an async runtime (e.g. Tokio) is needed to run the validators.
-pub trait ValidatorDetector {
+pub trait ValidatorDetector<Fs: FileSystem> {
     fn detect(
         &self,
         block_with_context: &BlockWithContext,
+        file_system: &Arc<Fs>,
     ) -> anyhow::Result<Option<ValidatorType>>;
 }
 
@@ -269,33 +270,41 @@ pub fn run(
 type SyncValidators = Vec<Box<dyn ValidatorSync>>;
 type AsyncValidators = Vec<Box<dyn ValidatorAsync>>;
 
-type DetectorFactory = fn() -> Box<dyn ValidatorDetector>;
+type DetectorFactory<Fs> = fn() -> Box<dyn ValidatorDetector<Fs>>;
 
-pub const DETECTOR_FACTORIES: &[(&str, DetectorFactory)] = &[
-    // <block affects="README.md:available-validators">
-    ("affects", || Box::new(AffectsValidatorDetector::new())),
-    ("keep-sorted", || {
-        Box::new(KeepSortedValidatorDetector::new())
-    }),
-    ("keep-unique", || {
-        Box::new(KeepUniqueValidatorDetector::new())
-    }),
-    ("line-pattern", || {
-        Box::new(LinePatternValidatorDetector::new())
-    }),
-    ("line-count", || Box::new(LineCountValidatorDetector::new())),
-    ("check-ai", || Box::new(CheckAiValidatorDetector::new())),
-    ("check-lua", || Box::new(CheckLuaValidatorDetector::new())),
-    // </block>
-];
+/// Builds the ordered detector registry for a concrete filesystem `Fs`.
+///
+/// This is a generic function rather than a `const` because each [`DetectorFactory`] is now
+/// parameterized by the filesystem type its detectors receive, so the registry has to be
+/// instantiated per `Fs` (the production `FileSystemImpl`, a `FakeFileSystem` in tests).
+pub fn detector_factories<Fs: FileSystem + 'static>() -> Vec<(&'static str, DetectorFactory<Fs>)> {
+    vec![
+        // <block affects="README.md:available-validators">
+        ("affects", || Box::new(AffectsValidatorDetector::new())),
+        ("keep-sorted", || {
+            Box::new(KeepSortedValidatorDetector::new())
+        }),
+        ("keep-unique", || {
+            Box::new(KeepUniqueValidatorDetector::new())
+        }),
+        ("line-pattern", || {
+            Box::new(LinePatternValidatorDetector::new())
+        }),
+        ("line-count", || Box::new(LineCountValidatorDetector::new())),
+        ("check-ai", || Box::new(CheckAiValidatorDetector::new())),
+        ("check-lua", || Box::new(CheckLuaValidatorDetector::new())),
+        // </block>
+    ]
+}
 
-pub fn detect_validators(
+pub fn detect_validators<Fs: FileSystem + 'static>(
     context: &ValidationContext,
-    detectors: &[(&str, DetectorFactory)],
+    detectors: &[(&str, DetectorFactory<Fs>)],
     disabled_validators: &HashSet<&str>,
     enabled_validators: &HashSet<&str>,
+    file_system: &Arc<Fs>,
 ) -> anyhow::Result<(SyncValidators, AsyncValidators)> {
-    let mut validator_detectors: Vec<Box<dyn ValidatorDetector>> = detectors
+    let mut validator_detectors: Vec<Box<dyn ValidatorDetector<Fs>>> = detectors
         .iter()
         .filter(|(validator_name, _)| {
             if !enabled_validators.is_empty() {
@@ -312,7 +321,7 @@ pub fn detect_validators(
         for block in &file_blocks.blocks_with_context {
             let mut undetected = Vec::new();
             while let Some(detector) = validator_detectors.pop() {
-                match detector.detect(block)? {
+                match detector.detect(block, file_system)? {
                     Some(ValidatorType::Sync(validator)) => {
                         sync_validators.push(validator);
                     }
@@ -358,8 +367,8 @@ pub(in crate::validators) fn parse_affects_attribute(
 
 #[cfg(test)]
 mod tests {
-    use crate::blocks::{Block, BlockWithContext};
-    use crate::test_utils::{merge_validation_contexts, validation_context};
+    use crate::blocks::{Block, BlockWithContext, FileSystem};
+    use crate::test_utils::{FakeFileSystem, merge_validation_contexts, validation_context};
     use crate::validators::{
         DetectorFactory, ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorSync,
         ValidatorType, Violation, ViolationRange, detect_validators,
@@ -442,10 +451,11 @@ mod tests {
 
     struct FakeAsyncValidatorDetector();
 
-    impl ValidatorDetector for FakeAsyncValidatorDetector {
+    impl<Fs: FileSystem> ValidatorDetector<Fs> for FakeAsyncValidatorDetector {
         fn detect(
             &self,
             block_with_context: &BlockWithContext,
+            _file_system: &Arc<Fs>,
         ) -> anyhow::Result<Option<ValidatorType>> {
             if block_with_context
                 .block
@@ -462,10 +472,11 @@ mod tests {
     }
 
     struct FakeSyncValidatorDetector();
-    impl ValidatorDetector for FakeSyncValidatorDetector {
+    impl<Fs: FileSystem> ValidatorDetector<Fs> for FakeSyncValidatorDetector {
         fn detect(
             &self,
             block_with_context: &BlockWithContext,
+            _file_system: &Arc<Fs>,
         ) -> anyhow::Result<Option<ValidatorType>> {
             if block_with_context
                 .block
@@ -481,10 +492,12 @@ mod tests {
         }
     }
 
-    const DETECTOR_FACTORIES: &[(&str, DetectorFactory)] = &[
-        ("fake-sync", || Box::new(FakeSyncValidatorDetector {})),
-        ("fake-async", || Box::new(FakeAsyncValidatorDetector {})),
-    ];
+    fn detector_factories<Fs: FileSystem + 'static>() -> Vec<(&'static str, DetectorFactory<Fs>)> {
+        vec![
+            ("fake-sync", || Box::new(FakeSyncValidatorDetector {})),
+            ("fake-async", || Box::new(FakeAsyncValidatorDetector {})),
+        ]
+    }
 
     #[test]
     fn detect_and_run_with_sync_and_async_validators_returns_correct_violations()
@@ -504,9 +517,10 @@ mod tests {
 
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            DETECTOR_FACTORIES,
+            &detector_factories(),
             &HashSet::new(),
             &HashSet::new(),
+            &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?;
 
@@ -545,9 +559,10 @@ mod tests {
 
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            DETECTOR_FACTORIES,
+            &detector_factories(),
             &HashSet::new(),
             &HashSet::new(),
+            &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?;
 
@@ -582,9 +597,10 @@ mod tests {
         ]);
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            DETECTOR_FACTORIES,
+            &detector_factories(),
             &HashSet::new(),
             &HashSet::new(),
+            &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?;
 
@@ -612,9 +628,10 @@ mod tests {
         );
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            DETECTOR_FACTORIES,
+            &detector_factories(),
             &HashSet::from(["fake-async"]),
             &HashSet::new(),
+            &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?;
 
@@ -638,9 +655,10 @@ mod tests {
 
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            DETECTOR_FACTORIES,
+            &detector_factories(),
             &HashSet::new(),
             &HashSet::from(["fake-async"]),
+            &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?;
 
@@ -663,9 +681,10 @@ mod tests {
         );
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            DETECTOR_FACTORIES,
+            &detector_factories(),
             &HashSet::from(["fake-sync"]),
             &HashSet::new(),
+            &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?;
 
@@ -689,9 +708,10 @@ mod tests {
 
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            DETECTOR_FACTORIES,
+            &detector_factories(),
             &HashSet::new(),
             &HashSet::from(["fake-sync"]),
+            &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?;
 

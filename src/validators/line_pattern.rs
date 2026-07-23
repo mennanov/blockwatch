@@ -1,4 +1,4 @@
-use crate::blocks::{Block, BlockWithContext};
+use crate::blocks::{Block, BlockWithContext, FileSystem};
 use crate::validators::{
     ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
 };
@@ -93,10 +93,11 @@ impl LinePatternValidatorDetector {
     }
 }
 
-impl ValidatorDetector for LinePatternValidatorDetector {
+impl<Fs: FileSystem> ValidatorDetector<Fs> for LinePatternValidatorDetector {
     fn detect(
         &self,
         block_with_context: &BlockWithContext,
+        _file_system: &Arc<Fs>,
     ) -> anyhow::Result<Option<ValidatorType>> {
         if block_with_context
             .block

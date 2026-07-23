@@ -1,4 +1,4 @@
-use crate::blocks::{Block, BlockWithContext};
+use crate::blocks::{Block, BlockWithContext, FileSystem};
 use crate::validators::{
     ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorType, Violation, ViolationRange,
 };
@@ -103,10 +103,11 @@ impl CheckAiValidatorDetector {
     }
 }
 
-impl ValidatorDetector for CheckAiValidatorDetector {
+impl<Fs: FileSystem> ValidatorDetector<Fs> for CheckAiValidatorDetector {
     fn detect(
         &self,
         block_with_context: &BlockWithContext,
+        _file_system: &Arc<Fs>,
     ) -> anyhow::Result<Option<ValidatorType>> {
         if block_with_context.block.attributes.contains_key("check-ai") {
             Ok(Some(ValidatorType::Async(Box::new(

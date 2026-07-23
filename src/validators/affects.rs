@@ -1,4 +1,4 @@
-use crate::blocks::{Block, BlockWithContext};
+use crate::blocks::{Block, BlockWithContext, FileSystem};
 use crate::validators;
 use crate::validators::{ValidatorType, Violation, ViolationRange};
 use anyhow::Context;
@@ -83,10 +83,11 @@ impl AffectsValidatorDetector {
     }
 }
 
-impl validators::ValidatorDetector for AffectsValidatorDetector {
+impl<Fs: FileSystem> validators::ValidatorDetector<Fs> for AffectsValidatorDetector {
     fn detect(
         &self,
         block_with_context: &BlockWithContext,
+        _file_system: &Arc<Fs>,
     ) -> anyhow::Result<Option<ValidatorType>> {
         if block_with_context.is_content_modified
             && block_with_context.block.attributes.contains_key("affects")
