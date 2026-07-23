@@ -55,11 +55,12 @@ mod test_utils {
 
     impl FileSystem for FakeFileSystem {
         fn read_to_string(&self, path: &Path) -> anyhow::Result<String> {
-            Ok(self
-                .files
+            // Mirror a real filesystem: a missing file is an error, not a panic. This lets
+            // validators' read-failure paths be exercised with the fake.
+            self.files
                 .get(&path.display().to_string())
-                .unwrap_or_else(|| panic!("File {} not found", path.display()))
-                .clone())
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("File {} not found", path.display()))
         }
 
         fn walk(&self) -> impl Iterator<Item = anyhow::Result<PathBuf>> {

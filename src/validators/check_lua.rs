@@ -366,139 +366,66 @@ struct CheckLuaViolation<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blocks::FileSystemImpl;
     use crate::test_utils::{
-        merge_validation_contexts, validation_context, validation_context_with_changes,
-        validation_context_with_root,
+        FakeFileSystem, merge_validation_contexts, validation_context,
+        validation_context_with_changes,
     };
     use serde_json::json;
-    use std::io::Write;
 
-    fn write_temp_lua_script(content: &str) -> tempfile::NamedTempFile {
-        let mut file = tempfile::NamedTempFile::new().unwrap();
-        file.write_all(content.as_bytes()).unwrap();
-        file.flush().unwrap();
-        file
-    }
-
-    /// Builds a `CheckLuaValidator` whose injected filesystem is rooted at the validation context's
-    /// repository root — the same root the scripts referenced by that context live under.
-    fn validator_for(context: &Arc<ValidationContext>) -> CheckLuaValidator<FileSystemImpl> {
-        CheckLuaValidator::new(Arc::new(FileSystemImpl::new(context.root_path.clone())))
-    }
-
-    /// A Lua script written into a temporary directory that doubles as the repository root.
-    ///
-    /// Holding the [`tempfile::TempDir`] keeps the script (and its root) alive for the duration of
-    /// the test.
-    struct TempScript {
-        root: tempfile::TempDir,
-        path: PathBuf,
-    }
-
-    impl TempScript {
-        /// Writes `content` as `script.lua` inside a fresh temporary repository root.
-        fn new(content: &str) -> Self {
-            let root = tempfile::tempdir().unwrap();
-            let path = root.path().join("script.lua");
-            std::fs::write(&path, content).unwrap();
-            Self { root, path }
-        }
-
-        /// The repository root the script lives in.
-        fn root(&self) -> &Path {
-            self.root.path()
-        }
-
-        /// The absolute path to the script.
-        fn path(&self) -> &str {
-            self.path.to_str().unwrap()
-        }
+    /// Builds a `CheckLuaValidator` backed by a fake filesystem seeded with `scripts` (script path →
+    /// contents). check-lua reads its script through the injected filesystem, so unit tests seed the
+    /// script here instead of writing a real temp file.
+    fn validator(scripts: &[(&str, &str)]) -> CheckLuaValidator<FakeFileSystem> {
+        let files = scripts
+            .iter()
+            .map(|(path, contents)| (path.to_string(), contents.to_string()))
+            .collect();
+        CheckLuaValidator::new(Arc::new(FakeFileSystem::new(files)))
     }
 
     #[tokio::test]
     async fn when_lua_returns_nil_returns_no_violations() -> anyhow::Result<()> {
-        let script = TempScript::new(
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua">
+some content
+# </block>"#,
+        );
+
+        let violations = validator(&[(
+            "check.lua",
             r#"
 function validate(ctx, content)
     return nil
 end
 "#,
-        );
-        let script_path = script.path();
-        let context = validation_context_with_root(
-            script.root(),
-            "example.py",
-            &format!(
-                r#"# <block check-lua="{script_path}">
-some content
-# </block>"#,
-            ),
-        );
-        let validator = validator_for(&context);
-
-        let violations = validator.validate(context).await?;
+        )])
+        .validate(context)
+        .await?;
 
         assert!(violations.is_empty());
         Ok(())
     }
 
     #[tokio::test]
-    async fn script_outside_repository_root_returns_error() -> anyhow::Result<()> {
-        // The repository root is a temp dir, but the script lives outside it. Even though the script
-        // exists and is valid, it must be rejected because it is not within the repository.
-        let root = tempfile::tempdir()?;
-        let outside = write_temp_lua_script(
-            r#"
-function validate(ctx, content)
-    return nil
-end
-"#,
-        );
-        let script_path = outside.path().to_str().unwrap();
-        let context = validation_context_with_root(
-            root.path(),
+    async fn when_lua_returns_error_message_returns_violation() -> anyhow::Result<()> {
+        let context = validation_context(
             "example.py",
-            &format!(
-                r#"# <block check-lua="{script_path}">
+            r#"# <block check-lua="check.lua">
 some content
 # </block>"#,
-            ),
         );
-        let validator = validator_for(&context);
 
-        let err = validator.validate(context).await.unwrap_err();
-
-        let err_chain = format!("{err:#}");
-        assert!(
-            err_chain.contains("outside the repository root"),
-            "unexpected error: {err_chain}"
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn when_lua_returns_error_message_returns_violation() -> anyhow::Result<()> {
-        let script = TempScript::new(
+        let violations = validator(&[(
+            "check.lua",
             r#"
 function validate(ctx, content)
     return "block content is invalid"
 end
 "#,
-        );
-        let script_path = script.path();
-        let context = validation_context_with_root(
-            script.root(),
-            "example.py",
-            &format!(
-                r#"# <block check-lua="{script_path}">
-some content
-# </block>"#,
-            ),
-        );
-        let validator = validator_for(&context);
-
-        let violations = validator.validate(context).await?;
+        )])
+        .validate(context)
+        .await?;
 
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[&PathBuf::from("example.py")].len(), 1);
@@ -511,7 +438,7 @@ some content
         assert_eq!(
             violation.data,
             Some(json!({
-                "script": script_path,
+                "script": "check.lua",
                 "lua_error": "block content is invalid"
             }))
         );
@@ -526,8 +453,7 @@ some content
 text
 # </block>"#,
         );
-        let validator = validator_for(&context);
-        let err = validator.validate(context).await.unwrap_err();
+        let err = validator(&[]).validate(context).await.unwrap_err();
         assert!(
             err.to_string()
                 .contains("check-lua requires a non-empty script path")
@@ -539,12 +465,12 @@ text
     async fn missing_script_file_returns_error() -> anyhow::Result<()> {
         let context = validation_context(
             "example.py",
-            r#"# <block check-lua="/nonexistent/path/script.lua">
+            r#"# <block check-lua="missing.lua">
 text
 # </block>"#,
         );
-        let validator = validator_for(&context);
-        let err = validator.validate(context).await.unwrap_err();
+        // The fake filesystem has no "missing.lua", so the read fails and check-lua wraps the error.
+        let err = validator(&[]).validate(context).await.unwrap_err();
         let err_chain = format!("{err:#}");
         assert!(
             err_chain.contains("failed to read Lua script"),
@@ -555,7 +481,15 @@ text
 
     #[tokio::test]
     async fn pattern_match_is_used_as_block_content() -> anyhow::Result<()> {
-        let script = TempScript::new(
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" check-lua-pattern="id: \d+">
+name: Alice, id: 42
+# </block>"#,
+        );
+
+        let violations = validator(&[(
+            "check.lua",
             r#"
 function validate(ctx, content)
     if content ~= "id: 42" then
@@ -564,26 +498,25 @@ function validate(ctx, content)
     return nil
 end
 "#,
-        );
-        let script_path = script.path();
-        let context = validation_context_with_root(
-            script.root(),
-            "example.py",
-            &format!(
-                r#"# <block check-lua="{script_path}" check-lua-pattern="id: \d+">
-name: Alice, id: 42
-# </block>"#,
-            ),
-        );
-        let validator = validator_for(&context);
-        let violations = validator.validate(context).await?;
+        )])
+        .validate(context)
+        .await?;
+
         assert!(violations.is_empty());
         Ok(())
     }
 
     #[tokio::test]
     async fn pattern_group_match_is_used_as_block_content() -> anyhow::Result<()> {
-        let script = TempScript::new(
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" check-lua-pattern="id: (?P<value>\d+)">
+name: Alice, id: 42
+# </block>"#,
+        );
+
+        let violations = validator(&[(
+            "check.lua",
             r#"
 function validate(ctx, content)
     if content ~= "42" then
@@ -592,43 +525,24 @@ function validate(ctx, content)
     return nil
 end
 "#,
-        );
-        let script_path = script.path();
-        let context = validation_context_with_root(
-            script.root(),
-            "example.py",
-            &format!(
-                r#"# <block check-lua="{script_path}" check-lua-pattern="id: (?P<value>\d+)">
-name: Alice, id: 42
-# </block>"#,
-            ),
-        );
-        let validator = validator_for(&context);
-        let violations = validator.validate(context).await?;
+        )])
+        .validate(context)
+        .await?;
+
         assert!(violations.is_empty());
         Ok(())
     }
 
     #[tokio::test]
     async fn invalid_pattern_returns_error() -> anyhow::Result<()> {
-        let script = write_temp_lua_script(
-            r#"
-function validate(ctx, content)
-    return nil
-end
-"#,
-        );
-        let script_path = script.path().to_str().unwrap();
         let context = validation_context(
             "example.py",
-            &format!(
-                r#"# <block check-lua="{script_path}" check-lua-pattern="[invalid">
+            r#"# <block check-lua="check.lua" check-lua-pattern="[invalid">
 some content
 # </block>"#,
-            ),
         );
-        let validator = validator_for(&context);
-        let err = validator.validate(context).await.unwrap_err();
+        // The invalid pattern fails before the script is read, so no script needs seeding.
+        let err = validator(&[]).validate(context).await.unwrap_err();
         let err_chain = format!("{err:#}");
         assert!(
             err_chain.contains("check-lua-pattern is not a valid regex"),
@@ -639,7 +553,15 @@ some content
 
     #[tokio::test]
     async fn ctx_fields_are_accessible() -> anyhow::Result<()> {
-        let script = TempScript::new(
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua">
+some content
+# </block>"#,
+        );
+
+        let violations = validator(&[(
+            "check.lua",
             r#"
 function validate(ctx, content)
     if ctx.file ~= "example.py" then
@@ -657,27 +579,17 @@ function validate(ctx, content)
     return nil
 end
 "#,
-        );
-        let script_path = script.path();
-        let context = validation_context_with_root(
-            script.root(),
-            "example.py",
-            &format!(
-                r#"# <block check-lua="{script_path}">
-some content
-# </block>"#,
-            ),
-        );
-        let validator = validator_for(&context);
-        let violations = validator.validate(context).await?;
+        )])
+        .validate(context)
+        .await?;
+
         assert!(violations.is_empty());
         Ok(())
     }
 
     #[tokio::test]
     async fn ctx_affects_exposes_affected_blocks() -> anyhow::Result<()> {
-        let script = TempScript::new(
-            r#"
+        let script = r#"
 function validate(ctx, content)
     if ctx.affects == nil then
         return "ctx.affects is nil"
@@ -705,22 +617,17 @@ function validate(ctx, content)
     end
     return nil
 end
-"#,
-        );
-        let script_path = script.path();
+"#;
         let context = merge_validation_contexts(vec![
-            validation_context_with_root(
-                script.root(),
+            validation_context(
                 "example.py",
-                &format!(
-                    r#"# <block check-lua="{script_path}" affects=":local-block, other.py:remote-block">
+                r#"# <block check-lua="check.lua" affects=":local-block, other.py:remote-block">
 some content
 # </block>
 
 # <block name="local-block">
 local content
 # </block>"#,
-                ),
             ),
             validation_context(
                 "other.py",
@@ -729,8 +636,11 @@ remote content
 # </block>"#,
             ),
         ]);
-        let validator = validator_for(&context);
-        let violations = validator.validate(context).await?;
+
+        let violations = validator(&[("check.lua", script)])
+            .validate(context)
+            .await?;
+
         assert!(violations.is_empty());
         Ok(())
     }
@@ -739,8 +649,7 @@ remote content
     async fn ctx_affects_excludes_blocks_absent_from_the_diff() -> anyhow::Result<()> {
         // The affected block lives in a file that has no diff changes, so it is filtered out of the
         // validation context entirely. It must therefore NOT appear in ctx.affects.
-        let script = TempScript::new(
-            r#"
+        let script = r#"
 function validate(ctx, content)
     if ctx.affects == nil then
         return "ctx.affects is nil"
@@ -750,18 +659,13 @@ function validate(ctx, content)
     end
     return nil
 end
-"#,
-        );
-        let script_path = script.path();
+"#;
         let context = merge_validation_contexts(vec![
-            validation_context_with_root(
-                script.root(),
+            validation_context(
                 "example.py",
-                &format!(
-                    r#"# <block check-lua="{script_path}" affects="other.py:remote-block">
+                r#"# <block check-lua="check.lua" affects="other.py:remote-block">
 some content
 # </block>"#,
-                ),
             ),
             validation_context_with_changes(
                 "other.py",
@@ -771,16 +675,18 @@ remote content
                 vec![], // No changes: this block is absent from the diff.
             ),
         ]);
-        let validator = validator_for(&context);
-        let violations = validator.validate(context).await?;
+
+        let violations = validator(&[("check.lua", script)])
+            .validate(context)
+            .await?;
+
         assert!(violations.is_empty());
         Ok(())
     }
 
     #[tokio::test]
     async fn ctx_affects_skips_unresolved_references() -> anyhow::Result<()> {
-        let script = TempScript::new(
-            r#"
+        let script = r#"
 function validate(ctx, content)
     if ctx.affects == nil then
         return "ctx.affects is nil"
@@ -790,48 +696,43 @@ function validate(ctx, content)
     end
     return nil
 end
-"#,
-        );
-        let script_path = script.path();
-        let context = validation_context_with_root(
-            script.root(),
+"#;
+        let context = validation_context(
             "example.py",
-            &format!(
-                r#"# <block check-lua="{script_path}" affects=":does-not-exist">
+            r#"# <block check-lua="check.lua" affects=":does-not-exist">
 some content
 # </block>"#,
-            ),
         );
-        let validator = validator_for(&context);
-        let violations = validator.validate(context).await?;
+
+        let violations = validator(&[("check.lua", script)])
+            .validate(context)
+            .await?;
+
         assert!(violations.is_empty());
         Ok(())
     }
 
     #[tokio::test]
     async fn ctx_affects_is_nil_without_affects_attribute() -> anyhow::Result<()> {
-        let script = TempScript::new(
-            r#"
+        let script = r#"
 function validate(ctx, content)
     if ctx.affects ~= nil then
         return "ctx.affects should be nil"
     end
     return nil
 end
-"#,
-        );
-        let script_path = script.path();
-        let context = validation_context_with_root(
-            script.root(),
+"#;
+        let context = validation_context(
             "example.py",
-            &format!(
-                r#"# <block check-lua="{script_path}">
+            r#"# <block check-lua="check.lua">
 some content
 # </block>"#,
-            ),
         );
-        let validator = validator_for(&context);
-        let violations = validator.validate(context).await?;
+
+        let violations = validator(&[("check.lua", script)])
+            .validate(context)
+            .await?;
+
         assert!(violations.is_empty());
         Ok(())
     }
