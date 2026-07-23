@@ -127,8 +127,10 @@ impl SimpleDiagnostic<'_> {
 }
 
 pub struct ValidationContext {
-    // Repository (project) root the scanned paths are relative to. Used to confine file references
-    // such as `check-lua` script paths to within the repository.
+    // Repository (project) root the scanned paths are relative to. File-access confinement now
+    // lives in `FileSystemImpl` (which owns the same root), so no validator reads this in
+    // production; it is kept as run metadata and used by tests to root the injected filesystem.
+    #[allow(dead_code)]
     pub(crate) root_path: PathBuf,
     // Blocks with their corresponding source file contents grouped by filename.
     pub(crate) blocks: HashMap<PathBuf, FileBlocks>,

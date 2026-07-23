@@ -36,16 +36,20 @@ fn lua_from_env() -> Lua {
     // </block>
 }
 
-pub(crate) struct CheckLuaValidator;
+pub(crate) struct CheckLuaValidator<Fs: FileSystem> {
+    // Injected by the detector; used to read `check-lua` scripts. `FileSystemImpl` confines these
+    // reads to the repository root, so this validator no longer resolves paths itself.
+    file_system: Arc<Fs>,
+}
 
-impl CheckLuaValidator {
-    pub fn new() -> Self {
-        Self
+impl<Fs: FileSystem + 'static> CheckLuaValidator<Fs> {
+    pub(super) fn new(file_system: Arc<Fs>) -> Self {
+        Self { file_system }
     }
 }
 
 #[async_trait]
-impl ValidatorAsync for CheckLuaValidator {
+impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
     async fn validate(
         &self,
         context: Arc<ValidationContext>,
@@ -75,6 +79,7 @@ impl ValidatorAsync for CheckLuaValidator {
 
                 let context = Arc::clone(&context);
                 let file_path = file_path.clone();
+                let file_system = Arc::clone(&self.file_system);
                 tasks.spawn(async move {
                     let file_blocks = &context.blocks[&file_path];
                     let block_with_context = &file_blocks.blocks_with_context[block_idx];
@@ -85,7 +90,7 @@ impl ValidatorAsync for CheckLuaValidator {
 
                     let result = run_lua_script(
                         script_path,
-                        &context.root_path,
+                        file_system.as_ref(),
                         &file_path,
                         block_with_context,
                         content,
@@ -133,47 +138,9 @@ impl ValidatorAsync for CheckLuaValidator {
     }
 }
 
-/// Resolves a `check-lua` `script_path` against the repository `root_path` and verifies it points
-/// to an existing file located inside the repository.
-///
-/// Relative paths are resolved against `root_path`; absolute paths are used as-is. The candidate is
-/// canonicalized (resolving symlinks and `..`) and must remain within the canonicalized
-/// `root_path`. This prevents a scanned (and potentially untrusted) source file from pointing
-/// `check-lua` at a script outside the project, e.g. via an absolute path, `../` traversal, or a
-/// symlink that escapes the repository.
-fn resolve_script_path(root_path: &Path, script_path: &str) -> anyhow::Result<PathBuf> {
-    let candidate = {
-        let path = Path::new(script_path);
-        if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            root_path.join(path)
-        }
-    };
-    let canonical_root = std::fs::canonicalize(root_path).with_context(|| {
-        format!(
-            "failed to canonicalize repository root: {}",
-            root_path.display()
-        )
-    })?;
-    let canonical_script = std::fs::canonicalize(&candidate)
-        .with_context(|| format!("failed to canonicalize Lua script path: {script_path}"))?;
-    if !canonical_script.starts_with(&canonical_root) {
-        return Err(anyhow!(
-            "check-lua script \"{script_path}\" resolves to \"{}\" which is outside the repository root \"{}\"",
-            canonical_script.display(),
-            canonical_root.display(),
-        ));
-    }
-    if !canonical_script.is_file() {
-        return Err(anyhow!("check-lua script \"{script_path}\" is not a file"));
-    }
-    Ok(canonical_script)
-}
-
-async fn run_lua_script(
+async fn run_lua_script<Fs: FileSystem>(
     script_path: &str,
-    root_path: &Path,
+    file_system: &Fs,
     file_path: &Path,
     block_with_context: &BlockWithContext,
     content: &str,
@@ -181,8 +148,10 @@ async fn run_lua_script(
 ) -> anyhow::Result<Option<String>> {
     let lua = lua_from_env();
 
-    let resolved_script_path = resolve_script_path(root_path, script_path)?;
-    let script_content = std::fs::read_to_string(&resolved_script_path)
+    // `FileSystemImpl` canonicalizes the path and confines it to the repository root, so the
+    // bespoke `resolve_script_path` security check that used to live here now lives in one place.
+    let script_content = file_system
+        .read_to_string(Path::new(script_path))
         .with_context(|| format!("failed to read Lua script: {script_path}"))?;
 
     lua.load(&script_content)
@@ -368,11 +337,11 @@ impl CheckLuaValidatorDetector {
     }
 }
 
-impl<Fs: FileSystem> ValidatorDetector<Fs> for CheckLuaValidatorDetector {
+impl<Fs: FileSystem + 'static> ValidatorDetector<Fs> for CheckLuaValidatorDetector {
     fn detect(
         &self,
         block_with_context: &BlockWithContext,
-        _file_system: &Arc<Fs>,
+        file_system: &Arc<Fs>,
     ) -> anyhow::Result<Option<ValidatorType>> {
         if block_with_context
             .block
@@ -380,7 +349,7 @@ impl<Fs: FileSystem> ValidatorDetector<Fs> for CheckLuaValidatorDetector {
             .contains_key("check-lua")
         {
             Ok(Some(ValidatorType::Async(Box::new(
-                CheckLuaValidator::new(),
+                CheckLuaValidator::new(Arc::clone(file_system)),
             ))))
         } else {
             Ok(None)
@@ -397,6 +366,7 @@ struct CheckLuaViolation<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blocks::FileSystemImpl;
     use crate::test_utils::{
         merge_validation_contexts, validation_context, validation_context_with_changes,
         validation_context_with_root,
@@ -409,6 +379,12 @@ mod tests {
         file.write_all(content.as_bytes()).unwrap();
         file.flush().unwrap();
         file
+    }
+
+    /// Builds a `CheckLuaValidator` whose injected filesystem is rooted at the validation context's
+    /// repository root — the same root the scripts referenced by that context live under.
+    fn validator_for(context: &Arc<ValidationContext>) -> CheckLuaValidator<FileSystemImpl> {
+        CheckLuaValidator::new(Arc::new(FileSystemImpl::new(context.root_path.clone())))
     }
 
     /// A Lua script written into a temporary directory that doubles as the repository root.
@@ -440,91 +416,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn resolve_script_path_resolves_relative_path_inside_root() -> anyhow::Result<()> {
-        let script = TempScript::new("-- ok");
-
-        let resolved = resolve_script_path(script.root(), "script.lua")?;
-
-        assert_eq!(
-            resolved,
-            std::fs::canonicalize(script.root().join("script.lua"))?
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn resolve_script_path_resolves_absolute_path_inside_root() -> anyhow::Result<()> {
-        let script = TempScript::new("-- ok");
-
-        let resolved = resolve_script_path(script.root(), script.path())?;
-
-        assert_eq!(resolved, std::fs::canonicalize(script.path())?);
-        Ok(())
-    }
-
-    #[test]
-    fn resolve_script_path_rejects_absolute_path_outside_root() -> anyhow::Result<()> {
-        let root = tempfile::tempdir()?;
-        let outside = write_temp_lua_script("-- evil");
-
-        let err = resolve_script_path(root.path(), outside.path().to_str().unwrap()).unwrap_err();
-
-        assert!(
-            err.to_string().contains("outside the repository root"),
-            "unexpected error: {err}"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn resolve_script_path_rejects_relative_path_escaping_root() -> anyhow::Result<()> {
-        let parent = tempfile::tempdir()?;
-        std::fs::write(parent.path().join("evil.lua"), "-- evil")?;
-        let root = parent.path().join("repo");
-        std::fs::create_dir(&root)?;
-
-        let err = resolve_script_path(&root, "../evil.lua").unwrap_err();
-
-        assert!(
-            err.to_string().contains("outside the repository root"),
-            "unexpected error: {err}"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn resolve_script_path_rejects_missing_script() -> anyhow::Result<()> {
-        let root = tempfile::tempdir()?;
-
-        let err = resolve_script_path(root.path(), "does_not_exist.lua").unwrap_err();
-
-        let err_chain = format!("{err:#}");
-        assert!(
-            err_chain.contains("failed to canonicalize Lua script path"),
-            "unexpected error: {err_chain}"
-        );
-        Ok(())
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn resolve_script_path_rejects_symlink_escaping_root() -> anyhow::Result<()> {
-        let parent = tempfile::tempdir()?;
-        std::fs::write(parent.path().join("secret.lua"), "-- secret")?;
-        let root = parent.path().join("repo");
-        std::fs::create_dir(&root)?;
-        std::os::unix::fs::symlink(parent.path().join("secret.lua"), root.join("link.lua"))?;
-
-        let err = resolve_script_path(&root, "link.lua").unwrap_err();
-
-        assert!(
-            err.to_string().contains("outside the repository root"),
-            "unexpected error: {err}"
-        );
-        Ok(())
-    }
-
     #[tokio::test]
     async fn when_lua_returns_nil_returns_no_violations() -> anyhow::Result<()> {
         let script = TempScript::new(
@@ -544,7 +435,7 @@ some content
 # </block>"#,
             ),
         );
-        let validator = CheckLuaValidator::new();
+        let validator = validator_for(&context);
 
         let violations = validator.validate(context).await?;
 
@@ -574,7 +465,7 @@ some content
 # </block>"#,
             ),
         );
-        let validator = CheckLuaValidator::new();
+        let validator = validator_for(&context);
 
         let err = validator.validate(context).await.unwrap_err();
 
@@ -605,7 +496,7 @@ some content
 # </block>"#,
             ),
         );
-        let validator = CheckLuaValidator::new();
+        let validator = validator_for(&context);
 
         let violations = validator.validate(context).await?;
 
@@ -629,13 +520,13 @@ some content
 
     #[tokio::test]
     async fn empty_script_path_returns_error() -> anyhow::Result<()> {
-        let validator = CheckLuaValidator::new();
         let context = validation_context(
             "example.py",
             r#"# <block check-lua=" ">
 text
 # </block>"#,
         );
+        let validator = validator_for(&context);
         let err = validator.validate(context).await.unwrap_err();
         assert!(
             err.to_string()
@@ -646,17 +537,17 @@ text
 
     #[tokio::test]
     async fn missing_script_file_returns_error() -> anyhow::Result<()> {
-        let validator = CheckLuaValidator::new();
         let context = validation_context(
             "example.py",
             r#"# <block check-lua="/nonexistent/path/script.lua">
 text
 # </block>"#,
         );
+        let validator = validator_for(&context);
         let err = validator.validate(context).await.unwrap_err();
         let err_chain = format!("{err:#}");
         assert!(
-            err_chain.contains("failed to canonicalize Lua script path"),
+            err_chain.contains("failed to read Lua script"),
             "unexpected error: {err_chain}"
         );
         Ok(())
@@ -684,7 +575,7 @@ name: Alice, id: 42
 # </block>"#,
             ),
         );
-        let validator = CheckLuaValidator::new();
+        let validator = validator_for(&context);
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());
         Ok(())
@@ -712,7 +603,7 @@ name: Alice, id: 42
 # </block>"#,
             ),
         );
-        let validator = CheckLuaValidator::new();
+        let validator = validator_for(&context);
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());
         Ok(())
@@ -736,7 +627,7 @@ some content
 # </block>"#,
             ),
         );
-        let validator = CheckLuaValidator::new();
+        let validator = validator_for(&context);
         let err = validator.validate(context).await.unwrap_err();
         let err_chain = format!("{err:#}");
         assert!(
@@ -777,7 +668,7 @@ some content
 # </block>"#,
             ),
         );
-        let validator = CheckLuaValidator::new();
+        let validator = validator_for(&context);
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());
         Ok(())
@@ -838,7 +729,7 @@ remote content
 # </block>"#,
             ),
         ]);
-        let validator = CheckLuaValidator::new();
+        let validator = validator_for(&context);
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());
         Ok(())
@@ -880,7 +771,7 @@ remote content
                 vec![], // No changes: this block is absent from the diff.
             ),
         ]);
-        let validator = CheckLuaValidator::new();
+        let validator = validator_for(&context);
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());
         Ok(())
@@ -911,7 +802,7 @@ some content
 # </block>"#,
             ),
         );
-        let validator = CheckLuaValidator::new();
+        let validator = validator_for(&context);
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());
         Ok(())
@@ -939,7 +830,7 @@ some content
 # </block>"#,
             ),
         );
-        let validator = CheckLuaValidator::new();
+        let validator = validator_for(&context);
         let violations = validator.validate(context).await?;
         assert!(violations.is_empty());
         Ok(())

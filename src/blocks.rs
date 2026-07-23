@@ -419,7 +419,8 @@ fn try_parser_for_extension<'p>(
     parsers.get(ext)
 }
 
-pub trait FileSystem {
+// `Send + Sync` so an `Arc<Fs>` can be shared into validator threads (std::thread and Tokio tasks).
+pub trait FileSystem: Send + Sync {
     /// Reads the entire contents of a file into a string.
     fn read_to_string(&self, path: &Path) -> anyhow::Result<String>;
 
@@ -445,12 +446,46 @@ impl FileSystemImpl {
     pub fn new(root_path: PathBuf) -> Self {
         Self { root_path }
     }
+
+    /// Resolves `path` against the repository root and guarantees the result stays inside it.
+    ///
+    /// Relative paths are joined to `root_path`; absolute paths are used as-is. Both the candidate
+    /// and the root are canonicalized (resolving symlinks and `..`), and the canonical candidate
+    /// must remain within the canonical root. This confines every read to the repository, rejecting
+    /// `..` traversal, absolute escapes, and symlinks that resolve outside the root — so callers
+    /// (e.g. the `check-lua` script path or a cross-file validator's target) get containment for
+    /// free without re-implementing the check.
+    fn resolve_within_root(&self, path: &Path) -> anyhow::Result<PathBuf> {
+        let candidate = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.root_path.join(path)
+        };
+        let canonical_root = std::fs::canonicalize(&self.root_path).with_context(|| {
+            format!(
+                "failed to canonicalize repository root: {}",
+                self.root_path.display()
+            )
+        })?;
+        let canonical = std::fs::canonicalize(&candidate)
+            .with_context(|| format!("failed to canonicalize path \"{}\"", path.display()))?;
+        if !canonical.starts_with(&canonical_root) {
+            return Err(anyhow!(
+                "path \"{}\" resolves to \"{}\" which is outside the repository root \"{}\"",
+                path.display(),
+                canonical.display(),
+                canonical_root.display(),
+            ));
+        }
+        Ok(canonical)
+    }
 }
 
 impl FileSystem for FileSystemImpl {
     fn read_to_string(&self, path: &Path) -> anyhow::Result<String> {
-        std::fs::read_to_string(self.root_path.join(path))
-            .context(format!("Failed to read file \"{}\"", path.display()))
+        let resolved = self.resolve_within_root(path)?;
+        std::fs::read_to_string(&resolved)
+            .with_context(|| format!("Failed to read file \"{}\"", path.display()))
     }
 
     fn walk(&self) -> impl Iterator<Item = anyhow::Result<PathBuf>> {
@@ -1052,6 +1087,111 @@ mod parse_blocks_tests {
         )?;
 
         assert_eq!(blocks.len(), 0);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod file_system_impl_tests {
+    use super::{FileSystem, FileSystemImpl};
+    use std::path::{Path, PathBuf};
+
+    /// Writes `content` to `name` inside a fresh temp dir that doubles as the repository root.
+    /// Returns the held temp dir (kept alive for the test) and the file's absolute path.
+    fn root_with_file(name: &str, content: &str) -> (tempfile::TempDir, PathBuf) {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join(name);
+        std::fs::write(&path, content).unwrap();
+        (root, path)
+    }
+
+    #[test]
+    fn read_to_string_reads_relative_path_inside_root() -> anyhow::Result<()> {
+        let (root, _path) = root_with_file("a.txt", "hello");
+        let file_system = FileSystemImpl::new(root.path().to_path_buf());
+
+        assert_eq!(file_system.read_to_string(Path::new("a.txt"))?, "hello");
+        Ok(())
+    }
+
+    #[test]
+    fn read_to_string_reads_absolute_path_inside_root() -> anyhow::Result<()> {
+        let (root, abs_path) = root_with_file("a.txt", "hello");
+        let file_system = FileSystemImpl::new(root.path().to_path_buf());
+
+        assert_eq!(file_system.read_to_string(&abs_path)?, "hello");
+        Ok(())
+    }
+
+    #[test]
+    fn read_to_string_rejects_absolute_path_outside_root() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        // A file that exists and is readable, but lives outside the repository root.
+        let (_outside_root, outside) = root_with_file("secret.txt", "secret");
+        let file_system = FileSystemImpl::new(root.path().to_path_buf());
+
+        let err = file_system.read_to_string(&outside).unwrap_err();
+
+        assert!(
+            format!("{err:#}").contains("outside the repository root"),
+            "unexpected error: {err:#}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn read_to_string_rejects_relative_path_escaping_root() -> anyhow::Result<()> {
+        let parent = tempfile::tempdir()?;
+        std::fs::write(parent.path().join("evil.txt"), "evil")?;
+        let root = parent.path().join("repo");
+        std::fs::create_dir(&root)?;
+        let file_system = FileSystemImpl::new(root);
+
+        let err = file_system
+            .read_to_string(Path::new("../evil.txt"))
+            .unwrap_err();
+
+        assert!(
+            format!("{err:#}").contains("outside the repository root"),
+            "unexpected error: {err:#}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn read_to_string_rejects_missing_path() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let file_system = FileSystemImpl::new(root.path().to_path_buf());
+
+        let err = file_system
+            .read_to_string(Path::new("does_not_exist.txt"))
+            .unwrap_err();
+
+        assert!(
+            format!("{err:#}").contains("failed to canonicalize path"),
+            "unexpected error: {err:#}"
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_to_string_rejects_symlink_escaping_root() -> anyhow::Result<()> {
+        let parent = tempfile::tempdir()?;
+        std::fs::write(parent.path().join("secret.txt"), "secret")?;
+        let root = parent.path().join("repo");
+        std::fs::create_dir(&root)?;
+        std::os::unix::fs::symlink(parent.path().join("secret.txt"), root.join("link.txt"))?;
+        let file_system = FileSystemImpl::new(root);
+
+        let err = file_system
+            .read_to_string(Path::new("link.txt"))
+            .unwrap_err();
+
+        assert!(
+            format!("{err:#}").contains("outside the repository root"),
+            "unexpected error: {err:#}"
+        );
         Ok(())
     }
 }
