@@ -5,6 +5,7 @@ mod keep_sorted;
 mod keep_unique;
 mod line_count;
 mod line_pattern;
+mod same_as;
 
 use crate::Position;
 use crate::blocks::{BlockSeverity, BlockWithContext, FileBlocks};
@@ -17,6 +18,7 @@ use crate::validators::keep_sorted::KeepSortedValidatorDetector;
 use crate::validators::keep_unique::KeepUniqueValidatorDetector;
 use crate::validators::line_count::LineCountValidatorDetector;
 use crate::validators::line_pattern::LinePatternValidatorDetector;
+use crate::validators::same_as::SameAsValidatorDetector;
 use anyhow::Context;
 use async_trait::async_trait;
 use serde::Serialize;
@@ -283,6 +285,7 @@ pub fn detector_factories<Fs: FileSystem + 'static>() -> Vec<(&'static str, Dete
         ("line-count", || Box::new(LineCountValidatorDetector::new())),
         ("check-ai", || Box::new(CheckAiValidatorDetector::new())),
         ("check-lua", || Box::new(CheckLuaValidatorDetector::new())),
+        ("same-as", || Box::new(SameAsValidatorDetector::new())),
         // </block>
     ]
 }
@@ -333,7 +336,12 @@ pub fn detect_validators<Fs: FileSystem + 'static>(
     Ok((sync_validators, async_validators))
 }
 
-pub(in crate::validators) fn parse_affects_attribute(
+/// Parses a comma-separated list of block references in the `file:name` (or `:name` for the same
+/// file) syntax shared by the reference-based validators (`affects`, `check-lua`, `same-as`).
+///
+/// Returns each reference as an `(optional file path, block name)` pair; an empty file part yields
+/// `None`, meaning "a block in the same file".
+pub(in crate::validators) fn parse_block_references(
     value: &str,
 ) -> anyhow::Result<Vec<(Option<PathBuf>, String)>> {
     let mut result = Vec::new();
@@ -341,7 +349,7 @@ pub(in crate::validators) fn parse_affects_attribute(
         let block = block_ref.trim();
         let (mut filename, block_name) = block
             .split_once(":")
-            .context(format!("Invalid \"affects\" attribute value: \"{block}\"",))?;
+            .context(format!("Invalid block reference: \"{block}\"",))?;
         filename = filename.trim();
         result.push((
             if filename.is_empty() {
@@ -353,6 +361,56 @@ pub(in crate::validators) fn parse_affects_attribute(
         ));
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod parse_block_references_tests {
+    use crate::validators::parse_block_references;
+    #[test]
+    fn single_reference() -> anyhow::Result<()> {
+        let result = parse_block_references("file.rs:block_name")?;
+        assert_eq!(
+            result,
+            vec![(Some("file.rs".into()), "block_name".to_string())]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn multiple_references() -> anyhow::Result<()> {
+        let result = parse_block_references("file1.rs:block1, file2.rs:block2")?;
+        assert_eq!(
+            result,
+            vec![
+                (Some("file1.rs".into()), "block1".to_string()),
+                (Some("file2.rs".into()), "block2".to_string())
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn empty_filename_returns_none_for_filename() -> anyhow::Result<()> {
+        let result = parse_block_references(":block_name")?;
+        assert_eq!(result, vec![(None, "block_name".to_string())]);
+        Ok(())
+    }
+
+    #[test]
+    fn multiple_empty_filename_references_returns_non_for_filename() -> anyhow::Result<()> {
+        let result = parse_block_references(":block1, :block2")?;
+        assert_eq!(
+            result,
+            vec![(None, "block1".to_string()), (None, "block2".to_string())]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_block_returns_error() {
+        let result = parse_block_references("invalid_reference");
+        assert!(result.is_err());
+    }
 }
 
 #[cfg(test)]

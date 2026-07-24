@@ -340,6 +340,28 @@ enum BlocksFilter {
     ModifiedOnly,
 }
 
+/// Parses every block in a single file, without diff-based filtering. Returns `None` for
+/// unsupported file extensions.
+///
+/// Whereas [`parse_blocks`] keeps only the blocks intersecting a set of changed lines, this returns
+/// all blocks in the file — for reading a referenced block in a file that is not part of the
+/// current change set.
+pub fn parse_single_file(
+    file_system: &impl FileSystem,
+    file_path: &Path,
+    parsers: &LanguageParsers,
+    extra_file_extensions: &HashMap<OsString, OsString>,
+) -> anyhow::Result<Option<FileBlocks>> {
+    parse_file(
+        file_path,
+        &[],
+        BlocksFilter::All,
+        file_system,
+        parsers,
+        extra_file_extensions,
+    )
+}
+
 fn parse_file(
     file_path: &Path,
     line_changes: &[LineChange],
@@ -974,6 +996,20 @@ mod parse_blocks_tests {
         )?;
 
         assert_eq!(blocks.len(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_single_file_returns_all_blocks() -> anyhow::Result<()> {
+        let file_system = FakeFileSystem::new(HashMap::from([(
+            "a.py".to_string(),
+            "# <block name=\"x\">\n1\n# </block>\n# <block name=\"y\">\n2\n# </block>".to_string(),
+        )]));
+        let parsers = language_parsers()?;
+        let file_blocks =
+            parse_single_file(&file_system, Path::new("a.py"), &parsers, &HashMap::new())?
+                .expect("python is supported");
+        assert_eq!(file_blocks.blocks_with_context.len(), 2);
         Ok(())
     }
 }

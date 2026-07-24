@@ -1,6 +1,6 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
-use crate::validators::parse_affects_attribute;
+use crate::validators::parse_block_references;
 use crate::validators::{
     ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorType, Violation, ViolationRange,
 };
@@ -282,7 +282,7 @@ fn resolve_affected_blocks(
     let Some(affects) = block.attributes.get("affects") else {
         return Ok(result);
     };
-    for (file, name) in parse_affects_attribute(affects)? {
+    for (file, name) in parse_block_references(affects)? {
         let file = file.unwrap_or_else(|| current_file_path.to_path_buf());
         let Some(file_blocks) = context.blocks.get(&file) else {
             continue;

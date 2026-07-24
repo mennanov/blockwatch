@@ -50,7 +50,7 @@ impl validators::ValidatorSync for AffectsValidator {
                     continue;
                 }
                 if let Some(affects) = block_with_context.block.attributes.get("affects") {
-                    let affected_blocks = validators::parse_affects_attribute(affects)?;
+                    let affected_blocks = validators::parse_block_references(affects)?;
                     for (affected_file_path, affected_block_name) in affected_blocks {
                         let affected_file_path =
                             affected_file_path.unwrap_or_else(|| modified_block_file_path.clone());
@@ -459,55 +459,5 @@ pass
 
         assert!(!violations.is_empty());
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod parse_affects_attribute_tests {
-    use crate::validators::parse_affects_attribute;
-    #[test]
-    fn single_reference() -> anyhow::Result<()> {
-        let result = parse_affects_attribute("file.rs:block_name")?;
-        assert_eq!(
-            result,
-            vec![(Some("file.rs".into()), "block_name".to_string())]
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn multiple_references() -> anyhow::Result<()> {
-        let result = parse_affects_attribute("file1.rs:block1, file2.rs:block2")?;
-        assert_eq!(
-            result,
-            vec![
-                (Some("file1.rs".into()), "block1".to_string()),
-                (Some("file2.rs".into()), "block2".to_string())
-            ]
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn empty_filename_returns_none_for_filename() -> anyhow::Result<()> {
-        let result = parse_affects_attribute(":block_name")?;
-        assert_eq!(result, vec![(None, "block_name".to_string())]);
-        Ok(())
-    }
-
-    #[test]
-    fn multiple_empty_filename_references_returns_non_for_filename() -> anyhow::Result<()> {
-        let result = parse_affects_attribute(":block1, :block2")?;
-        assert_eq!(
-            result,
-            vec![(None, "block1".to_string()), (None, "block2".to_string())]
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn invalid_block_returns_error() {
-        let result = parse_affects_attribute("invalid_reference");
-        assert!(result.is_err());
     }
 }

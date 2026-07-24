@@ -79,6 +79,8 @@ Review the diff before you commit it: the agent's choices are a starting point.
 
 - **Drift Detection**: Link a block of code to its documentation. If you change the code but forget the docs, BlockWatch
   alerts you.
+- **Cross-Block Agreement**: Assert that two or more linked blocks hold the same value (`same-as`), catching duplicated
+  constants, lists, or versions that drift out of sync.
 - **Strict Formatting**: Enforce sorted lists (`keep-sorted`) and unique entries (`keep-unique`) so you don't have to
   nitpick in code reviews.
 - **Content Validation**: Check lines against Regex patterns (`line-pattern`) or enforce block size limits (
