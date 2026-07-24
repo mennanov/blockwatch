@@ -185,7 +185,7 @@ fn parse_extensions(s: &str) -> anyhow::Result<(String, String)> {
 }
 
 fn parse_validator(value: &str) -> anyhow::Result<String> {
-    let validators: Vec<&str> = validators::detector_factories::<crate::blocks::FileSystemImpl>()
+    let validators: Vec<&str> = validators::detector_factories::<crate::fs::FileSystemImpl>()
         .iter()
         .map(|(validator_name, _)| *validator_name)
         .collect();

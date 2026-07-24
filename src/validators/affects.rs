@@ -1,4 +1,5 @@
-use crate::blocks::{Block, BlockWithContext, FileSystem};
+use crate::blocks::{Block, BlockWithContext};
+use crate::fs::FileSystem;
 use crate::validators;
 use crate::validators::{ValidatorType, Violation, ViolationRange};
 use anyhow::Context;

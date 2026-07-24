@@ -1,4 +1,5 @@
-use crate::blocks::{Block, BlockWithContext, FileSystem};
+use crate::blocks::{Block, BlockWithContext};
+use crate::fs::FileSystem;
 use crate::validators::parse_affects_attribute;
 use crate::validators::{
     ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorType, Violation, ViolationRange,
@@ -364,9 +365,9 @@ struct CheckLuaViolation<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs::test_utils::FakeFileSystem;
     use crate::test_utils::{
-        FakeFileSystem, merge_validation_contexts, validation_context,
-        validation_context_with_changes,
+        merge_validation_contexts, validation_context, validation_context_with_changes,
     };
     use serde_json::json;
 

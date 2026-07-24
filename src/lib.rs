@@ -4,6 +4,7 @@ mod block_parser;
 pub mod blocks;
 pub mod diff_parser;
 pub mod flags;
+pub mod fs;
 pub mod language_parsers;
 mod tag_parser;
 pub mod validators;
@@ -24,13 +25,13 @@ impl Position {
 
 #[cfg(test)]
 mod test_utils {
-    use crate::blocks::{FileBlocks, FileSystem, PathChecker, parse_blocks};
+    use crate::blocks::{FileBlocks, parse_blocks};
     use crate::diff_parser::LineChange;
+    use crate::fs::test_utils::{FakeFileSystem, FakePathChecker};
     use crate::language_parsers;
     use crate::validators::ValidationContext;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
     use std::ops::Range;
-    use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
     /// Finds the byte range of the first occurrence of a substring within a string.
@@ -41,55 +42,6 @@ mod test_utils {
     pub(crate) fn substr_range(input: &str, substr: &str) -> Range<usize> {
         let pos = input.find(substr).unwrap();
         pos..(pos + substr.len())
-    }
-
-    pub(crate) struct FakeFileSystem {
-        files: HashMap<String, String>,
-    }
-
-    impl FakeFileSystem {
-        pub(crate) fn new(files: HashMap<String, String>) -> Self {
-            Self { files }
-        }
-    }
-
-    impl FileSystem for FakeFileSystem {
-        fn read_to_string(&self, path: &Path) -> anyhow::Result<String> {
-            // Mirror a real filesystem: a missing file is an error, not a panic. This lets
-            // validators' read-failure paths be exercised with the fake.
-            self.files
-                .get(&path.display().to_string())
-                .cloned()
-                .ok_or_else(|| anyhow::anyhow!("File {} not found", path.display()))
-        }
-
-        fn walk(&self) -> impl Iterator<Item = anyhow::Result<PathBuf>> {
-            self.files.keys().map(|p| Ok(PathBuf::from(p)))
-        }
-    }
-
-    pub(crate) struct FakePathChecker {
-        ignored_paths: HashSet<String>,
-    }
-
-    impl FakePathChecker {
-        pub(crate) fn with_ignored_paths(ignored_paths: HashSet<String>) -> Self {
-            Self { ignored_paths }
-        }
-
-        pub(crate) fn allow_all() -> Self {
-            Self::with_ignored_paths(HashSet::new())
-        }
-    }
-
-    impl PathChecker for FakePathChecker {
-        fn should_allow(&self, _unused_path: &Path) -> bool {
-            true
-        }
-
-        fn should_ignore(&self, path: &Path) -> bool {
-            self.ignored_paths.contains(&path.display().to_string())
-        }
     }
 
     /// Creates a [`ValidationContext`] for the given `file_name` with `contents` with all lines

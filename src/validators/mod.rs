@@ -7,7 +7,8 @@ mod line_count;
 mod line_pattern;
 
 use crate::Position;
-use crate::blocks::{BlockSeverity, BlockWithContext, FileBlocks, FileSystem};
+use crate::blocks::{BlockSeverity, BlockWithContext, FileBlocks};
+use crate::fs::FileSystem;
 use crate::language_parsers::LanguageParsers;
 use crate::validators::affects::AffectsValidatorDetector;
 use crate::validators::check_ai::CheckAiValidatorDetector;
@@ -356,8 +357,10 @@ pub(in crate::validators) fn parse_affects_attribute(
 
 #[cfg(test)]
 mod tests {
-    use crate::blocks::{Block, BlockWithContext, FileSystem};
-    use crate::test_utils::{FakeFileSystem, merge_validation_contexts, validation_context};
+    use crate::blocks::{Block, BlockWithContext};
+    use crate::fs::FileSystem;
+    use crate::fs::test_utils::FakeFileSystem;
+    use crate::test_utils::{merge_validation_contexts, validation_context};
     use crate::validators::{
         DetectorFactory, ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorSync,
         ValidatorType, Violation, ViolationRange, detect_validators,
