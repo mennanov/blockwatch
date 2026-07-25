@@ -224,6 +224,8 @@ enum Mode {
     Sequence,
     /// Exactly one value per side, compared directly.
     Single,
+    /// Directional containment: every value in this block must also appear in the target.
+    Subset,
 }
 
 /// Reads a block's `same-as-mode` attribute, defaulting to [`Mode::Set`].
@@ -232,14 +234,16 @@ fn parse_mode(block: &Block) -> anyhow::Result<Mode> {
         None | Some("set") => Ok(Mode::Set),
         Some("sequence") => Ok(Mode::Sequence),
         Some("single") => Ok(Mode::Single),
+        Some("subset") => Ok(Mode::Subset),
         Some(other) => Err(anyhow!(
-            "invalid same-as-mode \"{other}\" (expected set, sequence, or single)"
+            "invalid same-as-mode \"{other}\" (expected set, sequence, single, or subset)"
         )),
     }
 }
 
 /// Returns `None` when the two sides agree under `mode`, or `Some(reason)` describing the mismatch.
 ///
+/// Set, sequence, and single are symmetric; `Mode::Subset` is directional (`source` ⊆ `target`).
 /// `Mode::Single` requires exactly one value per side; a side with a different count is itself a
 /// mismatch (the block's content does not meet the asserted shape), reported like any other.
 fn disagreement(source: &[String], target: &[String], mode: &Mode) -> Option<String> {
@@ -259,6 +263,14 @@ fn disagreement(source: &[String], target: &[String], mode: &Mode) -> Option<Str
             let source_set: HashSet<&String> = source.iter().collect();
             let target_set: HashSet<&String> = target.iter().collect();
             (source_set != target_set).then(|| format!("{source:?} != {target:?}"))
+        }
+        Mode::Subset => {
+            let target_set: HashSet<&String> = target.iter().collect();
+            let missing: Vec<&String> = source
+                .iter()
+                .filter(|item| !target_set.contains(item))
+                .collect();
+            (!missing.is_empty()).then(|| format!("not a subset; missing from target: {missing:?}"))
         }
     }
 }
@@ -537,6 +549,59 @@ mod validate_tests {
             "// <block same-as=\":b\" same-as-format=\"number\">\n1\n// </block>\n// <block name=\"b\">\n1\n// </block>",
         );
         assert!(validator(&[]).validate(context).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn subset_mode_passes_when_contained() -> anyhow::Result<()> {
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "test.rs",
+                "// <block same-as=\"src.rs:vars\" same-as-mode=\"subset\" same-as-pattern=\"(?P<value>[A-Z_]+)\">\nAPI_KEY\nAPI_URL\n// </block>",
+            ),
+            validation_context(
+                "src.rs",
+                "// <block name=\"vars\" same-as-pattern=\"(?P<value>[A-Z_]+)\">\nAPI_KEY\nAPI_URL\n// </block>",
+            ),
+        ]);
+        assert!(validator(&[]).validate(context)?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn subset_mode_fails_when_not_contained() -> anyhow::Result<()> {
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "test.rs",
+                "// <block same-as=\"src.rs:vars\" same-as-mode=\"subset\" same-as-pattern=\"(?P<value>[A-Z_]+)\">\nAPI_KEY\nEXTRA\n// </block>",
+            ),
+            validation_context(
+                "src.rs",
+                "// <block name=\"vars\" same-as-pattern=\"(?P<value>[A-Z_]+)\">\nAPI_KEY\n// </block>",
+            ),
+        ]);
+        let violations = validator(&[]).validate(context)?;
+        let file = violations.get(&PathBuf::from("test.rs")).unwrap();
+        assert_eq!(file.len(), 1);
+        assert_eq!(file[0].code, "same-as");
+        Ok(())
+    }
+
+    #[test]
+    fn subset_mode_is_directional() -> anyhow::Result<()> {
+        // Subset is not symmetric: a superset on the source side fails even though the reverse
+        // relation would hold.
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "test.rs",
+                "// <block same-as=\"src.rs:vars\" same-as-mode=\"subset\" same-as-pattern=\"(?P<value>[A-Z_]+)\">\nAPI_KEY\nAPI_URL\n// </block>",
+            ),
+            validation_context(
+                "src.rs",
+                "// <block name=\"vars\" same-as-pattern=\"(?P<value>[A-Z_]+)\">\nAPI_KEY\n// </block>",
+            ),
+        ]);
+        assert_eq!(validator(&[]).validate(context)?.len(), 1);
         Ok(())
     }
 }
