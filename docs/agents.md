@@ -1,36 +1,41 @@
-# Annotating your project with an AI agent
+# Annotating Codebases with AI Agents
 
-Adding the first `<block>` tags by hand is the tedious part of picking up BlockWatch. Coding agents are good at it: an
-agent can read through the repo, pick reasonable spots, write the tags in the right comment syntax for each language,
-and run `blockwatch` to check its own work.
+Annotating an existing repository with `<block>` tags by hand can be repetitive. AI coding tools can automate this
+process by scanning your codebase, adding `<block>` comments in the appropriate language syntax, and running
+`blockwatch` to verify their changes.
 
-This repo ships a skill for exactly that —
-[`.agents/skills/blockwatch/SKILL.md`](../.agents/skills/blockwatch/SKILL.md). It tells the agent where blocks are worth
-adding, documents the tag syntax, and explains how to verify the result.
+This repository includes a skill definition ([
+`.agents/skills/blockwatch/SKILL.md`](../.agents/skills/blockwatch/SKILL.md)) that guides agents on where blocks add
+value, how tag parameters work, and how to test the resulting blocks.
 
-## 1. Install the binary
+## 1. Install the CLI
 
-The agent needs to be able to run it. See [Install](../README.md#install).
+Make sure the `blockwatch` binary is installed locally so your agent can verify its work.
+See [Installation](../README.md#installation).
 
-## 2. Give the skill to your agent
+## 2. Install the Skill
 
-**Claude Code** — install the plugin once and the skill is available in every project, with no per-project setup:
+### Claude Code
+
+Install the plugin once to make the skill available across all projects:
 
 ```text
 /plugin marketplace add mennanov/blockwatch
 /plugin install blockwatch@blockwatch
 ```
 
-For other agents, or if you prefer a project-local copy, place `SKILL.md` where your tool looks for instructions:
+### Other AI Tools
 
-| Agent              | Where to put the skill                                                                                                  |
-|--------------------|-------------------------------------------------------------------------------------------------------------------------|
-| **Claude Code**    | Use the plugin above (recommended), or `.claude/skills/blockwatch/SKILL.md` (project) / `~/.claude/skills/...` (global) |
-| **Cursor**         | `.cursor/rules/blockwatch.mdc`                                                                                          |
-| **GitHub Copilot** | append to `.github/copilot-instructions.md`                                                                             |
-| **Codex / others** | append to `AGENTS.md`                                                                                                   |
+For other environments or project-local setups, copy `SKILL.md` to the expected skill location:
 
-Pull the file straight from this repo:
+| Agent               | Location                                               |
+|---------------------|--------------------------------------------------------|
+| **Claude Code**     | Plugin (above) or `.claude/skills/blockwatch/SKILL.md` |
+| **Cursor**          | `.cursor/rules/blockwatch.mdc`                         |
+| **GitHub Copilot**  | Append to `.github/copilot-instructions.md`            |
+| **Codex / generic** | Append to `AGENTS.md`                                  |
+
+To download `SKILL.md` directly:
 
 ```shell
 mkdir -p .claude/skills/blockwatch
@@ -38,22 +43,20 @@ curl -sL https://raw.githubusercontent.com/mennanov/blockwatch/main/.agents/skil
   -o .claude/skills/blockwatch/SKILL.md
 ```
 
-## 3. Ask the agent to annotate the project
+## 3. Run the Agent
 
-For example:
+Prompt your agent to scan the repository and add rules:
 
-> Using the BlockWatch skill, annotate this repository with `<block>` tags. Focus on lists that
-> should stay sorted/unique and on code that must stay in sync with docs or config. Add only
-> high-value blocks, then run `blockwatch` to confirm they all pass.
+> Using the BlockWatch skill, annotate this repository with `<block>` tags. Focus on lists that must remain sorted or
+> unique, and on code that should stay in sync with docs or config. Only add high-value blocks, then run `blockwatch` to
+> verify everything passes.
 
-Review the diff before committing. The agent's choices are a starting point, and a block that does not catch a real
-mistake is just noise — the skill tells the agent to be selective, but the judgment call is yours.
+Always inspect the generated diff before committing to ensure the added blocks are necessary and accurate.
 
-## 4. Turn on enforcement
+## 4. Enable Automated Checks
 
-Wire up the pre-commit hook and GitHub Action so the rules stay in place. See
-[CI integration](ci.md).
+Set up pre-commit hooks or CI workflows to enforce rules on future changes. See [CI Integration](ci.md).
 
 ---
 
-← [README](../README.md)
+[← Return to README](../README.md)

@@ -1,99 +1,103 @@
-# CLI reference
+# CLI Reference
 
-Run `blockwatch --help` for the generated version of this.
+For command-line flag documentation directly in your terminal, run `blockwatch --help`.
 
-## Options
+## Quick Options Reference
 
 [//]: # (<block name="cli-docs">)
 
-- **List Blocks**: `blockwatch list` outputs a JSON report of all found blocks.
-- **Extensions**: Map custom extensions: `blockwatch -E cxx=cpp`
+- **List Blocks**: `blockwatch list` outputs a JSON report of all discovered blocks.
+- **Custom Extensions**: Map custom file extensions: `blockwatch -E cxx=cpp`
 - **Disable Validators**: `blockwatch -d check-ai`
 - **Enable Validators**: `blockwatch -e keep-sorted`
 - **Ignore Files**: `blockwatch --ignore "**/generated/**"`
 
 [//]: # (</block>)
 
-## Selecting files
+## Selecting Files
+
+By default, `blockwatch` scans all files in the current working directory, respecting `.gitignore`.
 
 ```shell
-# Everything under the current directory, honoring .gitignore
+# Check everything in the repository
 blockwatch
 
-# Only these globs
+# Restrict checks to specific glob patterns
 blockwatch "src/**/*.rs" "**/*.md"
 
-# Exclude paths
+# Exclude specific paths
 blockwatch "**/*.rs" --ignore "**/generated/**"
 ```
 
-Quote glob patterns so the shell does not expand them first.
+Note: Quote glob patterns to prevent shell expansion before passing arguments to `blockwatch`.
 
-## Checking only what changed
+## Diff Validation
 
-Pipe a unified diff on stdin and only the blocks it touched are validated. This is what makes
-BlockWatch cheap enough for a pre-commit hook — see [CI integration](ci.md).
+When given a unified diff via stdin, `blockwatch` limits validation to blocks modified by the diff. This keeps execution
+fast during pre-commit hooks and CI runs (see [CI Integration](ci.md)).
 
 ```shell
-# Unstaged changes
+# Validate unstaged changes
 git diff --patch | blockwatch
 
-# Staged changes
+# Validate staged changes
 git diff --cached --patch | blockwatch
 
-# A single file's changes
+# Validate changes in a specific file
 git diff --patch path/to/file | blockwatch
 
-# Changed blocks, plus some files that are always checked
+# Validate diff changes alongside explicit globs
 git diff --patch | blockwatch "src/always_checked.rs" "**/*.md"
 ```
 
-A block is validated when the diff intersects its content or its start tag. If a rule is not firing
-when you expect it to, check that the diff actually hit the block's line range — `blockwatch list
---diff` shows this directly.
+A block is validated if the diff overlaps its line range or start tag. To inspect which blocks a diff touches, use
+`blockwatch list --diff`.
 
-## Extensions
+## Custom File Extension Mappings
 
-Language is resolved by file extension. Map an unrecognized extension onto a supported grammar:
+Language detection relies on file extensions. Use `-E` to map unrecognized or custom extensions to a supported grammar:
 
 ```shell
 blockwatch -E cxx=cpp -E c++=cpp
 ```
 
-Files whose extension resolves to no grammar are skipped.
+Files with extensions that do not map to any supported grammar are ignored.
 
-## Enabling and disabling validators
+## Enabling and Disabling Validators
+
+Control which validators run using `-e` (enable only) or `-d` (disable):
 
 ```shell
-blockwatch -d check-ai                 # everything except check-ai
-blockwatch -e keep-sorted -e keep-unique   # only these two
+# Run all validators except check-ai
+blockwatch -d check-ai
+
+# Run only keep-sorted and keep-unique
+blockwatch -e keep-sorted -e keep-unique
 ```
 
-`-e` and `-d` cannot be combined in one invocation.
+Note: `-e` and `-d` cannot be combined in a single invocation.
 
-## `list`
+## The `list` Command
 
-Dumps every block found, without validating anything. Useful for auditing annotations or working out
-why a rule did not fire.
+The `list` command outputs details on all discovered blocks in JSON format without running validation.
 
 ```shell
-# All blocks under the current directory
+# List all blocks under the current directory
 blockwatch list
 
-# Restricted to globs
+# Restrict block listing to specific globs
 blockwatch list "src/**/*.rs" "**/*.md"
 
-# Mark blocks touched by a diff
+# Annotate output with diff status
 git diff | blockwatch list --diff
 ```
 
-`list` does **not** read stdin unless you pass `--diff`, so it never blocks waiting for input. That
-makes it safe to run non-interactively — in CI, or when invoked by an AI agent — and to pipe
-elsewhere: `blockwatch list "src/**/*.ts" | jq`.
+`blockwatch list` reads stdin only when `--diff` is explicitly provided, preventing blocking during non-interactive
+scripts or pipeline commands (e.g. `blockwatch list "src/**/*.ts" | jq`).
 
-With `--diff`, the `is_content_modified` field reports which blocks the diff touched.
+With `--diff`, each block entry includes the `is_content_modified` boolean field.
 
-### Output
+### Output Example
 
 [//]: # (<block name="list-output-example">)
 
@@ -115,13 +119,13 @@ With `--diff`, the `is_content_modified` field reports which blocks the diff tou
 
 [//]: # (</block>)
 
-## Exit codes
+## Exit Codes
 
-| Code | Meaning                                                         |
-|------|-----------------------------------------------------------------|
-| 0    | No violations, or only violations with a non-`error` [severity](validators/README.md#severity) |
-| 1    | At least one `error`-severity violation                          |
+| Code | Description                                                                                                                  |
+|------|------------------------------------------------------------------------------------------------------------------------------|
+| `0`  | Success. No violations found, or all reported violations have a non-`error` [severity level](validators/README.md#severity). |
+| `1`  | Failure. At least one `error`-severity violation was detected.                                                               |
 
 ---
 
-← [README](../README.md)
+[← Return to README](../README.md)

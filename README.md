@@ -5,36 +5,16 @@
 [![Crates.io](https://img.shields.io/crates/v/blockwatch)](https://crates.io/crates/blockwatch)
 [![Downloads](https://img.shields.io/crates/d/blockwatch)](https://crates.io/crates/blockwatch)
 
-A language-agnostic linter that keeps co-dependent code, docs, and config from drifting apart. You declare the rule in a
-comment, next to the thing it guards.
+BlockWatch is a language-agnostic linter that keeps co-dependent code, documentation, and configuration files in sync.
+Rules are declared in comments right next to the code they protect.
 
 <p>
   <img src="demo.gif" alt="BlockWatch Demo">
 </p>
 
-## Why BlockWatch
+## Quick Start
 
-- **Catches cross-file drift.** Link an enum to the docs that describe it, or a constant to the config that duplicates
-  it. Change one side and forget the other, and the build tells you.
-- **Rules live where they apply** — inside comments, in the file they govern. There is no central config file to fall
-  out of date with the code.
-- **Free to adopt.** With a diff on stdin, only the blocks your change touched are checked. Adding a rule never
-  retroactively fails anyone else's work, so you can annotate one file at a time.
-- **One tool for the whole repo.** 30+ languages, plus Markdown, YAML, TOML, and Dockerfiles — which is what makes
-  linking code to its documentation possible in the first place.
-
-## Install
-
-```shell
-brew install mennanov/blockwatch/blockwatch   # macOS/Linux
-cargo install blockwatch                      # from source
-```
-
-Prebuilt binaries are on the [Releases](https://github.com/mennanov/blockwatch/releases) page.
-
-## Quick start
-
-Put `<block>` tags in a comment in any [supported file](#supported-languages):
+Add `<block>` tags inside comments in any [supported file](#supported-languages):
 
 **src/lib.rs**:
 
@@ -58,82 +38,94 @@ pub enum Language {
 <!-- </block> -->
 ```
 
-Add a variant to the enum and BlockWatch fails until you touch `supported-langs` too.
-[`affects`](docs/validators/affects.md) checks that the two were edited together;
-[`same-as`](docs/validators/same-as.md) goes further and checks they still hold the same *value*.
+If you add a new variant to `Language` in `src/lib.rs` without modifying `README.html`, BlockWatch will report an error.
 
-## Let an agent annotate your repo
+The [`affects`](docs/validators/affects.md) validator ensures linked blocks are modified together, while [
+`same-as`](docs/validators/same-as.md) verifies that they agree.
 
-Adding the first tags by hand is the tedious part, and agents are good at it. This repo ships a
-[skill](.agents/skills/blockwatch/SKILL.md) that tells them where blocks are worth adding and how to verify their own
-work.
+When a diff is piped in, only the blocks that diff touched are validated. Adding a rule never fails anyone else's work,
+so you can annotate an existing codebase one file at a time instead of fixing every pre-existing violation up front.
 
-Claude Code users install it once, for every project:
+## Validators
+
+[//]: # (<block name="available-validators">)
+
+| Attribute                                         | Description                                                      |
+|---------------------------------------------------|------------------------------------------------------------------|
+| [`affects`](docs/validators/affects.md)           | Ensures linked blocks are updated together (e.g. code and docs)  |
+| [`same-as`](docs/validators/same-as.md)           | Verifies that two or more blocks contain identical values        |
+| [`keep-sorted`](docs/validators/keep-sorted.md)   | Enforces alphabetical or numerical ordering on list items        |
+| [`keep-unique`](docs/validators/keep-unique.md)   | Prevents duplicate lines within a block                          |
+| [`line-pattern`](docs/validators/line-pattern.md) | Enforces that every line matches a specified regex               |
+| [`line-count`](docs/validators/line-count.md)     | Enforces lower or upper bounds on the number of lines in a block |
+| [`check-ai`](docs/validators/check-ai.md)         | Validates content against natural language rules using an LLM    |
+| [`check-lua`](docs/validators/check-lua.md)       | Runs custom validation logic written in Lua                      |
+
+[//]: # (</block>)
+
+Blocks also support `name` (for reference by `affects` or `same-as`) and [
+`severity`](docs/validators/README.md#severity) (e.g., `severity="warning"` to log warnings without breaking builds
+during gradual rollouts).
+
+See the [Validators Reference](docs/validators/README.md) for full details.
+
+## Installation
+
+```shell
+brew install mennanov/blockwatch/blockwatch   # macOS / Linux
+cargo install blockwatch                      # from source
+```
+
+Prebuilt binaries are also available on the [Releases](https://github.com/mennanov/blockwatch/releases) page.
+
+## AI Agent Integration
+
+Adding `<block>` tags to an existing codebase can be automated using AI coding tools. This repository includes
+a [skill](.agents/skills/blockwatch/SKILL.md) that instructs agents on how to identify candidate blocks and verify their
+edits.
+
+For **Claude Code**:
 
 ```text
 /plugin marketplace add mennanov/blockwatch
 /plugin install blockwatch@blockwatch
 ```
 
-Cursor, Copilot, and Codex setup, plus a prompt to start from: [docs/agents.md](docs/agents.md).
-
-## Validators
-
-[//]: # (<block name="available-validators">)
-
-| Attribute                                         | Enforces                                                             |
-|---------------------------------------------------|----------------------------------------------------------------------|
-| [`affects`](docs/validators/affects.md)           | Linked blocks are edited together — code and its docs, config, tests |
-| [`same-as`](docs/validators/same-as.md)           | Two or more blocks still hold the same value                         |
-| [`keep-sorted`](docs/validators/keep-sorted.md)   | A list stays ordered, lexicographically or numerically               |
-| [`keep-unique`](docs/validators/keep-unique.md)   | No duplicate entries                                                 |
-| [`line-pattern`](docs/validators/line-pattern.md) | Every line matches a regex                                           |
-| [`line-count`](docs/validators/line-count.md)     | A block stays within a size bound                                    |
-| [`check-ai`](docs/validators/check-ai.md)         | A rule stated in plain English, checked by an LLM                    |
-| [`check-lua`](docs/validators/check-lua.md)       | Custom logic, written as a Lua script                                |
-
-[//]: # (</block>)
-
-Any block also accepts `name` and
-[`severity`](docs/validators/README.md#severity) — set `severity="warning"` to report a rule without failing the build
-while you clean up existing violations.
-
-Full reference: [docs/validators/](docs/validators/README.md).
+For Cursor, Copilot, Codex, and other setup options, see [docs/agents.md](docs/agents.md).
 
 ## Usage
 
 ```shell
-blockwatch                              # check everything
-blockwatch "src/**/*.rs" "**/*.md"      # check some globs (quote them)
-git diff --patch | blockwatch           # check only the blocks you touched
-git diff --cached --patch | blockwatch  # same, for staged changes
-blockwatch list                         # JSON dump of every block found
+blockwatch                              # Check all blocks in the repository
+blockwatch "src/**/*.rs" "**/*.md"      # Check specific globs
+git diff --patch | blockwatch           # Check only blocks modified in uncommitted changes
+git diff --cached --patch | blockwatch  # Check only staged changes
+blockwatch list                         # Dump all discovered blocks as JSON
 ```
 
-Options for ignoring paths, mapping extensions, and turning individual validators on and off are in
-the [CLI reference](docs/cli.md).
+See [docs/cli.md](docs/cli.md) for CLI flags, path exclusions, and custom extension mappings.
 
-## CI integration
+## CI Integration
 
-Pre-commit hook, in `.pre-commit-config.yaml`:
+**pre-commit** (`.pre-commit-config.yaml`):
 
 ```yaml
 - repo: https://github.com/mennanov/blockwatch
-  rev: v0.2.27  # use the latest release tag
+  rev: v0.2.27  # Use latest release
   hooks:
     - id: blockwatch
 ```
 
-GitHub Actions:
+**GitHub Actions**:
 
 ```yaml
 - uses: mennanov/blockwatch-action@v1
 ```
 
-Plain git hooks, the local pre-commit form, and how to keep fork PRs from running untrusted Lua:
-[docs/ci.md](docs/ci.md).
+For plain git hooks, local pre-commit setups, and sandboxing untrusted Lua scripts in fork PRs,
+see [docs/ci.md](docs/ci.md).
 
-## Supported languages
+## Supported Languages
 
 [//]: # (<block name="supported-grammar" keep-sorted="asc">)
 
@@ -173,17 +165,23 @@ Plain git hooks, the local pre-commit form, and how to keep fork PRs from runnin
 
 [//]: # (</block>)
 
-Map an unrecognized extension onto a supported grammar with `-E cxx=cpp`.
+To map custom or unknown extensions to a supported syntax, use `-E`:
 
-## Known limitations
+```shell
+blockwatch -E cxx=cpp
+```
 
-- Deleted blocks are ignored.
-- Files with unsupported grammar are ignored.
+## Known Limitations
+
+- Deleted blocks are currently ignored.
+- Files with unsupported comment syntaxes are ignored.
 
 ## Contributing
 
-Contributions are welcome. A good place to start is
-[adding support for a new grammar](https://github.com/mennanov/blockwatch/pull/2).
+Contributions are welcome! A great first issue
+is [adding support for a new grammar](https://github.com/mennanov/blockwatch/pull/2).
+
+To run tests locally:
 
 ```shell
 cargo test

@@ -27,7 +27,7 @@ These apply to any block regardless of which validator it uses.
 ### `name`
 
 Names the block so other blocks can point at it with `affects` or `same-as`. Names also show up in
-[`blockwatch list`](../cli.md#list).
+[`blockwatch list`](../cli.md#the-list-command).
 
 ```python
 # <block name="allowed-colors">

@@ -1,19 +1,21 @@
-# CI integration
+# CI & Git Hooks Integration
 
-Validating only the diff keeps these near-instant.
+Checking only modified blocks in git diffs keeps validation fast and allows incremental adoption.
 
-## Pre-commit
+## Pre-commit Framework
 
-Using the [pre-commit](https://pre-commit.com) framework — it builds blockwatch from source with cargo on first run:
+To use [pre-commit](https://pre-commit.com), add the hook to `.pre-commit-config.yaml`. Cargo will build `blockwatch`
+from source on the first run:
 
 ```yaml
 - repo: https://github.com/mennanov/blockwatch
-  rev: v0.2.27  # use the latest release tag
+  rev: v0.2.27  # Use latest release
   hooks:
     - id: blockwatch
 ```
 
-If the binary is already installed (via Homebrew, say), the local form avoids the build:
+If `blockwatch` is already installed locally (e.g. via Homebrew or Cargo), use a local hook to skip building from
+source:
 
 ```yaml
 - repo: local
@@ -26,11 +28,11 @@ If the binary is already installed (via Homebrew, say), the local form avoids th
       pass_filenames: false
 ```
 
-`--unified=0` gives tighter diffs, so fewer blocks are pulled in by surrounding context lines.
+The `--unified=0` flag minimizes diff context lines so unchanged adjacent blocks aren't included in the check.
 
-## Plain git hook
+## Plain Git Hook
 
-No framework needed. Write this to `.git/hooks/pre-commit` and `chmod +x` it:
+Without pre-commit, add the diff pipe directly to `.git/hooks/pre-commit` and make it executable (`chmod +x`):
 
 ```bash
 #!/bin/sh
@@ -39,11 +41,7 @@ git diff --patch --cached --unified=0 | blockwatch
 
 ## GitHub Actions
 
-```yaml
-- uses: mennanov/blockwatch-action@v1
-```
-
-The action figures out the diff for you. A minimal workflow:
+Use the official GitHub Action to validate pull requests and pushes:
 
 ```yaml
 name: blockwatch
@@ -51,35 +49,34 @@ on:
   pull_request: { branches: [ main ] }
   push: { branches: [ main ] }
 permissions: { contents: read }
+
 jobs:
   blockwatch:
     runs-on: ubuntu-latest
     steps:
       - uses: mennanov/blockwatch-action@v1
-        # Only needed if you use check-ai:
+        # Optional: set API key for check-ai
         # env: { BLOCKWATCH_AI_API_KEY: ${{ secrets.BLOCKWATCH_AI_API_KEY }} }
 ```
 
-## Full-tree runs
+## Full-Tree Runs
 
-Validating the PR diff is enough for `affects` and other drift checks. A periodic full-tree run —
-`blockwatch` with nothing on stdin — is a useful extra net, since it catches
-[`same-as`](validators/same-as.md) disagreements on blocks that no recent diff happened to touch.
+While diff-based checks catch `affects` violations in changed files, [`same-as`](validators/same-as.md) checks benefit
+from periodic full-tree runs. Running `blockwatch` without piped diff input scans all blocks across the entire
+repository to ensure untouched copies haven't drifted.
 
-## Fork PRs and untrusted input
+## Security: Sandboxing Fork Pull Requests
 
-If your repo uses [`check-lua`](validators/check-lua.md) or
-[`check-ai`](validators/check-ai.md), a pull request from a fork is untrusted input: the Lua scripts that get executed
-come from the scanned files, so a fork PR could otherwise run arbitrary commands with your secrets in the environment.
-
-This repository's own workflow handles it by keeping fork PRs sandboxed and secret-free:
+If your repository uses [`check-lua`](validators/check-lua.md) or [`check-ai`](validators/check-ai.md), pull requests
+from forks execute Lua scripts defined in files. To prevent unauthorized execution or credential leakage on public
+repositories, sandbox untrusted PRs:
 
 ```yaml
 jobs:
   blockwatch:
     runs-on: ubuntu-latest
     env:
-      # Trusted = a push (which requires write access), or a PR from a branch in this repo.
+      # Trusted if run on push or PR from internal branch
       TRUSTED: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - uses: mennanov/blockwatch-action@v1
@@ -88,8 +85,9 @@ jobs:
           BLOCKWATCH_AI_API_KEY: ${{ env.TRUSTED == 'true' && secrets.BLOCKWATCH_AI_API_KEY || '' }}
 ```
 
-Fork PRs are still linted — just in the sandboxed mode, with no file or OS access and no secrets.
+When `BLOCKWATCH_LUA_MODE` is set to `sandboxed`, Lua scripts run without OS or filesystem access and without API
+secrets.
 
 ---
 
-← [README](../README.md)
+[← Return to README](../README.md)
