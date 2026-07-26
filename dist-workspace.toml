@@ -4,7 +4,7 @@ members = ["cargo:."]
 # Config for 'dist'
 [dist]
 # The preferred dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.30.2"
+cargo-dist-version = "0.32.0"
 # CI backends to support
 ci = "github"
 # The installers to generate for each app
@@ -35,9 +35,7 @@ runner = "ubuntu-latest"
 [dist.github-custom-runners.aarch64-unknown-linux-gnu]
 runner = "ubuntu-latest"
 
-# dist 0.30.2 still defaults these to @v4, which run on the deprecated Node 20.
-# Pin the current Node 24 majors; drop this block once dist is upgraded to 0.32+.
+# dist defaults to actions/checkout@v6; pin v7 to match rust.yml and codeql.yml.
+# The other actions come from dist's defaults, which are already on Node 24.
 [dist.github-action-commits]
 "actions/checkout" = "v7"
-"actions/upload-artifact" = "v7"
-"actions/download-artifact" = "v8"
