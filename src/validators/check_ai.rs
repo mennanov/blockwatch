@@ -28,7 +28,7 @@ const DEFAULT_MODEL_NAME: &str = "gpt-5-nano";
 // </block>
 
 /* <block name="check-ai-env-vars"
-   affects="README.md:check-ai-env-vars, tests/check_ai.rs:check-ai-env-vars"
+   affects="README.md:check-ai-env-vars"
    same-as="README.md:check-ai-env-vars" same-as-pattern="BLOCKWATCH_AI_[A-Z_]+">
 */
 const API_KEY_ENV_VAR_NAME: &str = "BLOCKWATCH_AI_API_KEY";
