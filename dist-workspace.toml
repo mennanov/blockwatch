@@ -15,6 +15,9 @@ targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-da
 install-path = "CARGO_HOME"
 # Whether to install an updater program
 install-updater = false
+# Build each package with `-p <name>` instead of `--workspace`, so the `fuzz`
+# member (which only links under `cargo afl build`) stays out of release builds.
+precise-builds = true
 # A GitHub repo to push Homebrew formulas to
 tap = "mennanov/homebrew-blockwatch"
 # Publish jobs to run in CI
@@ -31,3 +34,10 @@ runner = "ubuntu-latest"
 
 [dist.github-custom-runners.aarch64-unknown-linux-gnu]
 runner = "ubuntu-latest"
+
+# dist 0.30.2 still defaults these to @v4, which run on the deprecated Node 20.
+# Pin the current Node 24 majors; drop this block once dist is upgraded to 0.32+.
+[dist.github-action-commits]
+"actions/checkout" = "v7"
+"actions/upload-artifact" = "v7"
+"actions/download-artifact" = "v8"
