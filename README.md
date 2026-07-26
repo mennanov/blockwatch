@@ -5,169 +5,36 @@
 [![Crates.io](https://img.shields.io/crates/v/blockwatch)](https://crates.io/crates/blockwatch)
 [![Downloads](https://img.shields.io/crates/d/blockwatch)](https://crates.io/crates/blockwatch)
 
-BlockWatch is a linter that keeps your code, documentation, and configuration in sync and enforces strict formatting and
-validation rules.
+A language-agnostic linter that keeps co-dependent code, docs, and config from drifting apart. You declare the rule in a
+comment, next to the thing it guards.
 
 <p>
   <img src="demo.gif" alt="BlockWatch Demo">
 </p>
 
-It helps you avoid broken docs and messy config files by enforcing rules directly in your comments. You can link code to
-documentation, enforce sorted lists, ensure uniqueness, and even validate content with Regex, AI, or custom Lua scripts.
+## Why BlockWatch
 
-It works with almost any language (Rust, Python, JS, Go, Markdown, YAML, etc.) and can run on your entire repo or just
-your VCS diffs.
+- **Catches cross-file drift.** Link an enum to the docs that describe it, or a constant to the config that duplicates
+  it. Change one side and forget the other, and the build tells you.
+- **Rules live where they apply** — inside comments, in the file they govern. There is no central config file to fall
+  out of date with the code.
+- **Free to adopt.** With a diff on stdin, only the blocks your change touched are checked. Adding a rule never
+  retroactively fails anyone else's work, so you can annotate one file at a time.
+- **One tool for the whole repo.** 30+ languages, plus Markdown, YAML, TOML, and Dockerfiles — which is what makes
+  linking code to its documentation possible in the first place.
 
-## Annotate your project with an AI agent (recommended)
-
-Adding the first `<block>` tags by hand is the tedious part of picking up BlockWatch.
-AI coding agents are good at this. An agent can read through the repo, pick reasonable spots, add the tags in the
-correct comment syntax for each language, and run `blockwatch` to check its own work.
-
-There's a skill in this repo for it: [`.agents/skills/blockwatch/SKILL.md`](.agents/skills/blockwatch/SKILL.md). It
-tells
-the agent where blocks are worth adding, documents the tag syntax, and explains how to verify the result.
-
-**1. Install the binary** so the agent can run it:
+## Install
 
 ```shell
-cargo install blockwatch   # or: brew install mennanov/blockwatch/blockwatch
+brew install mennanov/blockwatch/blockwatch   # macOS/Linux
+cargo install blockwatch                      # from source
 ```
 
-**2. Give the skill to your agent.**
+Prebuilt binaries are on the [Releases](https://github.com/mennanov/blockwatch/releases) page.
 
-**Claude Code users:** install the plugin once and the skill is available in every project — no
-per-project setup:
+## Quick start
 
-```text
-/plugin marketplace add mennanov/blockwatch
-/plugin install blockwatch@blockwatch
-```
-
-For other agents (or if you prefer a project-local copy), place `SKILL.md` where your tool looks
-for instructions:
-
-| Agent              | Where to put the skill                                                                                                  |
-|--------------------|-------------------------------------------------------------------------------------------------------------------------|
-| **Claude Code**    | Use the plugin above (recommended), or `.claude/skills/blockwatch/SKILL.md` (project) / `~/.claude/skills/...` (global) |
-| **Cursor**         | `.cursor/rules/blockwatch.mdc`                                                                                          |
-| **GitHub Copilot** | append to `.github/copilot-instructions.md`                                                                             |
-| **Codex / others** | append to `AGENTS.md`                                                                                                   |
-
-You can pull the file straight from this repo:
-
-```shell
-mkdir -p .claude/skills/blockwatch
-curl -sL https://raw.githubusercontent.com/mennanov/blockwatch/main/.agents/skills/blockwatch/SKILL.md \
-  -o .claude/skills/blockwatch/SKILL.md
-```
-
-**3. Ask the agent to annotate the project**, for example:
-
-> Using the BlockWatch skill, annotate this repository with `<block>` tags. Focus on lists that should stay
-> sorted/unique and on code that must stay in sync with docs or config. Add only high-value blocks, then run
-> `blockwatch` to confirm they all pass.
-
-Review the diff before you commit it: the agent's choices are a starting point.
-
-**4. Turn on enforcement** so the rules stay in place: wire up the pre-commit hook and GitHub Action from
-[CI Integration](#ci-integration).
-
-## Features
-
-[//]: # (<block name="available-validators">)
-
-- **Drift Detection**: Link a block of code to its documentation. If you change the code but forget the docs, BlockWatch
-  alerts you.
-- **Cross-Block Agreement**: Assert that two or more linked blocks hold the same value (`same-as`), catching duplicated
-  constants, lists, or versions that drift out of sync.
-- **Strict Formatting**: Enforce sorted lists (`keep-sorted`) and unique entries (`keep-unique`) so you don't have to
-  nitpick in code reviews.
-- **Content Validation**: Check lines against Regex patterns (`line-pattern`) or enforce block size limits (
-  `line-count`).
-- **AI Rules**: Use natural language to validate code or text (e.g., "Must mention 'banana'").
-- **Lua Scripting**: Write custom validation logic in Lua scripts (`check-lua`).
-- **Flexible**: Run it on specific files, glob patterns, or just your unstaged changes.
-
-[//]: # (</block>)
-
-## Installation
-
-### Homebrew (macOS/Linux)
-
-```shell
-brew install mennanov/blockwatch/blockwatch
-```
-
-The fully-qualified name keeps working once Homebrew starts requiring
-[explicit trust](https://docs.brew.sh/Tap-Trust) for third-party taps: it trusts only the
-`blockwatch` formula, not the whole tap. If you install via a `Brewfile`, use:
-
-```ruby
-brew "mennanov/blockwatch/blockwatch", trusted: true
-```
-
-### From Source (Rust)
-
-```shell
-cargo install blockwatch
-```
-
-### Prebuilt Binaries
-
-Check the [Releases](https://github.com/mennanov/blockwatch/releases) page for prebuilt binaries.
-
-## Quick start example
-
-1. Add a special `block` tag in the comments in any supported file ([See *Supported Languages*](#supported-languages))
-   like this:
-
-   ```python
-   user_ids = [
-       # <block keep-sorted keep-unique>
-       "cherry",
-       "apple",
-       "apple",
-       "banana",
-       # </block>
-   ]
-   ```
-
-2. Run `blockwatch`:
-
-   ```shell
-   blockwatch
-   ```
-
-   BlockWatch will fail and tell you that the list is not sorted and has duplicate entries.
-
-3. Fix the order and uniqueness:
-
-   ```python
-   user_ids = [
-       # <block keep-sorted keep-unique>
-       "apple",
-       "banana",
-       "cherry",
-       # </block>
-   ]
-   ```
-
-4. Run `blockwatch` again:
-
-   ```shell
-   blockwatch
-   ```
-
-   Now it passes!
-
-## How It Works
-
-You define rules using HTML-like tags inside your comments.
-
-### Linking Code Blocks (`affects`)
-
-This ensures that if you change some block of code, you're forced to look at the other blocks too.
+Put `<block>` tags in a comment in any [supported file](#supported-languages):
 
 **src/lib.rs**:
 
@@ -191,437 +58,64 @@ pub enum Language {
 <!-- </block> -->
 ```
 
-If you modify the enum in `src/lib.rs`, BlockWatch will fail until you touch the corresponding block `supported-langs`
-in `README.html` as well.
+Add a variant to the enum and BlockWatch fails until you touch `supported-langs` too.
+[`affects`](docs/validators/affects.md) checks that the two were edited together;
+[`same-as`](docs/validators/same-as.md) goes further and checks they still hold the same *value*.
 
-### Cross-Block Agreement (`same-as`)
+## Let an agent annotate your repo
 
-While `affects` only checks that linked blocks were *co-edited*, `same-as` checks that they still hold the **same
-value** — catching duplicated constants, lists, or versions that silently drift apart. Unlike `affects`, it also runs in
-full-tree mode, not only on a diff.
+Adding the first tags by hand is the tedious part, and agents are good at it. This repo ships a
+[skill](.agents/skills/blockwatch/SKILL.md) that tells them where blocks are worth adding and how to verify their own
+work.
 
-**README.md**:
+Claude Code users install it once, for every project:
 
-```markdown
-[//]: # (<block same-as="docs/ci.md:pre-commit">)
-
-    git diff --patch --cached | blockwatch
-
-[//]: # (</block>)
+```text
+/plugin marketplace add mennanov/blockwatch
+/plugin install blockwatch@blockwatch
 ```
 
-**docs/ci.md** (the same command, documented in a second place):
+Cursor, Copilot, and Codex setup, plus a prompt to start from: [docs/agents.md](docs/agents.md).
 
-```markdown
-[//]: # (<block name="pre-commit">)
+## Validators
 
-    git diff --patch --cached | blockwatch
+[//]: # (<block name="available-validators">)
 
-[//]: # (</block>)
-```
-
-With no extra attributes the whole trimmed content is compared as text, so both blocks must stay **identical**. This fits
-content you can't factor into a shared symbol — here, a command documented in two places that must not drift. Most
-couplings, though, don't share verbatim text, so each block can instead describe **how to read itself**.
-
-#### Extract values with `same-as-pattern`
-
-Each side extracts one token per line via its own regex — the `(?P<value>…)` capture group, or the whole match if there
-is none. Lines that don't match are skipped. Because each block self-describes, blocks in different formats can still be
-compared:
-
-```rust
-// <block same-as="README.md:supported-env-vars" same-as-pattern="BLOCKWATCH_AI_[A-Z_]+">
-const API_KEY: &str = "BLOCKWATCH_AI_API_KEY";
-const API_URL: &str = "BLOCKWATCH_AI_API_URL";
-// </block>
-```
-
-```markdown
-[//]: # (<block name="supported-env-vars" same-as-pattern="BLOCKWATCH_AI_[A-Z_]+">)
-
-- `BLOCKWATCH_AI_API_KEY`: API key.
-- `BLOCKWATCH_AI_API_URL`: API URL.
-
-[//]: # (</block>)
-```
-
-#### Comparison modes (`same-as-mode`)
-
-- `set` (default) — order- and duplicate-insensitive; the two token sets must be equal.
-- `sequence` — order-sensitive list equality.
-- `single` — exactly one token per side (e.g. "there is exactly one version").
-- `subset` — directional: every token in this block must also appear in the target.
-
-`subset` is the one directional mode, useful when one side is a legitimate subset of the other — for example a test
-fixture that exercises only some of the declared environment variables:
-
-```rust
-// <block same-as="src/config.rs:env-vars" same-as-mode="subset" same-as-pattern="BLOCKWATCH_AI_[A-Z_]+">
-const API_KEY: &str = "BLOCKWATCH_AI_API_KEY";
-// </block>
-```
-
-#### Numeric comparison (`same-as-format`)
-
-`same-as-format="numeric"` parses each token as a number before comparing, so the same quantity written in different
-numeric forms still agrees. A timeout shared between a Rust backend and a TypeScript frontend is a good case: the value
-can't be imported across the language boundary, and the two sides spell it differently. Wrapping the tag *inline* around
-just the literal keeps the block content down to the number itself, so no `same-as-pattern` is needed:
-
-**src/backend.rs**:
-
-```rust
-const TIMEOUT: Duration = Duration::from_secs_f64(/* <block same-as="app/config.ts:timeout" same-as-format="numeric"> */ 60.0 /* </block> */);
-```
-
-**app/config.ts**:
-
-```typescript
-export const timeout = /* <block name="timeout"> */ 60 /* </block> */; // seconds
-```
-
-Rust's `from_secs_f64` takes a float (`60.0`) while TypeScript uses a plain `60`; `numeric` parses both and they compare
-equal. Under plain text comparison, `"60.0" != "60"` would fail.
-
-The source block's `same-as-mode` and `same-as-format` govern the comparison; each block's own `same-as-pattern` governs
-only how that block is read. A missing target block, a non-numeric token under `numeric`, or a `single`/`subset` side
-with the wrong number of tokens is reported as a violation.
-
-### Enforce Sort Order (`keep-sorted`)
-
-Keep lists alphabetized. Default is `asc` (ascending).
-
-```python
-# <block keep-sorted>
-"apple",
-"banana",
-"cherry",
-# </block>
-```
-
-If the list is not sorted alphabetically, BlockWatch will fail until you fix the order.
-
-#### Sort by Regex
-
-You can sort by a specific part of the line using a regex capture group named `value`.
-
-```python
-items = [
-    # <block keep-sorted="asc" keep-sorted-pattern="id: (?P<value>\d+)">
-    "id: 1  apple",
-    "id: 2  banana",
-    "id: 10 orange",
-    # </block>
-]
-```
-
-#### Numeric Sort (`keep-sorted-format`)
-
-By default, values are compared lexicographically (as strings). This means `"10"` sorts before `"2"` because `"1" < "2"`
-character-by-character. Use `keep-sorted-format="numeric"` to compare values as numbers instead.
-
-```python
-numbers = [
-    # <block keep-sorted keep-sorted-format="numeric">
-    2
-    10
-    20
-    # </block>
-]
-```
-
-This works with `keep-sorted-pattern` to extract numeric values from lines with mixed content:
-
-```python
-items = [
-    # <block keep-sorted keep-sorted-format="numeric" keep-sorted-pattern="id: (?P<value>\d+)">
-    "id: 2  banana",
-    "id: 10 orange",
-    "id: 20 apple",
-    # </block>
-]
-```
-
-Without `keep-sorted-format="numeric"`, the example above would fail because `"10"` is lexicographically less than
-`"2"`.
-
-### Enforce Unique Lines (`keep-unique`)
-
-Prevent duplicates in a list.
-
-```python
-# <block keep-unique>
-"user_1",
-"user_2",
-"user_3",
-# </block>
-```
-
-#### Uniqueness by Regex
-
-Just like sorting, you can check uniqueness based on a specific regex match.
-
-```python
-ids = [
-    # <block keep-unique="^ID:(?P<value>\d+)">
-    "ID:1 Alice",
-    "ID:2 Bob",
-    "ID:1 Carol",  # Violation: ID:1 is already used
-    # </block>
-]
-```
-
-### Regex Validation (`line-pattern`)
-
-Ensure every line matches a specific regex pattern.
-
-```python
-slugs = [
-    # <block line-pattern="^[a-z0-9-]+$">
-    "valid-slug",
-    "another-one",
-    # </block>
-]
-```
-
-### Enforce Line Count (`line-count`)
-
-Enforce the number of lines in a block.
-Supported operators: `<`, `>`, `<=`, `>=`, `==`.
-
-```python
-# <block line-count="<=5">
-"a",
-"b",
-"c"
-# </block>
-```
-
-### Validate with AI (`check-ai`)
-
-Use an LLM to validate logic or style.
-
-```html
-<!-- <block check-ai="Must mention the company name 'Acme Corp'"> -->
-<p>Welcome to Acme Corp!</p>
-<!-- </block> -->
-```
-
-#### Targeted AI Checks
-
-Use `check-ai-pattern` to send only specific parts of the text to the LLM.
-
-```python
-prices = [
-    # <block check-ai="Prices must be under $100" check-ai-pattern="\$(?P<value>\d+)">
-    "Item A: $50",
-    "Item B: $150",  # Violation
-    # </block>
-]
-```
-
-#### Supported environment variables
-
-[//]: # (<block name="check-ai-env-vars" same-as-pattern="BLOCKWATCH_AI_[A-Z_]+">)
-
-- `BLOCKWATCH_AI_API_KEY`: API Key.
-- `BLOCKWATCH_AI_MODEL`: Model name (default: `gpt-5-nano`).
-- `BLOCKWATCH_AI_API_URL`: Custom OpenAI compatible API URL (optional).
+| Attribute                                         | Enforces                                                             |
+|---------------------------------------------------|----------------------------------------------------------------------|
+| [`affects`](docs/validators/affects.md)           | Linked blocks are edited together — code and its docs, config, tests |
+| [`same-as`](docs/validators/same-as.md)           | Two or more blocks still hold the same value                         |
+| [`keep-sorted`](docs/validators/keep-sorted.md)   | A list stays ordered, lexicographically or numerically               |
+| [`keep-unique`](docs/validators/keep-unique.md)   | No duplicate entries                                                 |
+| [`line-pattern`](docs/validators/line-pattern.md) | Every line matches a regex                                           |
+| [`line-count`](docs/validators/line-count.md)     | A block stays within a size bound                                    |
+| [`check-ai`](docs/validators/check-ai.md)         | A rule stated in plain English, checked by an LLM                    |
+| [`check-lua`](docs/validators/check-lua.md)       | Custom logic, written as a Lua script                                |
 
 [//]: # (</block>)
 
-### Validate with Lua Scripts (`check-lua`)
+Any block also accepts `name` and
+[`severity`](docs/validators/README.md#severity) — set `severity="warning"` to report a rule without failing the build
+while you clean up existing violations.
 
-Run custom validation logic using a Lua script. The script must define a global `validate(ctx, content)` function that
-returns `nil` if validation passes or a string error message if it fails.
-
-The script path is resolved relative to the project root and must point to a file inside the repository; paths that escape it (absolute paths outside the project, `../` traversal, or symlinks pointing outside) are rejected.
-
-```python
-colors = [
-    # <block check-lua="scripts/validate_colors.lua">
-    'red',
-    'green',
-    'blue',
-    # </block>
-]
-```
-
-**scripts/validate_colors.lua**:
-
-```lua
-function validate(ctx, content)
-    if content:find("purple") then
-        return "purple is not an allowed color"
-    end
-    return nil
-end
-```
-
-The `validate` function receives two arguments:
-
-- `ctx` — a table with the following fields:
-    - `ctx.file` — the source file path.
-    - `ctx.line` — the line number of the block's start tag.
-    - `ctx.attrs` — a table of all block attributes.
-    - `ctx.affects` — only present when the block also has an [`affects`](#linking-code-blocks-affects)
-      attribute. A list (1-based array) of the blocks this block affects, each a table with `file`,
-      `name`, and (trimmed) `content` fields. References to blocks that don't exist are skipped.
-- `content` — the trimmed text content of the block.
-
-#### Checking affected blocks (`affects` + `check-lua`)
-
-Combining `affects` with `check-lua` lets a script inspect the blocks it affects through `ctx.affects`
-— without any file IO, so it works in the default sandboxed mode. This is handy for keeping two blocks
-in sync deterministically:
-
-```python
-allowed_colors = [
-    # <block check-lua="scripts/in_sync.lua" affects=":allowed-colors-docs">
-    'blue',
-    'green',
-    'red',
-    # </block>
-]
-
-docs = [
-    # <block name="allowed-colors-docs">
-    'blue',
-    'green',
-    'red',
-    # </block>
-]
-```
-
-**scripts/in_sync.lua**:
-
-```lua
-function validate(ctx, content)
-    for _, affected in ipairs(ctx.affects) do
-        if affected.content ~= content then
-            return "block '" .. affected.name .. "' in " .. affected.file .. " is out of sync"
-        end
-    end
-    return nil
-end
-```
-
-<!-- <block name="lua-safety-modes"> -->
-
-#### Lua safety mode
-
-By default, Lua scripts run in a **sandboxed** mode with only the `coroutine`, `table`, `string`, `utf8`, and `math`
-standard libraries available. The `io`, `os`, and `package` libraries are **not** loaded, preventing file system access,
-command execution, and loading of external modules.
-
-You can change the security level by setting the `BLOCKWATCH_LUA_MODE` environment variable:
-
-```shell
-# Allow IO and OS libraries (memory-safe, but with file/system access)
-BLOCKWATCH_LUA_MODE=safe blockwatch
-
-# Allow all libraries including C module loading (unsafe)
-BLOCKWATCH_LUA_MODE=unsafe blockwatch
-```
-
-| `BLOCKWATCH_LUA_MODE` | Libraries available                                                   | Security Level                      |
-|-----------------------|-----------------------------------------------------------------------|-------------------------------------|
-| `sandboxed` (default) | `coroutine`, `table`, `string`, `utf8`, `math`                        | Most secure - No file/OS access     |
-| `safe`                | All memory-safe libraries (including `io`, `os`, `package`)           | Memory-safe - Allows file/OS access |
-| `unsafe`              | All Lua standard libraries with no restrictions (including C modules) | Unsafe - Full system access         |
-
-<!-- </block> -->
+Full reference: [docs/validators/](docs/validators/README.md).
 
 ## Usage
 
-### Run Locally
-
-Validate all blocks in your project:
-
 ```shell
-# Check everything
-blockwatch
-
-# Check specific files
-blockwatch "src/**/*.rs" "**/*.md"
-
-# Ignore stuff
-blockwatch "**/*.rs" --ignore "**/generated/**"
+blockwatch                              # check everything
+blockwatch "src/**/*.rs" "**/*.md"      # check some globs (quote them)
+git diff --patch | blockwatch           # check only the blocks you touched
+git diff --cached --patch | blockwatch  # same, for staged changes
+blockwatch list                         # JSON dump of every block found
 ```
 
-> **Tip:** Glob patterns should be quoted to avoid shell expanding them.
+Options for ignoring paths, mapping extensions, and turning individual validators on and off are in
+the [CLI reference](docs/cli.md).
 
-### Check Only What Changed
+## CI integration
 
-Pipe a git diff to BlockWatch to validate only the blocks you touched. This is perfect for pre-commit hooks.
-
-```shell
-# Check unstaged changes
-git diff --patch | blockwatch
-
-# Check staged changes
-git diff --cached --patch | blockwatch
-
-# Check changes in a specific file only
-git diff --patch path/to/file | blockwatch
-
-# Check changes and some other (possibly unchanged) files
-git diff --patch | blockwatch "src/always_checked.rs" "**/*.md"
-```
-
-### Listing Blocks
-
-You can list all blocks that BlockWatch finds without running any validation. This is useful for auditing your blocks or
-debugging your configuration.
-
-```shell
-# List all blocks in the current directory
-blockwatch list
-
-# List blocks in specific files
-blockwatch list "src/**/*.rs" "**/*.md"
-
-# List only blocks affected by current changes (reads the diff from stdin)
-git diff | blockwatch list --diff
-```
-
-`blockwatch list` does not read stdin by default, so it never blocks waiting for
-input. This makes it safe to run non-interactively — in CI, or when invoked by
-another program such as an AI agent — and to feed its JSON output into a pipe,
-e.g. `blockwatch list "src/**/*.ts" | jq`. Pass `--diff` to opt in to reading a
-unified diff from stdin; `list` then reports which blocks the diff touched via
-the `is_content_modified` field.
-
-The output is a JSON object.
-
-#### Example Output
-
-[//]: # (<block name="list-output-example">)
-
-```json
-{
-  "README.md": [
-    {
-      "name": "available-validators",
-      "line": 18,
-      "column": 10,
-      "is_content_modified": false,
-      "attributes": {
-        "name": "available-validators"
-      }
-    }
-  ]
-}
-```
-
-[//]: # (</block>)
-
-### CI Integration
-
-#### Pre-commit Hook
-
-Add this to `.pre-commit-config.yaml` (pre-commit builds blockwatch from source with cargo on first run):
+Pre-commit hook, in `.pre-commit-config.yaml`:
 
 ```yaml
 - repo: https://github.com/mennanov/blockwatch
@@ -630,30 +124,16 @@ Add this to `.pre-commit-config.yaml` (pre-commit builds blockwatch from source 
     - id: blockwatch
 ```
 
-If you already have the `blockwatch` binary installed (e.g. via Homebrew), you can use the local form instead:
-
-```yaml
-- repo: local
-  hooks:
-    - id: blockwatch
-      name: blockwatch
-      entry: bash -c 'git diff --cached --patch --unified=0 | blockwatch'
-      language: system
-      stages: [ pre-commit ]
-      pass_filenames: false
-```
-
-#### GitHub Action
-
-Add this to `.github/workflows/your_workflow.yml`:
+GitHub Actions:
 
 ```yaml
 - uses: mennanov/blockwatch-action@v1
 ```
 
-## Supported Languages
+Plain git hooks, the local pre-commit form, and how to keep fork PRs from running untrusted Lua:
+[docs/ci.md](docs/ci.md).
 
-BlockWatch supports comments in:
+## Supported languages
 
 [//]: # (<block name="supported-grammar" keep-sorted="asc">)
 
@@ -693,29 +173,17 @@ BlockWatch supports comments in:
 
 [//]: # (</block>)
 
-## CLI Options
+Map an unrecognized extension onto a supported grammar with `-E cxx=cpp`.
 
-[//]: # (<block name="cli-docs">)
-
-- **List Blocks**: `blockwatch list` outputs a JSON report of all found blocks.
-- **Extensions**: Map custom extensions: `blockwatch -E cxx=cpp`
-- **Disable Validators**: `blockwatch -d check-ai`
-- **Enable Validators**: `blockwatch -e keep-sorted`
-- **Ignore Files**: `blockwatch --ignore "**/generated/**"`
-
-[//]: # (</block>)
-
-## Known Limitations
+## Known limitations
 
 - Deleted blocks are ignored.
 - Files with unsupported grammar are ignored.
 
 ## Contributing
 
-Contributions are welcome! A good place to start is
-by [adding support for a new grammar](https://github.com/mennanov/blockwatch/pull/2).
-
-### Run Tests
+Contributions are welcome. A good place to start is
+[adding support for a new grammar](https://github.com/mennanov/blockwatch/pull/2).
 
 ```shell
 cargo test

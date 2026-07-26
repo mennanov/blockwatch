@@ -1,0 +1,136 @@
+# `check-lua`
+
+Runs custom validation logic written in Lua (5.4). The escape hatch for domain rules the other validators cannot
+express.
+
+The script defines a global `validate(ctx, content)` that returns `nil` when validation passes, or an error message
+string when it fails.
+
+## Syntax
+
+| Attribute           | Value                                                 | Default     |
+|---------------------|-------------------------------------------------------|-------------|
+| `check-lua`         | path to a `.lua` script, relative to the project root | —           |
+| `check-lua-pattern` | regex; the `(?P<value>…)` group, or the whole match   | whole block |
+
+The script path must point to a file inside the repository. Paths that escape it — absolute paths outside the project,
+`../` traversal, or symlinks pointing outward — are rejected.
+
+## Example
+
+```python
+colors = [
+    # <block check-lua="scripts/validate_colors.lua">
+    'red',
+    'green',
+    'blue',
+    # </block>
+]
+```
+
+**scripts/validate_colors.lua**:
+
+```lua
+function validate(ctx, content)
+    if content:find("purple") then
+        return "purple is not an allowed color"
+    end
+    return nil
+end
+```
+
+## The `validate` arguments
+
+- `ctx` — a table with:
+    - `ctx.file` — the source file path.
+    - `ctx.line` — the line number of the block's start tag.
+    - `ctx.attrs` — a table of all block attributes.
+    - `ctx.affects` — present only when the block also has an [`affects`](affects.md) attribute. A 1-based array of the
+      blocks this block affects, each a table with `file`, `name`, and (trimmed)
+      `content`. References to blocks that do not exist are skipped.
+- `content` — the trimmed text content of the block, or the extracted value if `check-lua-pattern`
+  is set.
+
+## Narrowing the input with `check-lua-pattern`
+
+`check-lua-pattern` extracts a single value from the block and passes that to the script instead of the whole content,
+so the script does not have to re-parse the surrounding syntax. Unlike
+`same-as-pattern`, it matches **once against the entire block**, not per line, and `content` is the empty string when
+nothing matches.
+
+This repo uses it to check that the default model constant is current:
+
+```rust
+// <block check-lua="scripts/check_latest_gpt_nano_model.lua" check-lua-pattern='str = "(?P<value>[^"]+)"'>
+const DEFAULT_MODEL_NAME: &str = "gpt-5-nano";
+// </block>
+```
+
+## Checking affected blocks
+
+Combining `affects` with `check-lua` lets a script inspect the blocks it affects through
+`ctx.affects` — with no file IO, so it works in the default sandboxed mode. This keeps two blocks in sync
+deterministically:
+
+```python
+allowed_colors = [
+    # <block check-lua="scripts/in_sync.lua" affects=":allowed-colors-docs">
+    'blue',
+    'green',
+    'red',
+    # </block>
+]
+
+docs = [
+    # <block name="allowed-colors-docs">
+    'blue',
+    'green',
+    'red',
+    # </block>
+]
+```
+
+**scripts/in_sync.lua**:
+
+```lua
+function validate(ctx, content)
+    for _, affected in ipairs(ctx.affects) do
+        if affected.content ~= content then
+            return "block '" .. affected.name .. "' in " .. affected.file .. " is out of sync"
+        end
+    end
+    return nil
+end
+```
+
+For a plain value comparison, [`same-as`](same-as.md) does this without a script.
+
+<!-- <block name="lua-safety-modes"> -->
+
+## Safety modes
+
+By default, Lua scripts run **sandboxed** with only the `coroutine`, `table`, `string`, `utf8`, and
+`math` standard libraries available. The `io`, `os`, and `package` libraries are **not** loaded, preventing file system
+access, command execution, and loading of external modules.
+
+Set `BLOCKWATCH_LUA_MODE` to change the security level:
+
+```shell
+# Allow IO and OS libraries (memory-safe, but with file/system access)
+BLOCKWATCH_LUA_MODE=safe blockwatch
+
+# Allow all libraries including C module loading (unsafe)
+BLOCKWATCH_LUA_MODE=unsafe blockwatch
+```
+
+| `BLOCKWATCH_LUA_MODE` | Libraries available                                                   | Security Level                      |
+|-----------------------|-----------------------------------------------------------------------|-------------------------------------|
+| `sandboxed` (default) | `coroutine`, `table`, `string`, `utf8`, `math`                        | Most secure - No file/OS access     |
+| `safe`                | All memory-safe libraries (including `io`, `os`, `package`)           | Memory-safe - Allows file/OS access |
+| `unsafe`              | All Lua standard libraries with no restrictions (including C modules) | Unsafe - Full system access         |
+
+<!-- </block> -->
+
+---
+
+← [Validators](README.md) · [README](../../README.md)

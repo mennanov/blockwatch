@@ -46,7 +46,7 @@ use std::ffi::OsString;
     git diff --patch | blockwatch list --diff",
 )]
 pub struct Args {
-    // <block affects="README.md:cli-docs">
+    // <block affects="docs/cli.md:cli-docs">
     /// Additional file extension mappings, e.g. -E c++=cpp -E cxx=cpp
     #[arg(
         short = 'E',

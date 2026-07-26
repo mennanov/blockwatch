@@ -16,26 +16,25 @@ Use this skill in three situations:
 - **First-time / bulk pass:** annotating an existing project that has no blocks yet.
 - **Maintaining blocks:** keeping existing blocks valid when you edit files that already contain them.
 
+Two rules apply to all three:
+
+- **High-value only.** A block must catch a real mistake someone could plausibly make, not decorate. Too many blocks
+  create noise and get ignored. When in doubt, leave it out.
+- **Only in projects that use BlockWatch.** This skill being installed, or existing `<block>` tags in the tree, means
+  the project opted in. Don't add blocks to a project that doesn't use the tool.
+
 ## Annotate as you write code
 
 This is the primary way blocks should get added: incrementally, as part of normal coding. Whenever you write or change
-code that matches a pattern in **Where blocks add value** (below), add the matching `<block>` tag right then, using the
-**Validator reference** for the exact syntax.
+code matching a row in **Where blocks add value** (below), add the tag right then, using the **Validator reference**
+for the syntax.
 
-- **Same edit, not later.** Introduce a list that should stay ordered → wrap it in `keep-sorted` immediately. Add a fact
-  that also lives in the docs or config → add `affects` immediately. Retrofitting later is exactly the cost this avoids.
-- **Only in projects that use BlockWatch.** This skill being installed (or a `blockwatch` config / existing `<block>`
-  tags in the tree) means the project opted in. Don't add blocks to a project that doesn't use the tool.
-- **High-value only.** Same bar as a bulk pass: a block must catch a real mistake someone could plausibly make, not just
-  decorate. When in doubt, leave it out.
-- **Verify.** After adding tags, run `git diff --patch | blockwatch` to confirm they pass (see *Running and verifying*).
+Introduce a list that should stay ordered → wrap it in `keep-sorted` in the same edit. Add a fact that also lives in
+the docs or config → add `affects` in the same edit. Retrofitting later is exactly the cost this avoids.
+
+Then run `git diff --patch | blockwatch` to confirm the new tags pass (see *Running and verifying*).
 
 ## Annotating a new project
-
-Goal: add a **small number of high-value blocks**, not annotate everything. A block earns its place only when it would
-catch a real mistake a human might otherwise miss in review. Too many blocks create noise and get ignored.
-
-Workflow:
 
 1. Survey the repo for the patterns in the catalog below. Read the code *and* the docs/config; use `rg`/grep to find
    lists, enums, match arms, tables, and constants.
@@ -119,6 +118,7 @@ pub enum Language { Rust, Python }
 | `line-count`          | `line-count="<=5"`                                                                | Operators: `<`, `>`, `<=`, `>=`, `==`.                                                                                                                                                                                                                            |
 | `check-ai`            | `check-ai="Must mention 'Acme'"` + optional `check-ai-pattern="\$(?P<value>\d+)"` | LLM validation. Requires `BLOCKWATCH_AI_API_KEY` (plus optional `BLOCKWATCH_AI_MODEL`, `BLOCKWATCH_AI_API_URL`).                                                                                                                                                  |
 | `check-lua`           | `check-lua="scripts/x.lua"`                                                       | Script defines `validate(ctx, content)` returning `nil` (pass) or an error string. `ctx` has `file`, `line`, `attrs`; if the block also has `affects`, `ctx.affects` is a list of the affected blocks (`{ file, name, content }`) for IO-free cross-block checks. |
+| `check-lua-pattern`   | `check-lua-pattern='str = "(?P<value>[^"]+)"'`                                    | Pass only the extracted value to the script instead of the whole block. Matches **once against the entire block** (not per line); `content` is `""` when nothing matches.                                                                                          |
 | `severity`            | `severity="error"` (default) `/ warning / info / hint`                            | Only `error` fails the run (exit 1); the others are reported but exit 0.                                                                                                                                                                                          |
 
 ## Maintaining blocks (editing annotated files)
@@ -171,12 +171,7 @@ Validating only the diff keeps these near-instant.
       pass_filenames: false
 ```
 
-**Plain git hook** (`.git/hooks/pre-commit`, then `chmod +x`):
-
-```bash
-#!/bin/sh
-git diff --patch --cached --unified=0 | blockwatch
-```
+Without the pre-commit framework, put the same `entry` command in `.git/hooks/pre-commit` and `chmod +x` it.
 
 **GitHub Actions** (`.github/workflows/blockwatch.yml`):
 

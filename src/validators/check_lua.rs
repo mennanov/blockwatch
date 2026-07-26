@@ -21,7 +21,7 @@ const LUA_STDLIB_ENV_VAR: &str = "BLOCKWATCH_LUA_MODE";
 /// - `safe`: Memory-safe but includes IO/OS (useful for trusted scripts).
 /// - `unsafe`: Fully unsafe, allows C module loading.
 fn lua_from_env() -> Lua {
-    // <block affects="README.md:lua-safety-modes">
+    // <block affects="docs/validators/check-lua.md:lua-safety-modes">
     match std::env::var(LUA_STDLIB_ENV_VAR)
         .as_deref()
         .unwrap_or("sandboxed")

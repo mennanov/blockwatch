@@ -27,5 +27,8 @@ tests/testdata/list/.hg/wcache/
 .codeium/
 .gemini/
 .github/copilot/
-# Local-only docs (design notes, plans, maintainer checklists)
-/docs/
+# Local-only docs (design notes, plans, maintainer checklists).
+# Everything else under /docs/ is published documentation linked from the README.
+/docs/superpowers/
+/docs/dev-vm.md
+/docs/one-time-submissions.md
