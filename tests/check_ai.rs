@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 
-// <block name="check-ai-env-vars">
+// <block name="check-ai-env-vars" same-as="src/validators/check_ai.rs:check-ai-env-vars" same-as-mode="subset" same-as-pattern="BLOCKWATCH_AI_[A-Z_]+">
 const API_KEY_ENV_VAR_NAME: &str = "BLOCKWATCH_AI_API_KEY";
 const API_URL_ENV_VAR_NAME: &str = "BLOCKWATCH_AI_API_URL";
 // </block>

@@ -194,6 +194,100 @@ pub enum Language {
 If you modify the enum in `src/lib.rs`, BlockWatch will fail until you touch the corresponding block `supported-langs`
 in `README.html` as well.
 
+### Cross-Block Agreement (`same-as`)
+
+While `affects` only checks that linked blocks were *co-edited*, `same-as` checks that they still hold the **same
+value** — catching duplicated constants, lists, or versions that silently drift apart. Unlike `affects`, it also runs in
+full-tree mode, not only on a diff.
+
+**README.md**:
+
+```markdown
+[//]: # (<block same-as="docs/ci.md:pre-commit">)
+
+    git diff --patch --cached | blockwatch
+
+[//]: # (</block>)
+```
+
+**docs/ci.md** (the same command, documented in a second place):
+
+```markdown
+[//]: # (<block name="pre-commit">)
+
+    git diff --patch --cached | blockwatch
+
+[//]: # (</block>)
+```
+
+With no extra attributes the whole trimmed content is compared as text, so both blocks must stay **identical**. This fits
+content you can't factor into a shared symbol — here, a command documented in two places that must not drift. Most
+couplings, though, don't share verbatim text, so each block can instead describe **how to read itself**.
+
+#### Extract values with `same-as-pattern`
+
+Each side extracts one token per line via its own regex — the `(?P<value>…)` capture group, or the whole match if there
+is none. Lines that don't match are skipped. Because each block self-describes, blocks in different formats can still be
+compared:
+
+```rust
+// <block same-as="README.md:supported-env-vars" same-as-pattern="BLOCKWATCH_AI_[A-Z_]+">
+const API_KEY: &str = "BLOCKWATCH_AI_API_KEY";
+const API_URL: &str = "BLOCKWATCH_AI_API_URL";
+// </block>
+```
+
+```markdown
+[//]: # (<block name="supported-env-vars" same-as-pattern="BLOCKWATCH_AI_[A-Z_]+">)
+
+- `BLOCKWATCH_AI_API_KEY`: API key.
+- `BLOCKWATCH_AI_API_URL`: API URL.
+
+[//]: # (</block>)
+```
+
+#### Comparison modes (`same-as-mode`)
+
+- `set` (default) — order- and duplicate-insensitive; the two token sets must be equal.
+- `sequence` — order-sensitive list equality.
+- `single` — exactly one token per side (e.g. "there is exactly one version").
+- `subset` — directional: every token in this block must also appear in the target.
+
+`subset` is the one directional mode, useful when one side is a legitimate subset of the other — for example a test
+fixture that exercises only some of the declared environment variables:
+
+```rust
+// <block same-as="src/config.rs:env-vars" same-as-mode="subset" same-as-pattern="BLOCKWATCH_AI_[A-Z_]+">
+const API_KEY: &str = "BLOCKWATCH_AI_API_KEY";
+// </block>
+```
+
+#### Numeric comparison (`same-as-format`)
+
+`same-as-format="numeric"` parses each token as a number before comparing, so the same quantity written in different
+numeric forms still agrees. A timeout shared between a Rust backend and a TypeScript frontend is a good case: the value
+can't be imported across the language boundary, and the two sides spell it differently. Wrapping the tag *inline* around
+just the literal keeps the block content down to the number itself, so no `same-as-pattern` is needed:
+
+**src/backend.rs**:
+
+```rust
+const TIMEOUT: Duration = Duration::from_secs_f64(/* <block same-as="app/config.ts:timeout" same-as-format="numeric"> */ 60.0 /* </block> */);
+```
+
+**app/config.ts**:
+
+```typescript
+export const timeout = /* <block name="timeout"> */ 60 /* </block> */; // seconds
+```
+
+Rust's `from_secs_f64` takes a float (`60.0`) while TypeScript uses a plain `60`; `numeric` parses both and they compare
+equal. Under plain text comparison, `"60.0" != "60"` would fail.
+
+The source block's `same-as-mode` and `same-as-format` govern the comparison; each block's own `same-as-pattern` governs
+only how that block is read. A missing target block, a non-numeric token under `numeric`, or a `single`/`subset` side
+with the wrong number of tokens is reported as a violation.
+
 ### Enforce Sort Order (`keep-sorted`)
 
 Keep lists alphabetized. Default is `asc` (ascending).
@@ -329,7 +423,7 @@ prices = [
 
 #### Supported environment variables
 
-[//]: # (<block name="check-ai-env-vars">)
+[//]: # (<block name="check-ai-env-vars" same-as-pattern="BLOCKWATCH_AI_[A-Z_]+">)
 
 - `BLOCKWATCH_AI_API_KEY`: API Key.
 - `BLOCKWATCH_AI_MODEL`: Model name (default: `gpt-5-nano`).

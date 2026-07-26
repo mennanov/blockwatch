@@ -1,6 +1,6 @@
 ---
 name: blockwatch
-description: Use when writing or modifying code in a project that uses BlockWatch — proactively link co-dependent code with `<block affects=...>`/`<block name=...>` so it catches drift when one side changes without the other (an enum and its docs, a constant and its config). Also for lists that must stay sorted/unique or values with a strict format/size, and when editing files that contain `<block ...>` tags (affects, keep-sorted, keep-unique, line-pattern, line-count, check-ai, check-lua).
+description: Use when writing or modifying code in a project that uses BlockWatch — proactively link co-dependent code with `<block affects=...>`/`<block name=...>` so it catches drift when one side changes without the other (an enum and its docs, a constant and its config), or assert two places hold the same value with `<block same-as=...>`. Also for lists that must stay sorted/unique or values with a strict format/size, and when editing files that contain `<block ...>` tags (affects, same-as, keep-sorted, keep-unique, line-pattern, line-count, check-ai, check-lua).
 ---
 
 # BlockWatch
@@ -51,13 +51,20 @@ Workflow:
 | A hand-maintained list/enum/match that should stay ordered (dependencies, CLI flags, feature lists, route tables)             | `keep-sorted`            | Eliminates "please sort this" review nits       |
 | A list that must not repeat (allowlists, IDs, registered names)                                                               | `keep-unique`            | Prevents accidental duplicates                  |
 | The same fact in two places — an enum and its docs, a version constant and a changelog row, a config key and its README table | `affects` + `name`       | Forces docs/config to be updated alongside code |
+| The same **value** duplicated across places — a constant and its docs, a port in code and in a manifest, an env-var set and its README table | `same-as` + `name`       | Fails when the copies actually disagree, not just when one side is touched |
 | A list whose items have a strict format (slugs, semver, env-var names)                                                        | `line-pattern="<regex>"` | Catches typos at the source                     |
 | A block that must not grow past N lines (public API surface, a switch mapped to a fixed enum)                                 | `line-count="<=N"`       | Flags unbounded growth                          |
 | Prose or config with a natural-language rule ("must mention X", "no TODOs left")                                              | `check-ai="..."`         | Rules regex can't express                       |
 | Domain logic too complex for regex                                                                                            | `check-lua="script.lua"` | Custom programmable checks                      |
 
-Prefer the deterministic validators (`keep-sorted`, `keep-unique`, `affects`, `line-pattern`, `line-count`) first — they
-are free, fast, and need no API keys. Reserve `check-ai` for rules the cheaper validators genuinely can't express.
+Prefer the deterministic validators (`keep-sorted`, `keep-unique`, `affects`, `same-as`, `line-pattern`, `line-count`)
+first — they are free, fast, and need no API keys. Reserve `check-ai` for rules the cheaper validators genuinely can't
+express.
+
+When two blocks should hold the same value, prefer `same-as` over a bare `affects`: `affects` only notices that one side
+was edited, while `same-as` fails when the copies actually disagree. Put reciprocal blocks on both sides (each `name`d),
+and — because `same-as` also fires without a diff — a periodic full-tree `blockwatch` run (see CI below) catches drift
+that a diff-only check would miss.
 
 ### Placing tags
 
@@ -100,6 +107,10 @@ pub enum Language { Rust, Python }
 |-----------------------|-----------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `name`                | `name="foo"`                                                                      | Names a block; the target of `affects`; shown by `blockwatch list`.                                                                                                                                                                                               |
 | `affects`             | `affects="file:foo"` or `affects=":foo"` (same file); comma-separate multiple     | If this block's content changes in a diff, the referenced `name="foo"` block's content must change too, else a violation. One-way by default; put `affects` on **both** blocks (each `name`d) for two-way drift detection. Only fires in diff mode.               |
+| `same-as`             | `same-as="file:foo"` or `same-as=":foo"` (same file); comma-separate multiple     | This block and each referenced `name="foo"` block must hold the same **value**. Symmetric, and fires in full-tree mode too (unlike `affects`). Whole trimmed content by default.                                                                                    |
+| `same-as-pattern`     | `same-as-pattern="id: (?P<value>\d+)"`                                            | Per line, compare the `value` capture group (or the whole match). Each side reads *itself*, so put a pattern on both blocks when the two are in different formats.                                                                                                  |
+| `same-as-mode`        | `same-as-mode="set"` (default) `/ sequence / single / subset`                     | `set` order/duplicate-insensitive; `sequence` ordered; `single` exactly one token per side; `subset` this block's tokens must all appear in the target (directional). Governed by the source block.                                                                 |
+| `same-as-format`      | `same-as-format="numeric"`                                                        | Parse tokens as numbers before comparing, so `8080` == `8080.0`. Governed by the source block.                                                                                                                                                                     |
 | `keep-sorted`         | `keep-sorted` / `keep-sorted="asc"` / `keep-sorted="desc"`                        | Default `asc`, compared lexicographically.                                                                                                                                                                                                                        |
 | `keep-sorted-pattern` | `keep-sorted-pattern="id: (?P<value>\d+)"`                                        | Sort by the regex capture group named `value` instead of the whole line.                                                                                                                                                                                          |
 | `keep-sorted-format`  | `keep-sorted-format="numeric"`                                                    | Compare the value numerically rather than as text (`"10"` after `"2"`).                                                                                                                                                                                           |

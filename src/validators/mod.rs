@@ -132,9 +132,7 @@ impl SimpleDiagnostic<'_> {
 pub struct ValidationContext {
     // Blocks with their corresponding source file contents grouped by filename.
     pub(crate) blocks: HashMap<PathBuf, FileBlocks>,
-    // A map with `BlockParsers`. Can be used to parse source files in validators.
-    // Language parsers for different file types, used to parse source files in validators.
-    #[allow(dead_code)]
+    // Language parsers per file type, used by validators to parse referenced source files.
     pub(crate) parsers: LanguageParsers,
 }
 
