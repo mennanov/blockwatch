@@ -8,6 +8,9 @@ pub trait FileSystem: Send + Sync {
     /// Reads the entire contents of a file into a string.
     fn read_to_string(&self, path: &Path) -> anyhow::Result<String>;
 
+    /// Whether a readable file exists at `path` inside the repository.
+    fn exists(&self, path: &Path) -> bool;
+
     /// Walks the directory tree rooted at the file system's root path, returning an iterator over the paths of all files.
     fn walk(&self) -> impl Iterator<Item = anyhow::Result<PathBuf>>;
 }
@@ -22,13 +25,22 @@ pub trait PathChecker {
 }
 
 pub struct FileSystemImpl {
+    /// The repository root, canonicalized so that containment checks compare like with like.
     root_path: PathBuf,
 }
 
 impl FileSystemImpl {
-    /// Creates a new filesystem-backed reader rooted at `root_path`.
-    pub fn new(root_path: PathBuf) -> Self {
-        Self { root_path }
+    /// Creates a reader confined to `root_path`, which must name an existing directory.
+    ///
+    /// The root is canonicalized here so every later resolution can compare against it directly.
+    pub fn new(root_path: &Path) -> anyhow::Result<Self> {
+        let root_path = std::fs::canonicalize(root_path).with_context(|| {
+            format!(
+                "failed to canonicalize repository root: {}",
+                root_path.display()
+            )
+        })?;
+        Ok(Self { root_path })
     }
 
     /// Resolves `path` against the repository root and guarantees the result stays inside it.
@@ -45,20 +57,14 @@ impl FileSystemImpl {
         } else {
             self.root_path.join(path)
         };
-        let canonical_root = std::fs::canonicalize(&self.root_path).with_context(|| {
-            format!(
-                "failed to canonicalize repository root: {}",
-                self.root_path.display()
-            )
-        })?;
         let canonical = std::fs::canonicalize(&candidate)
             .with_context(|| format!("failed to canonicalize path \"{}\"", path.display()))?;
-        if !canonical.starts_with(&canonical_root) {
+        if !canonical.starts_with(&self.root_path) {
             return Err(anyhow!(
                 "path \"{}\" resolves to \"{}\" which is outside the repository root \"{}\"",
                 path.display(),
                 canonical.display(),
-                canonical_root.display(),
+                self.root_path.display(),
             ));
         }
         Ok(canonical)
@@ -70,6 +76,13 @@ impl FileSystem for FileSystemImpl {
         let resolved = self.resolve_within_root(path)?;
         std::fs::read_to_string(&resolved)
             .with_context(|| format!("Failed to read file \"{}\"", path.display()))
+    }
+
+    fn exists(&self, path: &Path) -> bool {
+        // `resolve_within_root` fails for a missing path as well as for one escaping the root;
+        // both mean "not a file this run may read".
+        self.resolve_within_root(path)
+            .is_ok_and(|resolved| resolved.is_file())
     }
 
     fn walk(&self) -> impl Iterator<Item = anyhow::Result<PathBuf>> {
@@ -132,7 +145,7 @@ mod file_system_impl_tests {
     #[test]
     fn read_to_string_reads_relative_path_inside_root() -> anyhow::Result<()> {
         let (root, _path) = root_with_file("a.txt", "hello");
-        let file_system = FileSystemImpl::new(root.path().to_path_buf());
+        let file_system = FileSystemImpl::new(root.path())?;
 
         assert_eq!(file_system.read_to_string(Path::new("a.txt"))?, "hello");
         Ok(())
@@ -141,7 +154,7 @@ mod file_system_impl_tests {
     #[test]
     fn read_to_string_reads_absolute_path_inside_root() -> anyhow::Result<()> {
         let (root, abs_path) = root_with_file("a.txt", "hello");
-        let file_system = FileSystemImpl::new(root.path().to_path_buf());
+        let file_system = FileSystemImpl::new(root.path())?;
 
         assert_eq!(file_system.read_to_string(&abs_path)?, "hello");
         Ok(())
@@ -152,7 +165,7 @@ mod file_system_impl_tests {
         let root = tempfile::tempdir()?;
         // A file that exists and is readable, but lives outside the repository root.
         let (_outside_root, outside) = root_with_file("secret.txt", "secret");
-        let file_system = FileSystemImpl::new(root.path().to_path_buf());
+        let file_system = FileSystemImpl::new(root.path())?;
 
         let err = file_system.read_to_string(&outside).unwrap_err();
 
@@ -169,7 +182,7 @@ mod file_system_impl_tests {
         std::fs::write(parent.path().join("evil.txt"), "evil")?;
         let root = parent.path().join("repo");
         std::fs::create_dir(&root)?;
-        let file_system = FileSystemImpl::new(root);
+        let file_system = FileSystemImpl::new(&root)?;
 
         let err = file_system
             .read_to_string(Path::new("../evil.txt"))
@@ -185,7 +198,7 @@ mod file_system_impl_tests {
     #[test]
     fn read_to_string_rejects_missing_path() -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let file_system = FileSystemImpl::new(root.path().to_path_buf());
+        let file_system = FileSystemImpl::new(root.path())?;
 
         let err = file_system
             .read_to_string(Path::new("does_not_exist.txt"))
@@ -206,7 +219,7 @@ mod file_system_impl_tests {
         let root = parent.path().join("repo");
         std::fs::create_dir(&root)?;
         std::os::unix::fs::symlink(parent.path().join("secret.txt"), root.join("link.txt"))?;
-        let file_system = FileSystemImpl::new(root);
+        let file_system = FileSystemImpl::new(&root)?;
 
         let err = file_system
             .read_to_string(Path::new("link.txt"))
@@ -244,6 +257,10 @@ pub mod test_utils {
                 .get(&path.display().to_string())
                 .cloned()
                 .ok_or_else(|| anyhow::anyhow!("File {} not found", path.display()))
+        }
+
+        fn exists(&self, path: &Path) -> bool {
+            self.files.contains_key(&path.display().to_string())
         }
 
         fn walk(&self) -> impl Iterator<Item = anyhow::Result<PathBuf>> {

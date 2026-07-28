@@ -6,6 +6,7 @@ pub mod diff_parser;
 pub mod flags;
 pub mod fs;
 pub mod language_parsers;
+pub mod repo_path;
 mod tag_parser;
 pub mod validators;
 

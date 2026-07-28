@@ -31,7 +31,7 @@ fn main() -> anyhow::Result<()> {
 /// non-interactively — piped to `jq`, in CI, or when spawned by another program such as an AI agent.
 fn run_list(args: &flags::Args, read_diff_flag: bool) -> anyhow::Result<()> {
     let read_diff = read_diff_flag && !stdin_is_terminal();
-    let file_system = blockwatch::fs::FileSystemImpl::new(repository_root()?);
+    let file_system = blockwatch::fs::FileSystemImpl::new(&repository_root()?)?;
     let context = build_context(args, read_diff, &file_system)?;
     let report = context.to_serializable_report();
     serde_json::to_writer_pretty(std::io::stdout(), &report).context("Failed to list blocks")
@@ -42,7 +42,7 @@ fn run_list(args: &flags::Args, read_diff_flag: bool) -> anyhow::Result<()> {
 /// The diff to validate is read from stdin whenever stdin is not a terminal (i.e. when a
 /// `git diff` is piped in); otherwise the whole working tree is checked.
 fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
-    let file_system = Arc::new(blockwatch::fs::FileSystemImpl::new(repository_root()?));
+    let file_system = Arc::new(blockwatch::fs::FileSystemImpl::new(&repository_root()?)?);
     let context = build_context(args, !stdin_is_terminal(), file_system.as_ref())?;
     let (sync_validators, async_validators) = validators::detect_validators(
         &context,
