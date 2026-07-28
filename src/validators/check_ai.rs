@@ -1,5 +1,6 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
+use crate::repo_path::RepoPath;
 use crate::validators::{
     ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorType, Violation, ViolationRange,
 };
@@ -14,7 +15,7 @@ use async_trait::async_trait;
 use secrecy::ExposeSecret;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use tokio::task::JoinSet;
 
@@ -45,7 +46,7 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
     async fn validate(
         &self,
         context: Arc<ValidationContext>,
-    ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
+    ) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
         let mut violations = HashMap::new();
         let mut tasks = JoinSet::new();
         for (file_path, file_blocks) in &context.blocks {
@@ -186,10 +187,10 @@ impl<C: AiClient> CheckAiValidator<C> {
     }
 
     fn process_ai_response(
-        file_path: PathBuf,
+        file_path: RepoPath,
         block_with_context: &BlockWithContext,
         result: anyhow::Result<Option<String>>,
-    ) -> anyhow::Result<Option<(PathBuf, Violation)>> {
+    ) -> anyhow::Result<Option<(RepoPath, Violation)>> {
         match result.context(format!(
             "check-ai API error in {}:{} at line {}",
             file_path.display(),
@@ -303,6 +304,7 @@ impl AiClient for OpenAiClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repo_path::RepoPath;
     use crate::test_utils::validation_context;
     use serde_json::json;
 
@@ -415,8 +417,11 @@ I like apples
         );
         let violations = validator.validate(context).await?;
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations[&PathBuf::from("example.py")].len(), 1);
-        let violation = &violations[&PathBuf::from("example.py")][0];
+        assert_eq!(
+            violations[&RepoPath::from_reference("example.py").unwrap()].len(),
+            1
+        );
+        let violation = &violations[&RepoPath::from_reference("example.py").unwrap()][0];
         assert_eq!(violation.code, "check-ai");
         assert_eq!(
             violation.message,

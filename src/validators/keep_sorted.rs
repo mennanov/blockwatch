@@ -1,5 +1,6 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
+use crate::repo_path::RepoPath;
 use crate::validators::{
     ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
 };
@@ -9,7 +10,7 @@ use serde::Serialize;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 use strum_macros::EnumString;
@@ -86,7 +87,7 @@ impl ValidatorSync for KeepSortedValidator {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,
-    ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
+    ) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
         let mut violations = HashMap::new();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
@@ -290,6 +291,7 @@ fn create_violation(
 #[cfg(test)]
 mod validate_tests {
     use super::*;
+    use crate::repo_path::RepoPath;
     use crate::test_utils::validation_context;
     use serde_json::json;
 
@@ -340,7 +342,9 @@ mod validate_tests {
         );
         let violations = validator.validate(context)?;
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py").unwrap())
+            .unwrap();
         assert_eq!(
             file_violations[0].message,
             "Block example.py:(unnamed) defined at line 1 has an out-of-order line 3 (asc)"
@@ -446,7 +450,9 @@ mod validate_tests {
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py").unwrap())
+            .unwrap();
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,
@@ -482,7 +488,9 @@ mod validate_tests {
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py").unwrap())
+            .unwrap();
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,
@@ -549,7 +557,9 @@ mod validate_tests {
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py").unwrap())
+            .unwrap();
         assert_eq!(file_violations.len(), 1);
         assert_eq!(file_violations[0].code, "keep-sorted");
         assert_eq!(
@@ -574,7 +584,9 @@ mod validate_tests {
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py").unwrap())
+            .unwrap();
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].range,
@@ -635,7 +647,9 @@ mod validate_tests {
         );
         let violations = validator.validate(context)?;
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py").unwrap())
+            .unwrap();
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,
@@ -680,7 +694,9 @@ mod validate_tests {
         );
         let violations = validator.validate(context)?;
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py").unwrap())
+            .unwrap();
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,
@@ -718,7 +734,9 @@ mod validate_tests {
         );
         let violations = validator.validate(context)?;
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py").unwrap())
+            .unwrap();
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,

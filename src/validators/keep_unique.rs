@@ -1,11 +1,12 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
+use crate::repo_path::RepoPath;
 use crate::validators::{
     ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
 };
 use crate::{Position, validators};
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 pub(super) struct KeepUniqueValidator {}
@@ -21,7 +22,7 @@ impl ValidatorSync for KeepUniqueValidator {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,
-    ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
+    ) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
         let mut violations = HashMap::new();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
@@ -181,6 +182,7 @@ fn create_violation(
 #[cfg(test)]
 mod validate_tests {
     use super::*;
+    use crate::repo_path::RepoPath;
     use crate::test_utils::validation_context;
 
     #[test]
@@ -268,7 +270,9 @@ C
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py").unwrap())
+            .unwrap();
         assert_eq!(file_violations.len(), 1);
         // The last line ` 1 ` is the only duplicate.
         assert_eq!(
@@ -296,7 +300,9 @@ BB
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py").unwrap())
+            .unwrap();
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,
@@ -325,7 +331,9 @@ ID:1 C
 
         let violations = validator.validate(context)?;
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py").unwrap())
+            .unwrap();
         assert_eq!(file_violations.len(), 1);
         // Only the matched value group is in the range.
         assert_eq!(
@@ -349,7 +357,9 @@ ID:1 C
 
         let violations = validator.validate(context)?;
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py").unwrap())
+            .unwrap();
         assert_eq!(file_violations.len(), 1);
         // Full regex match is in the range.
         assert_eq!(

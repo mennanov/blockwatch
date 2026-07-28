@@ -30,6 +30,7 @@ mod test_utils {
     use crate::diff_parser::LineChange;
     use crate::fs::test_utils::{FakeFileSystem, FakePathChecker};
     use crate::language_parsers;
+    use crate::repo_path::RepoPath;
     use crate::validators::ValidationContext;
     use std::collections::HashMap;
     use std::ops::Range;
@@ -78,7 +79,8 @@ mod test_utils {
             file_name.to_string(),
             contents.to_string(),
         )]));
-        let line_changes_by_file = HashMap::from([(file_name.into(), line_changes)]);
+        let line_changes_by_file =
+            HashMap::from([(RepoPath::from_reference(file_name).unwrap(), line_changes)]);
         let parsers = language_parsers::language_parsers().unwrap();
         Arc::new(ValidationContext::new(
             parse_blocks(

@@ -1,5 +1,6 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
+use crate::repo_path::RepoPath;
 use crate::validators::{
     ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
 };
@@ -8,7 +9,7 @@ use anyhow::anyhow;
 use regex::Regex;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 pub(crate) struct LinePatternValidator {}
@@ -28,7 +29,7 @@ impl ValidatorSync for LinePatternValidator {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,
-    ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
+    ) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
         let mut violations = HashMap::new();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
@@ -147,6 +148,7 @@ fn create_violation(
 #[cfg(test)]
 mod validate_tests {
     use super::*;
+    use crate::repo_path::RepoPath;
     use crate::test_utils::validation_context;
     use serde_json::json;
 
@@ -223,7 +225,9 @@ mod validate_tests {
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file_violations = violations.get(&PathBuf::from("example.py")).unwrap();
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py").unwrap())
+            .unwrap();
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,

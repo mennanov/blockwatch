@@ -1,14 +1,14 @@
 use crate::blocks::{Block, BlockWithContext, FileBlocks, parse_single_file};
 use crate::fs::FileSystem;
+use crate::repo_path::RepoPath;
 use crate::validators::{
     self, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
 };
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use regex::Regex;
 use serde::Serialize;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub(crate) struct SameAsValidator<Fs: FileSystem> {
@@ -27,11 +27,11 @@ impl<Fs: FileSystem + 'static> ValidatorSync for SameAsValidator<Fs> {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,
-    ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
-        let mut violations: HashMap<PathBuf, Vec<Violation>> = HashMap::new();
+    ) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
+        let mut violations: HashMap<RepoPath, Vec<Violation>> = HashMap::new();
         // Caches files read from disk so each is parsed at most once. `validate` runs on a single
         // thread, so no synchronization is needed.
-        let mut cache: HashMap<PathBuf, FileBlocks> = HashMap::new();
+        let mut cache: HashMap<RepoPath, FileBlocks> = HashMap::new();
         for (file_path, file_blocks) in &context.blocks {
             for bwc in &file_blocks.blocks_with_context {
                 let Some(same_as) = bwc.block.attributes.get("same-as") else {
@@ -43,7 +43,16 @@ impl<Fs: FileSystem + 'static> ValidatorSync for SameAsValidator<Fs> {
                     extract_items(&bwc.block, &file_blocks.file_content)?,
                     &format,
                 );
-                for (target_file_opt, target_name) in validators::parse_block_references(same_as)? {
+                let references =
+                    validators::parse_block_references(same_as).with_context(|| {
+                        format!(
+                            "invalid same-as reference on block {}:{} at line {}",
+                            file_path,
+                            bwc.block.name_display(),
+                            bwc.block.start_tag_position_range.start().line,
+                        )
+                    })?;
+                for (target_file_opt, target_name) in references {
                     let target_file = target_file_opt.unwrap_or_else(|| file_path.clone());
                     let target_items = resolve_target_items(
                         &context,
@@ -149,8 +158,8 @@ fn extract_named(file_blocks: &FileBlocks, name: &str) -> anyhow::Result<Option<
 fn resolve_target_items<Fs: FileSystem>(
     context: &validators::ValidationContext,
     file_system: &Fs,
-    cache: &mut HashMap<PathBuf, FileBlocks>,
-    target_file: &Path,
+    cache: &mut HashMap<RepoPath, FileBlocks>,
+    target_file: &RepoPath,
     target_name: &str,
 ) -> anyhow::Result<Option<Vec<String>>> {
     if let Some(file_blocks) = context.blocks.get(target_file)
@@ -158,7 +167,7 @@ fn resolve_target_items<Fs: FileSystem>(
     {
         return Ok(Some(items));
     }
-    let file_blocks = match cache.entry(target_file.to_path_buf()) {
+    let file_blocks = match cache.entry(target_file.clone()) {
         Entry::Occupied(entry) => entry.into_mut(),
         Entry::Vacant(entry) => {
             // Referenced target files are resolved without applying extension overrides.
@@ -277,15 +286,15 @@ fn disagreement(source: &[String], target: &[String], mode: &Mode) -> Option<Str
 
 #[derive(Serialize)]
 struct SameAsViolation<'a> {
-    target_file: &'a Path,
+    target_file: &'a RepoPath,
     target_name: &'a str,
     reason: &'a str,
 }
 
 fn create_violation(
-    file_path: &Path,
+    file_path: &RepoPath,
     block: &Block,
-    target_file: &Path,
+    target_file: &RepoPath,
     target_name: &str,
     reason: &str,
 ) -> anyhow::Result<Violation> {
@@ -343,6 +352,7 @@ mod validate_tests {
     use super::*;
     use crate::diff_parser::LineChange;
     use crate::fs::test_utils::FakeFileSystem;
+    use crate::repo_path::RepoPath;
     use crate::test_utils::merge_validation_contexts;
     use crate::test_utils::validation_context;
     use crate::test_utils::validation_context_with_changes;
@@ -384,7 +394,9 @@ mod validate_tests {
             "# <block same-as=\":b\">\nvalue = 10\n# </block>\n# <block name=\"b\">\nvalue = 20\n# </block>",
         );
         let violations = validator(&[]).validate(context)?;
-        let file = violations.get(&PathBuf::from("config.py")).unwrap();
+        let file = violations
+            .get(&RepoPath::from_reference("config.py").unwrap())
+            .unwrap();
         assert_eq!(file.len(), 1);
         assert_eq!(file[0].code, "same-as");
         Ok(())
@@ -411,7 +423,10 @@ mod validate_tests {
         // full file, so the filesystem is seeded with it.
         let violations = validator(&[("config.py", source)]).validate(context)?;
         assert_eq!(
-            violations.get(&PathBuf::from("config.py")).unwrap().len(),
+            violations
+                .get(&RepoPath::from_reference("config.py").unwrap())
+                .unwrap()
+                .len(),
             1
         );
         Ok(())
@@ -503,7 +518,9 @@ mod validate_tests {
             "// <block same-as=\":b\" same-as-pattern=\"(?P<value>[0-9]+)\" same-as-mode=\"single\">\n1\n2\n// </block>\n// <block name=\"b\">\n1\n// </block>",
         );
         let violations = validator(&[]).validate(context)?;
-        let file = violations.get(&PathBuf::from("a.rs")).unwrap();
+        let file = violations
+            .get(&RepoPath::from_reference("a.rs").unwrap())
+            .unwrap();
         assert_eq!(file.len(), 1);
         assert_eq!(file[0].code, "same-as");
         Ok(())
@@ -534,7 +551,9 @@ mod validate_tests {
             "// <block same-as=\":b\" same-as-pattern=\"(?P<value>\\w+)\" same-as-format=\"numeric\">\nabc\n// </block>\n// <block name=\"b\">\n1\n// </block>",
         );
         let violations = validator(&[]).validate(context)?;
-        let file = violations.get(&PathBuf::from("a.rs")).unwrap();
+        let file = violations
+            .get(&RepoPath::from_reference("a.rs").unwrap())
+            .unwrap();
         assert_eq!(file.len(), 1);
         assert_eq!(file[0].code, "same-as");
         Ok(())
@@ -581,7 +600,9 @@ mod validate_tests {
             ),
         ]);
         let violations = validator(&[]).validate(context)?;
-        let file = violations.get(&PathBuf::from("test.rs")).unwrap();
+        let file = violations
+            .get(&RepoPath::from_reference("test.rs").unwrap())
+            .unwrap();
         assert_eq!(file.len(), 1);
         assert_eq!(file[0].code, "same-as");
         Ok(())

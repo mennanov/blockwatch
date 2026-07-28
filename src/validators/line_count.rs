@@ -1,5 +1,6 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
+use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{
     ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
@@ -7,7 +8,7 @@ use crate::validators::{
 use anyhow::anyhow;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 pub(crate) struct LineCountValidator {}
@@ -29,7 +30,7 @@ impl ValidatorSync for LineCountValidator {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,
-    ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
+    ) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
         let mut violations = HashMap::new();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
@@ -189,6 +190,7 @@ fn parse_constraint(s: &str) -> anyhow::Result<(Op, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repo_path::RepoPath;
     use crate::test_utils::validation_context;
     use serde_json::json;
 
@@ -290,7 +292,9 @@ mod tests {
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file2_violations = violations.get(&PathBuf::from("example.py")).unwrap();
+        let file2_violations = violations
+            .get(&RepoPath::from_reference("example.py").unwrap())
+            .unwrap();
         assert_eq!(file2_violations.len(), 6);
         assert_eq!(file2_violations[0].code, "line-count");
         assert_eq!(

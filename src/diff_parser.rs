@@ -1,8 +1,9 @@
+use crate::fs::FileSystem;
+use crate::repo_path::RepoPath;
 use anyhow::Context;
 use similar::DiffOp;
 use std::collections::HashMap;
 use std::ops::Range;
-use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 use unidiff::{Line, PatchSet, PatchedFile};
 
@@ -21,24 +22,23 @@ pub struct LineChange {
 /// Deleted files are ignored and not included in the result.
 pub fn line_changes_from_diff(
     patch_diff: &str,
-) -> anyhow::Result<HashMap<PathBuf, Vec<LineChange>>> {
-    let patch_set = PatchSet::from_str(patch_diff)?;
+    file_system: &impl FileSystem,
+) -> anyhow::Result<HashMap<RepoPath, Vec<LineChange>>> {
     let mut result = HashMap::new();
-    for patched_file in patch_set {
+    for patched_file in PatchSet::from_str(patch_diff)? {
         if patched_file.is_removed_file() {
             // Deleted files are ignored.
             continue;
         }
-        let target_path: PathBuf = patched_file.target_file.trim_start_matches("b/").into();
-        if !is_within_repo_root(&target_path) {
-            // Reject target paths that would escape the repository root, e.g. a crafted diff with
-            // `../` traversal or an absolute path. A normal `git diff` only ever produces
-            // repository-relative paths, so this never rejects legitimate changes.
-            anyhow::bail!(
-                "diff target path \"{}\" escapes the repository root folder",
-                target_path.display()
-            );
-        }
+        let Some(target_path) = RepoPath::from_diff_target(
+            &patched_file.source_file,
+            &patched_file.target_file,
+            file_system,
+        )?
+        else {
+            // The header names no file, e.g. the "/dev/null" side of a deletion.
+            continue;
+        };
         let changes = line_changes(&patched_file).with_context(|| {
             format!(
                 "failed to extract line changes from the diff for \"{}\"",
@@ -48,16 +48,6 @@ pub fn line_changes_from_diff(
         result.insert(target_path, changes);
     }
     Ok(result)
-}
-
-/// Whether `path` stays within the repository root.
-///
-/// I.e. it is a relative path with no `..` component and no absolute/root prefix.
-/// Used to reject diff target paths that would otherwise be joined onto the repository root and
-/// read from outside the repository.
-fn is_within_repo_root(path: &Path) -> bool {
-    path.components()
-        .all(|c| matches!(c, Component::CurDir | Component::Normal(_)))
 }
 
 fn line_changes(patched_file: &PatchedFile) -> anyhow::Result<Vec<LineChange>> {
@@ -382,6 +372,86 @@ mod modified_line_ranges_tests {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+    use std::path::Path;
+
+    /// Shorthand for the map key of a test fixture path.
+    fn key(path: &str) -> RepoPath {
+        RepoPath::from_reference(path).expect("test path is valid")
+    }
+
+    /// A working tree holding every path except those under a top-level directory named like one
+    /// of Git's prefixes, which is what an ordinary repository looks like. Tests needing a
+    /// specific file set seed one instead.
+    struct TypicalRepo;
+
+    impl FileSystem for TypicalRepo {
+        fn read_to_string(&self, _path: &Path) -> anyhow::Result<String> {
+            unimplemented!("diff parsing never reads file contents")
+        }
+
+        fn exists(&self, path: &Path) -> bool {
+            !matches!(
+                path.components()
+                    .next()
+                    .and_then(|c| c.as_os_str().to_str()),
+                Some("a") | Some("b")
+            )
+        }
+
+        fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>> {
+            std::iter::empty()
+        }
+    }
+
+    /// Parses `diff` against an ordinary working tree.
+    fn changes(diff: &str) -> anyhow::Result<HashMap<RepoPath, Vec<LineChange>>> {
+        line_changes_from_diff(diff, &TypicalRepo)
+    }
+
+    /// A working tree containing exactly the named files.
+    fn tree(files: &[&str]) -> crate::fs::test_utils::FakeFileSystem {
+        crate::fs::test_utils::FakeFileSystem::new(
+            files
+                .iter()
+                .map(|path| ((*path).to_string(), String::new()))
+                .collect::<HashMap<_, _>>(),
+        )
+    }
+
+    #[test]
+    fn keeps_a_top_level_directory_named_like_the_git_prefix() -> anyhow::Result<()> {
+        // Git writes `b/b/rules.py` for a file in a top-level directory named `b`. Stripping every
+        // repeated prefix would leave `rules.py` and validate an unrelated file.
+        let diff = "diff --git a/b/rules.py b/b/rules.py\n\
+--- a/b/rules.py\n\
++++ b/b/rules.py\n\
+@@ -1 +1 @@\n\
+-apple\n\
++banana\n";
+        let files = tree(&["b/rules.py", "rules.py"]);
+        let result = line_changes_from_diff(diff, &files)?;
+        assert!(result.contains_key(&key("b/rules.py")));
+        assert!(!result.contains_key(&key("rules.py")));
+        Ok(())
+    }
+
+    #[test]
+    fn decodes_a_quoted_non_ascii_target_path() -> anyhow::Result<()> {
+        let diff = "diff --git \"a/caf\\303\\251.py\" \"b/caf\\303\\251.py\"\n\
+--- \"a/caf\\303\\251.py\"\n\
++++ \"b/caf\\303\\251.py\"\n\
+@@ -1 +1 @@\n\
+-apple\n\
++banana\n";
+        let files = tree(&["café.py"]);
+        let result = line_changes_from_diff(diff, &files)?;
+        assert!(
+            result.contains_key(&key("café.py")),
+            "unexpected keys: {:?}",
+            result.keys().collect::<Vec<_>>()
+        );
+        Ok(())
+    }
 
     /// Creates a whole line change (either added or deleted line).
     fn line_change(line: usize) -> LineChange {
@@ -390,7 +460,7 @@ mod tests {
 
     #[test]
     fn single_file_diff_extracts_ranges_for_single_file() -> anyhow::Result<()> {
-        let ranges = line_changes_from_diff(
+        let ranges = changes(
             r#"diff --git a/Cargo.toml b/Cargo.toml
 index 8c34c48..23ddd69 100644
 --- a/Cargo.toml
@@ -405,13 +475,13 @@ index 8c34c48..23ddd69 100644
  cc="1.2.16"
 \ No newline at end of file"#,
         )?;
-        assert_eq!(ranges.keys().collect::<Vec<_>>(), vec!["Cargo.toml"]);
+        assert_eq!(ranges.keys().collect::<Vec<_>>(), vec![&key("Cargo.toml")]);
         Ok(())
     }
 
     #[test]
     fn multiple_files_diff_extracts_ranges_for_multiple_files() -> anyhow::Result<()> {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/Cargo.toml b/Cargo.toml
 index 8c34c48..23ddd69 100644
 --- a/Cargo.toml
@@ -455,7 +525,7 @@ index e69de29..215ed53 100644
 
     #[test]
     fn single_new_line_diff_returns_single_line_change() -> anyhow::Result<()> {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..b4b0c67 100644
 --- a/a.txt
@@ -467,13 +537,13 @@ index f384549..b4b0c67 100644
 +three and a half
  four"#,
         )?;
-        assert_eq!(line_changes[&PathBuf::from("a.txt")], vec![line_change(4)]);
+        assert_eq!(line_changes[&key("a.txt")], vec![line_change(4)]);
         Ok(())
     }
 
     #[test]
     fn single_first_new_line_diff_returns_single_line_change() -> anyhow::Result<()> {
-        let ranges = line_changes_from_diff(
+        let ranges = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..fa220f8 100644
 --- a/a.txt
@@ -484,13 +554,13 @@ index f384549..fa220f8 100644
  two
  three"#,
         )?;
-        assert_eq!(ranges[&PathBuf::from("a.txt")], vec![line_change(1)]);
+        assert_eq!(ranges[&key("a.txt")], vec![line_change(1)]);
         Ok(())
     }
 
     #[test]
     fn multiple_contiguous_new_lines_diff_returns_multiple_line_changes() -> anyhow::Result<()> {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..3a7bc2a 100644
 --- a/a.txt
@@ -504,7 +574,7 @@ index f384549..3a7bc2a 100644
  four"#,
         )?;
         assert_eq!(
-            line_changes[&PathBuf::from("a.txt")],
+            line_changes[&key("a.txt")],
             vec![line_change(4), line_change(5),]
         );
         Ok(())
@@ -513,7 +583,7 @@ index f384549..3a7bc2a 100644
     #[test]
     fn multiple_first_contiguous_new_lines_diff_returns_multiple_line_changes() -> anyhow::Result<()>
     {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..3ccae75 100644
 --- a/a.txt
@@ -526,7 +596,7 @@ index f384549..3ccae75 100644
  three"#,
         )?;
         assert_eq!(
-            line_changes[&PathBuf::from("a.txt")],
+            line_changes[&key("a.txt")],
             vec![line_change(1), line_change(2),]
         );
         Ok(())
@@ -535,7 +605,7 @@ index f384549..3ccae75 100644
     #[test]
     fn multiple_non_contiguous_new_lines_diff_returns_multiple_line_changes() -> anyhow::Result<()>
     {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..e797e7c 100644
 --- a/a.txt
@@ -549,7 +619,7 @@ index f384549..e797e7c 100644
  four"#,
         )?;
         assert_eq!(
-            line_changes[&PathBuf::from("a.txt")],
+            line_changes[&key("a.txt")],
             vec![line_change(3), line_change(5)]
         );
         Ok(())
@@ -558,7 +628,7 @@ index f384549..e797e7c 100644
     #[test]
     fn multiple_contiguous_new_line_groups_diff_returns_multiple_line_changes() -> anyhow::Result<()>
     {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..ab47fb2 100644
 --- a/a.txt
@@ -574,7 +644,7 @@ index f384549..ab47fb2 100644
  four"#,
         )?;
         assert_eq!(
-            line_changes[&PathBuf::from("a.txt")],
+            line_changes[&key("a.txt")],
             vec![
                 line_change(3),
                 line_change(4),
@@ -587,7 +657,7 @@ index f384549..ab47fb2 100644
 
     #[test]
     fn modified_line_returns_single_line_change_with_ranges() -> anyhow::Result<()> {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..e4c2829 100644
 --- a/a.txt
@@ -600,7 +670,7 @@ index f384549..e4c2829 100644
  four"#,
         )?;
         assert_eq!(
-            line_changes[&PathBuf::from("a.txt")],
+            line_changes[&key("a.txt")],
             vec![LineChange {
                 line: 3,
                 // "i" in "is" was modified, "o" and "a" in "thora" were modified.
@@ -613,7 +683,7 @@ index f384549..e4c2829 100644
     #[test]
     fn multiple_non_consecutive_modified_line_returns_separate_line_changes_with_ranges()
     -> anyhow::Result<()> {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..46c7533 100644
 --- a/a.txt
@@ -630,7 +700,7 @@ index f384549..46c7533 100644
  "#,
         )?;
         assert_eq!(
-            line_changes[&PathBuf::from("a.txt")],
+            line_changes[&key("a.txt")],
             vec![
                 LineChange {
                     line: 1,
@@ -655,7 +725,7 @@ index f384549..46c7533 100644
     #[test]
     fn multiple_consecutive_modified_lines_returns_single_line_changes_with_ranges()
     -> anyhow::Result<()> {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..676cbb7 100644
 --- a/a.txt
@@ -669,7 +739,7 @@ index f384549..676cbb7 100644
  four"#,
         )?;
         assert_eq!(
-            line_changes[&PathBuf::from("a.txt")],
+            line_changes[&key("a.txt")],
             vec![
                 LineChange {
                     line: 2,
@@ -686,7 +756,7 @@ index f384549..676cbb7 100644
 
     #[test]
     fn all_lines_replaced_returns_single_line_changes_with_ranges() -> anyhow::Result<()> {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..676cbb7 100644
 --- a/a.txt
@@ -700,7 +770,7 @@ index f384549..676cbb7 100644
 +modified two"#,
         )?;
         assert_eq!(
-            line_changes[&PathBuf::from("a.txt")],
+            line_changes[&key("a.txt")],
             vec![
                 LineChange {
                     line: 1,
@@ -717,7 +787,7 @@ index f384549..676cbb7 100644
 
     #[test]
     fn single_deleted_line_returns_single_line_change() -> anyhow::Result<()> {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..87a123c 100644
 --- a/a.txt
@@ -728,13 +798,13 @@ index f384549..87a123c 100644
 -three
  four"#,
         )?;
-        assert_eq!(line_changes[&PathBuf::from("a.txt")], vec![line_change(3)]);
+        assert_eq!(line_changes[&key("a.txt")], vec![line_change(3)]);
         Ok(())
     }
 
     #[test]
     fn single_first_deleted_line_returns_single_line_change() -> anyhow::Result<()> {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..58ac960 100644
 --- a/a.txt
@@ -745,13 +815,13 @@ index f384549..58ac960 100644
  three
  four"#,
         )?;
-        assert_eq!(line_changes[&PathBuf::from("a.txt")], vec![line_change(1)]);
+        assert_eq!(line_changes[&key("a.txt")], vec![line_change(1)]);
         Ok(())
     }
 
     #[test]
     fn single_last_deleted_line_returns_single_line_change() -> anyhow::Result<()> {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..4cb29ea 100644
 --- a/a.txt
@@ -762,14 +832,14 @@ index f384549..4cb29ea 100644
  three
 -four"#,
         )?;
-        assert_eq!(line_changes[&PathBuf::from("a.txt")], vec![line_change(4)]);
+        assert_eq!(line_changes[&key("a.txt")], vec![line_change(4)]);
         Ok(())
     }
 
     #[test]
     fn multiple_non_consecutive_deleted_lines_returns_separate_line_changes() -> anyhow::Result<()>
     {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..8c05df4 100644
 --- a/a.txt
@@ -781,7 +851,7 @@ index f384549..8c05df4 100644
  four"#,
         )?;
         assert_eq!(
-            line_changes[&PathBuf::from("a.txt")],
+            line_changes[&key("a.txt")],
             vec![line_change(1), line_change(2)]
         );
         Ok(())
@@ -789,7 +859,7 @@ index f384549..8c05df4 100644
 
     #[test]
     fn multiple_consecutive_deleted_lines_returns_single_line_change() -> anyhow::Result<()> {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..a9c7698 100644
 --- a/a.txt
@@ -802,13 +872,13 @@ index f384549..a9c7698 100644
         )?;
         // Consecutive deleted lines are treated as a single one-line range because they no longer
         // exist in the target file.
-        assert_eq!(line_changes[&PathBuf::from("a.txt")], vec![line_change(2)]);
+        assert_eq!(line_changes[&key("a.txt")], vec![line_change(2)]);
         Ok(())
     }
 
     #[test]
     fn all_lines_deleted_treated_as_deleted_file() -> anyhow::Result<()> {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..e69de29 100644
 --- a/a.txt
@@ -825,7 +895,7 @@ index f384549..e69de29 100644
 
     #[test]
     fn mixed_changes_returns_correct_line_changes() -> anyhow::Result<()> {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..58a279e 100644
 --- a/a.txt
@@ -841,7 +911,7 @@ index f384549..58a279e 100644
 +added five"#,
         )?;
         assert_eq!(
-            line_changes[&PathBuf::from("a.txt")],
+            line_changes[&key("a.txt")],
             vec![
                 LineChange {
                     line: 1,
@@ -868,7 +938,7 @@ index f384549..58a279e 100644
     #[test]
     fn diff_with_more_added_than_deleted_lines_pairs_modified_lines_by_similarity()
     -> anyhow::Result<()> {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/deps.py b/deps.py
 index abc123..def456 100644
 --- a/deps.py
@@ -881,7 +951,7 @@ index abc123..def456 100644
 +# <block name="deps" affects=":deps-docs" keep-sorted="asc">
 "#,
         )?;
-        let changes = &line_changes[&PathBuf::from("deps.py")];
+        let changes = &line_changes[&key("deps.py")];
         assert_eq!(changes.len(), 3);
         // Line 1 pairs with the old comment line.
         assert_eq!(changes[0].line, 1);
@@ -905,7 +975,7 @@ index abc123..def456 100644
     }
     #[test]
     fn out_of_order_hunks_returns_error() {
-        let err = line_changes_from_diff(
+        let err = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..b4b0c67 100644
 --- a/a.txt
@@ -939,8 +1009,8 @@ index f384549..b4b0c67 100644
              +{long_line}b\n\
              +{long_line}\n"
         );
-        let line_changes = line_changes_from_diff(&diff)?;
-        let changes = &line_changes[&PathBuf::from("a.txt")];
+        let line_changes = changes(&diff)?;
+        let changes = &line_changes[&key("a.txt")];
         assert_eq!(changes.len(), 2);
         // Similarity pairing would prefer the identical added line 2; the positional fallback
         // pairs the removed line with added line 1 and leaves line 2 as a pure insertion.
@@ -952,7 +1022,7 @@ index f384549..b4b0c67 100644
 
     #[test]
     fn deletion_after_earlier_insertions_uses_target_line_number() -> anyhow::Result<()> {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..b4b0c67 100644
 --- a/a.txt
@@ -967,7 +1037,7 @@ index f384549..b4b0c67 100644
 -deleted content
 "#,
         )?;
-        let changes = &line_changes[&PathBuf::from("a.txt")];
+        let changes = &line_changes[&key("a.txt")];
         // Source line 3 sits at target position 8 after the five inserted lines: the deletion gap
         // is between target lines 7 and 8.
         assert_eq!(
@@ -986,7 +1056,7 @@ index f384549..b4b0c67 100644
     #[test]
     fn modified_last_line_without_trailing_newline_returns_single_line_change_with_ranges()
     -> anyhow::Result<()> {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/a.txt b/a.txt
 index f384549..b4b0c67 100644
 --- a/a.txt
@@ -997,7 +1067,7 @@ index f384549..b4b0c67 100644
 +# </block>
 \ No newline at end of file"#,
         )?;
-        let changes = &line_changes[&PathBuf::from("a.txt")];
+        let changes = &line_changes[&key("a.txt")];
         assert_eq!(changes.len(), 1, "unexpected changes: {changes:?}");
         assert_eq!(changes[0].line, 5);
         assert!(changes[0].ranges.is_some());
@@ -1006,7 +1076,7 @@ index f384549..b4b0c67 100644
 
     #[test]
     fn new_file_diff_returns_line_changes_for_every_line() -> anyhow::Result<()> {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/example.rs b/example.rs
 new file mode 100644
 index 0000000..710d1d9
@@ -1019,7 +1089,7 @@ index 0000000..710d1d9
 "#,
         )?;
         assert_eq!(
-            line_changes[&PathBuf::from("example.rs")],
+            line_changes[&key("example.rs")],
             vec![line_change(1), line_change(2), line_change(3)]
         );
         Ok(())
@@ -1027,7 +1097,7 @@ index 0000000..710d1d9
 
     #[test]
     fn deleted_file_diff_is_ignored() -> anyhow::Result<()> {
-        let line_changes = line_changes_from_diff(
+        let line_changes = changes(
             r#"diff --git a/a.txt b/a.txt
 deleted file mode 100644
 index f384549..0000000
@@ -1044,7 +1114,7 @@ index f384549..0000000
     }
     #[test]
     fn diff_with_parent_dir_traversal_target_path_returns_error() {
-        let err = line_changes_from_diff(
+        let err = changes(
             r#"diff --git a/../../../etc/passwd b/../../../etc/passwd
 new file mode 100644
 index 0000000..710d1d9
@@ -1063,7 +1133,9 @@ index 0000000..710d1d9
 
     #[test]
     fn diff_with_absolute_target_path_returns_error() {
-        let err = line_changes_from_diff(
+        // Git never writes an absolute target, so this is rejected for carrying no path prefix
+        // before the traversal check is ever reached. Either way it must not resolve.
+        let err = changes(
             r#"diff --git a/etc/passwd b/etc/passwd
 new file mode 100644
 index 0000000..710d1d9
@@ -1075,7 +1147,7 @@ index 0000000..710d1d9
         )
         .unwrap_err();
         assert!(
-            err.to_string().contains("escapes the repository root"),
+            err.to_string().contains("no recognized Git path prefix"),
             "unexpected error: {err}"
         );
     }

@@ -1,11 +1,11 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
+use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{ValidatorType, Violation, ViolationRange};
 use anyhow::Context;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub(crate) struct AffectsValidator {}
@@ -18,7 +18,7 @@ impl AffectsValidator {
 
 #[derive(Serialize)]
 struct AffectsViolation<'a> {
-    affected_block_file_path: &'a Path,
+    affected_block_file_path: &'a RepoPath,
     affected_block_name: &'a str,
 }
 
@@ -26,7 +26,7 @@ impl validators::ValidatorSync for AffectsValidator {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,
-    ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
+    ) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
         let mut named_modified_blocks = HashMap::new();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
@@ -50,7 +50,19 @@ impl validators::ValidatorSync for AffectsValidator {
                     continue;
                 }
                 if let Some(affects) = block_with_context.block.attributes.get("affects") {
-                    let affected_blocks = validators::parse_block_references(affects)?;
+                    let affected_blocks = validators::parse_block_references(affects)
+                        .with_context(|| {
+                            format!(
+                                "invalid affects reference on block {}:{} at line {}",
+                                modified_block_file_path,
+                                block_with_context.block.name_display(),
+                                block_with_context
+                                    .block
+                                    .start_tag_position_range
+                                    .start()
+                                    .line,
+                            )
+                        })?;
                     for (affected_file_path, affected_block_name) in affected_blocks {
                         let affected_file_path =
                             affected_file_path.unwrap_or_else(|| modified_block_file_path.clone());
@@ -101,9 +113,9 @@ impl<Fs: FileSystem> validators::ValidatorDetector<Fs> for AffectsValidatorDetec
 }
 
 fn create_violation(
-    modified_block_file_path: &Path,
+    modified_block_file_path: &RepoPath,
     modified_block: &Block,
-    affected_block_file_path: &Path,
+    affected_block_file_path: &RepoPath,
     affected_block_name: &str,
 ) -> anyhow::Result<Violation> {
     let message = format!(
@@ -135,10 +147,26 @@ fn create_violation(
 mod validate_tests {
     use super::*;
     use crate::diff_parser::LineChange;
+    use crate::repo_path::RepoPath;
     use crate::test_utils::{
         merge_validation_contexts, validation_context, validation_context_with_changes,
     };
     use crate::validators::ValidatorSync;
+
+    #[test]
+    fn reference_with_a_leading_current_directory_resolves() -> anyhow::Result<()> {
+        // `./target.py` and `target.py` name the same file, so a change to both blocks satisfies
+        // the reference regardless of which spelling the author used.
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "source.py",
+                "# <block name=\"s\" affects=\"./target.py:t\">\nvalue = 2\n# </block>",
+            ),
+            validation_context("target.py", "# <block name=\"t\">\nvalue = 2\n# </block>"),
+        ]);
+        assert!(AffectsValidator::new().validate(context)?.is_empty());
+        Ok(())
+    }
 
     #[test]
     fn no_blocks_with_affects_attr_returns_ok() -> anyhow::Result<()> {
@@ -179,7 +207,9 @@ print("second")
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file1_violations = violations.get(&PathBuf::from("file1.py")).unwrap();
+        let file1_violations = violations
+            .get(&RepoPath::from_reference("file1.py").unwrap())
+            .unwrap();
         assert_eq!(file1_violations.len(), 1);
         assert_eq!(
             file1_violations[0].message,
@@ -231,7 +261,9 @@ print("file3")
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file1_violations = violations.get(&PathBuf::from("file1.py")).unwrap();
+        let file1_violations = violations
+            .get(&RepoPath::from_reference("file1.py").unwrap())
+            .unwrap();
         assert_eq!(file1_violations.len(), 2);
         assert_eq!(
             file1_violations[0].message,
@@ -328,7 +360,9 @@ print("hello")
         let violations = validator.validate(context)?;
 
         assert_eq!(violations.len(), 1);
-        let file1_violations = violations.get(&PathBuf::from("file1.py")).unwrap();
+        let file1_violations = violations
+            .get(&RepoPath::from_reference("file1.py").unwrap())
+            .unwrap();
         assert_eq!(file1_violations.len(), 1);
         assert_eq!(
             file1_violations[0].message,

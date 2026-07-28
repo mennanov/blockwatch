@@ -11,6 +11,7 @@ use crate::Position;
 use crate::blocks::{BlockSeverity, BlockWithContext, FileBlocks};
 use crate::fs::FileSystem;
 use crate::language_parsers::LanguageParsers;
+use crate::repo_path::RepoPath;
 use crate::validators::affects::AffectsValidatorDetector;
 use crate::validators::check_ai::CheckAiValidatorDetector;
 use crate::validators::check_lua::CheckLuaValidatorDetector;
@@ -23,7 +24,6 @@ use anyhow::Context;
 use async_trait::async_trait;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Validates the given `Context` and returns a list of the violations grouped by filename.
@@ -32,14 +32,14 @@ pub trait ValidatorAsync: Send + Sync {
     async fn validate(
         &self,
         context: Arc<ValidationContext>,
-    ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>>;
+    ) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>>;
 }
 
 pub trait ValidatorSync: Send + Sync {
     fn validate(
         &self,
         context: Arc<ValidationContext>,
-    ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>>;
+    ) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>>;
 }
 
 /// Detects a [`ValidatorType`] for the given `block` (if any).
@@ -131,14 +131,14 @@ impl SimpleDiagnostic<'_> {
 
 pub struct ValidationContext {
     // Blocks with their corresponding source file contents grouped by filename.
-    pub(crate) blocks: HashMap<PathBuf, FileBlocks>,
+    pub(crate) blocks: HashMap<RepoPath, FileBlocks>,
     // Language parsers per file type, used by validators to parse referenced source files.
     pub(crate) parsers: LanguageParsers,
 }
 
 impl ValidationContext {
     /// Creates a new validation context with modified blocks grouped by filename.
-    pub fn new(blocks: HashMap<PathBuf, FileBlocks>, parsers: LanguageParsers) -> Self {
+    pub fn new(blocks: HashMap<RepoPath, FileBlocks>, parsers: LanguageParsers) -> Self {
         Self { blocks, parsers }
     }
 
@@ -148,7 +148,7 @@ impl ValidationContext {
     }
 
     /// Converts the validation context to a serializable report that can be displayed as JSON.
-    pub fn to_serializable_report(&self) -> HashMap<PathBuf, Vec<serde_json::Value>> {
+    pub fn to_serializable_report(&self) -> HashMap<RepoPath, Vec<serde_json::Value>> {
         let mut report = HashMap::new();
         for (path, file_blocks) in &self.blocks {
             report.insert(path.clone(), file_blocks.to_serializable_report());
@@ -162,7 +162,7 @@ impl ValidationContext {
 fn run_sync_validators(
     context: Arc<ValidationContext>,
     validators: Vec<Box<dyn ValidatorSync>>,
-) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
+) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
     let mut handles = Vec::new();
     for validator in validators {
         let context = Arc::clone(&context);
@@ -193,7 +193,7 @@ fn run_sync_validators(
 fn run_async_validators(
     context: Arc<ValidationContext>,
     validators: Vec<Box<dyn ValidatorAsync>>,
-) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
+) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
     let tokio_runtime = tokio::runtime::Runtime::new()?;
     tokio_runtime.block_on(async move {
         let mut tasks = tokio::task::JoinSet::new();
@@ -227,7 +227,7 @@ pub fn run(
     context: Arc<ValidationContext>,
     sync_validators: Vec<Box<dyn ValidatorSync>>,
     async_validators: Vec<Box<dyn ValidatorAsync>>,
-) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
+) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
     if async_validators.is_empty() {
         return run_sync_validators(context, sync_validators);
     }
@@ -341,7 +341,7 @@ pub fn detect_validators<Fs: FileSystem + 'static>(
 /// `None`, meaning "a block in the same file".
 pub(in crate::validators) fn parse_block_references(
     value: &str,
-) -> anyhow::Result<Vec<(Option<PathBuf>, String)>> {
+) -> anyhow::Result<Vec<(Option<RepoPath>, String)>> {
     let mut result = Vec::new();
     for block_ref in value.split(',') {
         let block = block_ref.trim();
@@ -353,7 +353,8 @@ pub(in crate::validators) fn parse_block_references(
             if filename.is_empty() {
                 None
             } else {
-                Some(filename.into())
+                // Normalized so `./target.py` and `target.py` resolve to the same block.
+                Some(RepoPath::from_reference(filename)?)
             },
             block_name.trim().to_string(),
         ));
@@ -363,13 +364,17 @@ pub(in crate::validators) fn parse_block_references(
 
 #[cfg(test)]
 mod parse_block_references_tests {
+    use crate::repo_path::RepoPath;
     use crate::validators::parse_block_references;
     #[test]
     fn single_reference() -> anyhow::Result<()> {
         let result = parse_block_references("file.rs:block_name")?;
         assert_eq!(
             result,
-            vec![(Some("file.rs".into()), "block_name".to_string())]
+            vec![(
+                Some(RepoPath::from_reference("file.rs")?),
+                "block_name".to_string()
+            )]
         );
         Ok(())
     }
@@ -380,8 +385,14 @@ mod parse_block_references_tests {
         assert_eq!(
             result,
             vec![
-                (Some("file1.rs".into()), "block1".to_string()),
-                (Some("file2.rs".into()), "block2".to_string())
+                (
+                    Some(RepoPath::from_reference("file1.rs")?),
+                    "block1".to_string()
+                ),
+                (
+                    Some(RepoPath::from_reference("file2.rs")?),
+                    "block2".to_string()
+                )
             ]
         );
         Ok(())
@@ -416,6 +427,7 @@ mod tests {
     use crate::blocks::{Block, BlockWithContext};
     use crate::fs::FileSystem;
     use crate::fs::test_utils::FakeFileSystem;
+    use crate::repo_path::RepoPath;
     use crate::test_utils::{merge_validation_contexts, validation_context};
     use crate::validators::{
         DetectorFactory, ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorSync,
@@ -424,7 +436,6 @@ mod tests {
     use crate::{Position, validators};
     use async_trait::async_trait;
     use std::collections::{HashMap, HashSet};
-    use std::path::PathBuf;
     use std::sync::Arc;
 
     fn empty_testing_block() -> Block {
@@ -449,7 +460,7 @@ mod tests {
         async fn validate(
             &self,
             context: Arc<ValidationContext>,
-        ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
+        ) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
             Ok(context
                 .blocks
                 .keys()
@@ -477,7 +488,7 @@ mod tests {
         fn validate(
             &self,
             context: Arc<ValidationContext>,
-        ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
+        ) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
             Ok(context
                 .blocks
                 .keys()
@@ -573,15 +584,21 @@ mod tests {
         let violations = validators::run(context, sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 2);
-        assert_eq!(violations[&PathBuf::from("example1.py")].len(), 2);
-        let mut file1_violations = violations[&PathBuf::from("example1.py")]
+        assert_eq!(
+            violations[&RepoPath::from_reference("example1.py").unwrap()].len(),
+            2
+        );
+        let mut file1_violations = violations[&RepoPath::from_reference("example1.py").unwrap()]
             .iter()
             .map(|v| v.code.as_str())
             .collect::<Vec<_>>();
         file1_violations.sort();
         assert_eq!(file1_violations, vec!["fake-async", "fake-sync"]);
-        assert_eq!(violations[&PathBuf::from("example2.py")].len(), 2);
-        let mut file2_violations = violations[&PathBuf::from("example2.py")]
+        assert_eq!(
+            violations[&RepoPath::from_reference("example2.py").unwrap()].len(),
+            2
+        );
+        let mut file2_violations = violations[&RepoPath::from_reference("example2.py").unwrap()]
             .iter()
             .map(|v| v.code.as_str())
             .collect::<Vec<_>>();
@@ -615,14 +632,20 @@ mod tests {
         let violations = validators::run(context, sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 2);
-        assert_eq!(violations[&PathBuf::from("example1.py")].len(), 1);
         assert_eq!(
-            violations[&PathBuf::from("example1.py")][0].code,
+            violations[&RepoPath::from_reference("example1.py").unwrap()].len(),
+            1
+        );
+        assert_eq!(
+            violations[&RepoPath::from_reference("example1.py").unwrap()][0].code,
             "fake-sync"
         );
-        assert_eq!(violations[&PathBuf::from("example2.py")].len(), 1);
         assert_eq!(
-            violations[&PathBuf::from("example2.py")][0].code,
+            violations[&RepoPath::from_reference("example2.py").unwrap()].len(),
+            1
+        );
+        assert_eq!(
+            violations[&RepoPath::from_reference("example2.py").unwrap()][0].code,
             "fake-sync"
         );
         Ok(())
@@ -653,14 +676,20 @@ mod tests {
         let violations = validators::run(context, sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 2);
-        assert_eq!(violations[&PathBuf::from("example1.py")].len(), 1);
         assert_eq!(
-            violations[&PathBuf::from("example1.py")][0].code,
+            violations[&RepoPath::from_reference("example1.py").unwrap()].len(),
+            1
+        );
+        assert_eq!(
+            violations[&RepoPath::from_reference("example1.py").unwrap()][0].code,
             "fake-async"
         );
-        assert_eq!(violations[&PathBuf::from("example2.py")].len(), 1);
         assert_eq!(
-            violations[&PathBuf::from("example2.py")][0].code,
+            violations[&RepoPath::from_reference("example2.py").unwrap()].len(),
+            1
+        );
+        assert_eq!(
+            violations[&RepoPath::from_reference("example2.py").unwrap()][0].code,
             "fake-async"
         );
         Ok(())
@@ -684,9 +713,12 @@ mod tests {
         let violations = validators::run(context, sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations[&PathBuf::from("example1.py")].len(), 1);
         assert_eq!(
-            violations[&PathBuf::from("example1.py")][0].code,
+            violations[&RepoPath::from_reference("example1.py").unwrap()].len(),
+            1
+        );
+        assert_eq!(
+            violations[&RepoPath::from_reference("example1.py").unwrap()][0].code,
             "fake-sync"
         );
         Ok(())
@@ -711,9 +743,12 @@ mod tests {
         let violations = validators::run(context, sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations[&PathBuf::from("example1.py")].len(), 1);
         assert_eq!(
-            violations[&PathBuf::from("example1.py")][0].code,
+            violations[&RepoPath::from_reference("example1.py").unwrap()].len(),
+            1
+        );
+        assert_eq!(
+            violations[&RepoPath::from_reference("example1.py").unwrap()][0].code,
             "fake-async"
         );
         Ok(())
@@ -737,9 +772,12 @@ mod tests {
         let violations = validators::run(context, sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations[&PathBuf::from("example1.py")].len(), 1);
         assert_eq!(
-            violations[&PathBuf::from("example1.py")][0].code,
+            violations[&RepoPath::from_reference("example1.py").unwrap()].len(),
+            1
+        );
+        assert_eq!(
+            violations[&RepoPath::from_reference("example1.py").unwrap()][0].code,
             "fake-async"
         );
         Ok(())
@@ -764,9 +802,12 @@ mod tests {
         let violations = validators::run(context, sync_validators, async_validators)?;
 
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations[&PathBuf::from("example1.py")].len(), 1);
         assert_eq!(
-            violations[&PathBuf::from("example1.py")][0].code,
+            violations[&RepoPath::from_reference("example1.py").unwrap()].len(),
+            1
+        );
+        assert_eq!(
+            violations[&RepoPath::from_reference("example1.py").unwrap()][0].code,
             "fake-sync"
         );
         Ok(())
@@ -786,7 +827,7 @@ fn b() {}
         let report = context.to_serializable_report();
 
         assert_eq!(report.len(), 1);
-        let listings = &report[&PathBuf::from("example.rs")];
+        let listings = &report[&RepoPath::from_reference("example.rs").unwrap()];
         assert_eq!(listings.len(), 4);
         assert_eq!(
             listings,

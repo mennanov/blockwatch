@@ -2,13 +2,14 @@ use crate::Position;
 use crate::diff_parser::LineChange;
 use crate::fs::{FileSystem, PathChecker};
 use crate::language_parsers::{LanguageParser, LanguageParsers};
+use crate::repo_path::RepoPath;
 use anyhow::{Context, anyhow};
 use serde_repr::Serialize_repr;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::ops::{Range, RangeInclusive};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::str::FromStr;
 use strum_macros::EnumString;
 
@@ -272,13 +273,13 @@ pub struct BlockWithContext {
 ///
 /// Returns a map of file paths to the list of intersecting blocks found in that file.
 pub fn parse_blocks(
-    mut line_changes_by_file: HashMap<PathBuf, Vec<LineChange>>,
+    mut line_changes_by_file: HashMap<RepoPath, Vec<LineChange>>,
     should_scan_files: bool,
     file_system: &impl FileSystem,
     path_checker: &impl PathChecker,
     parsers: &LanguageParsers,
     extra_file_extensions: HashMap<OsString, OsString>,
-) -> anyhow::Result<HashMap<PathBuf, FileBlocks>> {
+) -> anyhow::Result<HashMap<RepoPath, FileBlocks>> {
     let mut blocks = HashMap::new();
     if should_scan_files {
         for result in file_system.walk() {
@@ -325,7 +326,20 @@ pub fn parse_blocks(
             file_system,
             parsers,
             &extra_file_extensions,
-        )?;
+        )
+        .map_err(|error| {
+            // Only a file this run validates reaches a read: ignored paths are skipped above, and
+            // one with no language parser returns before its contents are read.
+            if file_system.exists(file_path.as_path()) {
+                error
+            } else {
+                error.context(format!(
+                    "diff target \"{file_path}\" does not exist in the repository root. This \
+                     usually means the diff was produced with diff.relative=true, which writes \
+                     paths relative to the current directory. Re-run with: git diff --no-relative"
+                ))
+            }
+        })?;
         if let Some(file_blocks) = file_blocks_opt
             && !file_blocks.is_empty()
         {
@@ -539,7 +553,7 @@ mod parse_blocks_tests {
         ]));
         let line_changes = HashMap::from([
             (
-                PathBuf::from("a.rs"),
+                RepoPath::from_reference("a.rs").unwrap(),
                 vec![
                     line_change(1), // No blocks on this line.
                     LineChange {
@@ -653,7 +667,7 @@ mod parse_blocks_tests {
                 ],
             ),
             (
-                PathBuf::from("b.rs"),
+                RepoPath::from_reference("b.rs").unwrap(),
                 vec![LineChange {
                     line: 1,
                     ranges: Some(vec![test_utils::substr_range(
@@ -675,7 +689,8 @@ mod parse_blocks_tests {
         )?;
 
         assert_eq!(blocks_by_file.len(), 2);
-        let blocks_a = &blocks_by_file[&PathBuf::from("a.rs")].blocks_with_context;
+        let blocks_a =
+            &blocks_by_file[&RepoPath::from_reference("a.rs").unwrap()].blocks_with_context;
         assert_eq!(blocks_a.len(), 9);
         let first = &blocks_a[0];
         assert_eq!(first.block.name(), Some("first"));
@@ -713,7 +728,8 @@ mod parse_blocks_tests {
         assert_eq!(tenth.block.name(), Some("tenth"));
         assert!(!tenth._is_start_tag_modified);
         assert!(tenth.is_content_modified);
-        let blocks_b = &blocks_by_file[&PathBuf::from("b.rs")].blocks_with_context;
+        let blocks_b =
+            &blocks_by_file[&RepoPath::from_reference("b.rs").unwrap()].blocks_with_context;
         assert_eq!(blocks_b.len(), 1);
         assert_eq!(blocks_b[0].block.name(), Some("first"));
 
@@ -757,14 +773,14 @@ mod parse_blocks_tests {
 
         let line_changes = HashMap::from([
             (
-                PathBuf::from("a.rs"),
+                RepoPath::from_reference("a.rs").unwrap(),
                 vec![LineChange {
                     line: 3, // Content line of the first block.
                     ranges: None,
                 }],
             ),
             (
-                PathBuf::from("b.rs"),
+                RepoPath::from_reference("b.rs").unwrap(),
                 vec![LineChange {
                     line: 3, // Content line of the first block.
                     ranges: None,
@@ -781,7 +797,7 @@ mod parse_blocks_tests {
         )?;
 
         assert_eq!(
-            blocks_by_file[&PathBuf::from("a.rs")]
+            blocks_by_file[&RepoPath::from_reference("a.rs").unwrap()]
                 .blocks_with_context
                 .iter()
                 .map(|b| { (b.block.name().unwrap(), b.is_content_modified) })
@@ -789,7 +805,7 @@ mod parse_blocks_tests {
             &[("first_from_a", true), ("second_from_a", false)]
         );
         assert_eq!(
-            blocks_by_file[&PathBuf::from("b.rs")]
+            blocks_by_file[&RepoPath::from_reference("b.rs").unwrap()]
                 .blocks_with_context
                 .iter()
                 .map(|b| { (b.block.name().unwrap(), b.is_content_modified) })
@@ -843,7 +859,7 @@ mod parse_blocks_tests {
         )?;
 
         assert_eq!(
-            blocks_by_file[&PathBuf::from("a.rs")]
+            blocks_by_file[&RepoPath::from_reference("a.rs").unwrap()]
                 .blocks_with_context
                 .iter()
                 .map(|b| { (b.block.name().unwrap(), b.is_content_modified) })
@@ -851,7 +867,7 @@ mod parse_blocks_tests {
             &[("first_from_a", false), ("second_from_a", false)]
         );
         assert_eq!(
-            blocks_by_file[&PathBuf::from("b.rs")]
+            blocks_by_file[&RepoPath::from_reference("b.rs").unwrap()]
                 .blocks_with_context
                 .iter()
                 .map(|b| { (b.block.name().unwrap(), b.is_content_modified) })
@@ -889,7 +905,7 @@ mod parse_blocks_tests {
             HashMap::new(),
         )?;
 
-        let content_a = &blocks_by_file[&PathBuf::from("a.rs")].file_content;
+        let content_a = &blocks_by_file[&RepoPath::from_reference("a.rs").unwrap()].file_content;
         assert_eq!(content_a, file_a_contents);
         Ok(())
     }
@@ -917,7 +933,7 @@ mod parse_blocks_tests {
 
         assert_eq!(blocks_by_file.len(), 1);
         assert_eq!(
-            blocks_by_file[&PathBuf::from("a.rust")]
+            blocks_by_file[&RepoPath::from_reference("a.rust").unwrap()]
                 .blocks_with_context
                 .len(),
             1
@@ -978,8 +994,81 @@ mod parse_blocks_tests {
         )?;
 
         assert_eq!(blocks.len(), 1);
-        assert!(blocks.contains_key(&PathBuf::from("allowed.rs")));
-        assert!(!blocks.contains_key(&PathBuf::from("ignored.rs")));
+        assert!(blocks.contains_key(&RepoPath::from_reference("allowed.rs").unwrap()));
+        assert!(!blocks.contains_key(&RepoPath::from_reference("ignored.rs").unwrap()));
+        Ok(())
+    }
+
+    #[test]
+    fn diff_naming_a_missing_file_reports_the_likely_cause() -> anyhow::Result<()> {
+        // What `diff.relative=true` produces: a path that resolves cleanly but names no file.
+        let line_changes = HashMap::from([(
+            RepoPath::from_reference("rules.py")?,
+            vec![LineChange {
+                line: 1,
+                ranges: None,
+            }],
+        )]);
+        let error = parse_blocks(
+            line_changes,
+            false,
+            &FakeFileSystem::new(HashMap::from([("src/rules.py".to_string(), String::new())])),
+            &FakePathChecker::allow_all(),
+            &language_parsers()?,
+            HashMap::new(),
+        )
+        .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("--no-relative"),
+            "unexpected error: {message}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn diff_naming_a_missing_ignored_file_is_skipped() -> anyhow::Result<()> {
+        // An ignored path contributes no blocks whether or not it exists, so it must not be able
+        // to fail the run.
+        let line_changes = HashMap::from([(
+            RepoPath::from_reference("vendor/gone.py")?,
+            vec![LineChange {
+                line: 1,
+                ranges: None,
+            }],
+        )]);
+        let blocks = parse_blocks(
+            line_changes,
+            false,
+            &FakeFileSystem::new(HashMap::new()),
+            &FakePathChecker::with_ignored_paths(HashSet::from(["vendor/gone.py".to_string()])),
+            &language_parsers()?,
+            HashMap::new(),
+        )?;
+        assert!(blocks.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn diff_naming_a_missing_unparseable_file_is_skipped() -> anyhow::Result<()> {
+        // Likewise for a file whose extension maps to no language: a diff routinely carries binary
+        // assets and lockfiles that are absent from a partial checkout.
+        let line_changes = HashMap::from([(
+            RepoPath::from_reference("assets/logo.png")?,
+            vec![LineChange {
+                line: 1,
+                ranges: None,
+            }],
+        )]);
+        let blocks = parse_blocks(
+            line_changes,
+            false,
+            &FakeFileSystem::new(HashMap::new()),
+            &FakePathChecker::allow_all(),
+            &language_parsers()?,
+            HashMap::new(),
+        )?;
+        assert!(blocks.is_empty());
         Ok(())
     }
 
@@ -1016,7 +1105,7 @@ mod parse_blocks_tests {
 
 #[cfg(test)]
 mod supported_languages_tests {
-    use std::{collections::HashMap, path::PathBuf};
+    use std::collections::HashMap;
 
     use crate::blocks::*;
     use crate::fs::test_utils::{FakeFileSystem, FakePathChecker};
@@ -1314,7 +1403,7 @@ mod supported_languages_tests {
         for file_name in files.keys() {
             assert!(
                 !blocks_by_file
-                    .get(&PathBuf::from(file_name))
+                    .get(&RepoPath::from_reference(file_name).unwrap())
                     .unwrap_or_else(|| panic!("No blocks found for file {file_name}"))
                     .blocks_with_context
                     .is_empty(),

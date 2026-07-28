@@ -1,3 +1,4 @@
+use crate::repo_path::RepoPath;
 use anyhow::{Context, anyhow};
 use globset::GlobSet;
 use ignore::Walk;
@@ -12,7 +13,7 @@ pub trait FileSystem: Send + Sync {
     fn exists(&self, path: &Path) -> bool;
 
     /// Walks the directory tree rooted at the file system's root path, returning an iterator over the paths of all files.
-    fn walk(&self) -> impl Iterator<Item = anyhow::Result<PathBuf>>;
+    fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>>;
 }
 
 /// Checks whether a path should be allowed or ignored when parsing blocks from files.
@@ -85,7 +86,7 @@ impl FileSystem for FileSystemImpl {
             .is_ok_and(|resolved| resolved.is_file())
     }
 
-    fn walk(&self) -> impl Iterator<Item = anyhow::Result<PathBuf>> {
+    fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>> {
         // Clone root_path for the closure.
         let root_path = self.root_path.clone();
         Walk::new(&self.root_path).filter_map(move |entry| match entry {
@@ -94,9 +95,10 @@ impl FileSystem for FileSystemImpl {
                 if path.is_dir() {
                     return None;
                 }
-                // Return path relative to the root.
+                // Relative to the root. A name that is not valid UTF-8 cannot be written in a
+                // glob or a block reference, so it is skipped rather than failing the run.
                 let relative_path = path.strip_prefix(&root_path).unwrap_or(path);
-                Some(Ok(relative_path.to_path_buf()))
+                RepoPath::from_relative(relative_path).ok().map(Ok)
             }
             Err(err) => Some(Err(anyhow::Error::from(err))),
         })
@@ -236,8 +238,9 @@ mod file_system_impl_tests {
 #[cfg(test)]
 pub mod test_utils {
     use crate::fs::{FileSystem, PathChecker};
+    use crate::repo_path::RepoPath;
     use std::collections::{HashMap, HashSet};
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     pub(crate) struct FakeFileSystem {
         files: HashMap<String, String>,
@@ -263,8 +266,8 @@ pub mod test_utils {
             self.files.contains_key(&path.display().to_string())
         }
 
-        fn walk(&self) -> impl Iterator<Item = anyhow::Result<PathBuf>> {
-            self.files.keys().map(|p| Ok(PathBuf::from(p)))
+        fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>> {
+            self.files.keys().map(|path| RepoPath::from_reference(path))
         }
     }
 

@@ -4,6 +4,7 @@ use blockwatch::blocks::BlockSeverity;
 use blockwatch::diff_parser;
 use blockwatch::flags;
 use blockwatch::language_parsers;
+use blockwatch::repo_path::RepoPath;
 use blockwatch::validators;
 
 use blockwatch::fs::FileSystem;
@@ -71,11 +72,7 @@ fn build_context(
     let supported_extensions = language_parsers.keys().collect();
     args.validate(&supported_extensions)?;
 
-    let modified_lines_by_file = if read_diff {
-        read_diff_from_stdin()?
-    } else {
-        HashMap::new()
-    };
+    let extra_file_extensions = args.extensions();
 
     let mut glob_set = args.globs()?;
     if glob_set.is_empty() && !read_diff {
@@ -86,13 +83,19 @@ fn build_context(
 
     let path_checker = blockwatch::fs::PathCheckerImpl::new(glob_set, args.ignored_globs()?);
 
+    let modified_lines_by_file = if read_diff {
+        read_diff_from_stdin(file_system)?
+    } else {
+        HashMap::new()
+    };
+
     let blocks = blocks::parse_blocks(
         modified_lines_by_file,
         should_scan_files,
         file_system,
         &path_checker,
         &language_parsers,
-        args.extensions(),
+        extra_file_extensions,
     )?;
     Ok(validators::ValidationContext::new(blocks, language_parsers))
 }
@@ -103,15 +106,17 @@ fn stdin_is_terminal() -> bool {
 }
 
 /// Reads a unified diff from stdin and parses it into per-file line changes.
-fn read_diff_from_stdin() -> anyhow::Result<HashMap<PathBuf, Vec<diff_parser::LineChange>>> {
+fn read_diff_from_stdin(
+    file_system: &impl FileSystem,
+) -> anyhow::Result<HashMap<RepoPath, Vec<diff_parser::LineChange>>> {
     let mut diff = String::new();
     std::io::stdin().read_to_string(&mut diff)?;
-    diff_parser::line_changes_from_diff(&diff)
+    diff_parser::line_changes_from_diff(&diff, file_system)
 }
 
-fn process_violations(violations: HashMap<PathBuf, Vec<Violation>>) -> anyhow::Result<()> {
+fn process_violations(violations: HashMap<RepoPath, Vec<Violation>>) -> anyhow::Result<()> {
     let mut has_error_severity = false;
-    let mut diagnostics: HashMap<PathBuf, Vec<serde_json::Value>> =
+    let mut diagnostics: HashMap<RepoPath, Vec<serde_json::Value>> =
         HashMap::with_capacity(violations.len());
     for (file_path, file_violations) in violations {
         let mut file_diagnostics = Vec::with_capacity(file_violations.len());

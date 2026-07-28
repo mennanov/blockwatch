@@ -45,7 +45,7 @@ use tree_sitter::{Language, Node, Parser, Tree, TreeCursor};
 
 pub(crate) type LanguageParser = Arc<Mutex<Box<dyn BlocksParser>>>;
 
-pub(crate) type LanguageParsers = HashMap<OsString, LanguageParser>;
+pub type LanguageParsers = HashMap<OsString, LanguageParser>;
 
 /// Returns a map of all available language parsers by their file extensions.
 pub fn language_parsers() -> anyhow::Result<LanguageParsers> {

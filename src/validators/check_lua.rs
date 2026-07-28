@@ -1,5 +1,6 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
+use crate::repo_path::RepoPath;
 use crate::validators::parse_block_references;
 use crate::validators::{
     ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorType, Violation, ViolationRange,
@@ -9,7 +10,7 @@ use async_trait::async_trait;
 use mlua::{Lua, StdLib};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use tokio::task::JoinSet;
 
@@ -52,7 +53,7 @@ impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
     async fn validate(
         &self,
         context: Arc<ValidationContext>,
-    ) -> anyhow::Result<HashMap<PathBuf, Vec<Violation>>> {
+    ) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
         let mut violations = HashMap::new();
         let mut tasks = JoinSet::new();
         for (file_path, file_blocks) in &context.blocks {
@@ -140,7 +141,7 @@ impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
 async fn run_lua_script<Fs: FileSystem>(
     script_path: &str,
     file_system: &Fs,
-    file_path: &Path,
+    file_path: &RepoPath,
     block_with_context: &BlockWithContext,
     content: &str,
     affected_blocks: &[AffectedBlock],
@@ -165,7 +166,7 @@ async fn run_lua_script<Fs: FileSystem>(
 
     let ctx_table = lua.create_table().context("failed to create ctx table")?;
     ctx_table
-        .set("file", file_path.to_string_lossy().as_ref())
+        .set("file", file_path.as_str())
         .context("failed to set ctx.file")?;
     ctx_table
         .set(
@@ -199,7 +200,7 @@ async fn run_lua_script<Fs: FileSystem>(
                 .create_table()
                 .context("failed to create affects entry table")?;
             entry
-                .set("file", affected.file.to_string_lossy().as_ref())
+                .set("file", affected.file.as_str())
                 .context("failed to set ctx.affects[].file")?;
             entry
                 .set("name", affected.name.as_str())
@@ -232,7 +233,7 @@ async fn run_lua_script<Fs: FileSystem>(
 }
 
 fn create_violation(
-    file_path: &Path,
+    file_path: &RepoPath,
     block: &Block,
     script_path: &str,
     error_message: &str,
@@ -262,7 +263,7 @@ fn create_violation(
 
 /// A block referenced by the validated block's `affects` attribute, exposed to Lua scripts.
 struct AffectedBlock {
-    file: PathBuf,
+    file: RepoPath,
     name: String,
     content: String,
 }
@@ -275,15 +276,23 @@ struct AffectedBlock {
 /// validated block's own content is presented.
 fn resolve_affected_blocks(
     context: &ValidationContext,
-    current_file_path: &Path,
+    current_file_path: &RepoPath,
     block: &Block,
 ) -> anyhow::Result<Vec<AffectedBlock>> {
     let mut result = Vec::new();
     let Some(affects) = block.attributes.get("affects") else {
         return Ok(result);
     };
-    for (file, name) in parse_block_references(affects)? {
-        let file = file.unwrap_or_else(|| current_file_path.to_path_buf());
+    let references = parse_block_references(affects).with_context(|| {
+        format!(
+            "invalid affects reference on block {}:{} at line {}",
+            current_file_path,
+            block.name_display(),
+            block.start_tag_position_range.start().line,
+        )
+    })?;
+    for (file, name) in references {
+        let file = file.unwrap_or_else(|| current_file_path.clone());
         let Some(file_blocks) = context.blocks.get(&file) else {
             continue;
         };
@@ -366,6 +375,7 @@ struct CheckLuaViolation<'a> {
 mod tests {
     use super::*;
     use crate::fs::test_utils::FakeFileSystem;
+    use crate::repo_path::RepoPath;
     use crate::test_utils::{
         merge_validation_contexts, validation_context, validation_context_with_changes,
     };
@@ -425,8 +435,11 @@ end
         .await?;
 
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations[&PathBuf::from("example.py")].len(), 1);
-        let violation = &violations[&PathBuf::from("example.py")][0];
+        assert_eq!(
+            violations[&RepoPath::from_reference("example.py").unwrap()].len(),
+            1
+        );
+        let violation = &violations[&RepoPath::from_reference("example.py").unwrap()][0];
         assert_eq!(violation.code, "check-lua");
         assert_eq!(
             violation.message,
