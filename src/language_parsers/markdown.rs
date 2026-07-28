@@ -156,18 +156,14 @@ impl CommentsParser for MdCommentsParser {
 fn link_reference_definition_comment_text(comment: &str) -> Option<String> {
     let prefix_idx = comment.find("[//]:")?;
     let start_search = prefix_idx + 5;
-    let open_idx = comment[start_search..]
-        .find(|c| ['(', '"', '\''].contains(&c))
-        .map(|i| i + start_search)
+    let (open_offset, open_char) = comment[start_search..]
+        .char_indices()
+        .find(|&(_, c)| ['(', '"', '\''].contains(&c))
         .expect("comment is expected to have a title delimiter");
-
-    let open_char = comment.chars().nth(open_idx).unwrap();
-    let close_char = match open_char {
-        '(' => ')',
-        '"' => '"',
-        '\'' => '\'',
-        _ => unreachable!(),
-    };
+    let open_idx = open_offset + start_search;
+    // Of the three title delimiters only `(` closes on a different character; `"` and `'` close
+    // on themselves.
+    let close_char = if open_char == '(' { ')' } else { open_char };
 
     let close_idx = comment
         .rfind(close_char)
@@ -247,6 +243,24 @@ Some text here 3
                 )
             ]
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parses_link_reference_comment_with_non_ascii_destination() -> anyhow::Result<()> {
+        let mut parser = parser()?;
+        let content = "\
+[//]: /café (<block name=\"unicode_title\">)
+Text
+
+[//]: /café (</block>)
+";
+        let blocks = parser.parse(content)?;
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].attributes["name"], "unicode_title");
+        assert_eq!(blocks[0].content(content), "Text\n\n");
 
         Ok(())
     }
