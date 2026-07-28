@@ -59,6 +59,21 @@ jobs:
         # env: { BLOCKWATCH_AI_API_KEY: ${{ secrets.BLOCKWATCH_AI_API_KEY }} }
 ```
 
+## Diff Input
+
+The piped diff must carry Git's path prefixes and be repository-relative. A normal `git diff`
+satisfies both, so no extra flags are needed for a standard checkout.
+
+Diffs produced with `--no-prefix`, `diff.noprefix`, a custom `diff.srcPrefix` / `diff.dstPrefix`, or
+`diff.relative` are rejected with the flag that fixes them — BlockWatch stops rather than risk validating the wrong
+file. If your repositories set any of these globally, pin the output:
+
+```shell
+git diff --patch --unified=0 --default-prefix --no-relative | blockwatch
+```
+
+See [Supported Diff Input](cli.md#supported-diff-input) for details.
+
 ## Full-Tree Runs
 
 While diff-based checks catch `affects` violations in changed files, [`same-as`](validators/same-as.md) checks benefit

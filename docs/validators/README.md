@@ -5,6 +5,8 @@ once.
 
 ## Which validator do I want?
 
+[//]: # (<block name="validators-index" affects=".agents/skills/blockwatch/SKILL.md:validator-catalog">)
+
 | I want to...                                                  | Use                               |
 |---------------------------------------------------------------|-----------------------------------|
 | Force docs or config to be updated whenever some code changes | [`affects`](affects.md)           |
@@ -15,6 +17,8 @@ once.
 | Cap or fix the number of lines in a block                     | [`line-count`](line-count.md)     |
 | Enforce a rule stated in plain English                        | [`check-ai`](check-ai.md)         |
 | Run arbitrary validation logic                                | [`check-lua`](check-lua.md)       |
+
+[//]: # (</block>)
 
 Prefer the deterministic validators — `affects`, `same-as`, `keep-sorted`, `keep-unique`,
 `line-pattern`, `line-count`. They are fast, offline, and need no API key. Reserve `check-ai` for rules the others

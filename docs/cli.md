@@ -53,6 +53,54 @@ git diff --patch | blockwatch "src/always_checked.rs" "**/*.md"
 A block is validated if the diff overlaps its line range or start tag. To inspect which blocks a diff touches, use
 `blockwatch list --diff`.
 
+### Supported Diff Input
+
+[//]: # (<block name="diff-input" affects="src/repo_path.rs:diff-target-resolution">)
+
+Each diff header names a file, and `blockwatch` resolves that name against the repository:
+
+- **Path prefixes are required.** Git writes each diff path behind a one-component prefix — `a/`
+  and `b/` by default, or `i/`, `w/`, `c/` and `o/` under `diff.mnemonicPrefix`. Exactly one is removed, so a repository
+  directory that happens to share a prefix's name (a top-level `b/`, for example) is preserved.
+- **Quoted paths are decoded.** Git's default `core.quotePath` writes a name containing non-ASCII characters, tabs,
+  quotes or backslashes in an escaped form such as `"b/caf\303\251.py"`; the real name is recovered from it.
+
+Diffs written *without* prefixes — `git diff --no-prefix`, `diff.noprefix=true` — or with a custom
+`diff.srcPrefix` / `diff.dstPrefix` are rejected. They cannot be distinguished from prefixed paths whose repository
+directory shares the prefix's name, and guessing would risk validating a file the diff never mentioned while the changed
+one went unchecked. `diff.relative=true` is likewise unsupported: it writes paths relative to the current directory, and
+nothing in the diff records that it did.
+
+Two details make the detection reliable. Git draws the two prefixes from opposite sides of the comparison — `a/` against
+`b/`, or `i/`, `c/` and `o/` against `w/` — so a header repeating one prefix on both sides is recognised as unprefixed
+rather than stripped. An added file is the exception: its source is `/dev/null`, which says nothing either way, so both
+readings are checked against the working tree and a target where both name a real file is reported as ambiguous.
+
+In each case `blockwatch` stops with the flag that fixes it rather than checking the wrong file:
+
+```console
+$ git diff --no-prefix | blockwatch
+Error: diff target "rules.py" has no recognized Git path prefix.
+BlockWatch reads diffs written with the prefixes Git produces by default. This one looks like the
+output of --no-prefix, diff.noprefix, or a custom diff.srcPrefix/diff.dstPrefix. Re-run with:
+    git diff --default-prefix
+```
+
+A diff naming a file that does not exist in the repository is an error too — but only for files BlockWatch would parse.
+Entries whose extension maps to no language, such as binary assets or lockfiles, contribute no blocks and are passed
+over, so a diff carrying them alongside source changes still validates normally.
+
+To produce configuration-independent output in a repository that sets these options globally:
+
+```shell
+git diff --patch --default-prefix --no-relative | blockwatch
+```
+
+`--default-prefix` requires Git 2.41 or newer. On older versions, use
+`git -c diff.mnemonicPrefix=false -c diff.noprefix=false diff --patch`.
+
+[//]: # (</block>)
+
 ## Custom File Extension Mappings
 
 Language detection relies on file extensions. Use `-E` to map unrecognized or custom extensions to a supported grammar:

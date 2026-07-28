@@ -67,6 +67,7 @@ impl RepoPath {
         Self::from_relative(Path::new(reference))
     }
 
+    // <block name="diff-target-resolution" affects="docs/cli.md:diff-input">
     /// Resolves a diff header's target to the repository path it names.
     ///
     /// Exactly one of the prefixes Git writes ahead of a diff path is removed; a target carrying
@@ -74,6 +75,7 @@ impl RepoPath {
     ///
     /// The path is returned whether or not it names an existing file; `parse_blocks` decides
     /// whether an absent one matters.
+    // </block>
     pub fn from_diff_target(
         source: &str,
         target: &str,

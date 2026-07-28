@@ -42,12 +42,13 @@ end
 ## The `validate` arguments
 
 - `ctx` — a table with:
-    - `ctx.file` — the source file path.
+    - `ctx.file` — the source file path, relative to the repository root and always separated by
+      `/`, on every platform and in every run mode. A script may compare or pattern-match it without normalizing first.
     - `ctx.line` — the line number of the block's start tag.
     - `ctx.attrs` — a table of all block attributes.
     - `ctx.affects` — present only when the block also has an [`affects`](affects.md) attribute. A 1-based array of the
       blocks this block affects, each a table with `file`, `name`, and (trimmed)
-      `content`. References to blocks that do not exist are skipped.
+      `content`. `file` uses the same format as `ctx.file`. References to blocks that do not exist are skipped.
 - `content` — the trimmed text content of the block, or the extracted value if `check-lua-pattern`
   is set.
 

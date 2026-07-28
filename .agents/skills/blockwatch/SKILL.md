@@ -45,6 +45,8 @@ Then run `git diff --patch | blockwatch` to confirm the new tags pass (see *Runn
 
 ### Where blocks add value (catalog)
 
+[//]: # (<block name="validator-catalog" affects="docs/validators/README.md:validators-index">)
+
 | You see...                                                                                                                    | Add                      | Why                                             |
 |-------------------------------------------------------------------------------------------------------------------------------|--------------------------|-------------------------------------------------|
 | A hand-maintained list/enum/match that should stay ordered (dependencies, CLI flags, feature lists, route tables)             | `keep-sorted`            | Eliminates "please sort this" review nits       |
@@ -55,6 +57,8 @@ Then run `git diff --patch | blockwatch` to confirm the new tags pass (see *Runn
 | A block that must not grow past N lines (public API surface, a switch mapped to a fixed enum)                                 | `line-count="<=N"`       | Flags unbounded growth                          |
 | Prose or config with a natural-language rule ("must mention X", "no TODOs left")                                              | `check-ai="..."`         | Rules regex can't express                       |
 | Domain logic too complex for regex                                                                                            | `check-lua="script.lua"` | Custom programmable checks                      |
+
+[//]: # (</block>)
 
 Prefer the deterministic validators (`keep-sorted`, `keep-unique`, `affects`, `same-as`, `line-pattern`, `line-count`)
 first — they are free, fast, and need no API keys. Reserve `check-ai` for rules the cheaper validators genuinely can't
@@ -117,7 +121,7 @@ pub enum Language { Rust, Python }
 | `line-pattern`        | `line-pattern="^[a-z0-9-]+$"`                                                     | Every line in the block must match.                                                                                                                                                                                                                               |
 | `line-count`          | `line-count="<=5"`                                                                | Operators: `<`, `>`, `<=`, `>=`, `==`.                                                                                                                                                                                                                            |
 | `check-ai`            | `check-ai="Must mention 'Acme'"` + optional `check-ai-pattern="\$(?P<value>\d+)"` | LLM validation. Requires `BLOCKWATCH_AI_API_KEY` (plus optional `BLOCKWATCH_AI_MODEL`, `BLOCKWATCH_AI_API_URL`).                                                                                                                                                  |
-| `check-lua`           | `check-lua="scripts/x.lua"`                                                       | Script defines `validate(ctx, content)` returning `nil` (pass) or an error string. `ctx` has `file`, `line`, `attrs`; if the block also has `affects`, `ctx.affects` is a list of the affected blocks (`{ file, name, content }`) for IO-free cross-block checks. |
+| `check-lua`           | `check-lua="scripts/x.lua"`                                                       | Script defines `validate(ctx, content)` returning `nil` (pass) or an error string. `ctx` has `file` (repository-relative, always `/`-separated, in every run mode), `line`, `attrs`; if the block also has `affects`, `ctx.affects` is a list of the affected blocks (`{ file, name, content }`, same path format) for IO-free cross-block checks. |
 | `check-lua-pattern`   | `check-lua-pattern='str = "(?P<value>[^"]+)"'`                                    | Pass only the extracted value to the script instead of the whole block. Matches **once against the entire block** (not per line); `content` is `""` when nothing matches.                                                                                          |
 | `severity`            | `severity="error"` (default) `/ warning / info / hint`                            | Only `error` fails the run (exit 1); the others are reported but exit 0.                                                                                                                                                                                          |
 
@@ -150,6 +154,10 @@ blockwatch --ignore "**/generated/**"     # exclude paths
 After editing annotated files, run `git diff --patch | blockwatch`. If it fails, read the message, fix the
 sorting/duplication/pattern/sync issue, and re-run until it passes. Use `blockwatch list` to confirm a tag you just
 added is parsed and seen.
+
+The piped diff must carry Git's standard path prefixes, which a plain `git diff` produces. If BlockWatch reports that a
+diff target has no recognized prefix or does not exist, the repository sets `diff.noprefix`, a custom `diff.srcPrefix`,
+or `diff.relative`; re-run as `git diff --patch --default-prefix --no-relative | blockwatch`.
 
 If `blockwatch` is not on `PATH`, install it with `cargo install blockwatch` or
 `brew install mennanov/blockwatch/blockwatch`.
