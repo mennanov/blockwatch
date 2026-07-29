@@ -172,7 +172,17 @@ pub(crate) trait CommentsParser: Send + Sync {
     ) -> impl Iterator<Item = Comment> + 'source;
 }
 
-type NodeVisitor = Box<dyn Fn(&Node, &str) -> Option<String> + Send + Sync>;
+/// What the comment walk does at a node.
+enum Visit {
+    /// Recurse into the node's children; the node yields no comment.
+    Continue,
+    /// Stop at this node, not descending into its children.
+    /// If the node is a comment, then it must contain `Some(Comment)`.
+    Break(Option<Comment>),
+}
+
+/// Maps a node to a [`Visit`]: the one place a grammar's node kinds are interpreted, one per language.
+type NodeVisitor = Box<dyn Fn(&Node, &str) -> Visit + Send + Sync>;
 
 struct TreeSitterCommentsParser {
     parser: Parser,
@@ -203,11 +213,37 @@ impl CommentsParser for TreeSitterCommentsParser {
     }
 }
 
+/// Builds a [`NodeVisitor`] from `comment_text`, a function that returns a node's normalized
+/// comment text when the node is a comment, or `None` otherwise. The visitor turns that answer
+/// into a [`Visit`], one node at a time:
+///
+/// - not a comment: [`Visit::Continue`] — keep walking into the node's children;
+/// - a comment: [`Visit::Break`] carrying the comment — its children are not visited, because a
+///   comment's own text already covers any comment nested inside it.
+fn comment_visitor<F>(comment_text: F) -> NodeVisitor
+where
+    F: Fn(&Node, &str) -> Option<String> + Send + Sync + 'static,
+{
+    Box::new(
+        move |node, source_code| match comment_text(node, source_code) {
+            None => Visit::Continue,
+            Some(text) => Visit::Break(Some(comment_from_node(node, text))),
+        },
+    )
+}
+
 struct CommentsIterator<'source> {
     cursor: TreeCursor<'source>,
     node_visitor: &'source NodeVisitor,
     source_code: &'source str,
+    /// Whether the root node has been visited yet.
     start_visited: bool,
+    /// Whether the next advance must skip the current node's children (set on [`Visit::Break`]).
+    skip_children: bool,
+    /// Whether the walk has run out of nodes. Once set, the iterator yields `None` forever: the
+    /// cursor comes to rest on the root, so advancing it again would walk the whole tree a second
+    /// time and re-emit every comment.
+    done: bool,
 }
 
 impl<'source> CommentsIterator<'source> {
@@ -222,52 +258,54 @@ impl<'source> CommentsIterator<'source> {
             node_visitor,
             source_code,
             start_visited: false,
+            skip_children: false,
+            done: false,
         }
     }
 
-    fn comment_from_current_node(&self) -> Option<Comment> {
-        let node = self.cursor.node();
-        let comment_text = (self.node_visitor)(&node, self.source_code)?;
-        Some(comment_from_node(&node, comment_text))
+    /// Advances to the next node in pre-order, skipping the current node's children when `descend`
+    /// is false. Returns `false` once the tree is exhausted.
+    fn goto_next(&mut self, descend: bool) -> bool {
+        if descend && self.cursor.goto_first_child() {
+            return true;
+        }
+        loop {
+            if self.cursor.goto_next_sibling() {
+                return true;
+            }
+            if !self.cursor.goto_parent() {
+                return false;
+            }
+        }
     }
 }
 
 impl<'source> Iterator for CommentsIterator<'source> {
     type Item = Comment;
 
-    /// Traverses the tree-sitter AST via DFS and extracts comments.
+    /// Yields comments in pre-order, and keeps yielding `None` once the tree is exhausted.
     fn next(&mut self) -> Option<Self::Item> {
-        if !self.start_visited {
-            self.start_visited = true;
-            if let Some(comment) = self.comment_from_current_node() {
-                return Some(comment);
-            }
+        if self.done {
+            return None;
         }
-
         loop {
-            if self.cursor.goto_first_child() {
-                if let Some(comment) = self.comment_from_current_node() {
-                    return Some(comment);
-                }
-                continue;
-            }
-
-            if self.cursor.goto_next_sibling() {
-                if let Some(comment) = self.comment_from_current_node() {
-                    return Some(comment);
-                }
-                continue;
-            }
-
-            loop {
-                if !self.cursor.goto_parent() {
+            if !self.start_visited {
+                self.start_visited = true;
+            } else {
+                let descend = !self.skip_children;
+                if !self.goto_next(descend) {
+                    self.done = true;
                     return None;
                 }
-                if self.cursor.goto_next_sibling() {
-                    if let Some(comment) = self.comment_from_current_node() {
+            }
+            self.skip_children = false;
+            match (self.node_visitor)(&self.cursor.node(), self.source_code) {
+                Visit::Continue => {}
+                Visit::Break(comment) => {
+                    self.skip_children = true;
+                    if let Some(comment) = comment {
                         return Some(comment);
                     }
-                    break;
                 }
             }
         }
@@ -334,7 +372,7 @@ fn c_style_comments_parser(
 ) -> TreeSitterCommentsParser {
     TreeSitterCommentsParser::new(
         language,
-        Box::new(move |node, source_code| {
+        comment_visitor(move |node, source_code| {
             if node.kind() != comment_node_kind {
                 return None;
             }
@@ -356,7 +394,7 @@ fn c_style_line_and_block_comments_parser(
 ) -> TreeSitterCommentsParser {
     TreeSitterCommentsParser::new(
         language,
-        Box::new(move |node, source_code| {
+        comment_visitor(move |node, source_code| {
             let kind = node.kind();
             if kind == line_comment_node_kind {
                 Some(source_code[node.byte_range()].replacen("//", "  ", 1))
@@ -379,7 +417,7 @@ fn c_style_and_doc_comments_parser(
 ) -> TreeSitterCommentsParser {
     TreeSitterCommentsParser::new(
         language,
-        Box::new(move |node, source_code| {
+        comment_visitor(move |node, source_code| {
             if node.kind() != comment_node_kind {
                 return None;
             }
@@ -395,6 +433,31 @@ fn c_style_and_doc_comments_parser(
     )
 }
 
+/// Normalized comment text for a language with C-style line and block comments and a `///`
+/// doc-comment style (e.g. Java, Swift), or `None` when `node` is not one of those comments.
+fn c_style_and_doc_line_and_block_comment_text(
+    node: &Node,
+    source_code: &str,
+    line_comment_node_kind: &str,
+    block_comment_node_kind: &str,
+) -> Option<String> {
+    let kind = node.kind();
+    if kind == line_comment_node_kind {
+        let comment = &source_code[node.byte_range()];
+        Some(if comment.starts_with("///") {
+            comment.replacen("///", "   ", 1)
+        } else {
+            comment.replacen("//", "  ", 1)
+        })
+    } else if kind == block_comment_node_kind {
+        Some(c_style_multiline_comment_processor(
+            &source_code[node.byte_range()],
+        ))
+    } else {
+        None
+    }
+}
+
 /// Like [`c_style_line_and_block_comments_parser`], but additionally blanks the full `///`
 /// doc-comment marker, for languages where `///` is the primary documentation style
 /// (e.g. Swift).
@@ -405,22 +468,13 @@ fn c_style_and_doc_line_and_block_comments_parser(
 ) -> TreeSitterCommentsParser {
     TreeSitterCommentsParser::new(
         language,
-        Box::new(move |node, source_code| {
-            let kind = node.kind();
-            if kind == line_comment_node_kind {
-                let comment = &source_code[node.byte_range()];
-                Some(if comment.starts_with("///") {
-                    comment.replacen("///", "   ", 1)
-                } else {
-                    comment.replacen("//", "  ", 1)
-                })
-            } else if kind == block_comment_node_kind {
-                Some(c_style_multiline_comment_processor(
-                    &source_code[node.byte_range()],
-                ))
-            } else {
-                None
-            }
+        comment_visitor(move |node, source_code| {
+            c_style_and_doc_line_and_block_comment_text(
+                node,
+                source_code,
+                line_comment_node_kind,
+                block_comment_node_kind,
+            )
         }),
     )
 }
@@ -434,7 +488,7 @@ fn c_style_and_html_comments_parser(
 ) -> TreeSitterCommentsParser {
     TreeSitterCommentsParser::new(
         language,
-        Box::new(move |node, source_code| {
+        comment_visitor(move |node, source_code| {
             let kind = node.kind();
             if kind == comment_node_kind {
                 let comment = &source_code[node.byte_range()];
@@ -477,7 +531,7 @@ fn hash_and_c_style_comments_parser(
 ) -> TreeSitterCommentsParser {
     TreeSitterCommentsParser::new(
         language,
-        Box::new(move |node, source_code| {
+        comment_visitor(move |node, source_code| {
             if node.kind() != comment_node_kind {
                 return None;
             }
@@ -495,7 +549,7 @@ fn python_style_comments_parser(
 ) -> TreeSitterCommentsParser {
     TreeSitterCommentsParser::new(
         language,
-        Box::new(move |node, source_code| {
+        comment_visitor(move |node, source_code| {
             if node.kind() != comment_node_kind {
                 return None;
             }
@@ -518,7 +572,7 @@ fn xml_style_comments_parser(
 ) -> TreeSitterCommentsParser {
     TreeSitterCommentsParser::new(
         language,
-        Box::new(move |node, source_code| {
+        comment_visitor(move |node, source_code| {
             if node.kind() == comment_node_kind {
                 let comment = &source_code[node.byte_range()];
                 let open_idx = comment.find("<!--").expect("open comment tag is expected");

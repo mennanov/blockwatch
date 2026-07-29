@@ -1,5 +1,5 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
-use crate::language_parsers::{CommentsParser, TreeSitterCommentsParser};
+use crate::language_parsers::{CommentsParser, TreeSitterCommentsParser, comment_visitor};
 use tree_sitter::Node;
 
 /// Returns a [`BlocksParser`] for CMake.
@@ -11,7 +11,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let cmake_language = tree_sitter_cmake::LANGUAGE.into();
     let parser = TreeSitterCommentsParser::new(
         &cmake_language,
-        Box::new(|node, source_code| match node.kind() {
+        comment_visitor(|node, source_code| match node.kind() {
             "line_comment" => Some(source_code[node.byte_range()].replacen('#', " ", 1)),
             "bracket_comment" => Some(bracket_comment_text(node, &source_code[node.byte_range()])),
             _ => None,

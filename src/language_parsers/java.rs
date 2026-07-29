@@ -1,5 +1,8 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
-use crate::language_parsers::{CommentsParser, c_style_and_doc_line_and_block_comments_parser};
+use crate::language_parsers::{
+    CommentsParser, TreeSitterCommentsParser, Visit, c_style_and_doc_line_and_block_comment_text,
+    comment_from_node,
+};
 
 /// Returns a [`BlocksParser`] for Java.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -8,10 +11,24 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let java_language = tree_sitter_java::LANGUAGE.into();
-    let parser = c_style_and_doc_line_and_block_comments_parser(
+    let parser = TreeSitterCommentsParser::new(
         &java_language,
-        "line_comment",
-        "block_comment",
+        Box::new(|node, source_code| {
+            // A text block (`"""..."""`) is a `string_literal`, and tree-sitter can nest a
+            // comment-shaped node inside it; its text is string content, not a source comment.
+            if node.kind() == "string_literal" {
+                return Visit::Break(None);
+            }
+            match c_style_and_doc_line_and_block_comment_text(
+                node,
+                source_code,
+                "line_comment",
+                "block_comment",
+            ) {
+                Some(text) => Visit::Break(Some(comment_from_node(node, text))),
+                None => Visit::Continue,
+            }
+        }),
     );
     Ok(parser)
 }
@@ -20,6 +37,28 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 mod tests {
     use super::*;
     use crate::{Position, language_parsers::Comment};
+
+    #[test]
+    fn real_block_is_parsed_while_text_block_marker_is_ignored() -> anyhow::Result<()> {
+        let contents = r#"class Example {
+    // <block name="real">
+    int answer = 42;
+    // </block>
+    String template = """
+        // <block name="fake">
+        this text lives inside a Java text block
+        // </block>
+        """;
+}
+"#;
+        let blocks = parser()?.parse(contents)?;
+        let names: Vec<&str> = blocks
+            .iter()
+            .map(|block| block.attributes["name"].as_str())
+            .collect();
+        assert_eq!(names, ["real"]);
+        Ok(())
+    }
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {

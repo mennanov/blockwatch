@@ -1,6 +1,6 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{
-    CommentsParser, TreeSitterCommentsParser, c_style_multiline_comment_processor,
+    CommentsParser, TreeSitterCommentsParser, c_style_multiline_comment_processor, comment_visitor,
 };
 
 /// Returns a [`BlocksParser`] for CSS.
@@ -12,7 +12,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let css_language = tree_sitter_css::LANGUAGE.into();
     let parser = TreeSitterCommentsParser::new(
         &css_language,
-        Box::new(|node, source_code| {
+        comment_visitor(|node, source_code| {
             if node.kind() == "comment" {
                 Some(c_style_multiline_comment_processor(
                     &source_code[node.byte_range()],

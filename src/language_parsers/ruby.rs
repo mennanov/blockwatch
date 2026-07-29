@@ -1,5 +1,5 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
-use crate::language_parsers::{CommentsParser, TreeSitterCommentsParser};
+use crate::language_parsers::{CommentsParser, TreeSitterCommentsParser, comment_visitor};
 
 /// Returns a [`BlocksParser`] for Ruby.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -10,7 +10,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let ruby_language = tree_sitter_ruby::LANGUAGE.into();
     let parser = TreeSitterCommentsParser::new(
         &ruby_language,
-        Box::new(|node, source_code| {
+        comment_visitor(|node, source_code| {
             if node.kind() != "comment" {
                 return None;
             }

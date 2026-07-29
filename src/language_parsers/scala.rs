@@ -23,6 +23,21 @@ mod tests {
     use crate::{Position, language_parsers::Comment};
 
     #[test]
+    fn block_marker_inside_nested_comment_is_read_once() -> anyhow::Result<()> {
+        // A marker in a nested Scala block comment must be read once, not once per nesting level.
+        let contents = r#"/* wrapper
+   /* <block name="only_once"> */
+*/
+val value = 1
+// </block>
+"#;
+        let blocks = parser()?.parse(contents)?;
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].attributes["name"], "only_once");
+        Ok(())
+    }
+
+    #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 

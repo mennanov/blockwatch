@@ -1,6 +1,6 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{
-    CommentsParser, TreeSitterCommentsParser, c_style_multiline_comment_processor,
+    CommentsParser, TreeSitterCommentsParser, c_style_multiline_comment_processor, comment_visitor,
 };
 
 /// Returns a [`BlocksParser`] for Rust.
@@ -12,7 +12,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let rust_language = tree_sitter_rust::LANGUAGE.into();
     let parser = TreeSitterCommentsParser::new(
         &rust_language,
-        Box::new(|node, source_code| match node.kind() {
+        comment_visitor(|node, source_code| match node.kind() {
             "line_comment" => {
                 let comment = &source_code[node.byte_range()];
                 Some(if comment.starts_with("///") {

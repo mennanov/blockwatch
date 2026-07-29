@@ -1,5 +1,5 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
-use crate::language_parsers::{CommentsParser, TreeSitterCommentsParser};
+use crate::language_parsers::{CommentsParser, TreeSitterCommentsParser, comment_visitor};
 
 /// Returns a [`BlocksParser`] for Bash.
 pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
@@ -10,7 +10,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let bash_language = tree_sitter_bash::LANGUAGE.into();
     let parser = TreeSitterCommentsParser::new(
         &bash_language,
-        Box::new(|node, source| {
+        comment_visitor(|node, source| {
             if node.kind() != "comment" {
                 return None;
             }
