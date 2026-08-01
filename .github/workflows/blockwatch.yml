@@ -20,7 +20,7 @@ jobs:
       TRUSTED: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
 
     steps:
-      - uses: mennanov/blockwatch-action@v1
+      - uses: mennanov/blockwatch-action@v1.0.5
         env:
           # Untrusted (fork) PRs are still linted, but only in the sandboxed mode (no file/OS access)
           # and without any secrets.
