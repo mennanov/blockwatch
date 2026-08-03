@@ -2,7 +2,7 @@ use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators;
-use crate::validators::{ValidatorType, Violation, ViolationRange};
+use crate::validators::{ValidationReport, ValidatorType, Violation, ViolationRange};
 use anyhow::Context;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -26,7 +26,7 @@ impl validators::ValidatorSync for AffectsValidator {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,
-    ) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
+    ) -> anyhow::Result<ValidationReport> {
         let mut named_modified_blocks = HashMap::new();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
@@ -42,7 +42,7 @@ impl validators::ValidatorSync for AffectsValidator {
                 }
             }
         }
-        let mut violations = HashMap::new();
+        let mut report = ValidationReport::default();
         for (modified_block_file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
                 if !block_with_context.is_content_modified {
@@ -63,6 +63,7 @@ impl validators::ValidatorSync for AffectsValidator {
                                     .line,
                             )
                         })?;
+                    let mut block_violations = Vec::new();
                     for (affected_file_path, affected_block_name) in affected_blocks {
                         let affected_file_path =
                             affected_file_path.unwrap_or_else(|| modified_block_file_path.clone());
@@ -70,21 +71,23 @@ impl validators::ValidatorSync for AffectsValidator {
                             affected_file_path.clone(),
                             affected_block_name.clone(),
                         )) {
-                            violations
-                                .entry(modified_block_file_path.clone())
-                                .or_insert_with(Vec::new)
-                                .push(create_violation(
-                                    modified_block_file_path,
-                                    &block_with_context.block,
-                                    &affected_file_path,
-                                    affected_block_name.as_str(),
-                                )?);
+                            block_violations.push(create_violation(
+                                modified_block_file_path,
+                                &block_with_context.block,
+                                &affected_file_path,
+                                affected_block_name.as_str(),
+                            )?);
                         }
                     }
+                    report.add_all(
+                        modified_block_file_path,
+                        &block_with_context.block,
+                        block_violations,
+                    );
                 }
             }
         }
-        Ok(violations)
+        Ok(report)
     }
 }
 
@@ -149,7 +152,8 @@ mod validate_tests {
     use crate::diff_parser::LineChange;
     use crate::repo_path::RepoPath;
     use crate::test_utils::{
-        merge_validation_contexts, validation_context, validation_context_with_changes,
+        checked_lines, merge_validation_contexts, validation_context,
+        validation_context_with_changes,
     };
     use crate::validators::ValidatorSync;
 
@@ -164,7 +168,12 @@ mod validate_tests {
             ),
             validation_context("target.py", "# <block name=\"t\">\nvalue = 2\n# </block>"),
         ]);
-        assert!(AffectsValidator::new().validate(context)?.is_empty());
+        assert!(
+            AffectsValidator::new()
+                .validate(context)?
+                .violations
+                .is_empty()
+        );
         Ok(())
     }
 
@@ -179,7 +188,7 @@ pass
 "#,
         );
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -204,7 +213,7 @@ print("second")
             }],
         );
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
 
         assert_eq!(violations.len(), 1);
         let file1_violations = violations
@@ -258,7 +267,7 @@ print("file3")
             ),
         ]);
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
 
         assert_eq!(violations.len(), 1);
         let file1_violations = violations
@@ -292,7 +301,7 @@ print("bar")
 "#,
         );
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -322,7 +331,7 @@ print("buzz")
             ),
         ]);
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -357,7 +366,7 @@ print("hello")
             ),
         ]);
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
 
         assert_eq!(violations.len(), 1);
         let file1_violations = violations
@@ -402,7 +411,7 @@ print("bar")
             ),
         ]);
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -457,7 +466,7 @@ pass
             ),
         ]);
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -489,9 +498,28 @@ pass
         ];
         let context = validation_context_with_changes("file1.py", contents, line_changes);
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
 
         assert!(!violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn validate_records_a_check_for_every_examined_block() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block name="source" affects=":target">
+a = 1
+# </block>
+# <block name="target">
+b = 2
+# </block>"#,
+        );
+
+        let report = AffectsValidator::new().validate(context)?;
+
+        // Only the block with the `affects` attribute is checked. The target block is not.
+        assert_eq!(checked_lines(&report), vec![1]);
         Ok(())
     }
 }

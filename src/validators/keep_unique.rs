@@ -1,11 +1,10 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
-use crate::repo_path::RepoPath;
 use crate::validators::{
-    ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
+    ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
 };
 use crate::{Position, validators};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -22,8 +21,8 @@ impl ValidatorSync for KeepUniqueValidator {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,
-    ) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
-        let mut violations = HashMap::new();
+    ) -> anyhow::Result<ValidationReport> {
+        let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
                 if !block_with_context
@@ -44,6 +43,7 @@ impl ValidatorSync for KeepUniqueValidator {
                 } else {
                     Some(regex::Regex::new(&pattern))
                 };
+                let mut block_violations = Vec::new();
                 let mut seen: HashSet<&str> = HashSet::new();
                 for (line_number, line) in block_with_context
                     .block
@@ -106,22 +106,20 @@ impl ValidatorSync for KeepUniqueValidator {
                             + line_number;
                         let line_character_start = *line_range.start(); // Start position is 1-based.
                         let line_character_end = *line_range.end(); // End position is 1-based and inclusive.
-                        violations
-                            .entry(file_path.clone())
-                            .or_insert_with(Vec::new)
-                            .push(create_violation(
-                                file_path,
-                                &block_with_context.block,
-                                violation_line_number,
-                                line_character_start,
-                                line_character_end,
-                            )?);
+                        block_violations.push(create_violation(
+                            file_path,
+                            &block_with_context.block,
+                            violation_line_number,
+                            line_character_start,
+                            line_character_end,
+                        )?);
                         break;
                     }
                 }
+                report.add_all(file_path, &block_with_context.block, block_violations);
             }
         }
-        Ok(violations)
+        Ok(report)
     }
 }
 
@@ -183,7 +181,8 @@ fn create_violation(
 mod validate_tests {
     use super::*;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::validation_context;
+    use crate::test_utils::{checked_lines, validation_context, violation_count};
+    use std::collections::HashMap;
 
     #[test]
     fn empty_blocks_returns_no_violations() -> anyhow::Result<()> {
@@ -193,7 +192,7 @@ mod validate_tests {
             HashMap::new(),
         ));
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -208,7 +207,7 @@ mod validate_tests {
 # </block>"#,
         );
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -226,7 +225,7 @@ C
 # </block>"#,
         );
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -248,7 +247,7 @@ C
 # </block>"#,
         );
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -267,11 +266,11 @@ C
 # </block>"#,
         );
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
 
         assert_eq!(violations.len(), 1);
         let file_violations = violations
-            .get(&RepoPath::from_reference("example.py").unwrap())
+            .get(&RepoPath::from_reference("example.py")?)
             .unwrap();
         assert_eq!(file_violations.len(), 1);
         // The last line ` 1 ` is the only duplicate.
@@ -297,11 +296,11 @@ BB
 # </block>"#,
         );
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
 
         assert_eq!(violations.len(), 1);
         let file_violations = violations
-            .get(&RepoPath::from_reference("example.py").unwrap())
+            .get(&RepoPath::from_reference("example.py")?)
             .unwrap();
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
@@ -329,10 +328,10 @@ ID:1 C
 # </block>"#,
         );
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
         assert_eq!(violations.len(), 1);
         let file_violations = violations
-            .get(&RepoPath::from_reference("example.py").unwrap())
+            .get(&RepoPath::from_reference("example.py")?)
             .unwrap();
         assert_eq!(file_violations.len(), 1);
         // Only the matched value group is in the range.
@@ -355,10 +354,10 @@ ID:1 C
 # </block>"#,
         );
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
         assert_eq!(violations.len(), 1);
         let file_violations = violations
-            .get(&RepoPath::from_reference("example.py").unwrap())
+            .get(&RepoPath::from_reference("example.py")?)
             .unwrap();
         assert_eq!(file_violations.len(), 1);
         // Full regex match is in the range.
@@ -381,8 +380,34 @@ ID:2
 # </block>"#,
         );
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
         assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn validate_records_a_check_for_every_examined_block() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block name="unique" keep-unique>
+'apple',
+'banana',
+# </block>
+# <block name="duplicated" keep-unique>
+'apple',
+'apple',
+# </block>
+# <block name="unrelated">
+'apple',
+'apple',
+# </block>"#,
+        );
+
+        let report = KeepUniqueValidator::new().validate(context)?;
+
+        // The block without a keep-unique attribute is not checked, so it records nothing.
+        assert_eq!(checked_lines(&report), vec![1, 5]);
+        assert_eq!(violation_count(&report), 1);
         Ok(())
     }
 }

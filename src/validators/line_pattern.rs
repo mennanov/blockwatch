@@ -1,14 +1,12 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
-use crate::repo_path::RepoPath;
 use crate::validators::{
-    ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
+    ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
 };
 use crate::{Position, validators};
 use anyhow::anyhow;
 use regex::Regex;
 use serde::Serialize;
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -29,8 +27,8 @@ impl ValidatorSync for LinePatternValidator {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,
-    ) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
-        let mut violations = HashMap::new();
+    ) -> anyhow::Result<ValidationReport> {
+        let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
                 let Some(pattern) = block_with_context.block.attributes.get("line-pattern") else {
@@ -47,6 +45,7 @@ impl ValidatorSync for LinePatternValidator {
                         e
                     )
                 })?;
+                let mut block_violations = Vec::new();
                 for (line_number, line) in block_with_context
                     .block
                     .content(&file_blocks.file_content)
@@ -67,23 +66,21 @@ impl ValidatorSync for LinePatternValidator {
                         let line_character_start =
                             trimmed_line.as_ptr() as usize - line.as_ptr() as usize + 1; // Start position is 1-based.
                         let line_character_end = line_character_start + trimmed_line.len() - 1; // End position is 1-based and inclusive.
-                        violations
-                            .entry(file_path.clone())
-                            .or_insert_with(Vec::new)
-                            .push(create_violation(
-                                file_path,
-                                &block_with_context.block,
-                                pattern,
-                                violation_line_number,
-                                line_character_start,
-                                line_character_end,
-                            )?);
+                        block_violations.push(create_violation(
+                            file_path,
+                            &block_with_context.block,
+                            pattern,
+                            violation_line_number,
+                            line_character_start,
+                            line_character_end,
+                        )?);
                         break;
                     }
                 }
+                report.add_all(file_path, &block_with_context.block, block_violations);
             }
         }
-        Ok(violations)
+        Ok(report)
     }
 }
 
@@ -149,14 +146,14 @@ fn create_violation(
 mod validate_tests {
     use super::*;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::validation_context;
+    use crate::test_utils::{checked_lines, validation_context, violation_count};
     use serde_json::json;
 
     #[test]
     fn empty_blocks_returns_no_violations() -> anyhow::Result<()> {
         let validator = LinePatternValidator::new();
         let context = validation_context("example.py", "#<block>\n#</block>");
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -169,7 +166,7 @@ mod validate_tests {
             r#"# <block line-pattern="[A-Z]+">
         # </block>"#,
         );
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -185,7 +182,7 @@ mod validate_tests {
         Z
         # </block>"#,
         );
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -204,7 +201,7 @@ mod validate_tests {
         # </block>"#,
         );
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -222,11 +219,11 @@ mod validate_tests {
         # </block>"#,
         );
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
 
         assert_eq!(violations.len(), 1);
         let file_violations = violations
-            .get(&RepoPath::from_reference("example.py").unwrap())
+            .get(&RepoPath::from_reference("example.py")?)
             .unwrap();
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
@@ -259,5 +256,28 @@ mod validate_tests {
         let result = validator.validate(context);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_records_a_check_for_every_examined_block() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block name="matching" line-pattern="^[a-z]+$">
+apple
+# </block>
+# <block name="failing" line-pattern="^[a-z]+$">
+APPLE
+# </block>
+# <block name="unrelated">
+anything
+# </block>"#,
+        );
+
+        let report = LinePatternValidator::new().validate(context)?;
+
+        // The block without a line-pattern attribute is not checked, so it records nothing.
+        assert_eq!(checked_lines(&report), vec![1, 4]);
+        assert_eq!(violation_count(&report), 1);
+        Ok(())
     }
 }

@@ -3,13 +3,13 @@ use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::parse_block_references;
 use crate::validators::{
-    ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorType, Violation, ViolationRange,
+    ValidationContext, ValidationReport, ValidatorAsync, ValidatorDetector, ValidatorType,
+    Violation, ViolationRange,
 };
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use mlua::{Lua, StdLib};
 use serde::Serialize;
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::task::JoinSet;
@@ -50,11 +50,8 @@ impl<Fs: FileSystem + 'static> CheckLuaValidator<Fs> {
 
 #[async_trait]
 impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
-    async fn validate(
-        &self,
-        context: Arc<ValidationContext>,
-    ) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
-        let mut violations = HashMap::new();
+    async fn validate(&self, context: Arc<ValidationContext>) -> anyhow::Result<ValidationReport> {
+        let mut report = ValidationReport::default();
         let mut tasks = JoinSet::new();
         for (file_path, file_blocks) in &context.blocks {
             for (block_idx, block_with_context) in
@@ -77,6 +74,10 @@ impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
                     continue;
                 }
 
+                // The block is checked from here on, whatever the script returns, so add it
+                // before the borrowed path is shadowed by the owned copy the task takes.
+                report.add_checked_block(file_path, &block_with_context.block);
+
                 let context = Arc::clone(&context);
                 let file_path = file_path.clone();
                 let file_system = Arc::clone(&self.file_system);
@@ -98,7 +99,7 @@ impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
                     )
                     .await;
 
-                    match result.context(format!(
+                    let block_violations = match result.context(format!(
                         "check-lua script error in {}:{} at line {}",
                         file_path.display(),
                         block_with_context.block.name_display(),
@@ -108,33 +109,23 @@ impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
                             .start()
                             .line
                     ))? {
-                        None => Ok(None),
-                        Some(msg) => {
-                            let violation = create_violation(
-                                &file_path,
-                                &block_with_context.block,
-                                script_path,
-                                &msg,
-                            )?;
-                            Ok(Some((file_path, violation)))
-                        }
-                    }
+                        None => Vec::new(),
+                        Some(msg) => vec![create_violation(
+                            &file_path,
+                            &block_with_context.block,
+                            script_path,
+                            &msg,
+                        )?],
+                    };
+                    anyhow::Ok((file_path, block_violations))
                 });
             }
         }
         while let Some(task_result) = tasks.join_next().await {
-            match task_result.context("check-lua task failed")? {
-                Ok(None) => continue,
-                Ok(Some((file_path, violation))) => {
-                    violations
-                        .entry(file_path)
-                        .or_insert_with(Vec::new)
-                        .push(violation);
-                }
-                Err(e) => return Err(e),
-            }
+            let (file_path, violations) = task_result.context("check-lua task failed")??;
+            report.add_violations(&file_path, violations);
         }
-        Ok(violations)
+        Ok(report)
     }
 }
 
@@ -377,7 +368,8 @@ mod tests {
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
     use crate::test_utils::{
-        merge_validation_contexts, validation_context, validation_context_with_changes,
+        checked_lines, merge_validation_contexts, validation_context,
+        validation_context_with_changes, violation_count,
     };
     use serde_json::json;
 
@@ -399,7 +391,7 @@ some content
 # </block>"#,
         );
 
-        let violations = validator(&[(
+        let report = validator(&[(
             "check.lua",
             r#"
 function validate(ctx, content)
@@ -410,7 +402,52 @@ end
         .validate(context)
         .await?;
 
-        assert!(violations.is_empty());
+        assert!(report.violations.is_empty());
+        // The block was checked and passed. That is different from never being checked at all.
+        assert_eq!(checked_lines(&report), vec![1]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn validate_records_a_check_for_every_examined_block() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block name="passing" check-lua="ok.lua">
+some content
+# </block>
+# <block name="failing" check-lua="fail.lua">
+some content
+# </block>
+# <block name="unrelated">
+some content
+# </block>"#,
+        );
+
+        let report = validator(&[
+            (
+                "ok.lua",
+                r#"
+function validate(ctx, content)
+    return nil
+end
+"#,
+            ),
+            (
+                "fail.lua",
+                r#"
+function validate(ctx, content)
+    return "bad content"
+end
+"#,
+            ),
+        ])
+        .validate(context)
+        .await?;
+
+        // Both blocks are recorded whatever the script returns, and the block without a check-lua
+        // attribute is not checked, so it records nothing.
+        assert_eq!(checked_lines(&report), vec![1, 4]);
+        assert_eq!(violation_count(&report), 1);
         Ok(())
     }
 
@@ -432,14 +469,15 @@ end
 "#,
         )])
         .validate(context)
-        .await?;
+        .await?
+        .violations;
 
         assert_eq!(violations.len(), 1);
         assert_eq!(
-            violations[&RepoPath::from_reference("example.py").unwrap()].len(),
+            violations[&RepoPath::from_reference("example.py")?].len(),
             1
         );
-        let violation = &violations[&RepoPath::from_reference("example.py").unwrap()][0];
+        let violation = &violations[&RepoPath::from_reference("example.py")?][0];
         assert_eq!(violation.code, "check-lua");
         assert_eq!(
             violation.message,
@@ -510,7 +548,8 @@ end
 "#,
         )])
         .validate(context)
-        .await?;
+        .await?
+        .violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -537,7 +576,8 @@ end
 "#,
         )])
         .validate(context)
-        .await?;
+        .await?
+        .violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -591,7 +631,8 @@ end
 "#,
         )])
         .validate(context)
-        .await?;
+        .await?
+        .violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -649,7 +690,8 @@ remote content
 
         let violations = validator(&[("check.lua", script)])
             .validate(context)
-            .await?;
+            .await?
+            .violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -688,7 +730,8 @@ remote content
 
         let violations = validator(&[("check.lua", script)])
             .validate(context)
-            .await?;
+            .await?
+            .violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -716,7 +759,8 @@ some content
 
         let violations = validator(&[("check.lua", script)])
             .validate(context)
-            .await?;
+            .await?
+            .violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -741,7 +785,8 @@ some content
 
         let violations = validator(&[("check.lua", script)])
             .validate(context)
-            .await?;
+            .await?
+            .violations;
 
         assert!(violations.is_empty());
         Ok(())

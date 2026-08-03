@@ -116,6 +116,8 @@ equal. Under text comparison, `"60.0" != "60"` would fail.
 - **Hard errors** (not violations): an unrecognized `same-as-mode` or `same-as-format` value, or an invalid regex.
 - Because `same-as` fires without a diff, a periodic full-tree `blockwatch` run catches drift that a diff-only check
   would miss. See [CI integration](../ci.md).
+- **Targets are read, not reported.** Under a diff, a target the diff did not touch is still resolved and compared, but
+  it does not appear in a `--verbosity` run report. See [Reports Under a Diff](../cli.md#reports-under-a-diff).
 
 ---
 

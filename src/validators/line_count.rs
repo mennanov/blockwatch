@@ -1,13 +1,11 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
-use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{
-    ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
+    ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
 };
 use anyhow::anyhow;
 use serde::Serialize;
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -30,8 +28,8 @@ impl ValidatorSync for LineCountValidator {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,
-    ) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
-        let mut violations = HashMap::new();
+    ) -> anyhow::Result<ValidationReport> {
+        let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
                 let Some(expr) = block_with_context.block.attributes.get("line-count") else {
@@ -66,21 +64,21 @@ impl ValidatorSync for LineCountValidator {
                     Op::Ge => actual >= expected,
                     Op::Gt => actual > expected,
                 };
-                if !ok {
-                    violations
-                        .entry(file_path.clone())
-                        .or_insert_with(Vec::new)
-                        .push(create_violation(
-                            file_path,
-                            &block_with_context.block,
-                            op,
-                            expected,
-                            actual,
-                        )?);
-                }
+                let block_violations = if ok {
+                    Vec::new()
+                } else {
+                    vec![create_violation(
+                        file_path,
+                        &block_with_context.block,
+                        op,
+                        expected,
+                        actual,
+                    )?]
+                };
+                report.add_all(file_path, &block_with_context.block, block_violations);
             }
         }
-        Ok(violations)
+        Ok(report)
     }
 }
 
@@ -191,7 +189,7 @@ fn parse_constraint(s: &str) -> anyhow::Result<(Op, usize)> {
 mod tests {
     use super::*;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::validation_context;
+    use crate::test_utils::{checked_lines, validation_context, violation_count};
     use serde_json::json;
 
     #[test]
@@ -247,7 +245,7 @@ mod tests {
         d
         # </block>"#,
         );
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -289,11 +287,11 @@ mod tests {
         # </block>"#,
         );
 
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
 
         assert_eq!(violations.len(), 1);
         let file2_violations = violations
-            .get(&RepoPath::from_reference("example.py").unwrap())
+            .get(&RepoPath::from_reference("example.py")?)
             .unwrap();
         assert_eq!(file2_violations.len(), 6);
         assert_eq!(file2_violations[0].code, "line-count");
@@ -397,8 +395,32 @@ mod tests {
         d
         # </block>"#,
         );
-        let violations = validator.validate(context)?;
+        let violations = validator.validate(context)?.violations;
         assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn validate_records_a_check_for_every_examined_block() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block name="within" line-count="<=2">
+a = 1
+# </block>
+# <block name="over" line-count="<=1">
+a = 1
+b = 2
+# </block>
+# <block name="unrelated">
+c = 3
+# </block>"#,
+        );
+
+        let report = LineCountValidator::new().validate(context)?;
+
+        // The block without a line-count attribute is not checked, so it records nothing.
+        assert_eq!(checked_lines(&report), vec![1, 4]);
+        assert_eq!(violation_count(&report), 1);
         Ok(())
     }
 }

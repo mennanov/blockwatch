@@ -2,7 +2,8 @@ use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    ValidationContext, ValidatorAsync, ValidatorDetector, ValidatorType, Violation, ViolationRange,
+    ValidationContext, ValidationReport, ValidatorAsync, ValidatorDetector, ValidatorType,
+    Violation, ViolationRange,
 };
 use anyhow::{Context, anyhow};
 use async_openai::Client;
@@ -14,7 +15,6 @@ use async_openai::types::chat::{
 use async_trait::async_trait;
 use secrecy::ExposeSecret;
 use serde::Serialize;
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::task::JoinSet;
@@ -43,11 +43,8 @@ pub(crate) struct CheckAiValidator<C: AiClient> {
 
 #[async_trait]
 impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
-    async fn validate(
-        &self,
-        context: Arc<ValidationContext>,
-    ) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
-        let mut violations = HashMap::new();
+    async fn validate(&self, context: Arc<ValidationContext>) -> anyhow::Result<ValidationReport> {
+        let mut report = ValidationReport::default();
         let mut tasks = JoinSet::new();
         for (file_path, file_blocks) in &context.blocks {
             for (block_idx, block_with_context) in
@@ -70,6 +67,10 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
                     continue;
                 }
 
+                // The block is checked from here on, whatever the API answers, so add it
+                // before the borrowed path is shadowed by the owned copy the task takes.
+                report.add_checked_block(file_path, &block_with_context.block);
+
                 let client = Arc::clone(&self.client);
                 let context = Arc::clone(&context);
                 let file_path = file_path.clone();
@@ -80,23 +81,17 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
                     let content = block_content(block_with_context, &file_blocks.file_content)?;
 
                     let result = client.check_block(condition, content).await;
-                    Self::process_ai_response(file_path, block_with_context, result)
+                    let violation =
+                        Self::process_ai_response(&file_path, block_with_context, result)?;
+                    anyhow::Ok((file_path, Vec::from_iter(violation)))
                 });
             }
         }
         while let Some(task_result) = tasks.join_next().await {
-            match task_result.context("check-ai task failed")? {
-                Ok(None) => continue,
-                Ok(Some((file_path, violation))) => {
-                    violations
-                        .entry(file_path)
-                        .or_insert_with(Vec::new)
-                        .push(violation);
-                }
-                Err(e) => return Err(e),
-            }
+            let (file_path, violations) = task_result.context("check-ai task failed")??;
+            report.add_violations(&file_path, violations);
         }
-        Ok(violations)
+        Ok(report)
     }
 }
 
@@ -186,11 +181,12 @@ impl<C: AiClient> CheckAiValidator<C> {
         }
     }
 
+    /// Turns one AI answer into a violation, or into nothing when the block satisfied the check.
     fn process_ai_response(
-        file_path: RepoPath,
+        file_path: &RepoPath,
         block_with_context: &BlockWithContext,
         result: anyhow::Result<Option<String>>,
-    ) -> anyhow::Result<Option<(RepoPath, Violation)>> {
+    ) -> anyhow::Result<Option<Violation>> {
         match result.context(format!(
             "check-ai API error in {}:{} at line {}",
             file_path.display(),
@@ -202,10 +198,11 @@ impl<C: AiClient> CheckAiValidator<C> {
                 .line
         ))? {
             None => Ok(None),
-            Some(msg) => {
-                let violation = create_violation(&file_path, &block_with_context.block, &msg)?;
-                Ok(Some((file_path, violation)))
-            }
+            Some(msg) => Ok(Some(create_violation(
+                file_path,
+                &block_with_context.block,
+                &msg,
+            )?)),
         }
     }
 }
@@ -305,8 +302,9 @@ impl AiClient for OpenAiClient {
 mod tests {
     use super::*;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::validation_context;
+    use crate::test_utils::{checked_lines, validation_context, violation_count};
     use serde_json::json;
+    use std::collections::HashMap;
 
     #[derive(Clone)]
     enum FakeAiResponse {
@@ -364,8 +362,42 @@ mod tests {
 I like banana
 # </block>"#,
         );
-        let violations = validator.validate(context).await?;
+        let violations = validator.validate(context).await?.violations;
         assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn validate_records_a_check_for_every_examined_block() -> anyhow::Result<()> {
+        let validator = CheckAiValidator::with_client(FakeClient::new(HashMap::from([
+            (
+                ("must mention banana".into(), "I like banana".into()),
+                FakeAiResponse::None,
+            ),
+            (
+                ("must mention apple".into(), "I like banana".into()),
+                FakeAiResponse::Some("no apple".into()),
+            ),
+        ])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block name="passing" check-ai="must mention banana">
+I like banana
+# </block>
+# <block name="failing" check-ai="must mention apple">
+I like banana
+# </block>
+# <block name="unrelated">
+I like banana
+# </block>"#,
+        );
+
+        let report = validator.validate(context).await?;
+
+        // Both blocks are recorded whatever the answer comes back as, and the block without a
+        // check-ai attribute is not checked, so it records nothing.
+        assert_eq!(checked_lines(&report), vec![1, 4]);
+        assert_eq!(violation_count(&report), 1);
         Ok(())
     }
 
@@ -381,8 +413,11 @@ I like banana
 I like banana and apples
 # </block>"#,
         );
-        let violations = validator.validate(context).await?;
-        assert!(violations.is_empty());
+        let report = validator.validate(context).await?;
+
+        assert!(report.violations.is_empty());
+        // The block was checked and passed. That is different from never being checked at all.
+        assert_eq!(checked_lines(&report), vec![1]);
         Ok(())
     }
 
@@ -398,7 +433,7 @@ I like banana and apples
 I like banana and apples
 # </block>"#,
         );
-        let violations = validator.validate(context).await?;
+        let violations = validator.validate(context).await?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -415,13 +450,13 @@ I like banana and apples
 I like apples
 # </block>"#,
         );
-        let violations = validator.validate(context).await?;
+        let violations = validator.validate(context).await?.violations;
         assert_eq!(violations.len(), 1);
         assert_eq!(
-            violations[&RepoPath::from_reference("example.py").unwrap()].len(),
+            violations[&RepoPath::from_reference("example.py")?].len(),
             1
         );
-        let violation = &violations[&RepoPath::from_reference("example.py").unwrap()][0];
+        let violation = &violations[&RepoPath::from_reference("example.py")?][0];
         assert_eq!(violation.code, "check-ai");
         assert_eq!(
             violation.message,

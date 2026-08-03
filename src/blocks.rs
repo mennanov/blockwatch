@@ -263,6 +263,22 @@ pub struct BlockWithContext {
     pub(crate) is_content_modified: bool,
 }
 
+/// Counts of the files a scan looked at.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ScanStats {
+    /// Number of files that were read and parsed for blocks.
+    pub files_scanned: usize,
+    /// Number of files that were not parsed because their extension has no parser.
+    pub files_skipped: usize,
+}
+
+/// The blocks found in each file, together with the counts of files the scan looked at.
+#[derive(Debug, Default)]
+pub struct ParsedBlocks {
+    pub blocks: HashMap<RepoPath, FileBlocks>,
+    pub stats: ScanStats,
+}
+
 /// Parses source files and returns only those blocks that intersect with the provided modified line ranges.
 ///
 /// - `line_changes_by_file` maps file paths to sorted line changes.
@@ -271,7 +287,7 @@ pub struct BlockWithContext {
 /// - `parsers` maps file extensions to language-specific block parsers.
 /// - `extra_file_extensions` allows remapping unknown extensions to supported ones (e.g., "cxx" -> "cpp").
 ///
-/// Returns a map of file paths to the list of intersecting blocks found in that file.
+/// Returns the intersecting blocks found in each file, along with the counts of files scanned.
 pub fn parse_blocks(
     mut line_changes_by_file: HashMap<RepoPath, Vec<LineChange>>,
     should_scan_files: bool,
@@ -279,8 +295,9 @@ pub fn parse_blocks(
     path_checker: &impl PathChecker,
     parsers: &LanguageParsers,
     extra_file_extensions: HashMap<OsString, OsString>,
-) -> anyhow::Result<HashMap<RepoPath, FileBlocks>> {
+) -> anyhow::Result<ParsedBlocks> {
     let mut blocks = HashMap::new();
+    let mut stats = ScanStats::default();
     if should_scan_files {
         for result in file_system.walk() {
             match result {
@@ -292,18 +309,21 @@ pub fn parse_blocks(
                     }
                     let changes_owned = line_changes_by_file.remove(&file_path);
                     let line_changes = changes_owned.as_deref().unwrap_or(&[]);
-                    let file_blocks_opt = parse_file(
+                    match parse_file(
                         file_path.as_path(),
                         line_changes,
                         BlocksFilter::All,
                         file_system,
                         parsers,
                         &extra_file_extensions,
-                    )?;
-                    if let Some(file_blocks) = file_blocks_opt
-                        && !file_blocks.is_empty()
-                    {
-                        blocks.insert(file_path, file_blocks);
+                    )? {
+                        Some(file_blocks) => {
+                            stats.files_scanned += 1;
+                            if !file_blocks.is_empty() {
+                                blocks.insert(file_path, file_blocks);
+                            }
+                        }
+                        None => stats.files_skipped += 1,
                     }
                 }
                 Err(err) => {
@@ -340,13 +360,17 @@ pub fn parse_blocks(
                 ))
             }
         })?;
-        if let Some(file_blocks) = file_blocks_opt
-            && !file_blocks.is_empty()
-        {
-            blocks.insert(file_path.clone(), file_blocks);
+        match file_blocks_opt {
+            Some(file_blocks) => {
+                stats.files_scanned += 1;
+                if !file_blocks.is_empty() {
+                    blocks.insert(file_path.clone(), file_blocks);
+                }
+            }
+            None => stats.files_skipped += 1,
         }
     }
-    Ok(blocks)
+    Ok(ParsedBlocks { blocks, stats })
 }
 
 enum BlocksFilter {
@@ -517,6 +541,35 @@ mod parse_blocks_tests {
     }
 
     #[test]
+    fn parse_blocks_counts_scanned_and_skipped_files() -> anyhow::Result<()> {
+        let file_system = FakeFileSystem::new(HashMap::from([
+            (
+                "with_blocks.py".to_string(),
+                "# <block keep-sorted=\"asc\">\n'a'\n# </block>\n".to_string(),
+            ),
+            ("without_blocks.py".to_string(), "x = 1\n".to_string()),
+            ("notes.unknown".to_string(), "not a language\n".to_string()),
+        ]));
+        let parsers = language_parsers()?;
+
+        let parsed = parse_blocks(
+            HashMap::new(),
+            true,
+            &file_system,
+            &FakePathChecker::allow_all(),
+            &parsers,
+            HashMap::new(),
+        )?;
+
+        // The file without blocks is not kept, but it was parsed, so it counts as scanned. The
+        // file with an unknown extension counts as skipped.
+        assert_eq!(parsed.blocks.len(), 1);
+        assert_eq!(parsed.stats.files_scanned, 2);
+        assert_eq!(parsed.stats.files_skipped, 1);
+        Ok(())
+    }
+
+    #[test]
     fn with_nonempty_line_changes_no_scan_files_returns_only_blocks_with_modified_start_tag_or_content()
     -> anyhow::Result<()> {
         let content_a = r#"
@@ -553,7 +606,7 @@ mod parse_blocks_tests {
         ]));
         let line_changes = HashMap::from([
             (
-                RepoPath::from_reference("a.rs").unwrap(),
+                RepoPath::from_reference("a.rs")?,
                 vec![
                     line_change(1), // No blocks on this line.
                     LineChange {
@@ -667,7 +720,7 @@ mod parse_blocks_tests {
                 ],
             ),
             (
-                RepoPath::from_reference("b.rs").unwrap(),
+                RepoPath::from_reference("b.rs")?,
                 vec![LineChange {
                     line: 1,
                     ranges: Some(vec![test_utils::substr_range(
@@ -686,11 +739,11 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &parsers,
             HashMap::new(),
-        )?;
+        )?
+        .blocks;
 
         assert_eq!(blocks_by_file.len(), 2);
-        let blocks_a =
-            &blocks_by_file[&RepoPath::from_reference("a.rs").unwrap()].blocks_with_context;
+        let blocks_a = &blocks_by_file[&RepoPath::from_reference("a.rs")?].blocks_with_context;
         assert_eq!(blocks_a.len(), 9);
         let first = &blocks_a[0];
         assert_eq!(first.block.name(), Some("first"));
@@ -728,8 +781,7 @@ mod parse_blocks_tests {
         assert_eq!(tenth.block.name(), Some("tenth"));
         assert!(!tenth._is_start_tag_modified);
         assert!(tenth.is_content_modified);
-        let blocks_b =
-            &blocks_by_file[&RepoPath::from_reference("b.rs").unwrap()].blocks_with_context;
+        let blocks_b = &blocks_by_file[&RepoPath::from_reference("b.rs")?].blocks_with_context;
         assert_eq!(blocks_b.len(), 1);
         assert_eq!(blocks_b[0].block.name(), Some("first"));
 
@@ -773,14 +825,14 @@ mod parse_blocks_tests {
 
         let line_changes = HashMap::from([
             (
-                RepoPath::from_reference("a.rs").unwrap(),
+                RepoPath::from_reference("a.rs")?,
                 vec![LineChange {
                     line: 3, // Content line of the first block.
                     ranges: None,
                 }],
             ),
             (
-                RepoPath::from_reference("b.rs").unwrap(),
+                RepoPath::from_reference("b.rs")?,
                 vec![LineChange {
                     line: 3, // Content line of the first block.
                     ranges: None,
@@ -794,10 +846,11 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &parsers,
             HashMap::new(),
-        )?;
+        )?
+        .blocks;
 
         assert_eq!(
-            blocks_by_file[&RepoPath::from_reference("a.rs").unwrap()]
+            blocks_by_file[&RepoPath::from_reference("a.rs")?]
                 .blocks_with_context
                 .iter()
                 .map(|b| { (b.block.name().unwrap(), b.is_content_modified) })
@@ -805,7 +858,7 @@ mod parse_blocks_tests {
             &[("first_from_a", true), ("second_from_a", false)]
         );
         assert_eq!(
-            blocks_by_file[&RepoPath::from_reference("b.rs").unwrap()]
+            blocks_by_file[&RepoPath::from_reference("b.rs")?]
                 .blocks_with_context
                 .iter()
                 .map(|b| { (b.block.name().unwrap(), b.is_content_modified) })
@@ -856,10 +909,11 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &parsers,
             HashMap::new(),
-        )?;
+        )?
+        .blocks;
 
         assert_eq!(
-            blocks_by_file[&RepoPath::from_reference("a.rs").unwrap()]
+            blocks_by_file[&RepoPath::from_reference("a.rs")?]
                 .blocks_with_context
                 .iter()
                 .map(|b| { (b.block.name().unwrap(), b.is_content_modified) })
@@ -867,7 +921,7 @@ mod parse_blocks_tests {
             &[("first_from_a", false), ("second_from_a", false)]
         );
         assert_eq!(
-            blocks_by_file[&RepoPath::from_reference("b.rs").unwrap()]
+            blocks_by_file[&RepoPath::from_reference("b.rs")?]
                 .blocks_with_context
                 .iter()
                 .map(|b| { (b.block.name().unwrap(), b.is_content_modified) })
@@ -903,9 +957,10 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &parsers,
             HashMap::new(),
-        )?;
+        )?
+        .blocks;
 
-        let content_a = &blocks_by_file[&RepoPath::from_reference("a.rs").unwrap()].file_content;
+        let content_a = &blocks_by_file[&RepoPath::from_reference("a.rs")?].file_content;
         assert_eq!(content_a, file_a_contents);
         Ok(())
     }
@@ -929,11 +984,12 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &parsers,
             HashMap::from([("rust".into(), "rs".into())]),
-        )?;
+        )?
+        .blocks;
 
         assert_eq!(blocks_by_file.len(), 1);
         assert_eq!(
-            blocks_by_file[&RepoPath::from_reference("a.rust").unwrap()]
+            blocks_by_file[&RepoPath::from_reference("a.rust")?]
                 .blocks_with_context
                 .len(),
             1
@@ -952,7 +1008,8 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &HashMap::new(),
             HashMap::new(),
-        )?;
+        )?
+        .blocks;
 
         assert_eq!(blocks.len(), 0);
         Ok(())
@@ -991,11 +1048,12 @@ mod parse_blocks_tests {
             &path_checker,
             &language_parsers()?,
             HashMap::new(),
-        )?;
+        )?
+        .blocks;
 
         assert_eq!(blocks.len(), 1);
-        assert!(blocks.contains_key(&RepoPath::from_reference("allowed.rs").unwrap()));
-        assert!(!blocks.contains_key(&RepoPath::from_reference("ignored.rs").unwrap()));
+        assert!(blocks.contains_key(&RepoPath::from_reference("allowed.rs")?));
+        assert!(!blocks.contains_key(&RepoPath::from_reference("ignored.rs")?));
         Ok(())
     }
 
@@ -1044,7 +1102,8 @@ mod parse_blocks_tests {
             &FakePathChecker::with_ignored_paths(HashSet::from(["vendor/gone.py".to_string()])),
             &language_parsers()?,
             HashMap::new(),
-        )?;
+        )?
+        .blocks;
         assert!(blocks.is_empty());
         Ok(())
     }
@@ -1067,7 +1126,8 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &language_parsers()?,
             HashMap::new(),
-        )?;
+        )?
+        .blocks;
         assert!(blocks.is_empty());
         Ok(())
     }
@@ -1082,7 +1142,8 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &HashMap::new(),
             HashMap::new(),
-        )?;
+        )?
+        .blocks;
 
         assert_eq!(blocks.len(), 0);
         Ok(())
@@ -1398,12 +1459,13 @@ mod supported_languages_tests {
             &FakePathChecker::allow_all(),
             &parsers,
             HashMap::new(),
-        )?;
+        )?
+        .blocks;
 
         for file_name in files.keys() {
             assert!(
                 !blocks_by_file
-                    .get(&RepoPath::from_reference(file_name).unwrap())
+                    .get(&RepoPath::from_reference(file_name)?)
                     .unwrap_or_else(|| panic!("No blocks found for file {file_name}"))
                     .blocks_with_context
                     .is_empty(),

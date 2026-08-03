@@ -11,6 +11,7 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
 - **Disable Validators**: `blockwatch -d check-ai`
 - **Enable Validators**: `blockwatch -e keep-sorted`
 - **Ignore Files**: `blockwatch --ignore "**/generated/**"`
+- **Report What Ran**: `blockwatch --verbosity summary` (or `full` for JSON on stdout)
 
 [//]: # (</block>)
 
@@ -166,6 +167,125 @@ With `--diff`, each block entry includes the `is_content_modified` boolean field
 ```
 
 [//]: # (</block>)
+
+## Run Reports
+
+By default `blockwatch` prints nothing when a run succeeds. That makes a check that passed look exactly like a check
+that never ran. Use `--verbosity` to see what was actually checked.
+
+| Level            | Output                                                           |
+|------------------|------------------------------------------------------------------|
+| `none` (default) | Nothing.                                                         |
+| `summary`        | One line of counts.                                              |
+| `full`           | A JSON report of every block and the validators that checked it. |
+
+The report goes to **stdout**. Violations go to **stderr**. A run can print both, and each one can be piped and parsed
+on its own.
+
+```shell
+blockwatch --verbosity summary
+blockwatch: 34/240 files, 61 blocks (3 unchecked), 73 checks, 0 violations
+```
+
+Reading that line:
+
+- `34/240 files` — 240 files were read, and 34 of them contain blocks.
+- `61 blocks (3 unchecked)` — 61 blocks were in scope, and no validator checked 3 of them.
+- `73 checks` — validators ran 73 times in total, once per block they applied to.
+- `0 violations` — nothing failed.
+
+A block goes unchecked for one of three reasons:
+
+- **It is only a reference target.** A block that carries nothing but a `name` exists so that other blocks can point at
+  it with `affects` or `same-as`. It declares no rule of its own, so nothing checks it. This is normal and needs no
+  fixing.
+- **An attribute name is misspelled.** `keep-sortd` matches no validator, so the block is skipped without complaint. A
+  `full` report shows each attribute as it was written, which is usually enough to spot the typo.
+- **The validator does not apply to this run.** `affects` only compares blocks that a diff has touched, so it checks
+  nothing during a full-tree scan.
+
+### Reports Under a Diff
+
+A diff scopes the report exactly as it scopes the run: only the blocks the diff touched are described. A block the diff
+never reached is *absent* from the report rather than listed with an empty `checks` array, so under a diff
+`blocks_unchecked` counts only blocks that were in scope and that nothing checked. This is the same rule
+`blockwatch list --diff` follows, so the two commands always agree on which blocks exist.
+
+Reference targets follow it too. When a block declares `affects` or `same-as`, its target is read from disk and
+compared — but the target appears in the report only if the diff touched it as well. A diff that changes the source
+alone therefore reports a single file, even though two were involved:
+
+```shell
+git diff --patch | blockwatch --verbosity summary
+blockwatch: 1/1 files, 1 blocks (0 unchecked), 1 checks, 1 violations
+```
+
+Nothing about the failure is hidden by this. The violation on stderr names both sides:
+
+```console
+Block fileA.py:a at line 1 is modified, but fileB.py:b is not
+```
+
+The division of labour is deliberate — the report describes what the run examined, and the violation explains what went
+wrong. Once the diff touches the target as well, it appears like any other block, with an empty `checks` array because a
+block that carries nothing but a `name` declares no rule of its own:
+
+```shell
+git diff --patch | blockwatch --verbosity summary
+blockwatch: 2/2 files, 2 blocks (1 unchecked), 1 checks, 0 violations
+```
+
+### Full Reports
+
+`--verbosity full` describes every block the same way `blockwatch list` does, and adds a `checks` array naming the
+validators that ran on it. A block checked by several validators lists all of them.
+
+```json
+{
+  "summary": {
+    "files_scanned": 240,
+    "files_with_blocks": 34,
+    "files_skipped": 179,
+    "blocks": 61,
+    "blocks_unchecked": 3,
+    "checks": 73,
+    "violations": 0,
+    "validators": {
+      "affects": 41,
+      "check-lua": 12,
+      "keep-sorted": 20
+    }
+  },
+  "files": {
+    "src/validators/check_ai.rs": [
+      {
+        "attributes": {
+          "affects": "docs/validators/check-ai.md:check-ai-env-vars",
+          "name": "check-ai-env-vars",
+          "same-as": "docs/validators/check-ai.md:check-ai-env-vars",
+          "same-as-pattern": "BLOCKWATCH_AI_[A-Z_]+"
+        },
+        "checks": [
+          "affects",
+          "same-as"
+        ],
+        "column": 4,
+        "is_content_modified": true,
+        "line": 31,
+        "name": "check-ai-env-vars"
+      }
+    ]
+  }
+}
+```
+
+Files are sorted by path, and each block's checks by validator name, so two runs over an unchanged tree print the same
+bytes.
+
+The report says which validators looked at a block, not what each one concluded. Violations are not repeated here; they
+stay on stderr, under the same file paths and line numbers.
+
+`--verbosity` cannot be combined with the `list` subcommand, because `list` already prints its own JSON to stdout.
 
 ## Exit Codes
 

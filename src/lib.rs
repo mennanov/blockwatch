@@ -7,15 +7,17 @@ pub mod flags;
 pub mod fs;
 pub mod language_parsers;
 pub mod repo_path;
+pub mod report;
 mod tag_parser;
 pub mod validators;
 
+/// A place in a source file.
 #[derive(Serialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct Position {
-    // 1-based line number.
-    line: usize,
-    // 1-based character (column) number.
-    character: usize,
+pub struct Position {
+    /// 1-based line number.
+    pub line: usize,
+    /// 1-based character (column) number.
+    pub character: usize,
 }
 
 impl Position {
@@ -35,6 +37,20 @@ mod test_utils {
     use std::collections::HashMap;
     use std::ops::Range;
     use std::sync::Arc;
+
+    /// The start line of every block a validator reported checking, in the order it checked them.
+    pub(crate) fn checked_lines(report: &crate::validators::ValidationReport) -> Vec<usize> {
+        report
+            .checked_blocks
+            .iter()
+            .map(|(_, position)| position.line)
+            .collect()
+    }
+
+    /// How many violations a validator reported, across every file.
+    pub(crate) fn violation_count(report: &crate::validators::ValidationReport) -> usize {
+        report.violations.values().map(Vec::len).sum()
+    }
 
     /// Finds the byte range of the first occurrence of a substring within a string.
     ///
@@ -91,7 +107,8 @@ mod test_utils {
                 &parsers,
                 HashMap::new(),
             )
-            .unwrap(),
+            .unwrap()
+            .blocks,
             parsers,
         ))
     }

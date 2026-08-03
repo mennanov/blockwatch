@@ -2,7 +2,8 @@ use crate::blocks::{Block, BlockWithContext, FileBlocks, parse_single_file};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    self, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
+    self, ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation,
+    ViolationRange,
 };
 use anyhow::{Context, anyhow};
 use regex::Regex;
@@ -27,8 +28,8 @@ impl<Fs: FileSystem + 'static> ValidatorSync for SameAsValidator<Fs> {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,
-    ) -> anyhow::Result<HashMap<RepoPath, Vec<Violation>>> {
-        let mut violations: HashMap<RepoPath, Vec<Violation>> = HashMap::new();
+    ) -> anyhow::Result<ValidationReport> {
+        let mut report = ValidationReport::default();
         // Caches files read from disk so each is parsed at most once. `validate` runs on a single
         // thread, so no synchronization is needed.
         let mut cache: HashMap<RepoPath, FileBlocks> = HashMap::new();
@@ -52,6 +53,7 @@ impl<Fs: FileSystem + 'static> ValidatorSync for SameAsValidator<Fs> {
                             bwc.block.start_tag_position_range.start().line,
                         )
                     })?;
+                let mut block_violations = Vec::new();
                 for (target_file_opt, target_name) in references {
                     let target_file = target_file_opt.unwrap_or_else(|| file_path.clone());
                     let target_items = resolve_target_items(
@@ -62,16 +64,13 @@ impl<Fs: FileSystem + 'static> ValidatorSync for SameAsValidator<Fs> {
                         &target_name,
                     )?;
                     let Some(target_items) = target_items else {
-                        violations
-                            .entry(file_path.clone())
-                            .or_default()
-                            .push(create_violation(
-                                file_path,
-                                &bwc.block,
-                                &target_file,
-                                &target_name,
-                                "target block not found",
-                            )?);
+                        block_violations.push(create_violation(
+                            file_path,
+                            &bwc.block,
+                            &target_file,
+                            &target_name,
+                            "target block not found",
+                        )?);
                         continue;
                     };
                     let reason = match &source_items {
@@ -82,21 +81,19 @@ impl<Fs: FileSystem + 'static> ValidatorSync for SameAsValidator<Fs> {
                         },
                     };
                     if let Some(reason) = reason {
-                        violations
-                            .entry(file_path.clone())
-                            .or_default()
-                            .push(create_violation(
-                                file_path,
-                                &bwc.block,
-                                &target_file,
-                                &target_name,
-                                &reason,
-                            )?);
+                        block_violations.push(create_violation(
+                            file_path,
+                            &bwc.block,
+                            &target_file,
+                            &target_name,
+                            &reason,
+                        )?);
                     }
                 }
+                report.add_all(file_path, &bwc.block, block_violations);
             }
         }
-        Ok(violations)
+        Ok(report)
     }
 }
 
@@ -353,9 +350,9 @@ mod validate_tests {
     use crate::diff_parser::LineChange;
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::merge_validation_contexts;
     use crate::test_utils::validation_context;
     use crate::test_utils::validation_context_with_changes;
+    use crate::test_utils::{checked_lines, merge_validation_contexts, violation_count};
 
     /// Build a validator with a fake filesystem seeded with `files` (path, contents). Used by every
     /// same-as unit test; pass `&[]` when the target is in-scope (no disk read).
@@ -373,7 +370,7 @@ mod validate_tests {
             "config.py",
             "# <block same-as=\":b\">\nvalue = 10\n# </block>\n# <block name=\"b\">\nvalue = 10\n# </block>",
         );
-        assert!(validator(&[]).validate(context)?.is_empty());
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
         Ok(())
     }
 
@@ -383,7 +380,7 @@ mod validate_tests {
             "config.py",
             "# <block same-as=\":b\">\nvalue = 10\n# </block>\n# <block name=\"b\">\nvalue = 10\n# </block>",
         );
-        assert!(validator(&[]).validate(context)?.is_empty());
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
         Ok(())
     }
 
@@ -393,9 +390,9 @@ mod validate_tests {
             "config.py",
             "# <block same-as=\":b\">\nvalue = 10\n# </block>\n# <block name=\"b\">\nvalue = 20\n# </block>",
         );
-        let violations = validator(&[]).validate(context)?;
+        let violations = validator(&[]).validate(context)?.violations;
         let file = violations
-            .get(&RepoPath::from_reference("config.py").unwrap())
+            .get(&RepoPath::from_reference("config.py")?)
             .unwrap();
         assert_eq!(file.len(), 1);
         assert_eq!(file[0].code, "same-as");
@@ -411,7 +408,7 @@ mod validate_tests {
                 "[//]: # (<block name=\"doc\">)\n\nX\n\n[//]: # (</block>)",
             ),
         ]);
-        assert!(validator(&[]).validate(context)?.is_empty());
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
         Ok(())
     }
 
@@ -421,10 +418,12 @@ mod validate_tests {
         let context = validation_context("config.py", source);
         // The file exists but has no block named "nope"; confirming its absence requires reading the
         // full file, so the filesystem is seeded with it.
-        let violations = validator(&[("config.py", source)]).validate(context)?;
+        let violations = validator(&[("config.py", source)])
+            .validate(context)?
+            .violations;
         assert_eq!(
             violations
-                .get(&RepoPath::from_reference("config.py").unwrap())
+                .get(&RepoPath::from_reference("config.py")?)
                 .unwrap()
                 .len(),
             1
@@ -440,7 +439,7 @@ mod validate_tests {
             "b.md",
             "[//]: # (<block name=\"doc\">)\n\nX\n\n[//]: # (</block>)",
         )]);
-        assert!(v.validate(context)?.is_empty());
+        assert!(v.validate(context)?.violations.is_empty());
         Ok(())
     }
 
@@ -459,7 +458,7 @@ mod validate_tests {
             }],
         );
         let v = validator(&[("config.py", source)]);
-        assert!(v.validate(context)?.is_empty());
+        assert!(v.validate(context)?.violations.is_empty());
         Ok(())
     }
 
@@ -475,7 +474,7 @@ mod validate_tests {
                 "[//]: # (<block name=\"langs\" same-as-pattern=\"[a-z]+\">)\n\nrust\ngo\n\n[//]: # (</block>)",
             ),
         ]);
-        assert!(validator(&[]).validate(context)?.is_empty());
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
         Ok(())
     }
 
@@ -491,7 +490,7 @@ mod validate_tests {
                 "[//]: # (<block name=\"langs\" same-as-pattern=\"[a-z]+\">)\n\ngo\n\n[//]: # (</block>)",
             ),
         ]);
-        assert_eq!(validator(&[]).validate(context)?.len(), 1);
+        assert_eq!(validator(&[]).validate(context)?.violations.len(), 1);
         Ok(())
     }
 
@@ -507,7 +506,7 @@ mod validate_tests {
                 "[//]: # (<block name=\"l\" same-as-pattern=\"[a-z]+\">)\n\nrust\ngo\n\n[//]: # (</block>)",
             ),
         ]);
-        assert_eq!(validator(&[]).validate(context)?.len(), 1);
+        assert_eq!(validator(&[]).validate(context)?.violations.len(), 1);
         Ok(())
     }
 
@@ -517,10 +516,8 @@ mod validate_tests {
             "a.rs",
             "// <block same-as=\":b\" same-as-pattern=\"(?P<value>[0-9]+)\" same-as-mode=\"single\">\n1\n2\n// </block>\n// <block name=\"b\">\n1\n// </block>",
         );
-        let violations = validator(&[]).validate(context)?;
-        let file = violations
-            .get(&RepoPath::from_reference("a.rs").unwrap())
-            .unwrap();
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
         assert_eq!(file.len(), 1);
         assert_eq!(file[0].code, "same-as");
         Ok(())
@@ -538,7 +535,7 @@ mod validate_tests {
                 "// <block name=\"port\" same-as-pattern=\"(?P<value>[0-9.]+)\">\n8080.0\n// </block>",
             ),
         ]);
-        assert!(validator(&[]).validate(context)?.is_empty());
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
         Ok(())
     }
 
@@ -550,10 +547,8 @@ mod validate_tests {
             "a.rs",
             "// <block same-as=\":b\" same-as-pattern=\"(?P<value>\\w+)\" same-as-format=\"numeric\">\nabc\n// </block>\n// <block name=\"b\">\n1\n// </block>",
         );
-        let violations = validator(&[]).validate(context)?;
-        let file = violations
-            .get(&RepoPath::from_reference("a.rs").unwrap())
-            .unwrap();
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
         assert_eq!(file.len(), 1);
         assert_eq!(file[0].code, "same-as");
         Ok(())
@@ -583,7 +578,7 @@ mod validate_tests {
                 "// <block name=\"vars\" same-as-pattern=\"(?P<value>[A-Z_]+)\">\nAPI_KEY\nAPI_URL\n// </block>",
             ),
         ]);
-        assert!(validator(&[]).validate(context)?.is_empty());
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
         Ok(())
     }
 
@@ -599,9 +594,9 @@ mod validate_tests {
                 "// <block name=\"vars\" same-as-pattern=\"(?P<value>[A-Z_]+)\">\nAPI_KEY\n// </block>",
             ),
         ]);
-        let violations = validator(&[]).validate(context)?;
+        let violations = validator(&[]).validate(context)?.violations;
         let file = violations
-            .get(&RepoPath::from_reference("test.rs").unwrap())
+            .get(&RepoPath::from_reference("test.rs")?)
             .unwrap();
         assert_eq!(file.len(), 1);
         assert_eq!(file[0].code, "same-as");
@@ -622,7 +617,27 @@ mod validate_tests {
                 "// <block name=\"vars\" same-as-pattern=\"(?P<value>[A-Z_]+)\">\nAPI_KEY\n// </block>",
             ),
         ]);
-        assert_eq!(validator(&[]).validate(context)?.len(), 1);
+        assert_eq!(validator(&[]).validate(context)?.violations.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn validate_records_a_check_for_every_examined_block() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block name="source" same-as=":target">
+alpha
+# </block>
+# <block name="target">
+alpha
+# </block>"#,
+        );
+
+        let report = validator(&[]).validate(context)?;
+
+        // Only the block with the `same-as` attribute is checked. The target block is not.
+        assert_eq!(checked_lines(&report), vec![1]);
+        assert_eq!(violation_count(&report), 0);
         Ok(())
     }
 }

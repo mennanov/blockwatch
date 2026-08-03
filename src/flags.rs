@@ -5,6 +5,27 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 
+/// How much a run reports about what it checked.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Verbosity {
+    /// Print no report.
+    #[default]
+    None,
+    /// Print a one-line summary of the run.
+    Summary,
+    /// Print a JSON report of every block in scope and the validators that checked it.
+    Full,
+}
+
+impl std::fmt::Display for Verbosity {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        clap::ValueEnum::to_possible_value(self)
+            .expect("every variant has a value")
+            .get_name()
+            .fmt(formatter)
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(
     author,
@@ -88,6 +109,16 @@ pub struct Args {
         global = true,
     )]
     pub ignore: Vec<String>,
+
+    /// How much to report about what the run checked. Printed to stdout.
+    #[arg(
+        long = "verbosity",
+        value_name = "LEVEL",
+        value_enum,
+        default_value_t = Verbosity::None,
+        global = true,
+    )]
+    pub verbosity: Verbosity,
 
     /// Glob patterns to filter files.
     #[arg(value_name = "GLOBS")]
@@ -173,6 +204,13 @@ impl Args {
         if !self.disabled_validators.is_empty() && !self.enabled_validators.is_empty() {
             anyhow::bail!("--enable and --disable flags must not be set at the same time");
         }
+        // `list` already prints JSON to stdout. Two JSON documents on one stream cannot be parsed.
+        if self.command.is_some() && self.verbosity != Verbosity::None {
+            anyhow::bail!(
+                "--verbosity is not supported by the `list` subcommand; `list` already reports \
+                 every block it found"
+            );
+        }
 
         Ok(())
     }
@@ -199,4 +237,26 @@ fn parse_validator(value: &str) -> anyhow::Result<String> {
                 validators.join(", ")
             )
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(argv: &[&str]) -> anyhow::Result<Args> {
+        Ok(Args::try_parse_from(argv)?)
+    }
+
+    #[test]
+    fn verbosity_is_rejected_with_the_list_subcommand() -> anyhow::Result<()> {
+        let args = parse(&["blockwatch", "list", "--verbosity", "full"])?;
+        let error = args
+            .validate(&HashSet::new())
+            .expect_err("--verbosity must not be accepted alongside `list`");
+        assert!(
+            error.to_string().contains("`list` subcommand"),
+            "unexpected error: {error}"
+        );
+        Ok(())
+    }
 }
