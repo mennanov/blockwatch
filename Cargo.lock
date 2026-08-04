@@ -245,7 +245,7 @@ checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
 
 [[package]]
 name = "blockwatch"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "assert_cmd",
