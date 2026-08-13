@@ -8,9 +8,15 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Enforces `affects="file:name"`: when a block's content changes, every block it declares it
+/// affects must have changed in the same diff.
+///
+/// E.g., catches a constant edited without its documentation, or an enum extended without its
+/// switch statement.
 pub(crate) struct AffectsValidator {}
 
 impl AffectsValidator {
+    /// Creates the validator. It is stateless; all input arrives through the validation context.
     pub(super) fn new() -> Self {
         Self {}
     }
@@ -91,9 +97,12 @@ impl validators::ValidatorSync for AffectsValidator {
     }
 }
 
+/// Selects [`AffectsValidator`] for blocks that carry an `affects` attribute *and* were modified —
+/// an unchanged block places no obligation on anything.
 pub(crate) struct AffectsValidatorDetector();
 
 impl AffectsValidatorDetector {
+    /// Creates the detector. Registered in [`crate::validators::detector_factories`].
     pub fn new() -> Self {
         Self {}
     }

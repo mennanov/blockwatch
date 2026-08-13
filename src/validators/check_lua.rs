@@ -38,11 +38,18 @@ fn lua_from_env() -> Lua {
     // </block>
 }
 
+/// Enforces `check-lua="path/to/script.lua"`: runs a user-supplied Lua script over the block's
+/// content, for project-specific rules the built-in validators cannot express.
+///
+/// Needs a filesystem to read the script, which is resolved inside the repository like any other
+/// referenced file. How much of the Lua standard library the script may use is set by
+/// `BLOCKWATCH_LUA_MODE`.
 pub(crate) struct CheckLuaValidator<Fs: FileSystem> {
     file_system: Arc<Fs>,
 }
 
 impl<Fs: FileSystem + 'static> CheckLuaValidator<Fs> {
+    /// Creates the validator over the filesystem it will read scripts from.
     pub(super) fn new(file_system: Arc<Fs>) -> Self {
         Self { file_system }
     }
@@ -328,9 +335,11 @@ fn block_content<'c>(
     Ok(content)
 }
 
+/// Selects [`CheckLuaValidator`] for blocks carrying a `check-lua` attribute.
 pub(crate) struct CheckLuaValidatorDetector;
 
 impl CheckLuaValidatorDetector {
+    /// Creates the detector. Registered in [`crate::validators::detector_factories`].
     pub fn new() -> Self {
         Self
     }

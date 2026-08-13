@@ -32,6 +32,9 @@ pub trait ValidatorAsync: Send + Sync {
     async fn validate(&self, context: Arc<ValidationContext>) -> anyhow::Result<ValidationReport>;
 }
 
+/// The same contract as [`ValidatorAsync`] for validators that need no I/O beyond the filesystem,
+/// so the common case runs on plain threads and no Tokio runtime has to be started if no async
+/// validators are involved.
 pub trait ValidatorSync: Send + Sync {
     fn validate(&self, context: Arc<ValidationContext>) -> anyhow::Result<ValidationReport>;
 }
@@ -53,12 +56,21 @@ pub enum ValidatorType {
     Async(Box<dyn ValidatorAsync>),
 }
 
+/// One rule breach found in one block: what is wrong, where, and how severe it is.
+///
+/// Fields are private because the public shape of a violation is [`SimpleDiagnostic`], the form
+/// that gets serialized for editors and CI.
 #[derive(Debug)]
 pub struct Violation {
+    /// Where to underline in the file — normally the block's start tag, or the offending line.
     range: ViolationRange,
+    /// The name of the validator that reported it, e.g. `"keep-sorted"`.
     code: String,
+    /// Human-readable explanation, printed to the developer.
     message: String,
+    /// Decides whether this breach fails the run; see [`BlockSeverity`].
     severity: BlockSeverity,
+    /// Validator-specific details for tools, e.g. the expected and actual line count.
     data: Option<serde_json::Value>,
 }
 
@@ -135,6 +147,8 @@ impl ValidationReport {
 pub struct ValidationLog {
     /// Violations grouped by the file they were found in.
     pub violations: HashMap<RepoPath, Vec<Violation>>,
+    /// Every block that was examined, and by which validators. BTreeMap is used so the
+    /// `--verbosity` report comes out in a stable order regardless of the validators order.
     pub checked_blocks: BTreeMap<RepoPath, BTreeMap<Position, BTreeSet<&'static str>>>,
 }
 
@@ -171,6 +185,7 @@ impl ValidationLog {
     }
 }
 
+/// The span an editor should highlight for a violation. Both ends are 1-based and inclusive.
 #[derive(Serialize, Debug, PartialEq)]
 pub struct ViolationRange {
     start: Position,
@@ -178,6 +193,7 @@ pub struct ViolationRange {
 }
 
 impl ViolationRange {
+    /// Creates a range from its two endpoints, which must be in the same file.
     pub(crate) fn new(start: Position, end: Position) -> Self {
         Self { start, end }
     }
@@ -198,15 +214,21 @@ pub struct SimpleDiagnostic<'a> {
 }
 
 impl SimpleDiagnostic<'_> {
+    /// The severity, which the caller uses to decide the process exit code.
     pub fn severity(&self) -> BlockSeverity {
         self.severity
     }
 }
 
+/// Everything the validators are given to work with, shared read-only across all of them.
+///
+/// Built once per run and handed out as an `Arc`, because validators run concurrently on separate
+/// threads and each needs the whole picture: a rule such as `affects` has to see blocks in files
+/// other than the one it started from.
 pub struct ValidationContext {
-    // Blocks with their corresponding source file contents grouped by filename.
+    /// Blocks with their corresponding source file contents grouped by filename.
     pub(crate) blocks: HashMap<RepoPath, FileBlocks>,
-    // Language parsers per file type, used by validators to parse referenced source files.
+    /// Language parsers per file type, used by validators to parse referenced source files.
     pub(crate) parsers: LanguageParsers,
 }
 
@@ -344,6 +366,14 @@ pub fn detector_factories<Fs: FileSystem + 'static>() -> Vec<(&'static str, Dete
     ]
 }
 
+/// Instantiates exactly the validators the blocks in `context` call for.
+///
+/// A validator is created at most once, no matter how many blocks use it, and scanning stops as
+/// soon as every candidate has been detected. Returning sync and async validators separately lets
+/// the caller skip starting a Tokio runtime when no async validator is present.
+///
+/// `enabled_validators` takes precedence over `disabled_validators`: when it is non-empty, only the
+/// validators it names are considered. Passing both is rejected earlier, when the flags are parsed.
 pub fn detect_validators<Fs: FileSystem + 'static>(
     context: &ValidationContext,
     detectors: &[(&'static str, DetectorFactory<Fs>)],

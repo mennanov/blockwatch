@@ -38,9 +38,14 @@ impl SortFormat {
     }
 }
 
+/// Enforces `keep-sorted`: the non-empty lines inside the block must be in ascending order.
+///
+/// The `keep-sorted` attribute's value optionally supplies a regex selecting the part of each line
+/// to compare, so entries can be sorted by a key rather than by the whole line.
 pub(crate) struct KeepSortedValidator {}
 
 impl KeepSortedValidator {
+    /// Creates the validator. It is stateless; all input arrives through the validation context.
     pub(super) fn new() -> Self {
         Self {}
     }
@@ -226,9 +231,11 @@ impl ValidatorSync for KeepSortedValidator {
     }
 }
 
+/// Selects [`KeepSortedValidator`] for blocks carrying a `keep-sorted` attribute.
 pub(crate) struct KeepSortedValidatorDetector();
 
 impl KeepSortedValidatorDetector {
+    /// Creates the detector. Registered in [`crate::validators::detector_factories`].
     pub fn new() -> Self {
         Self {}
     }

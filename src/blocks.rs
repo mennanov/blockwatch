@@ -18,14 +18,17 @@ const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
 /// Represents a `block` tag parsed from the source file comments.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Block {
-    // Optional attributes in the `block` tag.
+    /// Optional attributes in the `block` tag. Their names are what selects the validators that
+    /// will check this block (`affects`, `keep-sorted`, …).
     pub(crate) attributes: HashMap<String, String>,
-    // Block's start tag position range ("<" symbol to ">" symbol).
+    /// Block's start tag position range ("<" symbol to ">" symbol). Doubles as the block's identity
+    /// in reports, since a block need not have a `name`.
     pub(crate) start_tag_position_range: RangeInclusive<Position>,
-    // Block's content substring range in the original source code.
+    /// Block's content substring range in the original source code.
     pub(crate) content_bytes_range: Range<usize>,
-    // Block's content position range in the original source code (from the end of the comment with
-    // the start tag to the beginning of the comment with the end tag).
+    /// Block's content position range in the original source code (from the end of the comment with
+    /// the start tag to the beginning of the comment with the end tag). Compared against the diff's
+    /// line changes to decide whether the block was touched.
     pub(crate) content_position_range: Range<Position>,
 }
 
@@ -213,9 +216,13 @@ impl Block {
 #[strum(ascii_case_insensitive)]
 #[repr(u8)]
 pub enum BlockSeverity {
+    /// The default. A violation at this level makes the run exit non-zero, failing a hook or CI.
     Error = 1,
+    /// Reported like an error but does not affect the exit code.
     Warning = 2,
+    /// Reported for information only; does not affect the exit code.
     Info = 3,
+    /// The weakest level, for suggestions, does not affect the exit code.
     Hint = 4,
 }
 
@@ -256,10 +263,12 @@ impl FileBlocks {
 /// Represents a block with its corresponding validation context.
 #[derive(Debug, Clone)]
 pub struct BlockWithContext {
+    /// The block itself, as parsed from the source comment.
     pub(crate) block: Block,
-    // Whether the block's tag is modified (computed from the input diff).
+    /// Whether the block's tag is modified (computed from the input diff).
     pub(crate) _is_start_tag_modified: bool,
-    // Whether the content of the block is modified (computed from the input diff).
+    /// Whether the content of the block is modified (computed from the input diff). Validators such
+    /// as `affects` fire only for blocks whose content actually changed.
     pub(crate) is_content_modified: bool,
 }
 
@@ -275,7 +284,10 @@ pub struct ScanStats {
 /// The blocks found in each file, together with the counts of files the scan looked at.
 #[derive(Debug, Default)]
 pub struct ParsedBlocks {
+    /// The blocks to validate, grouped by the file they were found in.
     pub blocks: HashMap<RepoPath, FileBlocks>,
+    /// File counts for the run report; carried alongside the blocks because only the walk knows
+    /// how many files it looked at but produced no blocks for.
     pub stats: ScanStats,
 }
 
@@ -484,6 +496,8 @@ mod block_severity_from_str_tests {
     use crate::blocks::{Block, BlockSeverity};
     use std::collections::HashMap;
 
+    /// Builds a contentless block carrying only a `severity` attribute to test how that attribute
+    /// is parsed.
     pub(crate) fn new_empty_block_with_severity(severity: &str) -> Block {
         Block::new(
             HashMap::from([("severity".into(), severity.into())]),

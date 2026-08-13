@@ -4,7 +4,9 @@ use globset::GlobSet;
 use ignore::Walk;
 use std::path::{Path, PathBuf};
 
-// `Send + Sync` so an `Arc<Fs>` can be shared into validator threads (std::thread and Tokio tasks).
+/// Every read the program performs, behind a trait.
+///
+/// `Send + Sync` so an `Arc<Fs>` can be shared into validator threads (std::thread and Tokio).
 pub trait FileSystem: Send + Sync {
     /// Reads the entire contents of a file into a string.
     fn read_to_string(&self, path: &Path) -> anyhow::Result<String>;
@@ -25,6 +27,11 @@ pub trait PathChecker {
     fn should_ignore(&self, path: &Path) -> bool;
 }
 
+/// The real filesystem, confined to one VCS repository.
+///
+/// Block attributes name other files (`affects="docs/cli.md:intro"`, `check-lua="scripts/x.lua"`),
+/// and those names come from the files being linted. Routing every read through this type means a
+/// crafted attribute cannot make the linter read outside the repository.
 pub struct FileSystemImpl {
     /// The repository root, canonicalized so that containment checks compare like with like.
     root_path: PathBuf,
@@ -112,6 +119,10 @@ pub struct PathCheckerImpl {
 }
 
 impl PathCheckerImpl {
+    /// Builds a checker from the compiled globs of the positional file filters and of `--ignore`.
+    ///
+    /// An empty `glob_set` matches nothing, so callers treat "no filters given" as "every file" on
+    /// their own rather than relying on this type.
     pub fn new(glob_set: GlobSet, ignored_glob_set: GlobSet) -> Self {
         Self {
             glob_set,
@@ -235,6 +246,8 @@ mod file_system_impl_tests {
     }
 }
 
+/// In-memory stand-ins for [`FileSystem`] and [`PathChecker`], so unit tests can describe a source
+/// tree as a map of strings instead of creating temporary directories.
 #[cfg(test)]
 pub mod test_utils {
     use crate::fs::{FileSystem, PathChecker};
@@ -242,11 +255,16 @@ pub mod test_utils {
     use std::collections::{HashMap, HashSet};
     use std::path::Path;
 
+    /// A source tree held in memory, keyed by path exactly as it is spelled by the caller.
+    ///
+    /// Unlike [`super::FileSystemImpl`] it enforces no root confinement, so tests that care about
+    /// containment must exercise the real implementation.
     pub(crate) struct FakeFileSystem {
         files: HashMap<String, String>,
     }
 
     impl FakeFileSystem {
+        /// Creates a fake tree from a path -> contents map.
         pub(crate) fn new(files: HashMap<String, String>) -> Self {
             Self { files }
         }
@@ -271,15 +289,19 @@ pub mod test_utils {
         }
     }
 
+    /// A path filter driven by an explicit deny list instead of compiled globs, so a test can
+    /// exclude a file without writing glob patterns.
     pub(crate) struct FakePathChecker {
         ignored_paths: HashSet<String>,
     }
 
     impl FakePathChecker {
+        /// Allows every path except those listed.
         pub(crate) fn with_ignored_paths(ignored_paths: HashSet<String>) -> Self {
             Self { ignored_paths }
         }
 
+        /// Allows every path — the default for tests that are not about filtering.
         pub(crate) fn allow_all() -> Self {
             Self::with_ignored_paths(HashSet::new())
         }

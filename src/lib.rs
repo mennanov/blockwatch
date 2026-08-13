@@ -1,14 +1,22 @@
 use serde::Serialize;
 
 mod block_parser;
+/// The `Block` type and the repo walk that turns source files into blocks to validate.
 pub mod blocks;
+/// Reads a unified diff into the per-file line changes that decide which blocks are checked.
 pub mod diff_parser;
+/// Command-line arguments and the accessors that turn them into globs, filters, and extension maps.
 pub mod flags;
+/// File access and path filtering behind traits, so tests can substitute fakes for the real disk.
 pub mod fs;
+/// One tree-sitter-backed comment parser per supported language, keyed by file extension.
 pub mod language_parsers;
+/// `RepoPath`: the single spelling of a repository-relative file path used as a map key.
 pub mod repo_path;
+/// Renders the end-of-run report describing what was scanned and checked.
 pub mod report;
 mod tag_parser;
+/// The rules enforced on blocks (`affects`, `keep-sorted`, …) and the machinery that runs them.
 pub mod validators;
 
 /// A place in a source file.
@@ -21,6 +29,10 @@ pub struct Position {
 }
 
 impl Position {
+    /// Creates a position from a 1-based `line` and `character`.
+    ///
+    /// Callers converting from a 0-based source (tree-sitter rows/columns, diff offsets) must add
+    /// one first.
     pub fn new(line: usize, character: usize) -> Self {
         Self { line, character }
     }
@@ -113,6 +125,8 @@ mod test_utils {
         ))
     }
 
+    /// Combines several single-file contexts into one, so a test can exercise a validator that
+    /// resolves references across files.
     pub(crate) fn merge_validation_contexts(
         contexts: Vec<Arc<ValidationContext>>,
     ) -> Arc<ValidationContext> {

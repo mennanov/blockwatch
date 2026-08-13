@@ -12,13 +12,19 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+/// Enforces `same-as="file:name"`: the block's content must equal that of the blocks it names.
+///
+/// Where `affects` only checks that linked blocks were edited together, this compares their actual
+/// contents, catching a constant or version duplicated in two places that have drifted apart. That
+/// is also why it runs on a full-tree scan and not only on the blocks a diff touched.
 pub(crate) struct SameAsValidator<Fs: FileSystem> {
-    // Reads files containing referenced target blocks that are not already parsed into the
-    // validation context.
+    /// Reads files containing referenced target blocks that are not already parsed into the
+    /// validation context.
     file_system: Arc<Fs>,
 }
 
 impl<Fs: FileSystem + 'static> SameAsValidator<Fs> {
+    /// Creates the validator over the filesystem it will read referenced files from.
     pub(super) fn new(file_system: Arc<Fs>) -> Self {
         Self { file_system }
     }
@@ -320,9 +326,11 @@ fn create_violation(
     ))
 }
 
+/// Selects [`SameAsValidator`] for blocks carrying a `same-as` attribute.
 pub(crate) struct SameAsValidatorDetector();
 
 impl SameAsValidatorDetector {
+    /// Creates the detector. Registered in [`crate::validators::detector_factories`].
     pub fn new() -> Self {
         Self()
     }

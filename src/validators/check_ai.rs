@@ -37,6 +37,10 @@ const API_URL_ENV_VAR_NAME: &str = "BLOCKWATCH_AI_API_URL";
 const API_MODEL_ENV_VAR_NAME: &str = "BLOCKWATCH_AI_MODEL";
 // </block>
 
+/// Enforces `check-ai="<condition>"`: asks a language model whether the block's content satisfies a
+/// condition stated in prose, for rules too fuzzy to express as a regex.
+///
+/// Async because each block costs a network round trip; blocks are checked concurrently.
 pub(crate) struct CheckAiValidator<C: AiClient> {
     client: Arc<C>,
 }
@@ -95,9 +99,12 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
     }
 }
 
+/// Selects [`CheckAiValidator`] for blocks carrying a `check-ai` attribute, building a client from
+/// the `BLOCKWATCH_AI_*` environment variables.
 pub(crate) struct CheckAiValidatorDetector();
 
 impl CheckAiValidatorDetector {
+    /// Creates the detector. Registered in [`crate::validators::detector_factories`].
     pub fn new() -> Self {
         Self {}
     }
@@ -175,6 +182,8 @@ fn create_violation(
 }
 
 impl<C: AiClient> CheckAiValidator<C> {
+    /// Creates the validator over a given client, which is what makes it testable without a
+    /// network call.
     pub(super) fn with_client(client: C) -> Self {
         Self {
             client: Arc::new(client),
@@ -214,6 +223,10 @@ struct CheckAiViolation<'a> {
     ai_message: Option<&'a str>,
 }
 
+/// The single call [`CheckAiValidator`] makes against a model provider.
+///
+/// Narrow on purpose: it hides prompt construction and response parsing behind one method, so the
+/// validator's own logic can be tested against a canned client.
 #[async_trait]
 pub(crate) trait AiClient: Send + Sync {
     /// Returns Ok(None) if the block satisfies the condition, Ok(Some(error_message)) otherwise.

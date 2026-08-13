@@ -9,9 +9,15 @@ use serde::Serialize;
 use std::path::Path;
 use std::sync::Arc;
 
+/// Enforces `line-count="<N"` and friends: the number of non-empty lines in the block must satisfy
+/// the given comparison.
+///
+/// Useful for keeping a section from silently growing past the size it was designed for — a code
+/// sample that must stay readable, or a list with a hard limit.
 pub(crate) struct LineCountValidator {}
 
 impl LineCountValidator {
+    /// Creates the validator. It is stateless; all input arrives through the validation context.
     pub(super) fn new() -> Self {
         Self {}
     }
@@ -114,9 +120,11 @@ fn create_violation(
     ))
 }
 
+/// Selects [`LineCountValidator`] for blocks carrying a `line-count` attribute.
 pub(crate) struct LineCountValidatorDetector();
 
 impl LineCountValidatorDetector {
+    /// Creates the detector. Registered in [`crate::validators::detector_factories`].
     pub fn new() -> Self {
         Self {}
     }

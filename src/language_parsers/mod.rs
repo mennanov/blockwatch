@@ -23,7 +23,8 @@ mod php;
 mod proto;
 mod python;
 mod ruby;
-// pub(crate) visibility is needed by the unit tests in block_parser.rs
+/// Rust comment parsing. Serves as the stand-in language for the block parser's own unit tests,
+/// which is why it alone is visible outside this module.
 pub(crate) mod rust;
 mod scala;
 mod sql;
@@ -43,8 +44,14 @@ use std::ops::Range;
 use std::sync::{Arc, Mutex};
 use tree_sitter::{Language, Node, Parser, Tree, TreeCursor};
 
+/// A parser for one language, shared between files and threads.
+///
+/// Each parser owns a mutable tree-sitter `Parser` and is therefore behind a `Mutex`; the `Arc`
+/// lets languages that share a grammar (`.cc` and `.cpp`, `.yaml` and `.yml`) share one instance.
 pub(crate) type LanguageParser = Arc<Mutex<Box<dyn BlocksParser>>>;
 
+/// Parsers keyed by file extension (or by the whole filename for extensionless files such as
+/// `Dockerfile`). Also serves as the list of extensions the CLI recognizes.
 pub type LanguageParsers = HashMap<OsString, LanguageParser>;
 
 /// Returns a map of all available language parsers by their file extensions.
@@ -313,15 +320,16 @@ impl<'source> Iterator for CommentsIterator<'source> {
 }
 
 #[derive(Debug, PartialEq)]
+/// A single comment extracted from a source file — the only place block tags may appear.
 pub(crate) struct Comment {
-    // Position range of the comment in the source.
+    /// Position range of the comment in the source.
     pub(crate) position_range: Range<Position>,
-    // Byte offset (i.e. position) of the comment in the source.
+    /// Byte offset (i.e. position) of the comment in the source.
     pub(crate) source_range: Range<usize>,
-    // The `comment_string` is expected to be the content of the comment with all language specific
-    // comment symbols like "//", "/**", "#", etc replaced with the corresponding number of
-    // whitespaces ("  " for "//", "   " for "/**", etc.) so that the length of the comment is
-    // preserved.
+    /// The `comment_string` is expected to be the content of the comment with all language specific
+    /// comment symbols like `//`, `/**`, `#`, etc replaced with the corresponding number of
+    /// whitespaces ("  " for "//", "   " for `/**`, etc.) so that the length of the comment is
+    /// preserved. Offsets into this text therefore map straight back onto the source file.
     pub(crate) comment_text: String,
 }
 

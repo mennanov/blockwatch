@@ -37,10 +37,15 @@ pub(crate) struct WinnowBlockTagParser<'source> {
 }
 
 impl<'source> WinnowBlockTagParser<'source> {
+    /// Parses `source` starting at byte offset `cursor`.
+    ///
+    /// Callers resume scanning a comment they have already partly consumed by passing back the
+    /// [`Self::cursor`] of the previous parser.
     pub(crate) fn new(source: &'source str, cursor: usize) -> Self {
         Self { source, cursor }
     }
 
+    /// The byte offset just past the last tag returned, for resuming the scan.
     pub(crate) fn cursor(&self) -> usize {
         self.cursor
     }

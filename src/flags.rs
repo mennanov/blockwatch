@@ -26,6 +26,11 @@ impl std::fmt::Display for Verbosity {
     }
 }
 
+/// The parsed command line.
+///
+/// Fields hold the raw strings clap collected; the accessors below turn them into the compiled
+/// glob sets, extension map and validator filters the rest of the program consumes. Flags are
+/// `global` so they may be written before or after a subcommand.
 #[derive(Parser, Debug)]
 #[command(
     author,
@@ -124,11 +129,13 @@ pub struct Args {
     #[arg(value_name = "GLOBS")]
     pub globs: Vec<String>,
 
+    /// The subcommand to run, if any. `None` means the default action: validate.
     #[command(subcommand)]
     pub command: Option<SubCommand>,
     // </block>
 }
 
+/// A mode that inspects blocks instead of validating them.
 #[derive(clap::Subcommand, Debug, Clone)]
 pub enum SubCommand {
     /// List all blocks found in the scanned files.

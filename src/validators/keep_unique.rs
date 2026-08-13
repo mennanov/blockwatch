@@ -8,6 +8,10 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
+/// Enforces `keep-unique`: no two non-empty lines inside the block may be equal.
+///
+/// The attribute's value optionally supplies a regex selecting the part of each line that must be
+/// unique, which is how lists of ids or keys are checked without regard to the rest of the line.
 pub(super) struct KeepUniqueValidator {}
 
 impl KeepUniqueValidator {
@@ -123,9 +127,11 @@ impl ValidatorSync for KeepUniqueValidator {
     }
 }
 
+/// Selects [`KeepUniqueValidator`] for blocks carrying a `keep-unique` attribute.
 pub(crate) struct KeepUniqueValidatorDetector();
 
 impl KeepUniqueValidatorDetector {
+    /// Creates the detector. Registered in [`crate::validators::detector_factories`].
     pub fn new() -> Self {
         Self {}
     }
