@@ -3,7 +3,7 @@ use crate::diff_parser::LineChange;
 use crate::fs::{FileSystem, PathChecker};
 use crate::language_parsers::{LanguageParser, LanguageParsers};
 use crate::repo_path::RepoPath;
-use anyhow::{Context, anyhow};
+use anyhow::{Context, anyhow, bail};
 use serde_repr::Serialize_repr;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -204,7 +204,7 @@ impl Block {
             .get("severity")
             .map_or(Ok(BlockSeverity::Error), |s| {
                 BlockSeverity::from_str(s.as_str())
-                    .context("Failed to parse \"severity\" attribute")
+                    .context(format!("Invalid \"severity\" attribute value \"{}\"", s))
             })
     }
 }
@@ -439,6 +439,9 @@ fn parse_file(
                 Ok(block) => block,
                 Err(error) => return Some(Err(error)),
             };
+            if let Err(err) = validate_block_syntax(&block, file_path) {
+                return Some(Err(err));
+            }
             let is_content_modified = block.content_intersects_with_any(line_changes);
             let is_start_tag_modified = block.start_tag_intersects_with_any(line_changes);
 
@@ -462,6 +465,53 @@ fn parse_file(
         file_content: source_code,
         blocks_with_context,
     }))
+}
+
+const RECOGNIZED_ATTRIBUTES: &[&str] = &[
+    // <block keep-sorted>
+    "affects",
+    "check-ai",
+    "check-ai-pattern",
+    "check-lua",
+    "check-lua-pattern",
+    "keep-sorted",
+    "keep-sorted-format",
+    "keep-sorted-pattern",
+    "keep-unique",
+    "keep-unique-pattern",
+    "line-count",
+    "line-pattern",
+    "name",
+    "same-as",
+    "same-as-format",
+    "same-as-mode",
+    "same-as-pattern",
+    "severity",
+    // </block>
+];
+
+/// Validates syntax for the given `block` and `file_path`.
+fn validate_block_syntax(block: &Block, file_path: &Path) -> anyhow::Result<()> {
+    for attr in block.attributes.keys() {
+        if !RECOGNIZED_ATTRIBUTES.contains(&attr.as_str()) {
+            bail!(
+                "Block {}:{} at line {}, column {} contains unrecognized attribute `{}`",
+                file_path.display(),
+                block.name_display(),
+                block.start_tag_position_range.start().line,
+                block.start_tag_position_range.start().character,
+                attr,
+            );
+        }
+    }
+    // Validate the `severity` attribute value.
+    block.severity().map(|_| ()).context(format!(
+        "Block {}:{} at line {}, column {} contains unrecognized severity value",
+        file_path.display(),
+        block.name_display(),
+        block.start_tag_position_range.start().line,
+        block.start_tag_position_range.start().character,
+    ))
 }
 
 fn parser_for_file_path<'p>(
@@ -1180,6 +1230,42 @@ mod parse_blocks_tests {
             parse_single_file(&file_system, Path::new("a.py"), &parsers, &HashMap::new())?
                 .expect("python is supported");
         assert_eq!(file_blocks.blocks_with_context.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_attribute_in_block_fails_with_error() -> anyhow::Result<()> {
+        let file_system = FakeFileSystem::new(HashMap::from([(
+            "a.py".to_string(),
+            "# <block name=\"x\" unknown-attr=\"value\">\n1\n# </block>".to_string(),
+        )]));
+        let parsers = language_parsers()?;
+        let file_blocks =
+            parse_single_file(&file_system, Path::new("a.py"), &parsers, &HashMap::new());
+
+        assert!(file_blocks.is_err());
+        assert_eq!(
+            file_blocks.unwrap_err().source().unwrap().to_string(),
+            "Block a.py:x at line 1, column 3 contains unrecognized attribute `unknown-attr`"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_severity_value_in_block_fails_with_error() -> anyhow::Result<()> {
+        let file_system = FakeFileSystem::new(HashMap::from([(
+            "a.py".to_string(),
+            "# <block severity=\"invalid-severity\">\n1\n# </block>".to_string(),
+        )]));
+        let parsers = language_parsers()?;
+        let file_blocks =
+            parse_single_file(&file_system, Path::new("a.py"), &parsers, &HashMap::new());
+
+        assert!(file_blocks.is_err());
+        assert_eq!(
+            file_blocks.unwrap_err().source().unwrap().to_string(),
+            "Block a.py:(unnamed) at line 1, column 3 contains unrecognized severity value"
+        );
         Ok(())
     }
 }

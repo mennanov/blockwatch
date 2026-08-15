@@ -116,7 +116,7 @@ index 1111111..2222222 100644
 +++ b/tests/testdata/check_lua_pattern.py
 @@ -1,5 +1,5 @@
  data = [
-     # <block check-lua="tests/testdata/check_lua_echo.lua" check-lua-pattern="zzz_no_match" expected="">
+     # <block check-lua="tests/testdata/check_lua_echo.lua" check-lua-pattern="zzz_no_match" name="">
 -    name: Alice, id: 42
 +    name: Bob, id: 42
      # </block>

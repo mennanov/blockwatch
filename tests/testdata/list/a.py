@@ -1,3 +1,3 @@
-# <block name="a" attr="val">
+# <block name="a">
 pass
 # </block>

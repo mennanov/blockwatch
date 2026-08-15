@@ -70,13 +70,12 @@ fn full_level_shows_a_block_no_validator_examined() {
     let output = cmd.output().unwrap();
 
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let block = &report["files"]["tests/testdata/verbosity/typo.py"][0];
+    let block = &report["files"]["tests/testdata/verbosity/noop.py"][0];
 
-    // A misspelled attribute matches no validator. The block is still listed, with an empty check
-    // list and the attribute as it was written.
-    assert_eq!(block["name"], "typo");
+    // A block carrying only a `name` declares no rule, so no validator claims it. It is still
+    // listed, with an empty check list, and it counts towards `blocks_unchecked`.
+    assert_eq!(block["name"], "noop");
     assert_eq!(block["checks"], serde_json::json!([]));
-    assert_eq!(block["attributes"]["keep-sortd"], "asc");
     assert_eq!(report["summary"]["blocks_unchecked"], 1);
 }
 

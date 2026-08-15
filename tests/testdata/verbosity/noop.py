@@ -1,5 +1,5 @@
 values = [
-    # <block name="typo" keep-sortd="asc">
+    # <block name="noop">
     'b',
     'a',
     # </block>

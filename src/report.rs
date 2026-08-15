@@ -123,7 +123,7 @@ mod tests {
 # <block name="sorted-only" keep-sorted="asc">
 'apple',
 # </block>
-# <block name="unchecked" keep-sortd="asc">
+# <block name="unchecked" keep-sorted="asc">
 'apple',
 # </block>"#;
 
@@ -249,7 +249,7 @@ mod tests {
                             "is_content_modified": true,
                             "attributes": {
                                 "name": "unchecked",
-                                "keep-sortd": "asc"
+                                "keep-sorted": "asc"
                             },
                             "checks": []
                         }

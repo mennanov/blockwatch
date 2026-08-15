@@ -45,7 +45,10 @@ end
     - `ctx.file` — the source file path, relative to the repository root and always separated by
       `/`, on every platform and in every run mode. A script may compare or pattern-match it without normalizing first.
     - `ctx.line` — the line number of the block's start tag.
-    - `ctx.attrs` — a table of all block attributes.
+    - `ctx.attrs` — the block's own attributes, keyed by attribute name, each value exactly as it was written in the
+      tag. A block tagged `<block check-lua="…" name="limits" severity="warning">` gives the script
+      `ctx.attrs["check-lua"]`, `ctx.attrs["name"]` and `ctx.attrs["severity"]`. Only BlockWatch's own attributes can
+      appear here.
     - `ctx.affects` — present only when the block also has an [`affects`](affects.md) attribute. A 1-based array of the
       blocks this block affects, each a table with `file`, `name`, and (trimmed)
       `content`. `file` uses the same format as `ctx.file`. References to blocks that do not exist are skipped.

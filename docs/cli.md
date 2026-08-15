@@ -199,10 +199,11 @@ A block goes unchecked for one of three reasons:
 - **It is only a reference target.** A block that carries nothing but a `name` exists so that other blocks can point at
   it with `affects` or `same-as`. It declares no rule of its own, so nothing checks it. This is normal and needs no
   fixing.
-- **An attribute name is misspelled.** `keep-sortd` matches no validator, so the block is skipped without complaint. A
-  `full` report shows each attribute as it was written, which is usually enough to spot the typo.
 - **The validator does not apply to this run.** `affects` only compares blocks that a diff has touched, so it checks
   nothing during a full-tree scan.
+- **The attributes do not add up to a rule.** A modifier such as `keep-sorted-pattern` only refines the validator it
+  belongs to; on a block with no `keep-sorted`, it has nothing to modify and no validator claims the block. A `full`
+  report lists every attribute as it was written, which is usually enough to see what is missing.
 
 ### Reports Under a Diff
 

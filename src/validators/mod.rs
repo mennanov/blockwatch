@@ -556,8 +556,8 @@ mod tests {
                             file_name.clone(),
                             vec![Violation::new(
                                 empty_testing_violation_range(),
-                                "fake-async".to_string(),
-                                "fake-async error message".to_string(),
+                                "check-ai".to_string(),
+                                "check-ai error message".to_string(),
                                 self.testing_block.severity().unwrap(),
                                 None,
                             )],
@@ -584,8 +584,8 @@ mod tests {
                             file_name.clone(),
                             vec![Violation::new(
                                 empty_testing_violation_range(),
-                                "fake-sync".to_string(),
-                                "fake-sync error message".to_string(),
+                                "keep-sorted".to_string(),
+                                "keep-sorted error message".to_string(),
                                 self.testing_block.severity().unwrap(),
                                 None,
                             )],
@@ -605,11 +605,7 @@ mod tests {
             block_with_context: &BlockWithContext,
             _file_system: &Arc<Fs>,
         ) -> anyhow::Result<Option<ValidatorType>> {
-            if block_with_context
-                .block
-                .attributes
-                .contains_key("fake-async")
-            {
+            if block_with_context.block.attributes.contains_key("check-ai") {
                 Ok(Some(ValidatorType::Async(Box::new(FakeAsyncValidator {
                     testing_block: Arc::new(empty_testing_block()),
                 }))))
@@ -629,7 +625,7 @@ mod tests {
             if block_with_context
                 .block
                 .attributes
-                .contains_key("fake-sync")
+                .contains_key("keep-sorted")
             {
                 Ok(Some(ValidatorType::Sync(Box::new(FakeSyncValidator {
                     testing_block: Arc::new(empty_testing_block()),
@@ -642,8 +638,8 @@ mod tests {
 
     fn detector_factories<Fs: FileSystem + 'static>() -> Vec<(&'static str, DetectorFactory<Fs>)> {
         vec![
-            ("fake-sync", || Box::new(FakeSyncValidatorDetector {})),
-            ("fake-async", || Box::new(FakeAsyncValidatorDetector {})),
+            ("keep-sorted", || Box::new(FakeSyncValidatorDetector {})),
+            ("check-ai", || Box::new(FakeAsyncValidatorDetector {})),
         ]
     }
 
@@ -653,12 +649,12 @@ mod tests {
         let context = merge_validation_contexts(vec![
             validation_context(
                 "example1.py",
-                r#"# <block fake-sync="condition A" fake-async="condition B">
+                r#"# <block keep-sorted="condition A" check-ai="condition B">
     # </block>"#,
             ),
             validation_context(
                 "example2.py",
-                r#"# <block fake-sync="condition C" fake-async="condition D">
+                r#"# <block keep-sorted="condition C" check-ai="condition D">
     # </block>"#,
             ),
         ]);
@@ -682,7 +678,7 @@ mod tests {
             .map(|v| v.code.as_str())
             .collect::<Vec<_>>();
         file1_violations.sort();
-        assert_eq!(file1_violations, vec!["fake-async", "fake-sync"]);
+        assert_eq!(file1_violations, vec!["check-ai", "keep-sorted"]);
         assert_eq!(
             violations[&RepoPath::from_reference("example2.py")?].len(),
             2
@@ -692,7 +688,7 @@ mod tests {
             .map(|v| v.code.as_str())
             .collect::<Vec<_>>();
         file2_violations.sort();
-        assert_eq!(file2_violations, vec!["fake-async", "fake-sync"]);
+        assert_eq!(file2_violations, vec!["check-ai", "keep-sorted"]);
         Ok(())
     }
 
@@ -701,12 +697,12 @@ mod tests {
         let context = merge_validation_contexts(vec![
             validation_context(
                 "example1.py",
-                r#"# <block fake-sync="condition A">
+                r#"# <block keep-sorted="condition A">
     # </block>"#,
             ),
             validation_context(
                 "example2.py",
-                r#"# <block fake-sync="condition B">
+                r#"# <block keep-sorted="condition B">
     # </block>"#,
             ),
         ]);
@@ -727,7 +723,7 @@ mod tests {
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example1.py")?][0].code,
-            "fake-sync"
+            "keep-sorted"
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example2.py")?].len(),
@@ -735,7 +731,7 @@ mod tests {
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example2.py")?][0].code,
-            "fake-sync"
+            "keep-sorted"
         );
         Ok(())
     }
@@ -746,12 +742,12 @@ mod tests {
         let context = merge_validation_contexts(vec![
             validation_context(
                 "example1.py",
-                r#"# <block fake-async="condition A">
+                r#"# <block check-ai="condition A">
     # </block>"#,
             ),
             validation_context(
                 "example2.py",
-                r#"# <block fake-async="condition B">
+                r#"# <block check-ai="condition B">
     # </block>"#,
             ),
         ]);
@@ -771,7 +767,7 @@ mod tests {
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example1.py")?][0].code,
-            "fake-async"
+            "check-ai"
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example2.py")?].len(),
@@ -779,7 +775,7 @@ mod tests {
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example2.py")?][0].code,
-            "fake-async"
+            "check-ai"
         );
         Ok(())
     }
@@ -789,13 +785,13 @@ mod tests {
     -> anyhow::Result<()> {
         let context = validation_context(
             "example1.py",
-            r#"# <block fake-sync="condition A" fake-async="condition B">
+            r#"# <block keep-sorted="condition A" check-ai="condition B">
     # </block>"#,
         );
         let (sync_validators, async_validators) = detect_validators(
             &context,
             &detector_factories(),
-            &HashSet::from(["fake-async"]),
+            &HashSet::from(["check-ai"]),
             &HashSet::new(),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
@@ -808,7 +804,7 @@ mod tests {
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example1.py")?][0].code,
-            "fake-sync"
+            "keep-sorted"
         );
         Ok(())
     }
@@ -818,7 +814,7 @@ mod tests {
     -> anyhow::Result<()> {
         let context = validation_context(
             "example1.py",
-            r#"# <block fake-sync="condition A" fake-async="condition B">
+            r#"# <block keep-sorted="condition A" check-ai="condition B">
     # </block>"#,
         );
 
@@ -826,7 +822,7 @@ mod tests {
             &context,
             &detector_factories(),
             &HashSet::new(),
-            &HashSet::from(["fake-async"]),
+            &HashSet::from(["check-ai"]),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?.violations;
@@ -838,7 +834,7 @@ mod tests {
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example1.py")?][0].code,
-            "fake-async"
+            "check-ai"
         );
         Ok(())
     }
@@ -848,13 +844,13 @@ mod tests {
     -> anyhow::Result<()> {
         let context = validation_context(
             "example1.py",
-            r#"# <block fake-sync="condition A" fake-async="condition B">
+            r#"# <block keep-sorted="condition A" check-ai="condition B">
     # </block>"#,
         );
         let (sync_validators, async_validators) = detect_validators(
             &context,
             &detector_factories(),
-            &HashSet::from(["fake-sync"]),
+            &HashSet::from(["keep-sorted"]),
             &HashSet::new(),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
@@ -867,7 +863,7 @@ mod tests {
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example1.py")?][0].code,
-            "fake-async"
+            "check-ai"
         );
         Ok(())
     }
@@ -877,7 +873,7 @@ mod tests {
     -> anyhow::Result<()> {
         let context = validation_context(
             "example1.py",
-            r#"# <block fake-sync="condition A" fake-async="condition B">
+            r#"# <block keep-sorted="condition A" check-ai="condition B">
     # </block>"#,
         );
 
@@ -885,7 +881,7 @@ mod tests {
             &context,
             &detector_factories(),
             &HashSet::new(),
-            &HashSet::from(["fake-sync"]),
+            &HashSet::from(["keep-sorted"]),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?.violations;
@@ -897,7 +893,7 @@ mod tests {
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example1.py")?][0].code,
-            "fake-sync"
+            "keep-sorted"
         );
         Ok(())
     }
@@ -905,10 +901,10 @@ mod tests {
     #[test]
     fn to_serializable_report_returns_correct_listings() -> anyhow::Result<()> {
         let contents = r#"/* <block name="top"> */ let a = "cc"; /* </block> Block on the first line. */
-// <block name="first" attr1="val1"> Block on the second line.
+// <block name="first"> Block on the second line.
 fn a() {}
 // </block>
-//     <block name="second" attr2="val2"> Block with indent.
+//     <block name="second"> Block with indent.
 fn b() {}
 // </block>
 /* <block name="bottom"> */ fn c() {} /* </block> Block on the last line. */"#;
@@ -936,7 +932,6 @@ fn b() {}
                     "column": 4,
                     "is_content_modified": true,
                     "attributes": {
-                        "attr1": "val1",
                         "name": "first",
                     }
                 }),
@@ -946,7 +941,6 @@ fn b() {}
                     "column": 8,
                     "is_content_modified": true,
                     "attributes": {
-                        "attr2": "val2",
                         "name": "second"
                     }
                 }),

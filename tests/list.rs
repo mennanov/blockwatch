@@ -26,7 +26,6 @@ fn list_subcommand_with_specific_file_returns_correct_json_from_that_file_only()
                 "is_content_modified": false,
                 "attributes": {
                     "name": "a",
-                    "attr": "val"
                 }
             }
         ]
