@@ -31,7 +31,9 @@ mod tests {
 val value = 1
 // </block>
 "#;
-        let blocks = parser()?.parse(contents)?;
+        let blocks = parser()?
+            .parse(contents)
+            .collect::<anyhow::Result<Vec<_>>>()?;
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].attributes["name"], "only_once");
         Ok(())

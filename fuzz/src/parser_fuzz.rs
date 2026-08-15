@@ -44,6 +44,7 @@ fn parse_rust_blocks(source: &str) -> anyhow::Result<Vec<Block>> {
         .lock()
         .expect("no active locks")
         .parse(source)
+        .collect()
 }
 
 fn split_in_half(input: &str) -> Option<(&str, &str)> {

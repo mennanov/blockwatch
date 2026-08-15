@@ -116,25 +116,31 @@ fn extract_items(block: &Block, file_content: &str) -> anyhow::Result<Vec<String
     };
     let regex = Regex::new(pattern)
         .map_err(|e| anyhow!("same-as-pattern is not a valid regex ({pattern}): {e}"))?;
-    let mut items = Vec::new();
-    for line in content.lines() {
-        if let Some(captures) = regex.captures(line.trim())
-            && let Some(matched) = captures.name("value").or_else(|| captures.get(0))
-        {
-            items.push(matched.as_str().to_string());
-        }
-    }
-    Ok(items)
+    Ok(content
+        .lines()
+        .filter_map(|line| {
+            let captures = regex.captures(line.trim())?;
+            let matched = captures.name("value").or_else(|| captures.get(0))?;
+            Some(matched.as_str().to_string())
+        })
+        .collect())
 }
 
 /// Trim each line, drop blanks, rejoin — matching `line-pattern` / `keep-unique` normalization.
+///
+/// Folded rather than joined so the retained lines are never collected into an intermediate `Vec`.
 fn normalize_content(content: &str) -> String {
     content
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
+        .fold(String::new(), |mut normalized, line| {
+            if !normalized.is_empty() {
+                normalized.push('\n');
+            }
+            normalized.push_str(line);
+            normalized
+        })
 }
 
 /// Find a named block in a file and extract its comparable items.

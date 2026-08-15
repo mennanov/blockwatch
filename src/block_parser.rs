@@ -2,16 +2,25 @@ use crate::Position;
 use crate::blocks::Block;
 use crate::language_parsers::{Comment, CommentsParser};
 use crate::tag_parser::{BlockTag, BlockTagParser, WinnowBlockTagParser};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ops::{Range, RangeInclusive};
 use std::rc::Rc;
 
 /// Parses [`Blocks`] from a source code.
 pub trait BlocksParser: Send + Sync {
-    /// Returns [`Block`]s extracted from the given `contents` string.
+    /// Returns an iterator over the [`Block`]s found in the given `contents` string.
     ///
-    /// The blocks are required to be sorted by the `starts_at` field in ascending order.
-    fn parse(&mut self, contents: &str) -> anyhow::Result<Vec<Block>>;
+    /// The blocks are required to be yielded sorted by the `starts_at` field in ascending order.
+    ///
+    /// The iteration stops at the first error: whatever follows a malformed or unbalanced tag
+    /// cannot be trusted to belong to the block the source intended.
+    ///
+    /// Returned boxed rather than as an `impl Iterator` because the trait is used as
+    /// `dyn BlocksParser`, which a return-position `impl Trait` would rule out.
+    fn parse<'a>(
+        &'a mut self,
+        contents: &'a str,
+    ) -> Box<dyn Iterator<Item = anyhow::Result<Block>> + 'a>;
 }
 
 /// The one [`BlocksParser`] every language uses: block syntax is identical everywhere, so only the
@@ -29,49 +38,114 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
 }
 
 impl<C: CommentsParser> BlocksParser for BlocksFromCommentsParser<C> {
-    fn parse(&mut self, contents: &str) -> anyhow::Result<Vec<Block>> {
-        parse_blocks_from_comments(self.comments_parser.parse(contents))
+    fn parse<'a>(
+        &'a mut self,
+        contents: &'a str,
+    ) -> Box<dyn Iterator<Item = anyhow::Result<Block>> + 'a> {
+        Box::new(BlocksIterator::new(self.comments_parser.parse(contents)))
     }
 }
 
-/// Parses blocks from comments iterator.
-pub(crate) fn parse_blocks_from_comments(
-    comments: impl Iterator<Item = Comment>,
-) -> anyhow::Result<Vec<Block>> {
-    let mut blocks = Vec::new();
-    let mut block_starts = Vec::new();
-    for partial_block in PartialBlocksIterator::new(comments) {
-        match partial_block? {
-            PartialBlock::Start(block_start) => {
-                block_starts.push(block_start);
-            }
-            PartialBlock::End(block_end) => {
-                if let Some(block_start) = block_starts.pop() {
-                    blocks.push(block_end.into_block(block_start));
-                } else {
-                    return Err(anyhow::anyhow!(
-                        "Unexpected closed block at line {}, position {}",
-                        block_end.comment.position_range.start.line,
-                        block_end.comment.source_range.start + block_end.start_position
-                    ));
-                }
-            }
+/// Assembles [`Block`]s out of a comment stream.
+pub(crate) struct BlocksIterator<I: Iterator<Item = Comment>> {
+    partial_blocks: PartialBlocksIterator<I>,
+    /// Start tags still waiting for their end tag, outermost first.
+    open_blocks: Vec<BlockStart>,
+    /// The current group of blocks, in start order.
+    blocks: VecDeque<Block>,
+    /// Error to yield once `blocks` has drained; yielding it ends the iteration.
+    error: Option<anyhow::Error>,
+    /// Whether the comment stream is exhausted.
+    done: bool,
+}
+
+impl<I: Iterator<Item = Comment>> BlocksIterator<I> {
+    /// Starts the block stream over the given comments, which must be in source order.
+    pub(crate) fn new(comments: I) -> Self {
+        Self {
+            partial_blocks: PartialBlocksIterator::new(comments),
+            open_blocks: Vec::new(),
+            blocks: VecDeque::new(),
+            error: None,
+            done: false,
         }
     }
 
-    if let Some(unclosed_block) = block_starts.pop() {
-        return Err(anyhow::anyhow!(format!(
-            "Block at line {} is not closed",
-            unclosed_block.comment.position_range.start.line
-        )));
+    /// The next block of a group that has closed, or the error that ends the iteration.
+    ///
+    /// `None` means neither is available yet and the stream has to be read further.
+    fn take_ready(&mut self) -> Option<anyhow::Result<Block>> {
+        if self.open_blocks.is_empty()
+            && let Some(block) = self.blocks.pop_front()
+        {
+            return Some(Ok(block));
+        }
+        let error = self.error.take()?;
+        self.done = true;
+        Some(Err(error))
     }
-    blocks.sort_by(|a, b| {
-        a.start_tag_position_range
-            .start()
-            .cmp(b.start_tag_position_range.start())
-    });
 
-    Ok(blocks)
+    /// Reads one start or end tag and folds it into the pending state.
+    fn consume_tag(&mut self) {
+        match self.partial_blocks.next() {
+            Some(Ok(PartialBlock::Start(block_start))) => self.open_blocks.push(block_start),
+            Some(Ok(PartialBlock::End(block_end))) => self.close_block(block_end),
+            Some(Err(error)) => self.error = Some(error),
+            None => self.finish(),
+        }
+    }
+
+    /// Pairs an end tag with the innermost tag still open, completing one block.
+    fn close_block(&mut self, block_end: BlockEnd) {
+        let Some(block_start) = self.open_blocks.pop() else {
+            self.error = Some(anyhow::anyhow!(
+                "Unexpected closed block at line {}, position {}",
+                block_end.comment.position_range.start.line,
+                block_end.comment.source_range.start + block_end.start_position
+            ));
+            return;
+        };
+        self.blocks.push_back(block_end.into_block(block_start));
+        if self.open_blocks.is_empty() {
+            self.sort_completed_group();
+        }
+    }
+
+    /// Winds up once the comments run out, reporting the innermost block left open.
+    ///
+    /// Blocks that closed inside an unclosed one stay behind the gate and are never yielded: an
+    /// unbalanced file pairs tags unreliably from the missing tag onward, so those blocks may hold
+    /// the wrong content.
+    fn finish(&mut self) {
+        self.done = true;
+        if let Some(unclosed_block) = self.open_blocks.pop() {
+            self.error = Some(anyhow::anyhow!(
+                "Block at line {} is not closed",
+                unclosed_block.comment.position_range.start.line
+            ));
+        }
+    }
+
+    /// Puts a group into start-tag order, which is how callers expect blocks to arrive.
+    fn sort_completed_group(&mut self) {
+        self.blocks.make_contiguous().sort();
+    }
+}
+
+impl<I: Iterator<Item = Comment>> Iterator for BlocksIterator<I> {
+    type Item = anyhow::Result<Block>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(item) = self.take_ready() {
+                return Some(item);
+            }
+            if self.done {
+                return None;
+            }
+            self.consume_tag();
+        }
+    }
 }
 
 /// Flattens comments into the stream of individual start and end tags they contain.
@@ -244,6 +318,69 @@ mod tests {
         language_parsers::rust::parser().unwrap()
     }
 
+    /// Drains the parser into a `Vec`, failing on the first parse error.
+    fn parse_all(parser: &mut impl BlocksParser, contents: &str) -> anyhow::Result<Vec<Block>> {
+        parser.parse(contents).collect()
+    }
+
+    #[test]
+    fn block_closed_inside_unclosed_ones_is_discarded() {
+        let mut parser = create_parser();
+        // `inner` is complete, but both of the blocks holding it are left open. Its tags could
+        // just as well have been mispaired by the missing ones, so it is not handed over.
+        let contents = "// <block name=\"outer\">\n// <block name=\"middle\">\n// <block name=\"inner\">\n// </block>";
+
+        let mut blocks = parser.parse(contents);
+
+        assert_eq!(
+            blocks
+                .next()
+                .expect("an error")
+                .expect_err("the unclosed block")
+                .to_string(),
+            "Block at line 2 is not closed"
+        );
+        assert!(blocks.next().is_none());
+    }
+
+    #[test]
+    fn iteration_stops_at_the_first_error() {
+        let mut parser = create_parser();
+        // The stray end tag has nothing to close, so the block following it is never reached.
+        let contents = "// </block>\n// <block>\n// </block>";
+
+        let mut blocks = parser.parse(contents);
+
+        assert!(blocks.next().expect("an error").is_err());
+        assert!(blocks.next().is_none());
+    }
+
+    #[test]
+    fn blocks_closed_before_an_unclosed_one_are_yielded_ahead_of_the_error() {
+        let mut parser = create_parser();
+        let contents = "// <block name=\"closed\">\n// </block>\n// <block name=\"open\">";
+
+        let mut blocks = parser.parse(contents);
+
+        assert_eq!(
+            blocks
+                .next()
+                .expect("a block")
+                .expect("no parse error")
+                .attributes["name"],
+            "closed"
+        );
+        assert_eq!(
+            blocks
+                .next()
+                .expect("an error")
+                .expect_err("the unclosed block")
+                .to_string(),
+            "Block at line 3 is not closed"
+        );
+        assert!(blocks.next().is_none());
+    }
+
     #[test]
     fn no_defined_blocks_returns_empty_blocks() -> anyhow::Result<()> {
         let mut parser = create_parser();
@@ -252,7 +389,7 @@ mod tests {
               println!("hello world!");
             }
         "#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks, vec![]);
         Ok(())
     }
@@ -261,7 +398,7 @@ mod tests {
     fn single_block_with_single_line_content() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"/* <block> */ let say = "hi"; /* </block> */"#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
             vec![Block::new(
@@ -278,7 +415,7 @@ mod tests {
     fn single_block_with_multiple_lines_content() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = "// <block>\nlet say = \"hi\";\n// </block>";
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
             vec![Block::new(
@@ -295,7 +432,7 @@ mod tests {
     fn single_block_with_multiline_starting_block_tag() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = "/* <block\n> */ let say = \"hi\"; // </block>";
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
             vec![Block::new(
@@ -312,7 +449,7 @@ mod tests {
     fn single_block_with_multiline_ending_block_tag() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = "/* <block> */ let say = \"hi\"; /* </block\n> */";
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
             vec![Block::new(
@@ -334,7 +471,7 @@ println!("hello1");
 // <block>
 println!("hello2");
 // </block>"#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
             vec![
@@ -359,7 +496,7 @@ println!("hello2");
     fn multiple_blocks_on_intersecting_lines() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = "// <block>\nprintln!(\"hello1\");\n/* </block><block> */\nprintln!(\"hello2\");\n// </block>";
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
             vec![
@@ -384,7 +521,7 @@ println!("hello2");
     fn multiple_blocks_on_single_line() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = "/* <block> */println!(\"hello1\");/* </block><block> */println!(\"hello2\");// </block>";
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
             vec![
@@ -409,7 +546,7 @@ println!("hello2");
     fn block_starts_on_non_first_comment_line() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = "/* Some comment\n<block> */println!(\"hello1\");// </block>";
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
             vec![Block::new(
@@ -426,7 +563,7 @@ println!("hello2");
     fn block_ends_on_non_first_comment_line() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = "/* <block> */println!(\"hello1\");/* Some comment\n</block> */";
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
             vec![Block::new(
@@ -470,7 +607,7 @@ println!("hello2");
         // <block name="fizz">
         // </block>
         "#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
             vec![
@@ -525,7 +662,7 @@ println!("hello2");
             // </block>
         // </block>
         "#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 4);
         assert_eq!(blocks[0].attributes["name"], "parent");
         assert_eq!(blocks[1].attributes["name"], "child1");
@@ -540,7 +677,7 @@ println!("hello2");
         let contents = r#"// <block name="foo">This text is ignored
         let word = "hello";
         // </block> Some comment."#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
             vec![Block::new(
@@ -562,7 +699,7 @@ println!("hello2");
           println!("hello world!");
         }
         "#;
-        let error_message = parser.parse(contents).unwrap_err().to_string();
+        let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
         assert_eq!(error_message, "Block at line 2 is not closed");
         Ok(())
     }
@@ -581,7 +718,7 @@ println!("hello2");
 
         // </block>
         "#;
-        let error_message = parser.parse(contents).unwrap_err().to_string();
+        let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
         assert_eq!(error_message, "Block at line 2 is not closed");
         Ok(())
     }
@@ -595,7 +732,7 @@ println!("hello2");
         }
         // </block>
         "#;
-        let result = parser.parse(contents);
+        let result = parse_all(&mut parser, contents);
         assert!(result.is_err());
         Ok(())
     }
@@ -610,7 +747,7 @@ println!("hello2");
         }
         // </block>
         "#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 1);
         assert_eq!(
             blocks[0].attributes,
@@ -634,7 +771,7 @@ println!("hello2");
         }
         // </block>
         "#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 1);
         assert_eq!(
             blocks[0].attributes,
@@ -653,7 +790,7 @@ println!("hello2");
         // <block text='He said "Hello"'>
         // </block>
         "#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks[0].attributes["text"], "He said \"Hello\"");
         Ok(())
     }
@@ -665,7 +802,7 @@ println!("hello2");
         // <block text="He said &quot;Hello&quot;">
         // </block>
         "#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
 
         assert_eq!(blocks[0].attributes["text"], "He said &quot;Hello&quot;");
         Ok(())
@@ -678,7 +815,7 @@ println!("hello2");
         // <block color=red flavor=sweet>
         // </block>
         "#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks[0].attributes["color"], "red");
         assert_eq!(blocks[0].attributes["flavor"], "sweet");
         Ok(())
@@ -691,7 +828,7 @@ println!("hello2");
         // <block attr1 attr2>
         // </block>
         "#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks[0].attributes["attr1"], "");
         assert_eq!(blocks[0].attributes["attr2"], "");
         Ok(())
@@ -705,7 +842,7 @@ println!("hello2");
         fn foo() {}
         // </block>
         "#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks[0].attributes,
             HashMap::from([
@@ -724,7 +861,7 @@ println!("hello2");
         // <block keep-unique="(?P<value>\w+)">
         // </block>
         "#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks[0].attributes["keep-unique"], r"(?P<value>\w+)");
         Ok(())
     }
@@ -737,7 +874,7 @@ println!("hello2");
         fn unicode() {}
         // </block>
         "#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks[0].attributes["name"], "🦀");
         assert_eq!(blocks[0].attributes["desc"], "Rust");
         Ok(())
@@ -751,7 +888,7 @@ println!("hello2");
         fn unicode() {}
         // </block>
         "#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks[0].attributes["name"], "foo");
         assert_eq!(blocks[0].attributes["desc"], "bar");
         Ok(())
@@ -765,7 +902,7 @@ println!("hello2");
         fn escaped() {}
         // </block>
         "#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks[0].attributes["color"], "red");
         assert_eq!(blocks[0].attributes["attr1"], "");
         assert_eq!(blocks[0].attributes["align"], "center");
@@ -781,7 +918,7 @@ println!("hello2");
         fn escaped() {}
         // </block>
         "#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
 
         // Duplicate attributes: last value wins (standard HTML/XML behavior)
         assert_eq!(blocks.len(), 1);
@@ -801,7 +938,7 @@ println!("hello2");
         }
         // </block>
         "#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 2);
         assert_eq!(
             blocks[0].attributes,
@@ -828,7 +965,7 @@ println!("hello2");
         fn foo() {}
         // </block>
         "#;
-        assert!(parser.parse(contents).is_err());
+        assert!(parse_all(&mut parser, contents).is_err());
         Ok(())
     }
 
@@ -836,7 +973,7 @@ println!("hello2");
     fn blocks_with_different_line_endings() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = "// <block>\r\nWindows\r\n// </block>\n// <block>\nUnix\n// </block>";
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 2);
         assert!(blocks[0].content(contents).contains("\r\n"));
         assert!(blocks[1].content(contents).contains("\n"));
@@ -855,7 +992,7 @@ println!("hello2");
         fn unicode() {}
         // </block>
         "#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 1);
         Ok(())
     }
@@ -870,7 +1007,7 @@ println!("hello2");
 // "c" block
 // <block name="foo-bar">
 // </block>"#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 1);
         Ok(())
     }
@@ -883,7 +1020,7 @@ println!("hello2");
         fn unicode() {}
         // </block><body>hello</body>
         "#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 1);
         Ok(())
     }
@@ -896,7 +1033,7 @@ println!("hello2");
         fn unicode() {}
         // </block>
         "#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 1);
         Ok(())
     }
@@ -909,7 +1046,7 @@ println!("hello2");
         // <block>
         fn unicode() {}
         // </block>"#;
-        let blocks = parser.parse(contents)?;
+        let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 1);
         Ok(())
     }

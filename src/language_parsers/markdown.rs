@@ -215,7 +215,7 @@ Some text here 3
 [//]: # (</block>)
 [//]: # (</block>)
 "#;
-        let blocks = parser.parse(content)?;
+        let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(
             blocks,
@@ -256,7 +256,7 @@ Text
 
 [//]: /café (</block>)
 ";
-        let blocks = parser.parse(content)?;
+        let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].attributes["name"], "unicode_title");
@@ -280,7 +280,7 @@ ending text <!-- </block> --> tail.
 
 Inline code `<!-- <block name="ignored"> -->` is not a comment.
 "#;
-        let blocks = parser.parse(content)?;
+        let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(
             blocks,
@@ -304,7 +304,7 @@ Inline code `<!-- <block name="ignored"> -->` is not a comment.
 Some content.
 Closing text <!-- </block> --> tail.
 "#;
-        let blocks = parser.parse(content)?;
+        let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].attributes["name"], "mixed");
@@ -331,7 +331,7 @@ Second block content.
 
 [//]: # (</block>)
 "#;
-        let blocks = parser.parse(content)?;
+        let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 2);
         assert_eq!(blocks[0].attributes["name"], "a");
@@ -366,7 +366,7 @@ Some markdown content
 Not wrapped in HTML tags on multiple lines
 <!-- </block> -->
 "#;
-        let blocks = parser.parse(content)?;
+        let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(
             blocks,

@@ -241,22 +241,24 @@ impl FileBlocks {
     }
 
     /// Converts the file blocks to a serializable report.
+    ///
+    /// The listing is already deterministic without a sorting pass: the parser yields blocks in
+    /// start-tag order, and filtering preserves it.
     pub(crate) fn to_serializable_report(&self) -> Vec<serde_json::Value> {
-        let mut listings = Vec::new();
-        for block in &self.blocks_with_context {
-            listings.push(serde_json::json!({
-                // <block affects="docs/cli.md:list-output-example">
-                "name": block.block.name_display(),
-                "line": block.block.start_tag_position_range.start().line,
-                "column": block.block.start_tag_position_range.start().character,
-                "is_content_modified": block.is_content_modified,
-                "attributes": block.block.attributes,
-                // </block>
-            }));
-        }
-        // Sort by line number for deterministic output
-        listings.sort_by_key(|b| b["line"].as_u64().unwrap_or(0));
-        listings
+        self.blocks_with_context
+            .iter()
+            .map(|block| {
+                serde_json::json!({
+                    // <block affects="docs/cli.md:list-output-example">
+                    "name": block.block.name_display(),
+                    "line": block.block.start_tag_position_range.start().line,
+                    "column": block.block.start_tag_position_range.start().character,
+                    "is_content_modified": block.is_content_modified,
+                    "attributes": block.block.attributes,
+                    // </block>
+                })
+            })
+            .collect()
     }
 }
 
@@ -425,15 +427,18 @@ fn parse_file(
         Some(p) => p,
     };
     let source_code = file_reader.read_to_string(file_path)?;
-    let blocks = parser
+    // Blocks are filtered as the parser yields them, so only the ones this run will validate are
+    // ever held. The parser's lock lives until the end of the statement, which is as long as the
+    // iterator borrowing it does.
+    let blocks_with_context = parser
         .lock()
         .expect("no active locks")
         .parse(&source_code)
-        .context(format!("Failed to parse file {file_path:?}"))?;
-
-    let blocks_with_context = blocks
-        .into_iter()
         .filter_map(|block| {
+            let block = match block {
+                Ok(block) => block,
+                Err(error) => return Some(Err(error)),
+            };
             let is_content_modified = block.content_intersects_with_any(line_changes);
             let is_start_tag_modified = block.start_tag_intersects_with_any(line_changes);
 
@@ -441,16 +446,17 @@ fn parse_file(
                 || is_content_modified
                 || is_start_tag_modified
             {
-                Some(BlockWithContext {
+                Some(Ok(BlockWithContext {
                     block,
                     _is_start_tag_modified: is_start_tag_modified,
                     is_content_modified,
-                })
+                }))
             } else {
                 None
             }
         })
-        .collect();
+        .collect::<anyhow::Result<Vec<_>>>()
+        .context(format!("Failed to parse file {file_path:?}"))?;
 
     Ok(Some(FileBlocks {
         file_content: source_code,

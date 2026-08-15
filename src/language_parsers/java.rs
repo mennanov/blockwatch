@@ -51,7 +51,9 @@ mod tests {
         """;
 }
 "#;
-        let blocks = parser()?.parse(contents)?;
+        let blocks = parser()?
+            .parse(contents)
+            .collect::<anyhow::Result<Vec<_>>>()?;
         let names: Vec<&str> = blocks
             .iter()
             .map(|block| block.attributes["name"].as_str())
