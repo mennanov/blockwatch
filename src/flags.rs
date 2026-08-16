@@ -73,6 +73,17 @@ impl std::fmt::Display for Verbosity {
 )]
 pub struct Args {
     // <block affects="docs/cli.md:cli-docs">
+    /// Read a unified diff from stdin to mark which blocks it changed.
+    ///
+    /// Without this flag stdin is never read. Rules that only fire on changed content, such as
+    /// `affects`, need it.
+    #[arg(long = "diff", global = true)]
+    pub diff: bool,
+
+    /// Restrict the run to the blocks the diff changed, instead of the whole tree.
+    #[arg(long = "only-changed", requires = "diff", global = true)]
+    pub only_changed: bool,
+
     /// Additional file extension mappings, e.g. -E c++=cpp -E cxx=cpp
     #[arg(
         short = 'E',
@@ -140,11 +151,6 @@ pub struct Args {
 pub enum SubCommand {
     /// List all blocks found in the scanned files.
     List {
-        /// Read a unified diff from stdin to populate `is_content_modified`.
-        /// Without this flag, `list` never reads stdin.
-        #[arg(long)]
-        diff: bool,
-
         #[arg(value_name = "GLOBS")]
         globs: Vec<String>,
     },
@@ -173,10 +179,7 @@ impl Args {
     pub fn globs(&self) -> anyhow::Result<GlobSet> {
         let mut builder = GlobSetBuilder::new();
         let mut globs = self.globs.clone();
-        if let Some(SubCommand::List {
-            globs: list_globs, ..
-        }) = &self.command
-        {
+        if let Some(SubCommand::List { globs: list_globs }) = &self.command {
             globs.extend(list_globs.clone());
         }
 
@@ -252,6 +255,53 @@ mod tests {
 
     fn parse(argv: &[&str]) -> anyhow::Result<Args> {
         Ok(Args::try_parse_from(argv)?)
+    }
+
+    #[test]
+    fn only_changed_without_diff_is_rejected() {
+        let error = parse(&["blockwatch", "--only-changed"])
+            .expect_err("--only-changed must not be accepted on its own");
+        assert!(
+            error.to_string().contains("--diff"),
+            "the error must name the flag that is missing: {error}"
+        );
+    }
+
+    #[test]
+    fn only_changed_without_diff_is_rejected_under_the_list_subcommand() {
+        let error = parse(&["blockwatch", "list", "--only-changed"])
+            .expect_err("--only-changed must not be accepted on its own");
+        assert!(
+            error.to_string().contains("--diff"),
+            "the error must name the flag that is missing: {error}"
+        );
+    }
+
+    #[test]
+    fn diff_and_only_changed_parse_alongside_globs() -> anyhow::Result<()> {
+        let args = parse(&["blockwatch", "--diff", "--only-changed", "src/**/*.rs"])?;
+        assert!(args.diff);
+        assert!(args.only_changed);
+        assert_eq!(args.globs, vec!["src/**/*.rs".to_string()]);
+        Ok(())
+    }
+
+    #[test]
+    fn diff_and_only_changed_reach_the_list_subcommand() -> anyhow::Result<()> {
+        let args = parse(&["blockwatch", "list", "--diff", "--only-changed"])?;
+        assert!(args.diff);
+        assert!(args.only_changed);
+        assert!(matches!(args.command, Some(SubCommand::List { .. })));
+        Ok(())
+    }
+
+    #[test]
+    fn diff_and_only_changed_are_accepted_before_the_subcommand() -> anyhow::Result<()> {
+        let args = parse(&["blockwatch", "--diff", "--only-changed", "list"])?;
+        assert!(args.diff);
+        assert!(args.only_changed);
+        assert!(matches!(args.command, Some(SubCommand::List { .. })));
+        Ok(())
     }
 
     #[test]

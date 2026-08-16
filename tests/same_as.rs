@@ -16,6 +16,7 @@ index 1111111..2222222 100644
 +const PORT: u16 = 8080;
  // </block>"#;
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     cmd.write_stdin(diff).output().unwrap().assert().success();
 }
 
@@ -34,5 +35,6 @@ index 1111111..2222222 100644
 +const A: u16 = 8080;
  // </block>"#;
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     cmd.write_stdin(diff).output().unwrap().assert().success();
 }

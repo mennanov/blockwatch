@@ -21,31 +21,25 @@ use std::{env, fs, process};
 fn main() -> anyhow::Result<()> {
     let args = flags::Args::parse();
     match &args.command {
-        Some(flags::SubCommand::List { diff, .. }) => run_list(&args, *diff),
+        Some(flags::SubCommand::List { .. }) => run_list(&args),
         None => run_validators(&args),
     }
 }
 
 /// Runs the `list` subcommand: parses every block in scope and writes a JSON report to stdout.
-///
-/// A diff is read from stdin only when `--diff` is set (and stdin is not a terminal), to
-/// populate `is_content_modified`. Otherwise `list` never touches stdin, so it is safe to run
-/// non-interactively — piped to `jq`, in CI, or when spawned by another program such as an AI agent.
-fn run_list(args: &flags::Args, read_diff_flag: bool) -> anyhow::Result<()> {
-    let read_diff = read_diff_flag && !stdin_is_terminal();
+fn run_list(args: &flags::Args) -> anyhow::Result<()> {
     let file_system = blockwatch::fs::FileSystemImpl::new(&repository_root()?)?;
-    let (context, _scan_stats) = build_context(args, read_diff, &file_system)?;
+    let (scan_mode, line_changes) = run_inputs(args, &file_system)?;
+    let (context, _scan_stats) = build_context(args, scan_mode, line_changes, &file_system)?;
     let report = context.to_serializable_report();
     serde_json::to_writer_pretty(std::io::stdout(), &report).context("Failed to list blocks")
 }
 
 /// Runs the default command: validates every block in scope and reports any violations.
-///
-/// The diff to validate is read from stdin whenever stdin is not a terminal (i.e. when a
-/// `git diff` is piped in); otherwise the whole working tree is checked.
 fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
     let file_system = Arc::new(blockwatch::fs::FileSystemImpl::new(&repository_root()?)?);
-    let (context, scan_stats) = build_context(args, !stdin_is_terminal(), file_system.as_ref())?;
+    let (scan_mode, line_changes) = run_inputs(args, file_system.as_ref())?;
+    let (context, scan_stats) = build_context(args, scan_mode, line_changes, file_system.as_ref())?;
     let (sync_validators, async_validators) = validators::detect_validators(
         &context,
         &validators::detector_factories::<blockwatch::fs::FileSystemImpl>(),
@@ -96,13 +90,37 @@ fn write_report(
     Ok(())
 }
 
+/// Decides the [`ScanMode`] and extracts the [`diff_parser::LineChange`]s from the diff (if any).
+fn run_inputs(
+    args: &flags::Args,
+    file_system: &impl FileSystem,
+) -> anyhow::Result<(
+    blocks::ScanMode,
+    HashMap<RepoPath, Vec<diff_parser::LineChange>>,
+)> {
+    let scan_mode = if args.only_changed {
+        blocks::ScanMode::DiffTargets
+    } else {
+        blocks::ScanMode::Walk
+    };
+    if !args.diff {
+        return Ok((scan_mode, HashMap::new()));
+    }
+    if stdin_is_terminal() {
+        return Err(anyhow::anyhow!(
+            "--diff was given but stdin is a terminal, so there is no diff to read. \
+             Pipe one in, e.g. `git diff --patch | blockwatch --diff`, \
+             or drop --diff to check the whole tree."
+        ));
+    }
+    Ok((scan_mode, read_diff_from_stdin(file_system)?))
+}
+
 /// Parses every block the run should consider into a `ValidationContext`.
-///
-/// When `read_diff` is set, a unified diff is read from stdin and used to mark which blocks
-/// changed. With neither globs nor a diff to scope the run, the whole tree is scanned.
 fn build_context(
     args: &flags::Args,
-    should_read_diff: bool,
+    scan_mode: blocks::ScanMode,
+    modified_lines_by_file: HashMap<RepoPath, Vec<diff_parser::LineChange>>,
     file_system: &impl FileSystem,
 ) -> anyhow::Result<(validators::ValidationContext, blocks::ScanStats)> {
     let language_parsers = language_parsers::language_parsers()?;
@@ -115,23 +133,11 @@ fn build_context(
     // An empty glob set matches nothing, so "the caller named no files" has to be spelled out as
     // "every file". It applies in every mode, because the globs narrow whichever set of files the
     // scan mode selected — including the files in a diff.
-    let has_explicit_globs = !glob_set.is_empty();
-    if !has_explicit_globs {
+    if glob_set.is_empty() {
         glob_set = GlobSet::new([globset::Glob::new("**")?])?;
     }
-    let scan_mode = if should_read_diff && !has_explicit_globs {
-        blocks::ScanMode::DiffTargets
-    } else {
-        blocks::ScanMode::Walk
-    };
 
     let path_checker = blockwatch::fs::PathCheckerImpl::new(glob_set, args.ignored_globs()?);
-
-    let modified_lines_by_file = if should_read_diff {
-        read_diff_from_stdin(file_system)?
-    } else {
-        HashMap::new()
-    };
 
     let parsed = blocks::parse_blocks(
         modified_lines_by_file,
@@ -147,7 +153,7 @@ fn build_context(
     ))
 }
 
-/// Whether stdin is connected to an interactive terminal, i.e. no diff is piped in.
+/// Whether stdin is connected to an interactive terminal, i.e. nothing is piped in.
 fn stdin_is_terminal() -> bool {
     std::io::stdin().is_terminal()
 }

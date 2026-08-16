@@ -20,6 +20,7 @@ index abc123..def456 100644
 "#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
     output.assert()
@@ -81,6 +82,7 @@ index abc123..def456 100644
 "#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     cmd.write_stdin(diff_content);
 
     let output = cmd.output().expect("Failed to get command output");
@@ -113,6 +115,7 @@ index abc123..def456 100644
 "#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     cmd.current_dir("./tests");
     cmd.write_stdin(diff_content);
 
@@ -139,6 +142,7 @@ index abc123..def456 100644
 "#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     cmd.write_stdin(diff_content);
 
     let output = cmd.output().expect("Failed to get command output");
@@ -162,6 +166,7 @@ index abc123..def456 100644
 "#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     cmd.write_stdin(diff_content);
 
     let output = cmd.output().expect("Failed to get command output");
@@ -192,6 +197,7 @@ index abc123..def456 100644
 "#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     cmd.write_stdin(diff_content);
 
     let output = cmd.output().expect("Failed to get command output");

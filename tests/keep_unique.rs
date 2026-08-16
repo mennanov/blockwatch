@@ -20,6 +20,7 @@ index d69398d..c5cbb7f 100644
  ]"#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
     output.assert().success();
@@ -42,6 +43,7 @@ index d69398d..9b29f11 100644
  ]"#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
     output.assert()

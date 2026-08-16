@@ -24,6 +24,7 @@ index 1111111..2222222 100644
 "#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
     output.assert().success();
@@ -48,6 +49,7 @@ index 1111111..2222222 100644
 "#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
     output
@@ -102,6 +104,7 @@ index 1111111..2222222 100644
 "#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
     output.assert().success();
@@ -124,6 +127,7 @@ index 1111111..2222222 100644
 "#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
     output.assert().success();
@@ -147,6 +151,7 @@ index 1111111..2222222 100644
 "#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     // Default (sandboxed) mode: os library is not available.
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
@@ -175,6 +180,7 @@ index 1111111..2222222 100644
 "#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     cmd.env(LUA_STDLIB_ENV_VAR, "safe");
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
@@ -203,6 +209,7 @@ index 1111111..2222222 100644
 "#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
     output.assert().success();
@@ -230,6 +237,7 @@ index 1111111..2222222 100644
 "#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
     output
@@ -259,6 +267,7 @@ index 1111111..2222222 100644
 "#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     cmd.env(LUA_STDLIB_ENV_VAR, "unsafe");
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
@@ -276,7 +285,6 @@ fn ctx_file_is_identical_in_glob_and_diff_modes() {
     let glob_stderr = String::from_utf8(
         glob_command
             .arg("tests/testdata/pathfmt/source.py")
-            .write_stdin("")
             .output()
             .unwrap()
             .stderr,
@@ -294,6 +302,7 @@ diff --git a/tests/testdata/pathfmt/source.py b/tests/testdata/pathfmt/source.py
  # </block>
 ";
     let mut diff_command = cargo_bin_cmd!();
+    diff_command.args(["--diff", "--only-changed"]);
     let diff_stderr =
         String::from_utf8(diff_command.write_stdin(diff).output().unwrap().stderr).unwrap();
 

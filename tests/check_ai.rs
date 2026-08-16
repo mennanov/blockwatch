@@ -71,6 +71,7 @@ async fn check_ai_ok_succeeds() {
 
     // Configure client to use fake server for this command only
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     cmd.env(API_URL_ENV_VAR_NAME, format!("http://{addr}/v1"));
     cmd.env(API_KEY_ENV_VAR_NAME, "test-key");
 
@@ -97,6 +98,7 @@ async fn check_ai_violation_fails_and_reports_message() {
     let (addr, _handle) = start_fake_openai().await;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     cmd.env(API_URL_ENV_VAR_NAME, format!("http://{addr}/v1"));
     cmd.env(API_KEY_ENV_VAR_NAME, "test-key");
 
@@ -157,6 +159,7 @@ async fn when_api_key_is_empty_error_is_printed() {
 
     // Configure client to use fake server for this command only
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     cmd.env_clear()
         .env(API_URL_ENV_VAR_NAME, format!("http://{addr}/v1"));
 

@@ -130,6 +130,61 @@ index 2fcfa70..eea9cf4 100644
     );
 }
 
+/// The diff that touches `a.py` of the two-file fixture, in that fixture's own coordinates.
+const A_PY_DIFF: &str = r#"
+diff --git a/a.py b/a.py
+index 2fcfa70..eea9cf4 100644
+--- a/a.py
++++ b/a.py
+@@ -1,3 +1,3 @@
+ # <block name="a">
+-pass old
++pass
+ # </block>
+"#;
+
+#[test]
+fn list_subcommand_with_diff_flag_lists_every_block() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.current_dir("tests/testdata/list");
+    cmd.arg("list").arg("--diff");
+    let output = cmd
+        .write_stdin(A_PY_DIFF)
+        .output()
+        .expect("Failed to get command output");
+
+    output.clone().assert().success();
+
+    let actual: Value =
+        serde_json::from_slice(&output.stdout).expect("Failed to parse JSON output");
+    let report = actual.as_object().expect("Output should be a JSON object");
+
+    // `--diff` says which blocks changed; it does not narrow the listing.
+    assert_eq!(report.len(), 2);
+    assert!(report["a.py"][0]["is_content_modified"].as_bool().unwrap());
+    assert!(!report["b.py"][0]["is_content_modified"].as_bool().unwrap());
+}
+
+#[test]
+fn list_subcommand_with_only_changed_flag_lists_changed_blocks_only() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.current_dir("tests/testdata/list");
+    cmd.arg("list").arg("--diff").arg("--only-changed");
+    let output = cmd
+        .write_stdin(A_PY_DIFF)
+        .output()
+        .expect("Failed to get command output");
+
+    output.clone().assert().success();
+
+    let actual: Value =
+        serde_json::from_slice(&output.stdout).expect("Failed to parse JSON output");
+    let report = actual.as_object().expect("Output should be a JSON object");
+
+    assert_eq!(report.len(), 1);
+    assert!(report["a.py"][0]["is_content_modified"].as_bool().unwrap());
+}
+
 #[test]
 fn list_subcommand_ignores_piped_diff_without_diff_flag() {
     let diff_content = r#"

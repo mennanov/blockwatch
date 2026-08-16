@@ -120,7 +120,8 @@ index 1111111..2222222 100644
 #[test]
 fn full_level_under_a_diff_describes_only_the_blocks_in_scope() {
     let mut cmd = cargo_bin_cmd!();
-    cmd.arg("--verbosity")
+    cmd.args(["--diff", "--only-changed"])
+        .arg("--verbosity")
         .arg("full")
         .write_stdin(DIFF_TOUCHING_ONE_BLOCK);
     let output = cmd.output().unwrap();
@@ -148,7 +149,8 @@ fn full_level_under_a_diff_describes_only_the_blocks_in_scope() {
 #[test]
 fn summary_level_under_a_diff_counts_only_the_blocks_in_scope() {
     let mut cmd = cargo_bin_cmd!();
-    cmd.arg("--verbosity")
+    cmd.args(["--diff", "--only-changed"])
+        .arg("--verbosity")
         .arg("summary")
         .write_stdin(DIFF_TOUCHING_ONE_BLOCK);
     let output = cmd.output().unwrap();
@@ -175,7 +177,10 @@ index 1111111..2222222 100644
      # </block>
  ]"#;
     let mut cmd = cargo_bin_cmd!();
-    cmd.arg("--verbosity").arg("full").write_stdin(diff);
+    cmd.args(["--diff", "--only-changed"])
+        .arg("--verbosity")
+        .arg("full")
+        .write_stdin(diff);
     let output = cmd.output().unwrap();
 
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -209,7 +214,10 @@ index 1111111..2222222 100644
 +const PORT: u16 = 8080;
  // </block>"#;
     let mut cmd = cargo_bin_cmd!();
-    cmd.arg("--verbosity").arg("full").write_stdin(diff);
+    cmd.args(["--diff", "--only-changed"])
+        .arg("--verbosity")
+        .arg("full")
+        .write_stdin(diff);
     let output = cmd.output().unwrap();
 
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();

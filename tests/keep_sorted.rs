@@ -20,6 +20,7 @@ index 83205ee..d0cce11 100644
  ]"#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
     output.assert().success();
@@ -43,6 +44,7 @@ index 366590e..82c1f16 100644
  ]"#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
     output.assert()
@@ -93,6 +95,7 @@ index 1111111..2222222 100644
  ]"#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
     output.assert().success();
@@ -114,6 +117,7 @@ index 1111111..2222222 100644
  ]"#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
     output.assert()
@@ -165,6 +169,7 @@ index 1111111..2222222 100644
  ]"#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
     output.assert().success();
@@ -187,6 +192,7 @@ index 1111111..2222222 100644
  ]"#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
     output.assert()
@@ -237,6 +243,7 @@ index 1111111..2222222 100644
  ]"#;
 
     let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
     output.assert()
