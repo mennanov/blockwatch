@@ -102,7 +102,7 @@ fn write_report(
 /// changed. With neither globs nor a diff to scope the run, the whole tree is scanned.
 fn build_context(
     args: &flags::Args,
-    read_diff: bool,
+    should_read_diff: bool,
     file_system: &impl FileSystem,
 ) -> anyhow::Result<(validators::ValidationContext, blocks::ScanStats)> {
     let language_parsers = language_parsers::language_parsers()?;
@@ -112,15 +112,22 @@ fn build_context(
     let extra_file_extensions = args.extensions();
 
     let mut glob_set = args.globs()?;
-    if glob_set.is_empty() && !read_diff {
-        // Nothing scopes the run, so match every file.
+    // An empty glob set matches nothing, so "the caller named no files" has to be spelled out as
+    // "every file". It applies in every mode, because the globs narrow whichever set of files the
+    // scan mode selected — including the files in a diff.
+    let has_explicit_globs = !glob_set.is_empty();
+    if !has_explicit_globs {
         glob_set = GlobSet::new([globset::Glob::new("**")?])?;
     }
-    let should_scan_files = !glob_set.is_empty();
+    let scan_mode = if should_read_diff && !has_explicit_globs {
+        blocks::ScanMode::DiffTargets
+    } else {
+        blocks::ScanMode::Walk
+    };
 
     let path_checker = blockwatch::fs::PathCheckerImpl::new(glob_set, args.ignored_globs()?);
 
-    let modified_lines_by_file = if read_diff {
+    let modified_lines_by_file = if should_read_diff {
         read_diff_from_stdin(file_system)?
     } else {
         HashMap::new()
@@ -128,7 +135,7 @@ fn build_context(
 
     let parsed = blocks::parse_blocks(
         modified_lines_by_file,
-        should_scan_files,
+        scan_mode,
         file_system,
         &path_checker,
         &language_parsers,

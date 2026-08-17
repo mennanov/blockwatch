@@ -40,7 +40,7 @@ impl Position {
 
 #[cfg(test)]
 mod test_utils {
-    use crate::blocks::{FileBlocks, parse_blocks};
+    use crate::blocks::{FileBlocks, ScanMode, parse_blocks};
     use crate::diff_parser::LineChange;
     use crate::fs::test_utils::{FakeFileSystem, FakePathChecker};
     use crate::language_parsers;
@@ -113,7 +113,7 @@ mod test_utils {
         Arc::new(ValidationContext::new(
             parse_blocks(
                 line_changes_by_file,
-                false,
+                ScanMode::DiffTargets,
                 &file_system,
                 &FakePathChecker::allow_all(),
                 &parsers,

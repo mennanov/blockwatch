@@ -267,8 +267,8 @@ impl FileBlocks {
 pub struct BlockWithContext {
     /// The block itself, as parsed from the source comment.
     pub(crate) block: Block,
-    /// Whether the block's tag is modified (computed from the input diff).
-    pub(crate) _is_start_tag_modified: bool,
+    /// Whether the block's start tag is modified (computed from the input diff).
+    pub(crate) is_start_tag_modified: bool,
     /// Whether the content of the block is modified (computed from the input diff). Validators such
     /// as `affects` fire only for blocks whose content actually changed.
     pub(crate) is_content_modified: bool,
@@ -293,77 +293,107 @@ pub struct ParsedBlocks {
     pub stats: ScanStats,
 }
 
-/// Parses source files and returns only those blocks that intersect with the provided modified line ranges.
+/// How a run decides which files it reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanMode {
+    /// Read every file the repository walk yields. If a diff is supplied then the corresponding
+    /// blocks are marked as modified.
+    Walk,
+    /// Read only the files from the supplied diff, keeping just the blocks that the diff modified.
+    DiffTargets,
+}
+
+/// Parses source files into the blocks a run should consider, together with the counts of files
+/// it looked at.
 ///
 /// - `line_changes_by_file` maps file paths to sorted line changes.
-/// - `should_scan_files` indicates whether all the files in filesystem should be scanned for blocks.
+/// - `scan_mode` chooses which set of files is read; see [`ScanMode`].
 /// - `file_system` provides access to file contents within a root path.
 /// - `parsers` maps file extensions to language-specific block parsers.
 /// - `extra_file_extensions` allows remapping unknown extensions to supported ones (e.g., "cxx" -> "cpp").
 ///
-/// Returns the intersecting blocks found in each file, along with the counts of files scanned.
+/// In either mode a file is read only if it passes the allow globs and is not ignored.
 pub fn parse_blocks(
-    mut line_changes_by_file: HashMap<RepoPath, Vec<LineChange>>,
-    should_scan_files: bool,
+    line_changes_by_file: HashMap<RepoPath, Vec<LineChange>>,
+    scan_mode: ScanMode,
     file_system: &impl FileSystem,
     path_checker: &impl PathChecker,
     parsers: &LanguageParsers,
     extra_file_extensions: HashMap<OsString, OsString>,
 ) -> anyhow::Result<ParsedBlocks> {
-    let mut blocks = HashMap::new();
-    let mut stats = ScanStats::default();
-    if should_scan_files {
-        for result in file_system.walk() {
-            match result {
-                Ok(file_path) => {
-                    if !path_checker.should_allow(&file_path)
-                        || path_checker.should_ignore(&file_path)
-                    {
-                        continue;
-                    }
-                    let changes_owned = line_changes_by_file.remove(&file_path);
-                    let line_changes = changes_owned.as_deref().unwrap_or(&[]);
-                    match parse_file(
-                        file_path.as_path(),
-                        line_changes,
-                        BlocksFilter::All,
-                        file_system,
-                        parsers,
-                        &extra_file_extensions,
-                    )? {
-                        Some(file_blocks) => {
-                            stats.files_scanned += 1;
-                            if !file_blocks.is_empty() {
-                                blocks.insert(file_path, file_blocks);
-                            }
-                        }
-                        None => stats.files_skipped += 1,
-                    }
-                }
-                Err(err) => {
-                    return Err(anyhow!("Failed to walk directory: {err}"));
-                }
-            }
-        }
-    }
-    // Parse remaining files in `line_changes_by_file` from the given diff input (if any).
-    for (file_path, line_changes) in line_changes_by_file {
-        if path_checker.should_ignore(&file_path) {
-            // Not calling `path_checker.should_allow()` because all the files in the
-            // `line_changes_by_file` are implicitly allowed.
-            continue;
-        }
-        let file_blocks_opt = parse_file(
-            file_path.as_path(),
-            line_changes.as_slice(),
-            BlocksFilter::ModifiedOnly,
+    match scan_mode {
+        ScanMode::Walk => walk_repository(
+            line_changes_by_file,
             file_system,
+            path_checker,
             parsers,
             &extra_file_extensions,
+        ),
+        ScanMode::DiffTargets => parse_diff_targets(
+            line_changes_by_file,
+            file_system,
+            path_checker,
+            parsers,
+            &extra_file_extensions,
+        ),
+    }
+}
+
+/// Parses every block in every file the repository walk yields, marking the ones the line changes
+/// touched. Line changes in the files the walk did not yield are discarded.
+fn walk_repository(
+    mut line_changes_by_file: HashMap<RepoPath, Vec<LineChange>>,
+    file_system: &impl FileSystem,
+    path_checker: &impl PathChecker,
+    parsers: &LanguageParsers,
+    extra_file_extensions: &HashMap<OsString, OsString>,
+) -> anyhow::Result<ParsedBlocks> {
+    let mut parsed = ParsedBlocks::default();
+    for repo_path_result in file_system.walk() {
+        let file_path =
+            repo_path_result.map_err(|err| anyhow!("Failed to walk directory: {err}"))?;
+        if !path_checker.should_allow(&file_path) || path_checker.should_ignore(&file_path) {
+            continue;
+        }
+        let changes_owned = line_changes_by_file.remove(&file_path);
+        let line_changes = changes_owned.as_deref().unwrap_or(&[]);
+        let file_blocks = parse_file(
+            file_path.as_path(),
+            line_changes,
+            every_block,
+            file_system,
+            parsers,
+            extra_file_extensions,
+        )?;
+        record_parsed_file(&mut parsed, file_path, file_blocks);
+    }
+    Ok(parsed)
+}
+
+/// Parses only the files the diff names, keeping the blocks whose start tag or content it modified.
+fn parse_diff_targets(
+    line_changes_by_file: HashMap<RepoPath, Vec<LineChange>>,
+    file_system: &impl FileSystem,
+    path_checker: &impl PathChecker,
+    parsers: &LanguageParsers,
+    extra_file_extensions: &HashMap<OsString, OsString>,
+) -> anyhow::Result<ParsedBlocks> {
+    let mut parsed = ParsedBlocks::default();
+    for (file_path, line_changes) in line_changes_by_file {
+        if !path_checker.should_allow(&file_path) || path_checker.should_ignore(&file_path) {
+            continue;
+        }
+        let file_blocks = parse_file(
+            file_path.as_path(),
+            line_changes.as_slice(),
+            modified_blocks,
+            file_system,
+            parsers,
+            extra_file_extensions,
         )
         .map_err(|error| {
-            // Only a file this run validates reaches a read: ignored paths are skipped above, and
-            // one with no language parser returns before its contents are read.
+            // Only a file this run validates reaches a read: filtered-out paths are skipped above,
+            // and one with no language parser returns before its contents are read.
             if file_system.exists(file_path.as_path()) {
                 error
             } else {
@@ -374,30 +404,49 @@ pub fn parse_blocks(
                 ))
             }
         })?;
-        match file_blocks_opt {
-            Some(file_blocks) => {
-                stats.files_scanned += 1;
-                if !file_blocks.is_empty() {
-                    blocks.insert(file_path.clone(), file_blocks);
-                }
-            }
-            None => stats.files_skipped += 1,
-        }
+        record_parsed_file(&mut parsed, file_path, file_blocks);
     }
-    Ok(ParsedBlocks { blocks, stats })
+    Ok(parsed)
 }
 
-enum BlocksFilter {
-    All,
-    ModifiedOnly,
+/// Folds one file's parse result into the accumulator. `None` means no parser claimed the file's
+/// extension, which counts as skipped rather than scanned.
+fn record_parsed_file(
+    parsed: &mut ParsedBlocks,
+    file_path: RepoPath,
+    file_blocks: Option<FileBlocks>,
+) {
+    match file_blocks {
+        Some(file_blocks) => {
+            parsed.stats.files_scanned += 1;
+            // A file that parsed cleanly but declares no blocks still counts as scanned; it is
+            // simply nothing for the validators to work on.
+            if !file_blocks.is_empty() {
+                parsed.blocks.insert(file_path, file_blocks);
+            }
+        }
+        None => parsed.stats.files_skipped += 1,
+    }
+}
+
+/// Keeps every block the file declares, whether or not a diff touched it.
+fn every_block(_block: &BlockWithContext) -> bool {
+    true
+}
+
+/// Keeps only the blocks a diff touched, by their content or by their start tag.
+fn modified_blocks(block: &BlockWithContext) -> bool {
+    // A block with a modified start tag is considered modified because its rules (attributes) are
+    // modified.
+    block.is_content_modified || block.is_start_tag_modified
 }
 
 /// Parses every block in a single file, without diff-based filtering. Returns `None` for
 /// unsupported file extensions.
 ///
-/// Whereas [`parse_blocks`] keeps only the blocks intersecting a set of changed lines, this returns
-/// all blocks in the file — for reading a referenced block in a file that is not part of the
-/// current change set.
+/// Whereas [`parse_blocks`] may keep only the blocks intersecting a set of changed lines, this
+/// returns all blocks in the file — for reading a referenced block in a file that is not part of
+/// the current change set.
 pub fn parse_single_file(
     file_system: &impl FileSystem,
     file_path: &Path,
@@ -407,17 +456,22 @@ pub fn parse_single_file(
     parse_file(
         file_path,
         &[],
-        BlocksFilter::All,
+        every_block,
         file_system,
         parsers,
         extra_file_extensions,
     )
 }
 
+/// Parses the blocks of one file, keeping those `keep` selects. Returns `None` for unsupported
+/// file extensions.
+///
+/// Which blocks are worth keeping is the caller's policy, not this function's: pass [`every_block`]
+/// or [`modified_blocks`].
 fn parse_file(
     file_path: &Path,
     line_changes: &[LineChange],
-    blocks_filter: BlocksFilter,
+    block_predicate: impl Fn(&BlockWithContext) -> bool,
     file_reader: &impl FileSystem,
     parsers: &LanguageParsers,
     extra_file_extensions: &HashMap<OsString, OsString>,
@@ -442,21 +496,12 @@ fn parse_file(
             if let Err(err) = validate_block_syntax(&block, file_path) {
                 return Some(Err(err));
             }
-            let is_content_modified = block.content_intersects_with_any(line_changes);
-            let is_start_tag_modified = block.start_tag_intersects_with_any(line_changes);
-
-            if matches!(blocks_filter, BlocksFilter::All)
-                || is_content_modified
-                || is_start_tag_modified
-            {
-                Some(Ok(BlockWithContext {
-                    block,
-                    _is_start_tag_modified: is_start_tag_modified,
-                    is_content_modified,
-                }))
-            } else {
-                None
-            }
+            let block_with_context = BlockWithContext {
+                is_content_modified: block.content_intersects_with_any(line_changes),
+                is_start_tag_modified: block.start_tag_intersects_with_any(line_changes),
+                block,
+            };
+            block_predicate(&block_with_context).then_some(Ok(block_with_context))
         })
         .collect::<anyhow::Result<Vec<_>>>()
         .context(format!("Failed to parse file {file_path:?}"))?;
@@ -624,7 +669,7 @@ mod parse_blocks_tests {
 
         let parsed = parse_blocks(
             HashMap::new(),
-            true,
+            ScanMode::Walk,
             &file_system,
             &FakePathChecker::allow_all(),
             &parsers,
@@ -640,7 +685,7 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn with_nonempty_line_changes_no_scan_files_returns_only_blocks_with_modified_start_tag_or_content()
+    fn diff_targets_mode_returns_only_blocks_with_modified_start_tag_or_content()
     -> anyhow::Result<()> {
         let content_a = r#"
         /* <block name="first"> */ let foo = "bar"; // </block>
@@ -804,7 +849,7 @@ mod parse_blocks_tests {
 
         let blocks_by_file = parse_blocks(
             line_changes,
-            false,
+            ScanMode::DiffTargets,
             &file_system,
             &FakePathChecker::allow_all(),
             &parsers,
@@ -817,39 +862,39 @@ mod parse_blocks_tests {
         assert_eq!(blocks_a.len(), 9);
         let first = &blocks_a[0];
         assert_eq!(first.block.name(), Some("first"));
-        assert!(first._is_start_tag_modified);
+        assert!(first.is_start_tag_modified);
         assert!(!first.is_content_modified);
         let second = &blocks_a[1];
         assert_eq!(second.block.name(), Some("second"));
-        assert!(second._is_start_tag_modified);
+        assert!(second.is_start_tag_modified);
         assert!(second.is_content_modified);
         let third = &blocks_a[2];
         assert_eq!(third.block.name(), Some("third"));
-        assert!(!third._is_start_tag_modified);
+        assert!(!third.is_start_tag_modified);
         assert!(third.is_content_modified);
         let fourth = &blocks_a[3];
         assert_eq!(fourth.block.name(), Some("fourth"));
-        assert!(!fourth._is_start_tag_modified);
+        assert!(!fourth.is_start_tag_modified);
         assert!(fourth.is_content_modified);
         let sixth = &blocks_a[4];
         assert_eq!(sixth.block.name(), Some("sixth"));
-        assert!(sixth._is_start_tag_modified);
+        assert!(sixth.is_start_tag_modified);
         assert!(!sixth.is_content_modified);
         let seventh = &blocks_a[5];
         assert_eq!(seventh.block.name(), Some("seventh"));
-        assert!(seventh._is_start_tag_modified);
+        assert!(seventh.is_start_tag_modified);
         assert!(!seventh.is_content_modified);
         let eighth = &blocks_a[6];
         assert_eq!(eighth.block.name(), Some("eighth"));
-        assert!(!eighth._is_start_tag_modified);
+        assert!(!eighth.is_start_tag_modified);
         assert!(eighth.is_content_modified);
         let ninth = &blocks_a[7];
         assert_eq!(ninth.block.name(), Some("ninth"));
-        assert!(!ninth._is_start_tag_modified);
+        assert!(!ninth.is_start_tag_modified);
         assert!(ninth.is_content_modified);
         let tenth = &blocks_a[8];
         assert_eq!(tenth.block.name(), Some("tenth"));
-        assert!(!tenth._is_start_tag_modified);
+        assert!(!tenth.is_start_tag_modified);
         assert!(tenth.is_content_modified);
         let blocks_b = &blocks_by_file[&RepoPath::from_reference("b.rs")?].blocks_with_context;
         assert_eq!(blocks_b.len(), 1);
@@ -859,8 +904,7 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn with_nonempty_line_changes_with_scan_files_parses_modified_and_unmodified_blocks()
-    -> anyhow::Result<()> {
+    fn walk_mode_with_line_changes_parses_modified_and_unmodified_blocks() -> anyhow::Result<()> {
         let file_system = FakeFileSystem::new(HashMap::from([
             (
                 "a.rs".to_string(),
@@ -911,7 +955,7 @@ mod parse_blocks_tests {
         ]);
         let blocks_by_file = parse_blocks(
             line_changes,
-            true,
+            ScanMode::Walk,
             &file_system,
             &FakePathChecker::allow_all(),
             &parsers,
@@ -939,7 +983,7 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn with_empty_line_changes_with_scan_files_parses_unmodified_blocks() -> anyhow::Result<()> {
+    fn walk_mode_without_line_changes_parses_unmodified_blocks() -> anyhow::Result<()> {
         let file_system = FakeFileSystem::new(HashMap::from([
             (
                 "a.rs".to_string(),
@@ -974,7 +1018,7 @@ mod parse_blocks_tests {
 
         let blocks_by_file = parse_blocks(
             HashMap::new(),
-            true,
+            ScanMode::Walk,
             &file_system,
             &FakePathChecker::allow_all(),
             &parsers,
@@ -1022,7 +1066,7 @@ mod parse_blocks_tests {
 
         let blocks_by_file = parse_blocks(
             HashMap::new(),
-            true,
+            ScanMode::Walk,
             &file_system,
             &FakePathChecker::allow_all(),
             &parsers,
@@ -1049,7 +1093,7 @@ mod parse_blocks_tests {
 
         let blocks_by_file = parse_blocks(
             HashMap::new(),
-            true,
+            ScanMode::Walk,
             &file_system,
             &FakePathChecker::allow_all(),
             &parsers,
@@ -1073,7 +1117,7 @@ mod parse_blocks_tests {
 
         let blocks = parse_blocks(
             HashMap::new(),
-            true,
+            ScanMode::Walk,
             &FakeFileSystem::new(files),
             &FakePathChecker::allow_all(),
             &HashMap::new(),
@@ -1113,7 +1157,7 @@ mod parse_blocks_tests {
 
         let blocks = parse_blocks(
             HashMap::new(),
-            true,
+            ScanMode::Walk,
             &file_system,
             &path_checker,
             &language_parsers()?,
@@ -1124,6 +1168,76 @@ mod parse_blocks_tests {
         assert_eq!(blocks.len(), 1);
         assert!(blocks.contains_key(&RepoPath::from_reference("allowed.rs")?));
         assert!(!blocks.contains_key(&RepoPath::from_reference("ignored.rs")?));
+        Ok(())
+    }
+
+    #[test]
+    fn diff_target_outside_the_allowed_globs_is_not_parsed() -> anyhow::Result<()> {
+        let file_system = FakeFileSystem::new(HashMap::from([
+            (
+                "src/allowed.rs".to_string(),
+                "// <block name=\"allowed\">\nfn allowed() {}\n// </block>\n".to_string(),
+            ),
+            (
+                "vendor/denied.rs".to_string(),
+                "// <block name=\"denied\">\nfn denied() {}\n// </block>\n".to_string(),
+            ),
+        ]));
+        let line_changes = HashMap::from([
+            (
+                RepoPath::from_reference("src/allowed.rs")?,
+                vec![line_change(2)],
+            ),
+            (
+                RepoPath::from_reference("vendor/denied.rs")?,
+                vec![line_change(2)],
+            ),
+        ]);
+
+        let blocks = parse_blocks(
+            line_changes,
+            ScanMode::DiffTargets,
+            &file_system,
+            &FakePathChecker::allow_only("src/**"),
+            &language_parsers()?,
+            HashMap::new(),
+        )?
+        .blocks;
+
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks.contains_key(&RepoPath::from_reference("src/allowed.rs")?));
+        Ok(())
+    }
+
+    #[test]
+    fn walk_mode_ignores_diff_entries_the_walk_did_not_reach() -> anyhow::Result<()> {
+        // In `Walk` mode the walk alone decides which files are read; the diff only marks which of
+        // the blocks it found had changed.
+        let file_system = FakeFileSystem::new(HashMap::from([(
+            "walked.rs".to_string(),
+            "// <block name=\"walked\">\nfn walked() {}\n// </block>\n".to_string(),
+        )]));
+        let line_changes = HashMap::from([(
+            RepoPath::from_reference("not_walked.rs")?,
+            vec![line_change(1)],
+        )]);
+
+        let parsed = parse_blocks(
+            line_changes,
+            ScanMode::Walk,
+            &file_system,
+            &FakePathChecker::allow_all(),
+            &language_parsers()?,
+            HashMap::new(),
+        )?;
+
+        assert_eq!(parsed.blocks.len(), 1);
+        assert!(
+            parsed
+                .blocks
+                .contains_key(&RepoPath::from_reference("walked.rs")?)
+        );
+        assert_eq!(parsed.stats.files_scanned, 1);
         Ok(())
     }
 
@@ -1139,7 +1253,7 @@ mod parse_blocks_tests {
         )]);
         let error = parse_blocks(
             line_changes,
-            false,
+            ScanMode::DiffTargets,
             &FakeFileSystem::new(HashMap::from([("src/rules.py".to_string(), String::new())])),
             &FakePathChecker::allow_all(),
             &language_parsers()?,
@@ -1167,7 +1281,7 @@ mod parse_blocks_tests {
         )]);
         let blocks = parse_blocks(
             line_changes,
-            false,
+            ScanMode::DiffTargets,
             &FakeFileSystem::new(HashMap::new()),
             &FakePathChecker::with_ignored_paths(HashSet::from(["vendor/gone.py".to_string()])),
             &language_parsers()?,
@@ -1191,7 +1305,7 @@ mod parse_blocks_tests {
         )]);
         let blocks = parse_blocks(
             line_changes,
-            false,
+            ScanMode::DiffTargets,
             &FakeFileSystem::new(HashMap::new()),
             &FakePathChecker::allow_all(),
             &language_parsers()?,
@@ -1207,7 +1321,7 @@ mod parse_blocks_tests {
         let line_changes = HashMap::default();
         let blocks = parse_blocks(
             line_changes,
-            true,
+            ScanMode::Walk,
             &FakeFileSystem::new(HashMap::default()),
             &FakePathChecker::allow_all(),
             &HashMap::new(),
@@ -1560,7 +1674,7 @@ mod supported_languages_tests {
 
         let blocks_by_file = parse_blocks(
             HashMap::new(),
-            true,
+            ScanMode::Walk,
             &file_system,
             &FakePathChecker::allow_all(),
             &parsers,

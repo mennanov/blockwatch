@@ -252,6 +252,7 @@ mod file_system_impl_tests {
 pub mod test_utils {
     use crate::fs::{FileSystem, PathChecker};
     use crate::repo_path::RepoPath;
+    use globset::GlobSet;
     use std::collections::{HashMap, HashSet};
     use std::path::Path;
 
@@ -289,27 +290,47 @@ pub mod test_utils {
         }
     }
 
-    /// A path filter driven by an explicit deny list instead of compiled globs, so a test can
-    /// exclude a file without writing glob patterns.
+    /// A path filter for tests: an explicit deny list, so a file can be excluded without writing
+    /// glob patterns, plus an optional allow-list of globs for the tests that are about globbing.
     pub(crate) struct FakePathChecker {
+        /// The globs a path must match to be allowed. `None` allows every path, which is what most
+        /// tests want; `Some` mirrors the real checker, whose empty glob set matches nothing.
+        allowed_globs: Option<GlobSet>,
         ignored_paths: HashSet<String>,
     }
 
     impl FakePathChecker {
         /// Allows every path except those listed.
         pub(crate) fn with_ignored_paths(ignored_paths: HashSet<String>) -> Self {
-            Self { ignored_paths }
+            Self {
+                allowed_globs: None,
+                ignored_paths,
+            }
         }
 
         /// Allows every path — the default for tests that are not about filtering.
         pub(crate) fn allow_all() -> Self {
             Self::with_ignored_paths(HashSet::new())
         }
+
+        /// Allows only the paths matching `glob`.
+        pub(crate) fn allow_only(glob: &str) -> Self {
+            let glob_set = GlobSet::builder()
+                .add(globset::Glob::new(glob).expect("malformed test glob"))
+                .build()
+                .expect("failed to build test glob set");
+            Self {
+                allowed_globs: Some(glob_set),
+                ignored_paths: HashSet::new(),
+            }
+        }
     }
 
     impl PathChecker for FakePathChecker {
-        fn should_allow(&self, _unused_path: &Path) -> bool {
-            true
+        fn should_allow(&self, path: &Path) -> bool {
+            self.allowed_globs
+                .as_ref()
+                .is_none_or(|globs| globs.is_match(path))
         }
 
         fn should_ignore(&self, path: &Path) -> bool {
