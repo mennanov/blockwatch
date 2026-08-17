@@ -28,6 +28,19 @@ index ca94c7e..cd73191 100644
 }
 
 #[test]
+fn without_a_diff_the_whole_file_is_checked() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/line_pattern.py");
+    let output = cmd.output().unwrap();
+
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("has a non-matching line 13"));
+}
+
+#[test]
 fn with_some_lines_not_matching_pattern_fails() {
     let diff_content = r#"
 diff --git a/tests/testdata/line_pattern.py b/tests/testdata/line_pattern.py

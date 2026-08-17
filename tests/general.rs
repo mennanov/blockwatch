@@ -55,34 +55,10 @@ index da567bd..5586a8d 100644
 
 #[test]
 fn disabled_validator_arg_provided_run_ignores_disabled_validator_failures() {
-    let diff_content = r#"
-diff --git a/tests/testdata/disable_enable.py b/tests/testdata/disable_enable.py
-index 6739b09..a8464fb 100644
---- a/tests/testdata/disable_enable.py
-+++ b/tests/testdata/disable_enable.py
-@@ -2,7 +2,7 @@ fruits = [
-     # <block keep-unique>
-     "apple",
-     "banana",
--    "pear",
-+    "apple",
-     # </block>
- ]
-
-@@ -10,6 +10,6 @@ colors = [
-     # <block keep-sorted>
-     "blue",
-     "red",
--    "yellow",
-+    "green",
-     # </block>
- ]
-"#;
-
+    // Both blocks of the fixture violate their rule.
     let mut cmd = cargo_bin_cmd!();
-    cmd.args(["--diff", "--only-changed"]);
+    cmd.arg("tests/testdata/disable_enable.py");
     cmd.arg("--disable=keep-sorted");
-    cmd.write_stdin(diff_content);
 
     let output = cmd.output().expect("Failed to get command output");
 
@@ -96,34 +72,9 @@ index 6739b09..a8464fb 100644
 
 #[test]
 fn enabled_validator_arg_provided_run_returns_only_enabled_validator_failures() {
-    let diff_content = r#"
-diff --git a/tests/testdata/disable_enable.py b/tests/testdata/disable_enable.py
-index 6739b09..a8464fb 100644
---- a/tests/testdata/disable_enable.py
-+++ b/tests/testdata/disable_enable.py
-@@ -2,7 +2,7 @@ fruits = [
-     # <block keep-unique>
-     "apple",
-     "banana",
--    "pear",
-+    "apple",
-     # </block>
- ]
-
-@@ -10,6 +10,6 @@ colors = [
-     # <block keep-sorted>
-     "blue",
-     "red",
--    "yellow",
-+    "green",
-     # </block>
- ]
-"#;
-
     let mut cmd = cargo_bin_cmd!();
-    cmd.args(["--diff", "--only-changed"]);
+    cmd.arg("tests/testdata/disable_enable.py");
     cmd.arg("--enable=keep-sorted");
-    cmd.write_stdin(diff_content);
 
     let output = cmd.output().expect("Failed to get command output");
 
@@ -172,31 +123,10 @@ index 74ff7b7..574d79a 100644
 
 #[test]
 fn severity_error_violation_present_run_fails_with_exit_code_one() {
-    let diff_content = r#"
-diff --git a/tests/testdata/severity.py b/tests/testdata/severity.py
-index a01afcd..74c68a3 100644
---- a/tests/testdata/severity.py
-+++ b/tests/testdata/severity.py
-@@ -2,7 +2,7 @@ fruits = [
-     # <block keep-unique severity="warning">
-     "apple",
-     "banana",
--    "orange",
-+    "apple",
-     # </block>
- ]
-
-@@ -10,6 +10,6 @@ colors = [
-     # <block keep-unique>
-     "red",
-     "green",
--    "red"
-+    "green",
-     # </block>
- ]"#;
+    // The fixture holds a warning-severity violation and an error-severity one; a single
+    // error-severity violation anywhere in the run is what makes the exit code non-zero.
     let mut cmd = cargo_bin_cmd!();
-    cmd.args(["--diff", "--only-changed"]);
-    cmd.write_stdin(diff_content);
+    cmd.arg("tests/testdata/severity.py");
 
     let output = cmd.output().expect("Failed to get command output");
 

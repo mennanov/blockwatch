@@ -3,7 +3,10 @@ use assert_cmd::cargo_bin_cmd;
 use predicates::prelude::predicate;
 use serde_json::json;
 
-const LUA_STDLIB_ENV_VAR: &str = "BLOCKWATCH_LUA_MODE";
+const LUA_MODE_ENV_VAR: &str = "BLOCKWATCH_LUA_MODE";
+
+/// A one-block fixture whose Lua checker calls into `os`.
+const MODE_FIXTURE: &str = "tests/testdata/check_lua_mode.py";
 
 #[test]
 fn with_valid_lua_script_succeeds() {
@@ -89,71 +92,28 @@ index 1111111..2222222 100644
 
 #[test]
 fn with_pattern_extracts_matching_content() {
-    let diff_content = r#"
-diff --git a/tests/testdata/check_lua_pattern.py b/tests/testdata/check_lua_pattern.py
-index 1111111..2222222 100644
---- a/tests/testdata/check_lua_pattern.py
-+++ b/tests/testdata/check_lua_pattern.py
-@@ -1,5 +1,5 @@
- data = [
-     # <block check-lua="tests/testdata/check_lua_echo.lua" check-lua-pattern="id: (?P<value>\d+)" expected="42">
--    name: Alice, id: 42
-+    name: Bob, id: 42
-     # </block>
- ]
-"#;
-
     let mut cmd = cargo_bin_cmd!();
-    cmd.args(["--diff", "--only-changed"]);
-    let output = cmd.write_stdin(diff_content).output().unwrap();
+    cmd.arg("tests/testdata/check_lua_pattern.py");
+    let output = cmd.output().unwrap();
 
     output.assert().success();
 }
 
 #[test]
 fn with_pattern_no_match_passes_empty_content() {
-    let diff_content = r#"
-diff --git a/tests/testdata/check_lua_pattern.py b/tests/testdata/check_lua_pattern.py
-index 1111111..2222222 100644
---- a/tests/testdata/check_lua_pattern.py
-+++ b/tests/testdata/check_lua_pattern.py
-@@ -1,5 +1,5 @@
- data = [
-     # <block check-lua="tests/testdata/check_lua_echo.lua" check-lua-pattern="zzz_no_match" name="">
--    name: Alice, id: 42
-+    name: Bob, id: 42
-     # </block>
- ]
-"#;
-
     let mut cmd = cargo_bin_cmd!();
-    cmd.args(["--diff", "--only-changed"]);
-    let output = cmd.write_stdin(diff_content).output().unwrap();
+    cmd.arg("tests/testdata/check_lua_pattern_no_match.py");
+    let output = cmd.output().unwrap();
 
     output.assert().success();
 }
 
 #[test]
 fn lua_script_using_os_fails_in_sandboxed_mode() {
-    let diff_content = r#"
-diff --git a/tests/testdata/check_lua_mode.py b/tests/testdata/check_lua_mode.py
-index 1111111..2222222 100644
---- a/tests/testdata/check_lua_mode.py
-+++ b/tests/testdata/check_lua_mode.py
-@@ -1,7 +1,7 @@
- times = [
-     # <block check-lua="tests/testdata/check_lua_os.lua">
--    'morning',
-+    'evening',
-     'afternoon',
-     # </block>
- ]
-"#;
-
     let mut cmd = cargo_bin_cmd!();
-    cmd.args(["--diff", "--only-changed"]);
+    cmd.arg(MODE_FIXTURE);
     // Default (sandboxed) mode: os library is not available.
-    let output = cmd.write_stdin(diff_content).output().unwrap();
+    let output = cmd.output().unwrap();
 
     output
         .assert()
@@ -164,25 +124,10 @@ index 1111111..2222222 100644
 
 #[test]
 fn lua_script_using_os_succeeds_in_safe_mode() {
-    let diff_content = r#"
-diff --git a/tests/testdata/check_lua_mode.py b/tests/testdata/check_lua_mode.py
-index 1111111..2222222 100644
---- a/tests/testdata/check_lua_mode.py
-+++ b/tests/testdata/check_lua_mode.py
-@@ -1,7 +1,7 @@
- times = [
-     # <block check-lua="tests/testdata/check_lua_os.lua">
--    'morning',
-+    'evening',
-     'afternoon',
-     # </block>
- ]
-"#;
-
     let mut cmd = cargo_bin_cmd!();
-    cmd.args(["--diff", "--only-changed"]);
-    cmd.env(LUA_STDLIB_ENV_VAR, "safe");
-    let output = cmd.write_stdin(diff_content).output().unwrap();
+    cmd.arg(MODE_FIXTURE);
+    cmd.env(LUA_MODE_ENV_VAR, "safe");
+    let output = cmd.output().unwrap();
 
     output.assert().success();
 }
@@ -251,25 +196,10 @@ index 1111111..2222222 100644
 
 #[test]
 fn lua_script_using_os_succeeds_in_unsafe_mode() {
-    let diff_content = r#"
-diff --git a/tests/testdata/check_lua_mode.py b/tests/testdata/check_lua_mode.py
-index 1111111..2222222 100644
---- a/tests/testdata/check_lua_mode.py
-+++ b/tests/testdata/check_lua_mode.py
-@@ -1,7 +1,7 @@
- times = [
-     # <block check-lua="tests/testdata/check_lua_os.lua">
--    'morning',
-+    'evening',
-     'afternoon',
-     # </block>
- ]
-"#;
-
     let mut cmd = cargo_bin_cmd!();
-    cmd.args(["--diff", "--only-changed"]);
-    cmd.env(LUA_STDLIB_ENV_VAR, "unsafe");
-    let output = cmd.write_stdin(diff_content).output().unwrap();
+    cmd.arg(MODE_FIXTURE);
+    cmd.env(LUA_MODE_ENV_VAR, "unsafe");
+    let output = cmd.output().unwrap();
 
     output.assert().success();
 }

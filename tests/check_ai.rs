@@ -154,6 +154,26 @@ index 1111111..2222222 100644
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn without_a_diff_every_block_in_the_file_is_checked() {
+    let (addr, _handle) = start_fake_openai().await;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/check_ai.py");
+    cmd.env(API_URL_ENV_VAR_NAME, format!("http://{addr}/v1"));
+    cmd.env(API_KEY_ENV_VAR_NAME, "test-key");
+
+    let output = cmd.output().unwrap();
+
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicates::prelude::predicate::str::contains(
+            "Block tests/testdata/check_ai.py:(unnamed) defined at line 7 failed AI check",
+        ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn when_api_key_is_empty_error_is_printed() {
     let (addr, _handle) = start_fake_openai().await;
 

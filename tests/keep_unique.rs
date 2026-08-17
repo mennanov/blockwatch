@@ -27,6 +27,19 @@ index d69398d..c5cbb7f 100644
 }
 
 #[test]
+fn without_a_diff_the_whole_file_is_checked() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/keep_unique.py");
+    let output = cmd.output().unwrap();
+
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("has a duplicated line 13"));
+}
+
+#[test]
 fn with_non_unique_lines_fails() {
     let diff_content = r#"
 diff --git a/tests/testdata/keep_unique.py b/tests/testdata/keep_unique.py
