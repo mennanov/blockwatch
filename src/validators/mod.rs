@@ -366,6 +366,49 @@ pub fn detector_factories<Fs: FileSystem + 'static>() -> Vec<(&'static str, Dete
     ]
 }
 
+/// Validators that only ever fire when a diff touches the corresponding blocks, each paired with
+/// the block attribute that selects it.
+pub const DIFF_GATED_VALIDATORS: &[(&str, &str)] = &[("affects", "affects")];
+
+/// Whether a validator is enabled/disabled.
+fn is_validator_active(
+    validator_name: &str,
+    disabled_validators: &HashSet<&str>,
+    enabled_validators: &HashSet<&str>,
+) -> bool {
+    if enabled_validators.is_empty() {
+        !disabled_validators.contains(validator_name)
+    } else {
+        enabled_validators.contains(validator_name)
+    }
+}
+
+/// Counts the blocks in `context` carrying a rule that cannot fire unless a diff is supplied; see
+/// [`DIFF_GATED_VALIDATORS`].
+pub fn diff_gated_block_count(
+    context: &ValidationContext,
+    disabled_validators: &HashSet<&str>,
+    enabled_validators: &HashSet<&str>,
+) -> usize {
+    let attributes: Vec<&str> = DIFF_GATED_VALIDATORS
+        .iter()
+        .filter(|(validator_name, _)| {
+            is_validator_active(validator_name, disabled_validators, enabled_validators)
+        })
+        .map(|(_, attribute)| *attribute)
+        .collect();
+    context
+        .blocks
+        .values()
+        .flat_map(|file_blocks| &file_blocks.blocks_with_context)
+        .filter(|block_with_context| {
+            attributes
+                .iter()
+                .any(|attribute| block_with_context.block.attributes.contains_key(*attribute))
+        })
+        .count()
+}
+
 /// Instantiates exactly the validators the blocks in `context` call for.
 ///
 /// A validator is created at most once, no matter how many blocks use it, and scanning stops as
@@ -384,11 +427,7 @@ pub fn detect_validators<Fs: FileSystem + 'static>(
     let mut validator_detectors: Vec<(&'static str, Box<dyn ValidatorDetector<Fs>>)> = detectors
         .iter()
         .filter(|(validator_name, _)| {
-            if !enabled_validators.is_empty() {
-                enabled_validators.contains(validator_name)
-            } else {
-                !disabled_validators.contains(validator_name)
-            }
+            is_validator_active(validator_name, disabled_validators, enabled_validators)
         })
         .map(|(name, factory)| (*name, factory()))
         .collect();
@@ -957,5 +996,57 @@ fn b() {}
         );
 
         Ok(())
+    }
+
+    /// A file holding a diff-gated rule and the block it points at: only the block carrying the
+    /// attribute has a rule that a run without a diff leaves unchecked.
+    fn diff_gated_context() -> Arc<ValidationContext> {
+        validation_context(
+            "file1.py",
+            r#"# <block affects=":target">
+print("source")
+# </block>
+
+# <block name="target">
+print("target")
+# </block>
+"#,
+        )
+    }
+
+    #[test]
+    fn diff_gated_block_count_counts_the_blocks_carrying_the_rule() {
+        assert_eq!(
+            validators::diff_gated_block_count(
+                &diff_gated_context(),
+                &HashSet::new(),
+                &HashSet::new()
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn diff_gated_block_count_with_the_validator_disabled_returns_zero() {
+        assert_eq!(
+            validators::diff_gated_block_count(
+                &diff_gated_context(),
+                &HashSet::from(["affects"]),
+                &HashSet::new()
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn diff_gated_block_count_with_other_validators_enabled_returns_zero() {
+        assert_eq!(
+            validators::diff_gated_block_count(
+                &diff_gated_context(),
+                &HashSet::new(),
+                &HashSet::from(["keep-sorted"])
+            ),
+            0
+        );
     }
 }

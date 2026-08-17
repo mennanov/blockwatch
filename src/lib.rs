@@ -1,7 +1,7 @@
 use serde::Serialize;
 
 mod block_parser;
-/// The `Block` type and the repo walk that turns source files into blocks to validate.
+/// The `Block` type and the repository scan that turns source files into blocks to validate.
 pub mod blocks;
 /// Reads a unified diff into the per-file line changes that decide which blocks are checked.
 pub mod diff_parser;
@@ -113,7 +113,7 @@ mod test_utils {
         Arc::new(ValidationContext::new(
             parse_blocks(
                 line_changes_by_file,
-                ScanMode::DiffTargets,
+                ScanMode::OnlyChanged,
                 &file_system,
                 &FakePathChecker::allow_all(),
                 &parsers,

@@ -8,14 +8,56 @@ use crate::validators::{ValidationContext, ValidationLog};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
+/// Which of the three run modes produced a report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunMode {
+    /// No diff: every block in the scope is parsed and validated, and no block counts as changed.
+    All,
+    /// A diff marks which blocks changed, but every file in the scope is still parsed.
+    AllWithDiff,
+    /// A diff both marks the changed blocks and narrows the run down to them.
+    OnlyChanged,
+}
+
+impl RunMode {
+    /// Derives the mode from the two flags that select it.
+    pub fn new(with_diff: bool, only_changed: bool) -> Self {
+        match (with_diff, only_changed) {
+            (false, _) => Self::All,
+            (true, false) => Self::AllWithDiff,
+            (true, true) => Self::OnlyChanged,
+        }
+    }
+
+    /// The name the mode goes by in the report, on both the summary line and in the JSON.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::AllWithDiff => "all+diff",
+            Self::OnlyChanged => "only-changed",
+        }
+    }
+}
+
+impl Serialize for RunMode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
 /// The totals for a whole run.
 #[derive(Serialize, Debug)]
 struct ReportSummary {
+    mode: RunMode,
     files_scanned: usize,
     files_with_blocks: usize,
     files_skipped: usize,
     blocks: usize,
     blocks_unchecked: usize,
+    /// Blocks carrying a rule that cannot fire unless a diff is supplied; see
+    /// [`crate::validators::DIFF_GATED_VALIDATORS`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    blocks_needing_diff: Option<usize>,
     checks: usize,
     violations: usize,
     /// Number of checks each validator ran.
@@ -35,8 +77,11 @@ pub struct RunReport {
 }
 
 impl RunReport {
-    /// Builds a report from the scan counts, the blocks in scope, and the checks that ran.
+    /// Builds a report from the run mode, the scan counts, the blocks in scope, and the checks that
+    /// ran.
     pub fn new(
+        mode: RunMode,
+        blocks_needing_diff: Option<usize>,
         stats: ScanStats,
         context: &ValidationContext,
         log: &ValidationLog,
@@ -81,11 +126,13 @@ impl RunReport {
 
         Ok(Self {
             summary: ReportSummary {
+                mode,
                 files_scanned: stats.files_scanned,
                 files_with_blocks: context.blocks.len(),
                 files_skipped: stats.files_skipped,
                 blocks,
                 blocks_unchecked,
+                blocks_needing_diff,
                 checks,
                 violations: log.violations.values().map(Vec::len).sum(),
                 validators,
@@ -96,12 +143,18 @@ impl RunReport {
 
     /// Returns the run totals as a single line of text.
     pub fn summary_line(&self) -> String {
+        let needs_diff = match self.summary.blocks_needing_diff {
+            Some(count) => format!(", {count} needs --diff"),
+            None => String::new(),
+        };
         format!(
-            "blockwatch: {}/{} files, {} blocks ({} unchecked), {} checks, {} violations",
+            "blockwatch: mode={}, {}/{} files, {} blocks ({} unchecked{}), {} checks, {} violations",
+            self.summary.mode.as_str(),
             self.summary.files_with_blocks,
             self.summary.files_scanned,
             self.summary.blocks,
             self.summary.blocks_unchecked,
+            needs_diff,
             self.summary.checks,
             self.summary.violations,
         )
@@ -162,6 +215,8 @@ mod tests {
         let log = log_with_check(&context, 0, "keep-sorted", vec![violation()])?;
 
         let report = RunReport::new(
+            RunMode::All,
+            Some(2),
             ScanStats {
                 files_scanned: 4,
                 files_skipped: 2,
@@ -172,8 +227,54 @@ mod tests {
 
         assert_eq!(
             report.summary_line(),
-            "blockwatch: 1/4 files, 3 blocks (2 unchecked), 1 checks, 1 violations"
+            "blockwatch: mode=all, 1/4 files, 3 blocks (2 unchecked, 2 needs --diff), 1 checks, 1 violations"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn summary_line_under_a_diff_leaves_out_the_needs_diff_clause() -> anyhow::Result<()> {
+        let context = validation_context("example.py", CONTENTS);
+        let log = log_with_check(&context, 0, "keep-sorted", vec![violation()])?;
+
+        let report = RunReport::new(
+            RunMode::AllWithDiff,
+            None,
+            ScanStats {
+                files_scanned: 4,
+                files_skipped: 2,
+            },
+            &context,
+            &log,
+        )?;
+
+        assert_eq!(
+            report.summary_line(),
+            "blockwatch: mode=all+diff, 1/4 files, 3 blocks (2 unchecked), 1 checks, 1 violations"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn json_under_a_diff_omits_the_needs_diff_key() -> anyhow::Result<()> {
+        let context = validation_context("example.py", CONTENTS);
+        let log = log_with_check(&context, 0, "keep-sorted", vec![violation()])?;
+
+        let report = RunReport::new(
+            RunMode::OnlyChanged,
+            None,
+            ScanStats {
+                files_scanned: 4,
+                files_skipped: 2,
+            },
+            &context,
+            &log,
+        )?;
+
+        let summary = &serde_json::to_value(&report)?["summary"];
+        assert_eq!(summary.get("blocks_needing_diff"), None);
+        // The rest of the summary keeps its shape, so only the one field varies with the mode.
+        assert_eq!(summary["blocks_unchecked"], 2);
         Ok(())
     }
 
@@ -196,6 +297,8 @@ mod tests {
         log.add_validation_report("line-count", counted);
 
         let report = RunReport::new(
+            RunMode::OnlyChanged,
+            None,
             ScanStats {
                 files_scanned: 4,
                 files_skipped: 2,
@@ -208,6 +311,7 @@ mod tests {
             serde_json::to_value(&report)?,
             serde_json::json!({
                 "summary": {
+                    "mode": "only-changed",
                     "files_scanned": 4,
                     "files_with_blocks": 1,
                     "files_skipped": 2,

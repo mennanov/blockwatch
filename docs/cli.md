@@ -7,7 +7,8 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
 [//]: # (<block name="cli-docs">)
 
 - **Read a Diff**: `git diff --patch | blockwatch --diff` marks which blocks the diff changed.
-- **Only Changed Blocks**: `git diff --patch | blockwatch --diff --only-changed` narrows the run to them.
+- **Only Changed Blocks**: `git diff --patch | blockwatch --diff --only-changed` narrows the run to them, instead of
+  every block in the repository.
 - **List Blocks**: `blockwatch list` outputs a JSON report of all discovered blocks.
 - **Custom Extensions**: Map custom file extensions: `blockwatch -E cxx=cpp`
 - **Disable Validators**: `blockwatch -d check-ai`
@@ -191,10 +192,23 @@ blockwatch: 34/240 files, 61 blocks (3 unchecked), 73 checks, 0 violations
 
 Reading that line:
 
+- `mode=all` — which [run mode](#run-modes) this was: `all`, `all+diff`, or `only-changed`. Each name is a single token,
+  so the line stays tokenizable on whitespace.
 - `34/240 files` — 240 files were read, and 34 of them contain blocks.
-- `61 blocks (3 unchecked)` — 61 blocks were in scope, and no validator checked 3 of them.
+- `61 blocks (3 unchecked, 2 needs --diff)` — 61 blocks were in scope, no validator checked 3 of them, and 2 carry a
+  rule that cannot fire at all without a diff. Fixing that means supplying one, so the figure is a prompt to change how
+  you invoked `blockwatch`.
 - `73 checks` — validators ran 73 times in total, once per block they applied to.
 - `0 violations` — nothing failed.
+
+**`needs --diff` appears only under `mode=all`.** Every other field is present in every mode. Once a diff is supplied
+those rules *can* fire, so the question the figure answers no longer arises — and the obvious substitute, counting the
+blocks the diff did not happen to reach, would just measure the size of your change. On a repository with fifty
+`affects` blocks, a one-line commit would report forty-nine, every time, with nothing wrong. So the clause is left out
+rather than reported as zero or as noise.
+
+A parser should therefore read `mode=` first and expect the clause only for `all`; the remaining fields keep a fixed
+shape in every mode.
 
 A block goes unchecked for one of three reasons:
 
@@ -202,7 +216,8 @@ A block goes unchecked for one of three reasons:
   it with `affects` or `same-as`. It declares no rule of its own, so nothing checks it. This is normal and needs no
   fixing.
 - **The validator does not apply to this run.** `affects` only compares blocks that a diff has touched, so it checks
-  nothing during a full-tree scan.
+  nothing without `--diff`. These are the blocks the `needs --diff` figure counts. Under a diff the same block goes
+  unchecked whenever the diff did not reach it, which is normal for an incremental run and is not counted.
 - **The attributes do not add up to a rule.** A modifier such as `keep-sorted-pattern` only refines the validator it
   belongs to; on a block with no `keep-sorted`, it has nothing to modify and no validator claims the block. A `full`
   report lists every attribute as it was written, which is usually enough to see what is missing.
@@ -219,8 +234,8 @@ compared — but the target appears in the report only if the diff touched it as
 alone therefore reports a single file, even though two were involved:
 
 ```shell
-git diff --patch | blockwatch --verbosity summary
-blockwatch: 1/1 files, 1 blocks (0 unchecked), 1 checks, 1 violations
+git diff --patch | blockwatch --diff --only-changed --verbosity summary
+blockwatch: mode=only-changed, 1/1 files, 1 blocks (0 unchecked), 1 checks, 1 violations
 ```
 
 Nothing about the failure is hidden by this. The violation on stderr names both sides:
@@ -234,14 +249,16 @@ wrong. Once the diff touches the target as well, it appears like any other block
 block that carries nothing but a `name` declares no rule of its own:
 
 ```shell
-git diff --patch | blockwatch --verbosity summary
-blockwatch: 2/2 files, 2 blocks (1 unchecked), 1 checks, 0 violations
+git diff --patch | blockwatch --diff --only-changed --verbosity summary
+blockwatch: mode=only-changed, 2/2 files, 2 blocks (1 unchecked), 1 checks, 0 violations
 ```
 
 ### Full Reports
 
 `--verbosity full` describes every block the same way `blockwatch list` does, and adds a `checks` array naming the
-validators that ran on it. A block checked by several validators lists all of them.
+validators that ran on it. A block checked by several validators lists all of them. The `summary` object carries the
+same counts as the one-line report and follows the same rule: `blocks_needing_diff` is present only under `mode=all`,
+and is absent — not zero — in the other two modes.
 
 ```json
 {
@@ -251,6 +268,7 @@ validators that ran on it. A block checked by several validators lists all of th
     "files_skipped": 179,
     "blocks": 61,
     "blocks_unchecked": 3,
+    "blocks_needing_diff": 2,
     "checks": 73,
     "violations": 0,
     "validators": {

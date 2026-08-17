@@ -80,7 +80,7 @@ pub struct Args {
     #[arg(long = "diff", global = true)]
     pub diff: bool,
 
-    /// Restrict the run to the blocks the diff changed, instead of the whole tree.
+    /// Restrict the run to the blocks the diff changed, instead of every block in the repository.
     #[arg(long = "only-changed", requires = "diff", global = true)]
     pub only_changed: bool,
 

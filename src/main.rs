@@ -54,7 +54,21 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
     // failure to write the report from discarding them.
     let has_error_severity = !log.violations.is_empty() && process_violations(&log.violations)?;
 
-    write_report(args.verbosity, scan_stats, &context, &log)?;
+    let blocks_needing_diff = (!args.diff).then(|| {
+        validators::diff_gated_block_count(
+            &context,
+            &args.disabled_validators(),
+            &args.enabled_validators(),
+        )
+    });
+    write_report(
+        args.verbosity,
+        report::RunMode::new(args.diff, args.only_changed),
+        blocks_needing_diff,
+        scan_stats,
+        &context,
+        &log,
+    )?;
 
     if has_error_severity {
         process::exit(1);
@@ -68,6 +82,8 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
 /// would drop anything still held in the buffer.
 fn write_report(
     verbosity: flags::Verbosity,
+    mode: report::RunMode,
+    blocks_needing_diff: Option<usize>,
     scan_stats: blocks::ScanStats,
     context: &validators::ValidationContext,
     log: &validators::ValidationLog,
@@ -76,7 +92,7 @@ fn write_report(
         // Building the report walks every block, so skip it when nothing will be printed.
         return Ok(());
     }
-    let report = report::RunReport::new(scan_stats, context, log)?;
+    let report = report::RunReport::new(mode, blocks_needing_diff, scan_stats, context, log)?;
     let mut stdout = std::io::stdout().lock();
     match verbosity {
         flags::Verbosity::None => {}
@@ -99,9 +115,9 @@ fn run_inputs(
     HashMap<RepoPath, Vec<diff_parser::LineChange>>,
 )> {
     let scan_mode = if args.only_changed {
-        blocks::ScanMode::DiffTargets
+        blocks::ScanMode::OnlyChanged
     } else {
-        blocks::ScanMode::Walk
+        blocks::ScanMode::All
     };
     if !args.diff {
         return Ok((scan_mode, HashMap::new()));
@@ -110,7 +126,7 @@ fn run_inputs(
         return Err(anyhow::anyhow!(
             "--diff was given but stdin is a terminal, so there is no diff to read. \
              Pipe one in, e.g. `git diff --patch | blockwatch --diff`, \
-             or drop --diff to check the whole tree."
+             or drop --diff to check every block."
         ));
     }
     Ok((scan_mode, read_diff_from_stdin(file_system)?))
