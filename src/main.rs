@@ -164,6 +164,7 @@ fn read_diff_from_stdin(
 ) -> anyhow::Result<HashMap<RepoPath, Vec<diff_parser::LineChange>>> {
     let mut diff = String::new();
     std::io::stdin().read_to_string(&mut diff)?;
+    diff_parser::validate_diff_input(&diff)?;
     diff_parser::line_changes_from_diff(&diff, file_system)
 }
 

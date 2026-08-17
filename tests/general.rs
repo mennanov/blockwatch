@@ -134,14 +134,17 @@ fn severity_error_violation_present_run_fails_with_exit_code_one() {
 }
 
 #[test]
-fn empty_diff_provided_run_succeeds() {
+fn empty_diff_provided_run_fails_with_error() {
     let mut cmd = cargo_bin_cmd!();
-    cmd.args(["--diff", "--only-changed"]);
+    cmd.args(["--diff"]);
     cmd.write_stdin("");
 
     let output = cmd.output().expect("Failed to get command output");
 
-    output.assert().success();
+    output
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("stdin is empty"));
 }
 
 #[test]

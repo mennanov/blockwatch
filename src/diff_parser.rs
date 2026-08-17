@@ -16,6 +16,23 @@ pub struct LineChange {
     pub ranges: Option<Vec<Range<usize>>>, // TODO: consider making it 1-based to be consistent with `line`.
 }
 
+/// Rejects input that cannot be a unified diff, with a message naming the likely cause.
+pub fn validate_diff_input(diff: &str) -> anyhow::Result<()> {
+    if diff.trim().is_empty() {
+        anyhow::bail!("diff in stdin is empty.");
+    }
+    if diff.lines().any(|line| line.starts_with('\u{1b}')) {
+        anyhow::bail!("stdin carries ANSI color escapes, which cannot be parsed as a diff.");
+    }
+    if !diff
+        .lines()
+        .any(|line| line.starts_with("diff --git ") || line.starts_with("--- "))
+    {
+        anyhow::bail!("stdin is not a unified diff: no line starts with `diff --git ` or `--- `.");
+    }
+    Ok(())
+}
+
 /// Extracts line changes from a unified diff patch string.
 ///
 /// Parses a patch/diff string and extracts all line changes grouped by file path.
@@ -364,6 +381,70 @@ mod modified_line_ranges_tests {
         let ranges = line_diff("there was three", "there is thora");
 
         assert_eq!(ranges, vec![6..7, 11..12, 13..14]);
+    }
+}
+
+#[cfg(test)]
+mod validate_diff_input_tests {
+    use super::*;
+
+    #[test]
+    fn whitespace_only_input_returns_error() {
+        let err = validate_diff_input(" \n\t\n").unwrap_err();
+
+        assert!(
+            err.to_string().contains("stdin is empty"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn colorized_input_returns_error() {
+        // What `git diff --color=always` produces: the header lines carry SGR escapes.
+        let diff = "\u{1b}[1mdiff --git a/rules.py b/rules.py\u{1b}[m\n\
+\u{1b}[1m--- a/rules.py\u{1b}[m\n\
+\u{1b}[1m+++ b/rules.py\u{1b}[m\n\
+\u{1b}[36m@@ -1 +1 @@\u{1b}[m\n\
+\u{1b}[31m-apple\u{1b}[m\n\
+\u{1b}[32m+banana\u{1b}[m\n";
+
+        assert!(validate_diff_input(diff).is_err());
+    }
+
+    #[test]
+    fn input_without_a_diff_header_returns_error() {
+        let err = validate_diff_input("apple\nbanana\n").unwrap_err();
+
+        assert!(
+            err.to_string().contains("not a unified diff"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn deletion_only_diff_is_accepted() -> anyhow::Result<()> {
+        let diff = "diff --git a/rules.py b/rules.py\n\
+deleted file mode 100644\n\
+index 1234567..0000000\n\
+--- a/rules.py\n\
++++ /dev/null\n\
+@@ -1,2 +0,0 @@\n\
+-apple\n\
+-banana\n";
+
+        validate_diff_input(diff)
+    }
+
+    #[test]
+    fn diff_without_git_headers_is_accepted() -> anyhow::Result<()> {
+        // Not every unified diff comes from Git; `diff -u` output has no `diff --git` line.
+        let diff = "--- rules.py\n\
++++ rules.py\n\
+@@ -1 +1 @@\n\
+-apple\n\
++banana\n";
+
+        validate_diff_input(diff)
     }
 }
 
