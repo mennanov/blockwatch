@@ -95,15 +95,30 @@ For Cursor, Copilot, Codex, and other setup options, see [docs/agents.md](docs/a
 
 ## Usage
 
+A bare run checks the whole repository. Pass `--diff` to read a unified diff from stdin, which marks the blocks it
+changed, and add `--only-changed` to narrow the run down to those blocks:
+
 ```shell
-blockwatch                              # Check all blocks in the repository
-blockwatch "src/**/*.rs" "**/*.md"      # Check specific globs
-git diff --patch | blockwatch           # Check only blocks modified in uncommitted changes
-git diff --cached --patch | blockwatch  # Check only staged changes
-blockwatch list                         # Dump all discovered blocks as JSON
+# Check every block in the repository
+blockwatch
+
+# Check specific globs
+blockwatch "src/**/*.rs" "**/*.md"
+
+# Check every block, and enforce the rules that need a diff, such as `affects`
+git diff --patch | blockwatch --diff
+
+# Check only the blocks the diff changed
+git diff --patch | blockwatch --diff --only-changed
+
+# The same, for staged changes
+git diff --cached --patch | blockwatch --diff --only-changed
+
+# Dump all discovered blocks as JSON
+blockwatch list
 ```
 
-See [docs/cli.md](docs/cli.md) for CLI flags, path exclusions, and custom extension mappings.
+See [docs/cli.md](docs/cli.md) for the run modes in full, CLI flags, path exclusions, and custom extension mappings.
 
 ## CI Integration
 

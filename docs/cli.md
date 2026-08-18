@@ -35,27 +35,55 @@ blockwatch "**/*.rs" --ignore "**/generated/**"
 
 Note: Quote glob patterns to prevent shell expansion before passing arguments to `blockwatch`.
 
-## Diff Validation
+Globs **intersect** with whatever the run mode selected, in every mode. They only ever narrow a run: passing
+`"src/**/*.rs"` alongside a diff checks the changed blocks under `src/`, and never adds an unchanged file back.
 
-When given a unified diff via stdin, `blockwatch` limits validation to blocks modified by the diff. This keeps execution
-fast during pre-commit hooks and CI runs (see [CI Integration](ci.md)).
+## Run Modes
+
+Which files are parsed and which blocks are validated are two separate decisions, and each has its own flag.
+
+| Invocation                         | Files parsed                 | Blocks validated                                     |
+|------------------------------------|------------------------------|------------------------------------------------------|
+| `blockwatch`                       | Every file in scope          | Every block found; none counts as changed            |
+| `blockwatch --diff`                | Every file in scope          | Every block found; the diff marks which ones changed |
+| `blockwatch --diff --only-changed` | Only files named by the diff | Only the blocks the diff touched                     |
 
 ```shell
-# Validate unstaged changes
-git diff --patch | blockwatch
+# Check every block in the repository
+blockwatch
 
-# Validate staged changes
-git diff --cached --patch | blockwatch
+# Check every block, and enforce the rules that need a diff
+git diff --patch | blockwatch --diff
 
-# Validate changes in a specific file
-git diff --patch path/to/file | blockwatch
+# Check only the blocks the diff changed
+git diff --patch --unified=0 | blockwatch --diff --only-changed
 
-# Validate diff changes alongside explicit globs
-git diff --patch | blockwatch "src/always_checked.rs" "**/*.md"
+# The same, for staged changes
+git diff --cached --patch --unified=0 | blockwatch --diff --only-changed
+
+# Changed blocks under specific globs only
+git diff --patch | blockwatch --diff --only-changed "src/**/*.rs" "**/*.md"
 ```
 
-A block is validated if the diff overlaps its line range or start tag. To inspect which blocks a diff touches, use
-`blockwatch list --diff`.
+A block counts as changed when the diff overlaps its line range or its start tag. To inspect which blocks a diff
+touches, use `blockwatch list --diff`.
+
+`--only-changed` is what keeps pre-commit hooks and per-pull-request CI runs fast (see [CI Integration](ci.md)).
+`--diff` on its own audits the whole repository while still enforcing the rules that fire only on changed content.
+
+### Rules of the Modes
+
+- **stdin is never read without `--diff`.** A diff piped to a bare `blockwatch` is ignored and the whole tree is
+  scanned.
+- **`--only-changed` requires `--diff`.** Without a diff there is nothing to narrow the run down to.
+- **`--diff` with a terminal on stdin is an error.** No diff is coming, and quietly scanning the tree instead would hide
+  that.
+- **Under `--diff`, stdin that cannot be a diff is an error.** Empty input, input carrying ANSI color escapes (produce
+  the diff with `--color=never`), and input with no unified-diff header are each reported by name rather than treated as
+  "nothing changed".
+- **[`affects`](validators/affects.md) needs `--diff`.** It compares blocks that a diff has touched, so it reports
+  nothing at all without one. `--verbosity summary` says how many blocks carry a rule that needs a diff — see
+  [Run Reports](#run-reports).
 
 ### Supported Diff Input
 
@@ -80,30 +108,30 @@ Two details make the detection reliable. Git draws the two prefixes from opposit
 rather than stripped. An added file is the exception: its source is `/dev/null`, which says nothing either way, so both
 readings are checked against the working tree and a target where both name a real file is reported as ambiguous.
 
+A diff naming a file that does not exist in the repository is an error too — but only for files BlockWatch would parse.
+Entries whose extension maps to no language, such as binary assets or lockfiles, contribute no blocks and are passed
+over, so a diff carrying them alongside source changes still validates normally.
+
+[//]: # (</block>)
+
 In each case `blockwatch` stops with the flag that fixes it rather than checking the wrong file:
 
 ```console
-$ git diff --no-prefix | blockwatch
+$ git diff --no-prefix | blockwatch --diff
 Error: diff target "rules.py" has no recognized Git path prefix.
 BlockWatch reads diffs written with the prefixes Git produces by default. This one looks like the
 output of --no-prefix, diff.noprefix, or a custom diff.srcPrefix/diff.dstPrefix. Re-run with:
     git diff --default-prefix
 ```
 
-A diff naming a file that does not exist in the repository is an error too — but only for files BlockWatch would parse.
-Entries whose extension maps to no language, such as binary assets or lockfiles, contribute no blocks and are passed
-over, so a diff carrying them alongside source changes still validates normally.
-
 To produce configuration-independent output in a repository that sets these options globally:
 
 ```shell
-git diff --patch --default-prefix --no-relative | blockwatch
+git diff --patch --default-prefix --no-relative | blockwatch --diff
 ```
 
 `--default-prefix` requires Git 2.41 or newer. On older versions, use
 `git -c diff.mnemonicPrefix=false -c diff.noprefix=false diff --patch`.
-
-[//]: # (</block>)
 
 ## Custom File Extension Mappings
 
@@ -131,7 +159,8 @@ Note: `-e` and `-d` cannot be combined in a single invocation.
 
 ## The `list` Command
 
-The `list` command outputs details on all discovered blocks in JSON format without running validation.
+The `list` command outputs details on all discovered blocks in JSON format without running validation. It mirrors the
+[run modes](#run-modes) exactly, so `list` and the default command always agree on which blocks exist.
 
 ```shell
 # List all blocks under the current directory
@@ -140,14 +169,18 @@ blockwatch list
 # Restrict block listing to specific globs
 blockwatch list "src/**/*.rs" "**/*.md"
 
-# Annotate output with diff status
-git diff | blockwatch list --diff
+# List all blocks, marking the ones the diff changed
+git diff --patch | blockwatch list --diff
+
+# List only the blocks the diff changed
+git diff --patch | blockwatch list --diff --only-changed
 ```
 
-`blockwatch list` reads stdin only when `--diff` is explicitly provided, preventing blocking during non-interactive
-scripts or pipeline commands (e.g. `blockwatch list "src/**/*.ts" | jq`).
+Like the default command, `blockwatch list` reads stdin only when `--diff` is explicitly provided, preventing blocking
+during non-interactive scripts or pipeline commands (e.g. `blockwatch list "src/**/*.ts" | jq`).
 
-With `--diff`, each block entry includes the `is_content_modified` boolean field.
+Each block entry carries an `is_content_modified` boolean field. Without a diff nothing marks a block as changed, so it
+is `false` throughout; under `--diff` it identifies the blocks the diff touched.
 
 ### Output Example
 
@@ -187,7 +220,7 @@ on its own.
 
 ```shell
 blockwatch --verbosity summary
-blockwatch: 34/240 files, 61 blocks (3 unchecked), 73 checks, 0 violations
+blockwatch: mode=all, 34/240 files, 61 blocks (3 unchecked, 2 needs --diff), 73 checks, 0 violations
 ```
 
 Reading that line:
@@ -224,14 +257,15 @@ A block goes unchecked for one of three reasons:
 
 ### Reports Under a Diff
 
-A diff scopes the report exactly as it scopes the run: only the blocks the diff touched are described. A block the diff
-never reached is *absent* from the report rather than listed with an empty `checks` array, so under a diff
-`blocks_unchecked` counts only blocks that were in scope and that nothing checked. This is the same rule
-`blockwatch list --diff` follows, so the two commands always agree on which blocks exist.
+Under `--diff --only-changed` the diff scopes the report exactly as it scopes the run: only the blocks the diff touched
+are described. A block the diff never reached is *absent* from the report rather than listed with an empty `checks`
+array, so `blocks_unchecked` counts only blocks that were in scope and that nothing checked. This is the same rule
+`blockwatch list --diff --only-changed` follows, so the two commands always agree on which blocks exist. Under `--diff`
+alone the report covers the whole tree, exactly as a run without a diff does.
 
-Reference targets follow it too. When a block declares `affects` or `same-as`, its target is read from disk and
-compared — but the target appears in the report only if the diff touched it as well. A diff that changes the source
-alone therefore reports a single file, even though two were involved:
+Reference targets follow the run's scope too. When a block declares `affects` or `same-as`, its target is read from disk
+and compared — but under `--only-changed` the target appears in the report only if the diff touched it as well. A diff
+that changes the source alone therefore reports a single file, even though two were involved:
 
 ```shell
 git diff --patch | blockwatch --diff --only-changed --verbosity summary
@@ -263,6 +297,7 @@ and is absent — not zero — in the other two modes.
 ```json
 {
   "summary": {
+    "mode": "all",
     "files_scanned": 240,
     "files_with_blocks": 34,
     "files_skipped": 179,

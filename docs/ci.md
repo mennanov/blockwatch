@@ -1,6 +1,8 @@
 # CI & Git Hooks Integration
 
-Checking only modified blocks in git diffs keeps validation fast and allows incremental adoption.
+Checking only the blocks a diff modified keeps validation fast and allows incremental adoption. That is what
+`--diff --only-changed` does: `--diff` supplies the diff on stdin, and `--only-changed` narrows the run to the blocks it
+touched. See [Run Modes](cli.md#run-modes).
 
 ## Pre-commit Framework
 
@@ -22,7 +24,7 @@ source:
   hooks:
     - id: blockwatch
       name: blockwatch
-      entry: bash -c 'git diff --patch --cached --unified=0 | blockwatch'
+      entry: bash -c 'set -o pipefail; git diff --patch --cached --unified=0 | blockwatch --diff --only-changed'
       language: system
       stages: [ pre-commit ]
       pass_filenames: false
@@ -30,14 +32,22 @@ source:
 
 The `--unified=0` flag minimizes diff context lines so unchanged adjacent blocks aren't included in the check.
 
+`set -o pipefail` makes the pipeline report the diff command's failure instead of only `blockwatch`'s exit code. A diff
+command that fails without writing anything is already caught — `blockwatch` rejects empty stdin under `--diff` — but
+one that dies partway through writing leaves a shorter, still well-formed diff, which would otherwise pass as a clean
+run over a change set that was never fully read.
+
 ## Plain Git Hook
 
 Without pre-commit, add the diff pipe directly to `.git/hooks/pre-commit` and make it executable (`chmod +x`):
 
 ```bash
 #!/bin/sh
-git diff --patch --cached --unified=0 | blockwatch
+git diff --patch --cached --unified=0 | blockwatch --diff --only-changed
 ```
+
+`set -o pipefail` is deliberately absent here — `/bin/sh` does not portably support it. Under `--diff` an empty stdin
+is rejected outright, so a failing diff command still fails the hook rather than passing silently.
 
 ## GitHub Actions
 
@@ -61,24 +71,36 @@ jobs:
 
 ## Diff Input
 
-The piped diff must carry Git's path prefixes and be repository-relative. A normal `git diff`
-satisfies both, so no extra flags are needed for a standard checkout.
+Under `--diff` the piped diff must carry Git's path prefixes and be repository-relative. A normal `git diff`
+satisfies both, so no extra flags are needed for a standard checkout. Empty, ANSI-colorized, or non-diff input is
+rejected rather than read as "nothing changed", so produce the diff with `--color=never` where color is forced on.
 
 Diffs produced with `--no-prefix`, `diff.noprefix`, a custom `diff.srcPrefix` / `diff.dstPrefix`, or
 `diff.relative` are rejected with the flag that fixes them — BlockWatch stops rather than risk validating the wrong
 file. If your repositories set any of these globally, pin the output:
 
 ```shell
-git diff --patch --unified=0 --default-prefix --no-relative | blockwatch
+git diff --patch --unified=0 --default-prefix --no-relative | blockwatch --diff --only-changed
 ```
 
 See [Supported Diff Input](cli.md#supported-diff-input) for details.
 
 ## Full-Tree Runs
 
-While diff-based checks catch `affects` violations in changed files, [`same-as`](validators/same-as.md) checks benefit
-from periodic full-tree runs. Running `blockwatch` without piped diff input scans all blocks across the entire
-repository to ensure untouched copies haven't drifted.
+`blockwatch` on its own scans every block in the repository — no diff, no flags. That is the run to schedule
+periodically on the main branch: [`same-as`](validators/same-as.md), `keep-sorted` and the other deterministic
+validators catch copies that drifted apart in files no recent diff happened to touch.
+
+One rule is missing from it. [`affects`](validators/affects.md) asks whether two blocks were edited *together*, which
+only a diff can answer, so a bare run does not check it at all. To audit the whole tree and still enforce `affects`,
+pass `--diff` without `--only-changed`:
+
+```shell
+git diff --patch <base>..<head> | blockwatch --diff
+```
+
+`--verbosity summary` reports how many blocks carry a rule that needs a diff, so a run says plainly what it could not
+check.
 
 ## Security: Sandboxing Fork Pull Requests
 

@@ -6,8 +6,8 @@ description: Use when writing or modifying code in a project that uses BlockWatc
 # BlockWatch
 
 BlockWatch is a language-agnostic linter that enforces rules declared inside HTML-like `<block ...>` tags placed in
-source-file comments. It works across Rust, Python, JS/TS, Go, Java, Markdown, YAML, TOML, HTML, and more, and can run
-on the whole tree or only the changed lines of a `git diff`.
+source-file comments. It works across Rust, Python, JS/TS, Go, Java, Markdown, YAML, TOML, HTML, and more. By default it
+checks the whole tree; given a `git diff` on stdin it can instead check only the blocks that diff changed.
 
 Use this skill in three situations:
 
@@ -32,7 +32,8 @@ for the syntax.
 Introduce a list that should stay ordered → wrap it in `keep-sorted` in the same edit. Add a fact that also lives in
 the docs or config → add `affects` in the same edit. Retrofitting later is exactly the cost this avoids.
 
-Then run `git diff --patch | blockwatch` to confirm the new tags pass (see *Running and verifying*).
+Then run `git diff --patch | blockwatch --diff --only-changed` to confirm the new tags pass (see *Running and
+verifying*).
 
 ## Annotating a new project
 
@@ -66,16 +67,18 @@ express.
 
 When two blocks should hold the same value, prefer `same-as` over a bare `affects`: `affects` only notices that one side
 was edited, while `same-as` fails when the copies actually disagree. Put reciprocal blocks on both sides (each `name`d),
-and — because `same-as` also fires without a diff — a periodic full-tree `blockwatch` run (see CI below) catches drift
-that a diff-only check would miss.
+and — because `same-as` also fires without a diff — a periodic bare `blockwatch` run over the whole tree (see CI below)
+catches drift that a changed-blocks-only check would miss.
 
 ### Placing tags
 
 - Tags live **inside comments**, using the host language's comment syntax. Open with `<block ...>`, close with
   `</block>`.
 - The block's *content* is the lines between the two tags.
-- A block is only validated when its content (or its start tag) is touched by the diff, so annotating is safe to do
-  incrementally — adding a tag never retroactively fails unrelated code.
+- Under `--diff --only-changed` a block is only validated when its content (or its start tag) is touched by the diff, so
+  annotating is safe to do incrementally — adding a tag never retroactively fails unrelated code. A bare
+  `blockwatch` run checks every block in the tree, so use it to find the tags you placed on already-inconsistent
+  content.
 
 ```python
 DEPENDENCIES = [
@@ -106,24 +109,24 @@ pub enum Language { Rust, Python }
 
 ## Validator reference
 
-| Attribute             | Syntax                                                                            | Notes                                                                                                                                                                                                                                                             |
-|-----------------------|-----------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `name`                | `name="foo"`                                                                      | Names a block; the target of `affects`; shown by `blockwatch list`.                                                                                                                                                                                               |
-| `affects`             | `affects="file:foo"` or `affects=":foo"` (same file); comma-separate multiple     | If this block's content changes in a diff, the referenced `name="foo"` block's content must change too, else a violation. One-way by default; put `affects` on **both** blocks (each `name`d) for two-way drift detection. Only fires in diff mode.               |
-| `same-as`             | `same-as="file:foo"` or `same-as=":foo"` (same file); comma-separate multiple     | This block and each referenced `name="foo"` block must hold the same **value**. Symmetric, and fires in full-tree mode too (unlike `affects`). Whole trimmed content by default.                                                                                    |
-| `same-as-pattern`     | `same-as-pattern="id: (?P<value>\d+)"`                                            | Per line, compare the `value` capture group (or the whole match). Each side reads *itself*, so put a pattern on both blocks when the two are in different formats.                                                                                                  |
-| `same-as-mode`        | `same-as-mode="set"` (default) `/ sequence / single / subset`                     | `set` order/duplicate-insensitive; `sequence` ordered; `single` exactly one token per side; `subset` this block's tokens must all appear in the target (directional). Governed by the source block.                                                                 |
-| `same-as-format`      | `same-as-format="numeric"`                                                        | Parse tokens as numbers before comparing, so `8080` == `8080.0`. Governed by the source block.                                                                                                                                                                     |
-| `keep-sorted`         | `keep-sorted` / `keep-sorted="asc"` / `keep-sorted="desc"`                        | Default `asc`, compared lexicographically.                                                                                                                                                                                                                        |
-| `keep-sorted-pattern` | `keep-sorted-pattern="id: (?P<value>\d+)"`                                        | Sort by the regex capture group named `value` instead of the whole line.                                                                                                                                                                                          |
-| `keep-sorted-format`  | `keep-sorted-format="numeric"`                                                    | Compare the value numerically rather than as text (`"10"` after `"2"`).                                                                                                                                                                                           |
-| `keep-unique`         | `keep-unique` / `keep-unique="^ID:(?P<value>\d+)"`                                | Uniqueness on the whole line, or on the `value` capture group.                                                                                                                                                                                                    |
-| `line-pattern`        | `line-pattern="^[a-z0-9-]+$"`                                                     | Every line in the block must match.                                                                                                                                                                                                                               |
-| `line-count`          | `line-count="<=5"`                                                                | Operators: `<`, `>`, `<=`, `>=`, `==`.                                                                                                                                                                                                                            |
-| `check-ai`            | `check-ai="Must mention 'Acme'"` + optional `check-ai-pattern="\$(?P<value>\d+)"` | LLM validation. Requires `BLOCKWATCH_AI_API_KEY` (plus optional `BLOCKWATCH_AI_MODEL`, `BLOCKWATCH_AI_API_URL`).                                                                                                                                                  |
+| Attribute             | Syntax                                                                            | Notes                                                                                                                                                                                                                                                                                                                                              |
+|-----------------------|-----------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `name`                | `name="foo"`                                                                      | Names a block; the target of `affects`; shown by `blockwatch list`.                                                                                                                                                                                                                                                                                |
+| `affects`             | `affects="file:foo"` or `affects=":foo"` (same file); comma-separate multiple     | If this block's content changes in a diff, the referenced `name="foo"` block's content must change too, else a violation. One-way by default; put `affects` on **both** blocks (each `name`d) for two-way drift detection. Only fires under `--diff`.                                                                                              |
+| `same-as`             | `same-as="file:foo"` or `same-as=":foo"` (same file); comma-separate multiple     | This block and each referenced `name="foo"` block must hold the same **value**. Symmetric, and fires in full-tree mode too (unlike `affects`). Whole trimmed content by default.                                                                                                                                                                   |
+| `same-as-pattern`     | `same-as-pattern="id: (?P<value>\d+)"`                                            | Per line, compare the `value` capture group (or the whole match). Each side reads *itself*, so put a pattern on both blocks when the two are in different formats.                                                                                                                                                                                 |
+| `same-as-mode`        | `same-as-mode="set"` (default) `/ sequence / single / subset`                     | `set` order/duplicate-insensitive; `sequence` ordered; `single` exactly one token per side; `subset` this block's tokens must all appear in the target (directional). Governed by the source block.                                                                                                                                                |
+| `same-as-format`      | `same-as-format="numeric"`                                                        | Parse tokens as numbers before comparing, so `8080` == `8080.0`. Governed by the source block.                                                                                                                                                                                                                                                     |
+| `keep-sorted`         | `keep-sorted` / `keep-sorted="asc"` / `keep-sorted="desc"`                        | Default `asc`, compared lexicographically.                                                                                                                                                                                                                                                                                                         |
+| `keep-sorted-pattern` | `keep-sorted-pattern="id: (?P<value>\d+)"`                                        | Sort by the regex capture group named `value` instead of the whole line.                                                                                                                                                                                                                                                                           |
+| `keep-sorted-format`  | `keep-sorted-format="numeric"`                                                    | Compare the value numerically rather than as text (`"10"` after `"2"`).                                                                                                                                                                                                                                                                            |
+| `keep-unique`         | `keep-unique` / `keep-unique="^ID:(?P<value>\d+)"`                                | Uniqueness on the whole line, or on the `value` capture group.                                                                                                                                                                                                                                                                                     |
+| `line-pattern`        | `line-pattern="^[a-z0-9-]+$"`                                                     | Every line in the block must match.                                                                                                                                                                                                                                                                                                                |
+| `line-count`          | `line-count="<=5"`                                                                | Operators: `<`, `>`, `<=`, `>=`, `==`.                                                                                                                                                                                                                                                                                                             |
+| `check-ai`            | `check-ai="Must mention 'Acme'"` + optional `check-ai-pattern="\$(?P<value>\d+)"` | LLM validation. Requires `BLOCKWATCH_AI_API_KEY` (plus optional `BLOCKWATCH_AI_MODEL`, `BLOCKWATCH_AI_API_URL`).                                                                                                                                                                                                                                   |
 | `check-lua`           | `check-lua="scripts/x.lua"`                                                       | Script defines `validate(ctx, content)` returning `nil` (pass) or an error string. `ctx` has `file` (repository-relative, always `/`-separated, in every run mode), `line`, `attrs`; if the block also has `affects`, `ctx.affects` is a list of the affected blocks (`{ file, name, content }`, same path format) for IO-free cross-block checks. |
-| `check-lua-pattern`   | `check-lua-pattern='str = "(?P<value>[^"]+)"'`                                    | Pass only the extracted value to the script instead of the whole block. Matches **once against the entire block** (not per line); `content` is `""` when nothing matches.                                                                                          |
-| `severity`            | `severity="error"` (default) `/ warning / info / hint`                            | Only `error` fails the run (exit 1); the others are reported but exit 0.                                                                                                                                                                                          |
+| `check-lua-pattern`   | `check-lua-pattern='str = "(?P<value>[^"]+)"'`                                    | Pass only the extracted value to the script instead of the whole block. Matches **once against the entire block** (not per line); `content` is `""` when nothing matches.                                                                                                                                                                          |
+| `severity`            | `severity="error"` (default) `/ warning / info / hint`                            | Only `error` fails the run (exit 1); the others are reported but exit 0.                                                                                                                                                                                                                                                                           |
 
 ## Maintaining blocks (editing annotated files)
 
@@ -143,28 +146,34 @@ When you change code in a file that contains blocks, you **MUST**:
 You can run the `blockwatch` command directly in the shell:
 
 ```bash
-blockwatch                                # validate every block in the tree
-git diff --patch | blockwatch             # validate only blocks your changes touched (fast)
-git diff --cached --patch | blockwatch    # staged changes only
-blockwatch list                           # JSON dump of every block found (audit / debug)
-blockwatch "src/**/*.rs" "**/*.md"        # restrict to globs (quote them)
-blockwatch --ignore "**/generated/**"     # exclude paths
+blockwatch                                                   # validate every block in the tree
+git diff --patch | blockwatch --diff --only-changed          # only blocks your changes touched (fast)
+git diff --cached --patch | blockwatch --diff --only-changed # staged changes only
+git diff --patch | blockwatch --diff                         # whole tree, with `affects` enforced
+blockwatch list                                              # JSON dump of every block found (audit / debug)
+blockwatch "src/**/*.rs" "**/*.md"                           # restrict to globs (quote them)
+blockwatch --ignore "**/generated/**"                        # exclude paths
 ```
 
-After editing annotated files, run `git diff --patch | blockwatch`. If it fails, read the message, fix the
-sorting/duplication/pattern/sync issue, and re-run until it passes. Use `blockwatch list` to confirm a tag you just
-added is parsed and seen.
+Stdin is read **only** with `--diff`; piping a diff without it is silently ignored and the whole tree is scanned
+instead. `--only-changed` narrows the run to the blocks the diff touched and requires `--diff`.
+
+After editing annotated files, run `git diff --patch | blockwatch --diff --only-changed`. If it fails, read the message,
+fix the sorting/duplication/pattern/sync issue, and re-run until it passes. Use `blockwatch list` to confirm a tag you
+just added is parsed and seen.
 
 The piped diff must carry Git's standard path prefixes, which a plain `git diff` produces. If BlockWatch reports that a
 diff target has no recognized prefix or does not exist, the repository sets `diff.noprefix`, a custom `diff.srcPrefix`,
-or `diff.relative`; re-run as `git diff --patch --default-prefix --no-relative | blockwatch`.
+or `diff.relative`; re-run as
+`git diff --patch --default-prefix --no-relative | blockwatch --diff --only-changed`. Under `--diff`, stdin that is
+empty, ANSI-colorized, or not a diff is an error rather than "nothing changed".
 
 If `blockwatch` is not on `PATH`, install it with `cargo install blockwatch` or
 `brew install mennanov/blockwatch/blockwatch`.
 
 ## Wiring into hooks and CI (do this once, after annotating)
 
-Validating only the diff keeps these near-instant.
+Validating only the changed blocks keeps these near-instant.
 
 **pre-commit** (`.pre-commit-config.yaml`):
 
@@ -173,7 +182,7 @@ Validating only the diff keeps these near-instant.
   hooks:
     - id: blockwatch
       name: blockwatch
-      entry: bash -c 'git diff --patch --cached --unified=0 | blockwatch'
+      entry: bash -c 'set -o pipefail; git diff --patch --cached --unified=0 | blockwatch --diff --only-changed'
       language: system
       stages: [ pre-commit ]
       pass_filenames: false
@@ -198,5 +207,6 @@ jobs:
         # env: { BLOCKWATCH_AI_API_KEY: ${{ secrets.BLOCKWATCH_AI_API_KEY }} }
 ```
 
-Validating the PR diff is enough for `affects`/drift checks. A periodic full-tree `blockwatch` run (no diff) on `main`
-is a good extra safety net for the deterministic validators.
+Validating the PR diff is enough for `affects`/drift checks. A periodic bare `blockwatch` run over the whole tree on
+`main` is a good extra safety net for the deterministic validators — but note it cannot check `affects`, which needs a
+diff to compare against.

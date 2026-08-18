@@ -66,8 +66,9 @@ detection, name both blocks and point each at the other:
   contents. Touching the target with an unrelated edit satisfies it. When the two blocks should hold the same *value*, [
   `same-as`](same-as.md) is the stronger check.
 - **Missing targets are violations.** A reference to a `name` that does not exist is reported.
-- **Targets are read, not reported.** Under a diff, a target the diff did not touch is still resolved and compared, but
-  it does not appear in a `--verbosity` run report. See [Reports Under a Diff](../cli.md#reports-under-a-diff).
+- **Targets are read, not reported.** Under `--only-changed`, a target the diff did not touch is still resolved and
+  compared, but it does not appear in a `--verbosity` run report. See
+  [Reports Under a Diff](../cli.md#reports-under-a-diff).
 - Combining `affects` with [`check-lua`](check-lua.md) gives a script access to the affected blocks' contents through
   `ctx.affects`, which is a way to compare them without file IO.
 

@@ -35,26 +35,31 @@ impl std::fmt::Display for Verbosity {
 #[command(
     author,
     version = crate_version!(),
-    about = "Validate interdependent code/doc blocks in diffs to prevent drift.",
-    long_about = r"Blockwatch reads a unified git diff from stdin and validates that named blocks, sorted segments, and other constraints remain consistent across files. It is designed for use in pre-commit hooks and CI. Pipe `git diff --patch` to blockwatch.",
+    about = "Validate interdependent code/doc blocks to prevent drift.",
+    long_about = r"Blockwatch validates that named blocks, sorted segments, and other constraints declared in block tags remain consistent across files. It is designed for use in pre-commit hooks and CI.
+
+By default it scans every file in the repository. Pass --diff to additionally read a unified diff from stdin, which marks the blocks the diff changed; rules that only fire on changed content, such as `affects`, need it. Add --only-changed to narrow the run down to those blocks, which is what a pre-commit hook or a per-pull-request check usually wants.",
     after_help = r"EXAMPLES:
+    # Check every block in the repository
+    blockwatch
+
     # Filter files using glob patterns
-    blockwatch 'src/**/*.rs'
+    blockwatch 'src/**/*.rs' '**/*.md'
 
     # Ignore files using glob patterns
     blockwatch 'src/**/*.rs' --ignore '**/generated/**'
-    
-    # Filter files with the diff input
-    git diff --patch | blockwatch 'src/**/*.rs'
 
-    # Validate current unstaged changes
-    git diff --patch | blockwatch
+    # Scan the whole tree, and enforce the rules that need a diff
+    git diff --patch | blockwatch --diff
 
-    # Validate staged changes only
-    git diff --cached --patch | blockwatch
+    # Check only the blocks the diff changed (recommended for hooks and CI)
+    git diff --patch --unified=0 | blockwatch --diff --only-changed
 
-    # With zero context for tighter diffs (recommended for hooks)
-    git diff --patch --unified=0 | blockwatch
+    # The same, for staged changes only
+    git diff --cached --patch --unified=0 | blockwatch --diff --only-changed
+
+    # Narrow a diff-driven run further with glob patterns
+    git diff --patch | blockwatch --diff --only-changed 'src/**/*.rs'
 
     # Provide extra extension mappings (map unknown extensions to supported grammars)
     blockwatch -E cxx=cpp -E c++=cpp
@@ -68,8 +73,11 @@ impl std::fmt::Display for Verbosity {
     # List all found blocks
     blockwatch list 'src/**/*.rs'
 
-    # List blocks and mark those touched by a diff (reads stdin)
-    git diff --patch | blockwatch list --diff",
+    # List all blocks, marking those the diff changed
+    git diff --patch | blockwatch list --diff
+
+    # List only the blocks the diff changed
+    git diff --patch | blockwatch list --diff --only-changed",
 )]
 pub struct Args {
     // <block affects="docs/cli.md:cli-docs">

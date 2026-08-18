@@ -408,7 +408,12 @@ mod validate_diff_input_tests {
 \u{1b}[31m-apple\u{1b}[m\n\
 \u{1b}[32m+banana\u{1b}[m\n";
 
-        assert!(validate_diff_input(diff).is_err());
+        let err = validate_diff_input(diff).unwrap_err();
+
+        assert!(
+            err.to_string().contains("ANSI color escapes"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

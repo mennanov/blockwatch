@@ -125,8 +125,7 @@ fn run_inputs(
     if stdin_is_terminal() {
         return Err(anyhow::anyhow!(
             "--diff was given but stdin is a terminal, so there is no diff to read. \
-             Pipe one in, e.g. `git diff --patch | blockwatch --diff`, \
-             or drop --diff to check every block."
+             Pipe a unified diff in, or drop --diff to check every block."
         ));
     }
     Ok((scan_mode, read_diff_from_stdin(file_system)?))

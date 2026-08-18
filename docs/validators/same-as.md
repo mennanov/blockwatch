@@ -25,7 +25,7 @@ content you cannot factor into a shared symbol — here, a command documented in
 ```markdown
 [//]: # (<block same-as="docs/ci.md:pre-commit">)
 
-    git diff --patch --cached | blockwatch
+    git diff --patch --cached | blockwatch --diff --only-changed
 
 [//]: # (</block>)
 ```
@@ -35,7 +35,7 @@ content you cannot factor into a shared symbol — here, a command documented in
 ```markdown
 [//]: # (<block name="pre-commit">)
 
-    git diff --patch --cached | blockwatch
+    git diff --patch --cached | blockwatch --diff --only-changed
 
 [//]: # (</block>)
 ```
@@ -114,10 +114,11 @@ equal. Under text comparison, `"60.0" != "60"` would fail.
 - **Violations:** a missing target block, a non-numeric token under `numeric`, or a `single` /
   `subset` side with the wrong number of tokens.
 - **Hard errors** (not violations): an unrecognized `same-as-mode` or `same-as-format` value, or an invalid regex.
-- Because `same-as` fires without a diff, a periodic full-tree `blockwatch` run catches drift that a diff-only check
-  would miss. See [CI integration](../ci.md).
-- **Targets are read, not reported.** Under a diff, a target the diff did not touch is still resolved and compared, but
-  it does not appear in a `--verbosity` run report. See [Reports Under a Diff](../cli.md#reports-under-a-diff).
+- Because `same-as` fires without a diff, a periodic bare `blockwatch` run — which scans the whole tree — catches drift
+  that an `--only-changed` check would miss. See [CI integration](../ci.md).
+- **Targets are read, not reported.** Under `--only-changed`, a target the diff did not touch is still resolved and
+  compared, but it does not appear in a `--verbosity` run report. See
+  [Reports Under a Diff](../cli.md#reports-under-a-diff).
 
 ---
 

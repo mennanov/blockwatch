@@ -48,6 +48,10 @@ Any OpenAI-compatible endpoint works.
 
 - **This is the expensive validator.** It makes a network call per block and needs an API key. Reach
   for a deterministic validator first — see [choosing a validator](README.md#which-validator-do-i-want).
+- **Scope the run, or pay for the whole repository.** The cost of a run is set by how many `check-ai` blocks are in
+  scope, and a bare `blockwatch` — or `blockwatch --diff` — puts every one of them in scope. For per-pull-request CI and
+  hooks use `--diff --only-changed`, which checks only the blocks the diff touched. See
+  [Run Modes](../cli.md#run-modes).
 - Blocks are checked concurrently, so a run with many `check-ai` blocks costs roughly one round trip
   rather than N.
 - Disable it for local runs with `blockwatch -d check-ai` when you do not want to spend tokens. See
