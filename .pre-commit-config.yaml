@@ -3,7 +3,12 @@ repos:
     hooks:
       - id: blockwatch
         name: blockwatch
-        entry: bash -c 'set -o pipefail; git diff --patch --cached --unified=0 | blockwatch --diff --only-changed --ignore="tests/testdata/**"'
+        # This repository develops blockwatch, so its own hook runs the working tree's build rather
+        # than whatever release happens to sit on PATH. A published binary predates the flags and
+        # rules being worked on here, which makes it both reject valid invocations and pass changes
+        # it does not yet know how to check. `.pre-commit-hooks.yaml` is the hook other repositories
+        # consume; that one deliberately stays on a built release.
+        entry: bash -c 'set -o pipefail; git diff --patch --cached --unified=0 | cargo run --quiet -- --diff --only-changed --ignore="tests/testdata/**"'
         language: system
         stages: [ pre-commit ]
         pass_filenames: false
