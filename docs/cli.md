@@ -47,11 +47,11 @@ for nothing else: it is never validated, and never appears in a run report.
 
 Which files are parsed and which blocks are validated are two separate decisions, and each has its own flag.
 
-| Invocation                         | Files parsed                 | Blocks validated                                     |
-|------------------------------------|------------------------------|------------------------------------------------------|
-| `blockwatch`                       | Every file in scope          | Every block found; none counts as changed            |
-| `blockwatch --diff`                | Every file in scope          | Every block found; the diff marks which ones changed |
-| `blockwatch --diff --only-changed` | Only files named by the diff | Only the blocks the diff touched                     |
+| Invocation                         | Files parsed               | Blocks validated                                     |
+|------------------------------------|----------------------------|------------------------------------------------------|
+| `blockwatch`                       | Every file in scope        | Every block found; none counts as changed            |
+| `blockwatch --diff`                | Every file in scope        | Every block found; the diff marks which ones changed |
+| `blockwatch --diff --only-changed` | Only the files in the diff | Only the blocks the diff touched                     |
 
 ```shell
 # Check every block in the repository
@@ -86,6 +86,10 @@ touches, use `blockwatch list --diff`.
 - **Under `--diff`, stdin that cannot be a diff is an error.** Empty input, input carrying ANSI color escapes (produce
   the diff with `--color=never`), and input with no unified-diff header are each reported by name rather than treated as
   "nothing changed".
+- **A diff that resolves to nothing is an error.** Under `--only-changed` the diff is the scope, so any path in it that
+  BlockWatch would parse but cannot find fails the run. Under `--diff` alone such a path is passed over — unless *none*
+  resolves, which means the diff was taken against a different root (`diff.relative=true`, a wrong `-p` level) and no
+  rule that needs a diff could fire.
 - **[`affects`](validators/affects.md) needs `--diff`.** It compares blocks that a diff has touched, so it reports
   nothing at all without one. `--verbosity summary` says how many blocks carry a rule that needs a diff — see
   [Run Reports](#run-reports).
@@ -94,7 +98,7 @@ touches, use `blockwatch list --diff`.
 
 [//]: # (<block name="diff-input" affects="src/repo_path.rs:diff-target-resolution">)
 
-Each diff header names a file, and `blockwatch` resolves that name against the repository:
+Each diff header points at a file, and `blockwatch` resolves that path against the repository:
 
 - **Path prefixes are required.** Git writes each diff path behind a one-component prefix — `a/`
   and `b/` by default, or `i/`, `w/`, `c/` and `o/` under `diff.mnemonicPrefix`. Exactly one is removed, so a repository
@@ -113,23 +117,22 @@ Two details make the detection reliable. Git draws the two prefixes from opposit
 rather than stripped. An added file is the exception: its source is `/dev/null`, which says nothing either way, so both
 readings are checked against the working tree and a target where both name a real file is reported as ambiguous.
 
-A diff naming a file that does not exist in the repository is an error too — but only for files BlockWatch would parse.
+A diff with a file that does not exist in the repository is an error too — but only for files BlockWatch would parse.
 Entries whose extension maps to no language, such as binary assets or lockfiles, contribute no blocks and are passed
 over, so a diff carrying them alongside source changes still validates normally.
 
 [//]: # (</block>)
 
-In each case `blockwatch` stops with the flag that fixes it rather than checking the wrong file:
+In each case `blockwatch` stops rather than check the wrong file, reporting the diff target at fault. The messages
+describe the input rather than the command that produced it, since a diff need not come from Git:
 
 ```console
 $ git diff --no-prefix | blockwatch --diff
-Error: diff target "rules.py" has no recognized Git path prefix.
-BlockWatch reads diffs written with the prefixes Git produces by default. This one looks like the
-output of --no-prefix, diff.noprefix, or a custom diff.srcPrefix/diff.dstPrefix. Re-run with:
-    git diff --default-prefix
+Error: diff target "rules.py" has no recognized path prefix (a/, b/, i/, w/, c/, o/).
 ```
 
-To produce configuration-independent output in a repository that sets these options globally:
+With Git, that means `--no-prefix`, `diff.noprefix`, or a custom `diff.srcPrefix` / `diff.dstPrefix`. To produce
+configuration-independent output in a repository that sets any of these globally:
 
 ```shell
 git diff --patch --default-prefix --no-relative | blockwatch --diff

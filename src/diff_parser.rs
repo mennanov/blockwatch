@@ -53,7 +53,7 @@ pub fn line_changes_from_diff(
             file_system,
         )?
         else {
-            // The header names no file, e.g. the "/dev/null" side of a deletion.
+            // The header points at no file, e.g. the "/dev/null" side of a deletion.
             continue;
         };
         let changes = line_changes(&patched_file).with_context(|| {
@@ -1233,7 +1233,7 @@ index 0000000..710d1d9
         )
         .unwrap_err();
         assert!(
-            err.to_string().contains("no recognized Git path prefix"),
+            err.to_string().contains("no recognized path prefix"),
             "unexpected error: {err}"
         );
     }

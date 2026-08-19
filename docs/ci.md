@@ -76,8 +76,8 @@ satisfies both, so no extra flags are needed for a standard checkout. Empty, ANS
 rejected rather than read as "nothing changed", so produce the diff with `--color=never` where color is forced on.
 
 Diffs produced with `--no-prefix`, `diff.noprefix`, a custom `diff.srcPrefix` / `diff.dstPrefix`, or
-`diff.relative` are rejected with the flag that fixes them — BlockWatch stops rather than risk validating the wrong
-file. If your repositories set any of these globally, pin the output:
+`diff.relative` are rejected — BlockWatch stops rather than risk validating the wrong file. If your repositories set any
+of these globally, pin the output:
 
 ```shell
 git diff --patch --unified=0 --default-prefix --no-relative | blockwatch --diff --only-changed

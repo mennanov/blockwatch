@@ -313,6 +313,8 @@ pub enum ScanMode {
 /// - `extra_file_extensions` allows remapping unknown extensions to supported ones (e.g., "cxx" -> "cpp").
 ///
 /// In either mode a file is read only if it passes the allow globs and is not ignored.
+///
+/// Fails if `line_changes_by_file` is invalid, e.g. it refers to files that do not exist.
 pub fn parse_blocks(
     line_changes_by_file: &HashMap<RepoPath, Vec<LineChange>>,
     scan_mode: ScanMode,
@@ -321,6 +323,13 @@ pub fn parse_blocks(
     parsers: &LanguageParsers,
     extra_file_extensions: HashMap<OsString, OsString>,
 ) -> anyhow::Result<ParsedBlocks> {
+    ensure_diff_has_valid_paths(
+        line_changes_by_file,
+        file_system,
+        path_checker,
+        parsers,
+        &extra_file_extensions,
+    )?;
     match scan_mode {
         ScanMode::All => parse_all_files(
             line_changes_by_file,
@@ -339,8 +348,45 @@ pub fn parse_blocks(
     }
 }
 
+/// Rejects a diff with no valid file paths.
+///
+/// One invalid path is normal: deletions, generated files, paths outside the globs. But a diff
+/// where *no* path is valid is itself likely invalid: it marks no block as modified, so every rule
+/// that needs a diff would pass silently.
+fn ensure_diff_has_valid_paths(
+    line_changes_by_file: &HashMap<RepoPath, Vec<LineChange>>,
+    file_system: &impl FileSystem,
+    path_checker: &impl PathChecker,
+    parsers: &LanguageParsers,
+    extra_file_extensions: &HashMap<OsString, OsString>,
+) -> anyhow::Result<()> {
+    let mut invalid_path: Option<&RepoPath> = None;
+    for file_path in line_changes_by_file.keys() {
+        // Only paths this run would have opened count: past the filters, with a known extension.
+        if !path_checker.should_allow(file_path) || path_checker.should_ignore(file_path) {
+            continue;
+        }
+        if parser_for_file_path(file_path.as_path(), parsers, extra_file_extensions).is_none() {
+            continue;
+        }
+        if file_system.exists(file_path.as_path()) {
+            return Ok(());
+        }
+        // Hash map order is not stable, so pick the path to report rather than take the first.
+        invalid_path = Some(invalid_path.map_or(file_path, |lowest| lowest.min(file_path)));
+    }
+    match invalid_path {
+        None => Ok(()),
+        Some(file_path) => Err(anyhow!("{}", invalid_diff_target_message(file_path))),
+    }
+}
+
+fn invalid_diff_target_message(file_path: &RepoPath) -> String {
+    format!("diff target \"{file_path}\" does not exist in the repository root.")
+}
+
 /// Parses every block in every file of the repository, marking the ones the line changes touched.
-/// Line changes naming files the walk did not reach contribute nothing to the result; the walk
+/// Line changes for files the walk did not reach contribute nothing to the result; the walk
 /// defines the scope, and the diff only says which of the blocks it found had changed.
 fn parse_all_files(
     line_changes_by_file: &HashMap<RepoPath, Vec<LineChange>>,
@@ -372,7 +418,7 @@ fn parse_all_files(
     Ok(parsed)
 }
 
-/// Parses only the files the diff names, keeping the blocks whose start tag or content it modified.
+/// Parses only the files in the diff, keeping the blocks whose start tag or content it modified.
 fn parse_changed_files(
     line_changes_by_file: &HashMap<RepoPath, Vec<LineChange>>,
     file_system: &impl FileSystem,
@@ -399,11 +445,7 @@ fn parse_changed_files(
             if file_system.exists(file_path.as_path()) {
                 error
             } else {
-                error.context(format!(
-                    "diff target \"{file_path}\" does not exist in the repository root. This \
-                     usually means the diff was produced with diff.relative=true, which writes \
-                     paths relative to the current directory. Re-run with: git diff --no-relative"
-                ))
+                error.context(invalid_diff_target_message(file_path))
             }
         })?;
         record_parsed_file(&mut parsed, file_path.clone(), file_blocks);
@@ -1194,8 +1236,13 @@ mod parse_blocks_tests {
             "present.rs".to_string(),
             "// <block name=\"present\">\nfn present() {}\n// </block>\n".to_string(),
         )]));
-        let line_changes =
-            HashMap::from([(RepoPath::from_reference("absent.rs")?, vec![line_change(1)])]);
+        let line_changes = HashMap::from([
+            (
+                RepoPath::from_reference("present.rs")?,
+                vec![line_change(1)],
+            ),
+            (RepoPath::from_reference("absent.rs")?, vec![line_change(1)]),
+        ]);
 
         let parsed = parse_blocks(
             &line_changes,
@@ -1217,8 +1264,8 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn diff_naming_a_missing_file_reports_the_likely_cause() -> anyhow::Result<()> {
-        // What `diff.relative=true` produces: a path that resolves cleanly but names no file.
+    fn diff_with_a_missing_file_reports_the_likely_cause() -> anyhow::Result<()> {
+        // What `diff.relative=true` produces: a well-formed path that matches no file.
         let line_changes = HashMap::from([(
             RepoPath::from_reference("rules.py")?,
             vec![LineChange {
@@ -1237,14 +1284,61 @@ mod parse_blocks_tests {
         .unwrap_err();
         let message = format!("{error:#}");
         assert!(
-            message.contains("--no-relative"),
+            message.contains("does not exist in the repository root"),
             "unexpected error: {message}"
         );
         Ok(())
     }
 
     #[test]
-    fn diff_naming_a_missing_ignored_file_is_skipped() -> anyhow::Result<()> {
+    fn diff_with_only_missing_files_reports_the_likely_cause_in_all_mode() -> anyhow::Result<()> {
+        // A diff where no path is valid marks no block as modified, so every rule that needs a
+        // diff would go quiet, and the run would report success, which is undesirable.
+        let line_changes =
+            HashMap::from([(RepoPath::from_reference("rules.py")?, vec![line_change(1)])]);
+        let error = parse_blocks(
+            &line_changes,
+            ScanMode::All,
+            &FakeFileSystem::new(HashMap::from([("src/rules.py".to_string(), String::new())])),
+            &FakePathChecker::allow_all(),
+            &language_parsers()?,
+            HashMap::new(),
+        )
+        .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("does not exist in the repository root"),
+            "unexpected error: {message}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn diff_with_only_files_outside_the_globs_is_not_a_broken_diff() -> anyhow::Result<()> {
+        // Globs narrow a run, so a diff with no path inside them is what the caller asked for.
+        let line_changes = HashMap::from([(
+            RepoPath::from_reference("docs/gone.py")?,
+            vec![line_change(1)],
+        )]);
+        let blocks = parse_blocks(
+            &line_changes,
+            ScanMode::All,
+            &FakeFileSystem::new(HashMap::from([(
+                "src/present.py".to_string(),
+                "# <block name=\"present\">\nx = 1\n# </block>\n".to_string(),
+            )])),
+            &FakePathChecker::allow_only("src/**"),
+            &language_parsers()?,
+            HashMap::new(),
+        )?
+        .blocks;
+
+        assert!(blocks.contains_key(&RepoPath::from_reference("src/present.py")?));
+        Ok(())
+    }
+
+    #[test]
+    fn diff_with_a_missing_ignored_file_is_skipped() -> anyhow::Result<()> {
         // An ignored path contributes no blocks whether or not it exists, so it must not be able
         // to fail the run.
         let line_changes = HashMap::from([(
@@ -1268,7 +1362,7 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn diff_naming_a_missing_unparseable_file_is_skipped() -> anyhow::Result<()> {
+    fn diff_with_a_missing_unparseable_file_is_skipped() -> anyhow::Result<()> {
         // Likewise for a file whose extension maps to no language: a diff routinely carries binary
         // assets and lockfiles that are absent from a partial checkout.
         let line_changes = HashMap::from([(

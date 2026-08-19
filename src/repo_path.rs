@@ -68,12 +68,12 @@ impl RepoPath {
     }
 
     // <block name="diff-target-resolution" affects="docs/cli.md:diff-input">
-    /// Resolves a diff header's target to the repository path it names.
+    /// Resolves a diff header's target to the repository path it points at.
     ///
     /// Exactly one of the prefixes Git writes ahead of a diff path is removed; a target carrying
     /// none is rejected rather than guessed at. See "Supported Diff Input" in `docs/cli.md`.
     ///
-    /// The path is returned whether or not it names an existing file; `parse_blocks` decides
+    /// The path is returned whether or not it points at an existing file; `parse_blocks` decides
     /// whether an absent one matters.
     // </block>
     pub fn from_diff_target(
@@ -105,10 +105,8 @@ impl RepoPath {
         };
         let Some(without_prefix) = stripped else {
             bail!(
-                "diff target \"{decoded_target}\" has no recognized Git path prefix.\n\
-                 BlockWatch reads diffs written with the prefixes Git produces by default. This \
-                 one looks like the output of --no-prefix, diff.noprefix, or a custom \
-                 diff.srcPrefix/diff.dstPrefix. Re-run with:\n    git diff --default-prefix"
+                "diff target \"{decoded_target}\" has no recognized path prefix ({}).",
+                DIFF_PATH_PREFIXES.join(", ")
             );
         };
         // `from_relative` rejects anything that would escape the repository, including the rooted
@@ -122,10 +120,9 @@ impl RepoPath {
                 .filter(|candidate| file_system.exists(candidate.as_path()));
             match unprefixed {
                 Some(unprefixed) if file_system.exists(path.as_path()) => bail!(
-                    "cannot tell whether the diff writes Git's path prefixes: \"{decoded_target}\" reads \
-                     as both \"{path}\" and \"{unprefixed}\", and both exist.\nThis file is newly \
-                     added, and an added file's header records no prefix. Re-run with:\n    \
-                     git diff --default-prefix"
+                    "cannot tell whether diff target \"{decoded_target}\" carries a path prefix: it \
+                     reads as both \"{path}\" and \"{unprefixed}\", and both exist. A newly added \
+                     file's header records no prefix."
                 ),
                 Some(unprefixed) => unprefixed,
                 None => path,
@@ -300,7 +297,7 @@ mod repo_path_tests {
         let files = tree(&["b/rules.py", "rules.py"]);
         let error = RepoPath::from_diff_target("b/rules.py", "b/rules.py", &files).unwrap_err();
         assert!(
-            format!("{error:#}").contains("no recognized Git path prefix"),
+            format!("{error:#}").contains("no recognized path prefix"),
             "unexpected error: {error:#}"
         );
     }
@@ -330,12 +327,12 @@ mod repo_path_tests {
     #[test]
     fn added_file_with_two_real_readings_is_ambiguous() {
         // Both "b/x.py" and "x.py" exist, so the target is equally readable either way. Picking
-        // one would validate it while the file the diff names went unchecked.
+        // one would validate it while the file the diff points at went unchecked.
         let files = tree(&["b/x.py", "x.py"]);
         let error = RepoPath::from_diff_target("/dev/null", "b/x.py", &files).unwrap_err();
         let message = format!("{error:#}");
         assert!(
-            message.contains("cannot tell whether the diff writes Git's path prefixes"),
+            message.contains("cannot tell whether diff target"),
             "unexpected error: {message}"
         );
         assert!(
@@ -352,11 +349,11 @@ mod repo_path_tests {
         let error = RepoPath::from_diff_target("old/rules.py", "new/rules.py", &files).unwrap_err();
         let message = format!("{error:#}");
         assert!(
-            message.contains("no recognized Git path prefix"),
+            message.contains("no recognized path prefix"),
             "unexpected error: {message}"
         );
         assert!(
-            message.contains("--default-prefix"),
+            message.contains("new/rules.py"),
             "unexpected error: {message}"
         );
     }
@@ -368,7 +365,7 @@ mod repo_path_tests {
         let files = tree(&["rules.py"]);
         let error = RepoPath::from_diff_target("rules.py", "rules.py", &files).unwrap_err();
         assert!(
-            format!("{error:#}").contains("no recognized Git path prefix"),
+            format!("{error:#}").contains("no recognized path prefix"),
             "unexpected error: {error:#}"
         );
     }

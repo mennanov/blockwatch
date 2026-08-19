@@ -279,7 +279,7 @@ fn no_diff_flag_provided_run_finishes_without_waiting_for_stdin() {
 
 #[test]
 fn diff_piped_without_diff_flag_provided_run_scans_the_whole_tree() {
-    // The diff names a file that has no violations. Were it read, the run would check that file
+    // The diff contains a file that has no violations. Were it read, the run would check that file
     // alone and succeed; ignoring it means the whole tree is scanned and its violations reported.
     let diff_content = r#"
 diff --git a/tests/testdata/paths/valid.py b/tests/testdata/paths/valid.py
@@ -321,6 +321,44 @@ fn diff_flag_with_terminal_stdin_provided_run_fails_with_error() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("stdin is a terminal"));
+}
+
+#[test]
+fn diff_with_invalid_paths_provided_run_fails_with_error_in_every_mode() {
+    let diff_content = r#"
+diff --git a/sub/tests/testdata/paths/invalid.py b/sub/tests/testdata/paths/invalid.py
+index 0000000..1111111 100644
+--- a/sub/tests/testdata/paths/invalid.py
++++ b/sub/tests/testdata/paths/invalid.py
+@@ -1,4 +1,4 @@
+ # <block keep-sorted="asc">
+ b = 2
+-a = 2
++a = 1
+ # </block>
+"#;
+
+    // check-ai is disabled to avoid errors caused by the missing environment variables.
+    for args in [
+        ["--diff", "--only-changed", "--disable=check-ai"].as_slice(),
+        ["--diff", "--disable=check-ai"].as_slice(),
+    ] {
+        let mut cmd = cargo_bin_cmd!();
+        cmd.args(args);
+        cmd.write_stdin(diff_content);
+
+        let output = cmd.output().expect("Failed to get command output");
+
+        output
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "does not exist in the repository root",
+            ))
+            .stderr(predicate::str::contains(
+                "sub/tests/testdata/paths/invalid.py",
+            ));
+    }
 }
 
 #[test]
