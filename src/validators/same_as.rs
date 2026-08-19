@@ -1,4 +1,4 @@
-use crate::blocks::{Block, BlockWithContext, FileBlocks, parse_single_file};
+use crate::blocks::{Block, BlockWithContext, FileBlocks, every_block, parse_file};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
@@ -180,14 +180,20 @@ fn resolve_target_items<Fs: FileSystem>(
         Entry::Occupied(entry) => entry.into_mut(),
         Entry::Vacant(entry) => {
             // Referenced target files are resolved without applying extension overrides.
-            let parsed =
-                parse_single_file(file_system, target_file, context.parsers(), &HashMap::new())?
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "same-as target file format is unsupported: {}",
-                            target_file.display()
-                        )
-                    })?;
+            let parsed = parse_file(
+                file_system,
+                target_file,
+                &[],
+                every_block,
+                context.parsers(),
+                &HashMap::new(),
+            )?
+            .ok_or_else(|| {
+                anyhow!(
+                    "same-as target file format is unsupported: {}",
+                    target_file.display()
+                )
+            })?;
             entry.insert(parsed)
         }
     };

@@ -60,8 +60,8 @@ detection, name both blocks and point each at the other:
   no check. `blockwatch` on its own is therefore blind to it; run `git diff --patch | blockwatch --diff` to audit the
   whole tree with `affects` enforced, or add `--only-changed` to check just the changed blocks. On a run without a diff,
   `blockwatch --verbosity summary` prints a `needs --diff` count naming how many blocks were skipped for this reason;
-  under a diff those rules can fire, so the count is not reported. If
-  you want a check that also works on a bare full-tree run, use [`same-as`](same-as.md).
+  under a diff those rules can fire, so the count is not reported. If you want a check that also works on a bare
+  full-tree run, use [`same-as`](same-as.md).
 - **Co-editing, not agreement.** `affects` only checks that both sides were touched — it does not compare their
   contents. Touching the target with an unrelated edit satisfies it. When the two blocks should hold the same *value*, [
   `same-as`](same-as.md) is the stronger check.
@@ -69,6 +69,9 @@ detection, name both blocks and point each at the other:
 - **Targets are read, not reported.** Under `--only-changed`, a target the diff did not touch is still resolved and
   compared, but it does not appear in a `--verbosity` run report. See
   [Reports Under a Diff](../cli.md#reports-under-a-diff).
+- **Globs do not narrow target resolution.** `blockwatch --diff --only-changed "src/**/*.rs"` still resolves a target
+  living under `docs/`, so narrowing a run to one language does not report every rule that spans two of them as
+  unsatisfied. An excluded target file is read to answer the reference and is never validated.
 - Combining `affects` with [`check-lua`](check-lua.md) gives a script access to the affected blocks' contents through
   `ctx.affects`, which is a way to compare them without file IO.
 

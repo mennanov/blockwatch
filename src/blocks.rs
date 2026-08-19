@@ -314,7 +314,7 @@ pub enum ScanMode {
 ///
 /// In either mode a file is read only if it passes the allow globs and is not ignored.
 pub fn parse_blocks(
-    line_changes_by_file: HashMap<RepoPath, Vec<LineChange>>,
+    line_changes_by_file: &HashMap<RepoPath, Vec<LineChange>>,
     scan_mode: ScanMode,
     file_system: &impl FileSystem,
     path_checker: &impl PathChecker,
@@ -340,9 +340,10 @@ pub fn parse_blocks(
 }
 
 /// Parses every block in every file of the repository, marking the ones the line changes touched.
-/// Line changes naming files that were not reached are discarded.
+/// Line changes naming files the walk did not reach contribute nothing to the result; the walk
+/// defines the scope, and the diff only says which of the blocks it found had changed.
 fn parse_all_files(
-    mut line_changes_by_file: HashMap<RepoPath, Vec<LineChange>>,
+    line_changes_by_file: &HashMap<RepoPath, Vec<LineChange>>,
     file_system: &impl FileSystem,
     path_checker: &impl PathChecker,
     parsers: &LanguageParsers,
@@ -355,13 +356,14 @@ fn parse_all_files(
         if !path_checker.should_allow(&file_path) || path_checker.should_ignore(&file_path) {
             continue;
         }
-        let changes_owned = line_changes_by_file.remove(&file_path);
-        let line_changes = changes_owned.as_deref().unwrap_or(&[]);
+        let line_changes = line_changes_by_file
+            .get(&file_path)
+            .map_or(&[][..], Vec::as_slice);
         let file_blocks = parse_file(
+            file_system,
             file_path.as_path(),
             line_changes,
             every_block,
-            file_system,
             parsers,
             extra_file_extensions,
         )?;
@@ -372,7 +374,7 @@ fn parse_all_files(
 
 /// Parses only the files the diff names, keeping the blocks whose start tag or content it modified.
 fn parse_changed_files(
-    line_changes_by_file: HashMap<RepoPath, Vec<LineChange>>,
+    line_changes_by_file: &HashMap<RepoPath, Vec<LineChange>>,
     file_system: &impl FileSystem,
     path_checker: &impl PathChecker,
     parsers: &LanguageParsers,
@@ -380,14 +382,14 @@ fn parse_changed_files(
 ) -> anyhow::Result<ParsedBlocks> {
     let mut parsed = ParsedBlocks::default();
     for (file_path, line_changes) in line_changes_by_file {
-        if !path_checker.should_allow(&file_path) || path_checker.should_ignore(&file_path) {
+        if !path_checker.should_allow(file_path) || path_checker.should_ignore(file_path) {
             continue;
         }
         let file_blocks = parse_file(
-            file_path.as_path(),
-            line_changes.as_slice(),
-            modified_blocks,
             file_system,
+            file_path.as_path(),
+            line_changes,
+            modified_blocks,
             parsers,
             extra_file_extensions,
         )
@@ -404,7 +406,7 @@ fn parse_changed_files(
                 ))
             }
         })?;
-        record_parsed_file(&mut parsed, file_path, file_blocks);
+        record_parsed_file(&mut parsed, file_path.clone(), file_blocks);
     }
     Ok(parsed)
 }
@@ -430,49 +432,24 @@ fn record_parsed_file(
 }
 
 /// Keeps every block the file declares, whether or not a diff touched it.
-fn every_block(_block: &BlockWithContext) -> bool {
+pub fn every_block(_block: &BlockWithContext) -> bool {
     true
 }
 
 /// Keeps only the blocks a diff touched, by their content or by their start tag.
-fn modified_blocks(block: &BlockWithContext) -> bool {
+pub fn modified_blocks(block: &BlockWithContext) -> bool {
     // A block with a modified start tag is considered modified because its rules (attributes) are
     // modified.
     block.is_content_modified || block.is_start_tag_modified
 }
 
-/// Parses every block in a single file, without diff-based filtering. Returns `None` for
-/// unsupported file extensions.
-///
-/// Whereas [`parse_blocks`] may keep only the blocks intersecting a set of changed lines, this
-/// returns all blocks in the file — for reading a referenced block in a file that is not part of
-/// the current change set.
-pub fn parse_single_file(
+/// Parses the blocks of one file, marking the ones `line_changes` touched and keeping those
+/// `block_predicate` selects. Returns `None` for unsupported file extensions.
+pub fn parse_file(
     file_system: &impl FileSystem,
-    file_path: &Path,
-    parsers: &LanguageParsers,
-    extra_file_extensions: &HashMap<OsString, OsString>,
-) -> anyhow::Result<Option<FileBlocks>> {
-    parse_file(
-        file_path,
-        &[],
-        every_block,
-        file_system,
-        parsers,
-        extra_file_extensions,
-    )
-}
-
-/// Parses the blocks of one file, keeping those `keep` selects. Returns `None` for unsupported
-/// file extensions.
-///
-/// Which blocks are worth keeping is the caller's policy, not this function's: pass [`every_block`]
-/// or [`modified_blocks`].
-fn parse_file(
     file_path: &Path,
     line_changes: &[LineChange],
     block_predicate: impl Fn(&BlockWithContext) -> bool,
-    file_reader: &impl FileSystem,
     parsers: &LanguageParsers,
     extra_file_extensions: &HashMap<OsString, OsString>,
 ) -> anyhow::Result<Option<FileBlocks>> {
@@ -480,7 +457,7 @@ fn parse_file(
         None => return Ok(None),
         Some(p) => p,
     };
-    let source_code = file_reader.read_to_string(file_path)?;
+    let source_code = file_system.read_to_string(file_path)?;
     // Blocks are filtered as the parser yields them, so only the ones this run will validate are
     // ever held. The parser's lock lives until the end of the statement, which is as long as the
     // iterator borrowing it does.
@@ -668,7 +645,7 @@ mod parse_blocks_tests {
         let parsers = language_parsers()?;
 
         let parsed = parse_blocks(
-            HashMap::new(),
+            &HashMap::new(),
             ScanMode::All,
             &file_system,
             &FakePathChecker::allow_all(),
@@ -848,7 +825,7 @@ mod parse_blocks_tests {
         let parsers = language_parsers()?;
 
         let blocks_by_file = parse_blocks(
-            line_changes,
+            &line_changes,
             ScanMode::OnlyChanged,
             &file_system,
             &FakePathChecker::allow_all(),
@@ -954,7 +931,7 @@ mod parse_blocks_tests {
             ),
         ]);
         let blocks_by_file = parse_blocks(
-            line_changes,
+            &line_changes,
             ScanMode::All,
             &file_system,
             &FakePathChecker::allow_all(),
@@ -1017,7 +994,7 @@ mod parse_blocks_tests {
         let parsers = language_parsers()?;
 
         let blocks_by_file = parse_blocks(
-            HashMap::new(),
+            &HashMap::new(),
             ScanMode::All,
             &file_system,
             &FakePathChecker::allow_all(),
@@ -1065,7 +1042,7 @@ mod parse_blocks_tests {
         let parsers = language_parsers()?;
 
         let blocks_by_file = parse_blocks(
-            HashMap::new(),
+            &HashMap::new(),
             ScanMode::All,
             &file_system,
             &FakePathChecker::allow_all(),
@@ -1092,7 +1069,7 @@ mod parse_blocks_tests {
         let parsers = language_parsers()?;
 
         let blocks_by_file = parse_blocks(
-            HashMap::new(),
+            &HashMap::new(),
             ScanMode::All,
             &file_system,
             &FakePathChecker::allow_all(),
@@ -1116,7 +1093,7 @@ mod parse_blocks_tests {
         let files = HashMap::from([("test.unknown".to_string(), "test content".to_string())]);
 
         let blocks = parse_blocks(
-            HashMap::new(),
+            &HashMap::new(),
             ScanMode::All,
             &FakeFileSystem::new(files),
             &FakePathChecker::allow_all(),
@@ -1156,7 +1133,7 @@ mod parse_blocks_tests {
             FakePathChecker::with_ignored_paths(HashSet::from(["ignored.rs".to_string()]));
 
         let blocks = parse_blocks(
-            HashMap::new(),
+            &HashMap::new(),
             ScanMode::All,
             &file_system,
             &path_checker,
@@ -1195,7 +1172,7 @@ mod parse_blocks_tests {
         ]);
 
         let blocks = parse_blocks(
-            line_changes,
+            &line_changes,
             ScanMode::OnlyChanged,
             &file_system,
             &FakePathChecker::allow_only("src/**"),
@@ -1221,7 +1198,7 @@ mod parse_blocks_tests {
             HashMap::from([(RepoPath::from_reference("absent.rs")?, vec![line_change(1)])]);
 
         let parsed = parse_blocks(
-            line_changes,
+            &line_changes,
             ScanMode::All,
             &file_system,
             &FakePathChecker::allow_all(),
@@ -1250,7 +1227,7 @@ mod parse_blocks_tests {
             }],
         )]);
         let error = parse_blocks(
-            line_changes,
+            &line_changes,
             ScanMode::OnlyChanged,
             &FakeFileSystem::new(HashMap::from([("src/rules.py".to_string(), String::new())])),
             &FakePathChecker::allow_all(),
@@ -1278,7 +1255,7 @@ mod parse_blocks_tests {
             }],
         )]);
         let blocks = parse_blocks(
-            line_changes,
+            &line_changes,
             ScanMode::OnlyChanged,
             &FakeFileSystem::new(HashMap::new()),
             &FakePathChecker::with_ignored_paths(HashSet::from(["vendor/gone.py".to_string()])),
@@ -1302,7 +1279,7 @@ mod parse_blocks_tests {
             }],
         )]);
         let blocks = parse_blocks(
-            line_changes,
+            &line_changes,
             ScanMode::OnlyChanged,
             &FakeFileSystem::new(HashMap::new()),
             &FakePathChecker::allow_all(),
@@ -1318,7 +1295,7 @@ mod parse_blocks_tests {
     fn empty_input_returns_empty_result() -> anyhow::Result<()> {
         let line_changes = HashMap::default();
         let blocks = parse_blocks(
-            line_changes,
+            &line_changes,
             ScanMode::All,
             &FakeFileSystem::new(HashMap::default()),
             &FakePathChecker::allow_all(),
@@ -1332,15 +1309,21 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn parse_single_file_returns_all_blocks() -> anyhow::Result<()> {
+    fn parse_file_with_every_block_returns_all_blocks() -> anyhow::Result<()> {
         let file_system = FakeFileSystem::new(HashMap::from([(
             "a.py".to_string(),
             "# <block name=\"x\">\n1\n# </block>\n# <block name=\"y\">\n2\n# </block>".to_string(),
         )]));
         let parsers = language_parsers()?;
-        let file_blocks =
-            parse_single_file(&file_system, Path::new("a.py"), &parsers, &HashMap::new())?
-                .expect("python is supported");
+        let file_blocks = parse_file(
+            &file_system,
+            Path::new("a.py"),
+            &[],
+            every_block,
+            &parsers,
+            &HashMap::new(),
+        )?
+        .expect("python is supported");
         assert_eq!(file_blocks.blocks_with_context.len(), 2);
         Ok(())
     }
@@ -1352,8 +1335,14 @@ mod parse_blocks_tests {
             "# <block name=\"x\" unknown-attr=\"value\">\n1\n# </block>".to_string(),
         )]));
         let parsers = language_parsers()?;
-        let file_blocks =
-            parse_single_file(&file_system, Path::new("a.py"), &parsers, &HashMap::new());
+        let file_blocks = parse_file(
+            &file_system,
+            Path::new("a.py"),
+            &[],
+            every_block,
+            &parsers,
+            &HashMap::new(),
+        );
 
         assert!(file_blocks.is_err());
         assert_eq!(
@@ -1370,8 +1359,14 @@ mod parse_blocks_tests {
             "# <block severity=\"invalid-severity\">\n1\n# </block>".to_string(),
         )]));
         let parsers = language_parsers()?;
-        let file_blocks =
-            parse_single_file(&file_system, Path::new("a.py"), &parsers, &HashMap::new());
+        let file_blocks = parse_file(
+            &file_system,
+            Path::new("a.py"),
+            &[],
+            every_block,
+            &parsers,
+            &HashMap::new(),
+        );
 
         assert!(file_blocks.is_err());
         assert_eq!(
@@ -1671,7 +1666,7 @@ mod supported_languages_tests {
         let file_system = FakeFileSystem::new(files.clone());
 
         let blocks_by_file = parse_blocks(
-            HashMap::new(),
+            &HashMap::new(),
             ScanMode::All,
             &file_system,
             &FakePathChecker::allow_all(),

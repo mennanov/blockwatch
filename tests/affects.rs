@@ -28,7 +28,7 @@ index abc123..def456 100644
         .code(1)
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
-            let value: serde_json::Value  = json!({
+            let value: serde_json::Value = json!({
               "tests/testdata/affects.md": [
                 {
                   "range": {
@@ -207,7 +207,7 @@ index abc123..def456 100644
         .code(1)
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
-            let value: serde_json::Value  = json!({
+            let value: serde_json::Value = json!({
               "tests/testdata/affects.md": [
                 {
                   "range": {
@@ -233,4 +233,93 @@ index abc123..def456 100644
             assert_eq!(output_json, value);
             true
         }));
+}
+
+/// The diff that both cross-file tests below feed in. It changes the source block and its `affects`
+/// target together, which is exactly what the rule asks for, so no invocation over it may fail.
+const CROSS_FILE_DIFF: &str = r#"
+diff --git a/tests/testdata/affects_cross_file_source.rs b/tests/testdata/affects_cross_file_source.rs
+index abc123..def456 100644
+--- a/tests/testdata/affects_cross_file_source.rs
++++ b/tests/testdata/affects_cross_file_source.rs
+@@ -1,3 +1,3 @@
+ // <block name="limits" affects="tests/testdata/affects_cross_file_target.md:limits">
+-pub const MAX: usize = 10;
++pub const MAX: usize = 20;
+ // </block>
+diff --git a/tests/testdata/affects_cross_file_target.md b/tests/testdata/affects_cross_file_target.md
+index abc123..def456 100644
+--- a/tests/testdata/affects_cross_file_target.md
++++ b/tests/testdata/affects_cross_file_target.md
+@@ -1,5 +1,5 @@
+ [//]: # (<block name="limits">)
+
+-Max is 10.
++Max is 20.
+
+ [//]: # (</block>)
+"#;
+
+#[test]
+fn only_changed_with_globs_excluding_a_modified_affects_target_succeeds() {
+    // Globs choose what a run validates; they must not shrink the set of files `affects` resolves
+    // its targets against, or narrowing a run to one language would fail every cross-language rule.
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args([
+        "--diff",
+        "--only-changed",
+        "tests/testdata/affects_cross_file_source.rs",
+    ]);
+    cmd.write_stdin(CROSS_FILE_DIFF);
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.assert().success();
+}
+
+#[test]
+fn diff_with_globs_excluding_a_modified_affects_target_succeeds() {
+    // The same guarantee on a full-tree run, where the globs filter the walk rather than the diff.
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "tests/testdata/affects_cross_file_source.rs"]);
+    cmd.write_stdin(CROSS_FILE_DIFF);
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.assert().success();
+}
+
+#[test]
+fn only_changed_with_globs_excluding_an_unmodified_affects_target_fails() {
+    // The counterpart of the two tests above: resolving targets outside the validated set must
+    // still report the ones the diff left alone, rather than assuming any excluded target is fine.
+    let diff_content = r#"
+diff --git a/tests/testdata/affects_cross_file_source.rs b/tests/testdata/affects_cross_file_source.rs
+index abc123..def456 100644
+--- a/tests/testdata/affects_cross_file_source.rs
++++ b/tests/testdata/affects_cross_file_source.rs
+@@ -1,3 +1,3 @@
+ // <block name="limits" affects="tests/testdata/affects_cross_file_target.md:limits">
+-pub const MAX: usize = 10;
++pub const MAX: usize = 20;
+ // </block>
+"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args([
+        "--diff",
+        "--only-changed",
+        "tests/testdata/affects_cross_file_source.rs",
+    ]);
+    cmd.write_stdin(diff_content);
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "tests/testdata/affects_cross_file_target.md:limits is not",
+        ));
 }

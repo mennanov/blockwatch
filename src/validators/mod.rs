@@ -9,6 +9,7 @@ mod same_as;
 
 use crate::Position;
 use crate::blocks::{Block, BlockSeverity, BlockWithContext, FileBlocks};
+use crate::diff_parser::LineChange;
 use crate::fs::FileSystem;
 use crate::language_parsers::LanguageParsers;
 use crate::repo_path::RepoPath;
@@ -230,17 +231,32 @@ pub struct ValidationContext {
     pub(crate) blocks: HashMap<RepoPath, FileBlocks>,
     /// Language parsers per file type, used by validators to parse referenced source files.
     pub(crate) parsers: LanguageParsers,
+    /// Every line change from the diff (if any).
+    pub(crate) line_changes: HashMap<RepoPath, Vec<LineChange>>,
 }
 
 impl ValidationContext {
     /// Creates a new validation context with modified blocks grouped by filename.
-    pub fn new(blocks: HashMap<RepoPath, FileBlocks>, parsers: LanguageParsers) -> Self {
-        Self { blocks, parsers }
+    pub fn new(
+        blocks: HashMap<RepoPath, FileBlocks>,
+        parsers: LanguageParsers,
+        line_changes: HashMap<RepoPath, Vec<LineChange>>,
+    ) -> Self {
+        Self {
+            blocks,
+            parsers,
+            line_changes,
+        }
     }
 
     /// Returns the language parsers available to validators.
     pub fn parsers(&self) -> &LanguageParsers {
         &self.parsers
+    }
+
+    /// The line changes the diff reported for the `file_path`.
+    pub(crate) fn line_changes_for(&self, file_path: &RepoPath) -> Option<&[LineChange]> {
+        self.line_changes.get(file_path).map(Vec::as_slice)
     }
 
     /// Converts the validation context to a serializable report that can be displayed as JSON.

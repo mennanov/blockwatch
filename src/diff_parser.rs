@@ -8,7 +8,7 @@ use std::str::FromStr;
 use unidiff::{Line, PatchSet, PatchedFile};
 
 /// Represents a line change from a diff.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct LineChange {
     /// 1-based line number with a change.
     pub line: usize,

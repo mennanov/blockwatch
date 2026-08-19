@@ -38,6 +38,11 @@ Note: Quote glob patterns to prevent shell expansion before passing arguments to
 Globs **intersect** with whatever the run mode selected, in every mode. They only ever narrow a run: passing
 `"src/**/*.rs"` alongside a diff checks the changed blocks under `src/`, and never adds an unchanged file back.
 
+Globs choose which blocks are **validated**, not which files a rule may **resolve a reference against**. A rule such as
+[`affects`](validators/affects.md) still finds its target in a file the globs left out, so narrowing a run to one
+language does not turn every cross-language rule into a failure. An excluded file is read to answer the reference and
+for nothing else: it is never validated, and never appears in a run report.
+
 ## Run Modes
 
 Which files are parsed and which blocks are validated are two separate decisions, and each has its own flag.
@@ -263,9 +268,10 @@ array, so `blocks_unchecked` counts only blocks that were in scope and that noth
 `blockwatch list --diff --only-changed` follows, so the two commands always agree on which blocks exist. Under `--diff`
 alone the report covers the whole tree, exactly as a run without a diff does.
 
-Reference targets follow the run's scope too. When a block declares `affects` or `same-as`, its target is read from disk
-and compared — but under `--only-changed` the target appears in the report only if the diff touched it as well. A diff
-that changes the source alone therefore reports a single file, even though two were involved:
+Reference targets are reported by the run's scope, even though they are not resolved by it. When a block declares
+`affects` or `same-as`, its target is read from disk and compared wherever it lives — but under `--only-changed` the
+target appears in the report only if the diff touched it as well. A diff that changes the source alone therefore reports
+a single file, even though two were involved:
 
 ```shell
 git diff --patch | blockwatch --diff --only-changed --verbosity summary

@@ -112,7 +112,7 @@ mod test_utils {
         let parsers = language_parsers::language_parsers().unwrap();
         Arc::new(ValidationContext::new(
             parse_blocks(
-                line_changes_by_file,
+                &line_changes_by_file,
                 ScanMode::OnlyChanged,
                 &file_system,
                 &FakePathChecker::allow_all(),
@@ -122,6 +122,7 @@ mod test_utils {
             .unwrap()
             .blocks,
             parsers,
+            line_changes_by_file,
         ))
     }
 
@@ -135,6 +136,7 @@ mod test_utils {
             .map(|context| context.parsers.clone())
             .unwrap_or_default();
         let mut merged_modified_blocks = HashMap::new();
+        let mut merged_line_changes = HashMap::new();
         for context in contexts {
             for (file_path, file_blocks) in &context.blocks {
                 merged_modified_blocks
@@ -146,7 +148,14 @@ mod test_utils {
                     .blocks_with_context
                     .extend(file_blocks.blocks_with_context.clone());
             }
+            for (file_path, line_changes) in &context.line_changes {
+                merged_line_changes.insert(file_path.clone(), line_changes.to_vec());
+            }
         }
-        Arc::new(ValidationContext::new(merged_modified_blocks, parsers))
+        Arc::new(ValidationContext::new(
+            merged_modified_blocks,
+            parsers,
+            merged_line_changes,
+        ))
     }
 }

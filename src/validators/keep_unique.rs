@@ -196,6 +196,7 @@ mod validate_tests {
         let context = Arc::new(validators::ValidationContext::new(
             HashMap::new(),
             HashMap::new(),
+            HashMap::new(),
         ));
 
         let violations = validator.validate(context)?.violations;

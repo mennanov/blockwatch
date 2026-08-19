@@ -155,7 +155,7 @@ fn build_context(
     let path_checker = blockwatch::fs::PathCheckerImpl::new(glob_set, args.ignored_globs()?);
 
     let parsed = blocks::parse_blocks(
-        modified_lines_by_file,
+        &modified_lines_by_file,
         scan_mode,
         file_system,
         &path_checker,
@@ -163,7 +163,7 @@ fn build_context(
         extra_file_extensions,
     )?;
     Ok((
-        validators::ValidationContext::new(parsed.blocks, language_parsers),
+        validators::ValidationContext::new(parsed.blocks, language_parsers, modified_lines_by_file),
         parsed.stats,
     ))
 }
