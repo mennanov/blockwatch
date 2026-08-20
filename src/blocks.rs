@@ -63,40 +63,39 @@ impl Block {
     }
 
     /// Whether the `Block`'s content intersects with any of the **ordered** `line_changes`.
-    ///
-    /// `new_line_positions` is used for locating a starting position of a line in the source code.
     fn content_intersects_with_any(&self, line_changes: &[LineChange]) -> bool {
-        line_changes
-            .binary_search_by(|line_change: &LineChange| {
-                if Self::intersects_with_line_change(&self.content_position_range, line_change) {
-                    Ordering::Equal
-                } else if line_change.line < self.content_position_range.start.line {
-                    Ordering::Less
-                } else {
-                    Ordering::Greater
-                }
-            })
-            .is_ok()
+        Self::changes_on_lines(
+            line_changes,
+            self.content_position_range.start.line,
+            self.content_position_range.end.line,
+        )
+        .any(|line_change| {
+            Self::intersects_with_line_change(&self.content_position_range, line_change)
+        })
     }
 
     /// Whether the `Block`'s start tag intersects with any of the **ordered** `line_changes`.
-    ///
-    /// `new_line_positions` is used for locating a starting position of a line in the source code.
     fn start_tag_intersects_with_any(&self, line_changes: &[LineChange]) -> bool {
-        line_changes
-            .binary_search_by(|line_change: &LineChange| {
-                if Self::intersects_with_line_change_inclusive(
-                    &self.start_tag_position_range,
-                    line_change,
-                ) {
-                    Ordering::Equal
-                } else if line_change.line < self.start_tag_position_range.start().line {
-                    Ordering::Less
-                } else {
-                    Ordering::Greater
-                }
-            })
-            .is_ok()
+        Self::changes_on_lines(
+            line_changes,
+            self.start_tag_position_range.start().line,
+            self.start_tag_position_range.end().line,
+        )
+        .any(|line_change| {
+            Self::intersects_with_line_change_inclusive(&self.start_tag_position_range, line_change)
+        })
+    }
+
+    /// The **ordered** `line_changes` that fall on lines `first_line..=last_line`, in order.
+    fn changes_on_lines(
+        line_changes: &[LineChange],
+        first_line: usize,
+        last_line: usize,
+    ) -> impl Iterator<Item = &LineChange> {
+        let first = line_changes.partition_point(|line_change| line_change.line < first_line);
+        line_changes[first..]
+            .iter()
+            .take_while(move |line_change| line_change.line <= last_line)
     }
 
     /// Whether the `position_range` intersects with the given `line_change`.

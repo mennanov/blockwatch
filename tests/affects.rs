@@ -151,6 +151,43 @@ index abc123..def456 100644
 }
 
 #[test]
+fn diff_with_both_the_tag_and_the_content_modified_succeeds() {
+    // The target's edit adds a comment above the block, changes its start tag and changes its
+    // content, all in one change group. The content change is the one that satisfies `affects`, and
+    // the two changes above it must not hide it.
+    let diff_content = r#"
+diff --git a/tests/testdata/affects_tag_and_content_source.ts b/tests/testdata/affects_tag_and_content_source.ts
+index abc123..def456 100644
+--- a/tests/testdata/affects_tag_and_content_source.ts
++++ b/tests/testdata/affects_tag_and_content_source.ts
+@@ -1,3 +1,3 @@
+ // <block name="source" affects="tests/testdata/affects_tag_and_content_target.ts:target">
+-const value = 1;
++const value = 2;
+ // </block>
+diff --git a/tests/testdata/affects_tag_and_content_target.ts b/tests/testdata/affects_tag_and_content_target.ts
+index abc123..def456 100644
+--- a/tests/testdata/affects_tag_and_content_target.ts
++++ b/tests/testdata/affects_tag_and_content_target.ts
+@@ -1,3 +1,4 @@
+-// <block name="target" affects="tests/testdata/affects_tag_and_content_source.ts:source">
+-const value = 1;
++// Added explanation.
++// <block name="target" affects="tests/testdata/affects_tag_and_content_source.ts:source" severity="warning">
++const value = 2;
+ // </block>
+"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
+    cmd.write_stdin(diff_content);
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.assert().success();
+}
+
+#[test]
 fn diff_with_only_tag_modified_in_hunk_with_more_added_than_deleted_lines_succeeds() {
     let diff_content = r#"
 diff --git a/tests/testdata/affects.py b/tests/testdata/affects.py
