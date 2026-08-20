@@ -20,7 +20,9 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
 
 ## Selecting Files
 
-By default, `blockwatch` scans all files in the current working directory, respecting `.gitignore`.
+By default, `blockwatch` scans every file in the repository, respecting `.gitignore`. Paths are reported relative to the
+repository root, whichever directory you run from. Linked worktrees and submodules are supported too: a run inside one
+checks that repository only.
 
 ```shell
 # Check everything in the repository

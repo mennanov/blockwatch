@@ -12,6 +12,10 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Fixed
+
+- Added support for git worktrees and submodules.
+
 ## [0.4.0] - 2026-08-20
 
 ### Changed

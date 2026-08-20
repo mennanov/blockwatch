@@ -206,10 +206,15 @@ fn process_violations(violations: &HashMap<RepoPath, Vec<Violation>>) -> anyhow:
     Ok(has_error_severity)
 }
 
+/// Finds the repository root by walking up from `current_path` to the nearest ancestor carrying a
+/// repository marker.
+///
+/// The search stops at the first marker it meets, so a run started inside a nested repository (a
+/// submodule) stays within that repository instead of escaping into the parent one.
 fn repository_root_path(current_path: PathBuf) -> anyhow::Result<PathBuf> {
     current_path
         .ancestors()
-        .find(|path| path.join(".git").is_dir() || path.join(".hg").is_dir())
+        .find(|path| path.join(".git").exists() || path.join(".hg").exists())
         .map(|path| path.to_path_buf())
         .ok_or_else(|| anyhow::anyhow!("Could not find the repository root directory"))
 }
