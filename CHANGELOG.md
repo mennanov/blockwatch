@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.4.1] - 2026-08-20
+
 ### Breaking changes in v0.3.11
 
 - **`check-lua` scripts can no longer read custom block attributes.** This changed in **0.3.11**, as a consequence of
