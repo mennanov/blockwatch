@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.4.0] - 2026-08-20
+
 ### Changed
 
 - **Breaking:** the run mode is now chosen by flags rather than inferred from stdin. `--diff` supplies the diff and is
