@@ -13,3 +13,23 @@ pre-release-hook = [
     "-c",
     "git fetch origin && test \"$(git rev-list --count 'HEAD..@{upstream}')\" -eq 0 || { echo 'error: branch is behind its upstream; run git pull first' >&2; exit 1; }",
 ]
+
+# cargo `dist` builds the GitHub release body from the CHANGELOG.md section whose
+# heading names the version being released. There is no fallback to an
+# "Unreleased" heading: a release whose version is missing from the changelog is
+# published with no release notes at all. Rewriting the heading here puts it in
+# the release commit that gets tagged, which is the commit `dist` reads in CI.
+# The first replacement closes the section written during the cycle, the second
+# reopens an empty one for the next; `exactly = 1` aborts the release before
+# publishing to crates.io if the changelog ever stops matching these patterns.
+[[pre-release-replacements]]
+file = "CHANGELOG.md"
+search = "## \\[Unreleased\\] - ReleaseDate"
+replace = "## [{{version}}] - {{date}}"
+exactly = 1
+
+[[pre-release-replacements]]
+file = "CHANGELOG.md"
+search = "<!-- next-header -->"
+replace = "<!-- next-header -->\n\n## [Unreleased] - ReleaseDate"
+exactly = 1

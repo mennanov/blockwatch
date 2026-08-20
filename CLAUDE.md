@@ -90,3 +90,8 @@ The `check-ai` validator calls an OpenAI-compatible API configured via `BLOCKWAT
 Releases are produced by `cargo-dist` (see `dist-workspace.toml`) and the GitHub Actions workflow in
 `.github/workflows/`. Version bumps happen in `Cargo.toml` and land via a `chore: Release blockwatch version X.Y.Z`
 commit.
+
+User-facing changes get a `CHANGELOG.md` entry under `## [Unreleased]`, written in the same commit that makes the
+change; refactors, tests and CI work get none. `cargo release` renames that heading to the version being released (see
+the replacements in `release.toml`) and `dist` publishes the renamed section as the GitHub release notes, so an empty
+`Unreleased` section at release time means a release with no notes.
