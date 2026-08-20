@@ -12,11 +12,16 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Breaking changes in v0.3.11
+
+- **`check-lua` scripts can no longer read custom block attributes.** This changed in **0.3.11**, as a consequence of
+  rejecting misspelled attribute names ([#97](https://github.com/mennanov/blockwatch/issues/97)).
+
 ### Fixed
 
-- Added support for git worktrees and submodules.
+- Added support for git worktrees and submodules ([#114](https://github.com/mennanov/blockwatch/issues/114)).
 - A change to a block's content is no longer missed when the same edit also touched the block's start tag or the lines
-  above it.
+  above it ([#106](https://github.com/mennanov/blockwatch/issues/106)).
 
 ## [0.4.0] - 2026-08-20
 
