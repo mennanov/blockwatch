@@ -9,7 +9,8 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let containerfile_language = tree_sitter_containerfile::LANGUAGE.into();
-    let parser = language_parsers::python_style_comments_parser(&containerfile_language, "comment");
+    let parser = language_parsers::python_style_comments_parser(&containerfile_language, "comment")
+        .with_break_at_node_kinds(&["double_quoted_string", "single_quoted_string"]);
     Ok(parser)
 }
 
@@ -60,6 +61,48 @@ COPY . /app
                 },
             ]
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn hash_inside_a_double_quoted_argument_is_not_a_comment() -> anyhow::Result<()> {
+        let mut comments_parser = comments_parser()?;
+
+        let comments: Vec<String> = comments_parser
+            .parse(
+                r##"FROM alpine:3.20
+LABEL description="# 1 of a kind"
+
+# The only comment here
+COPY . /app
+"##,
+            )
+            .map(|comment| comment.comment_text)
+            .collect();
+
+        assert_eq!(comments, vec!["  The only comment here\n".to_string()]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn hash_inside_a_single_quoted_argument_is_not_a_comment() -> anyhow::Result<()> {
+        let mut comments_parser = comments_parser()?;
+
+        let comments: Vec<String> = comments_parser
+            .parse(
+                r##"FROM alpine:3.20
+LABEL summary='# also not a comment'
+
+# The only comment here
+COPY . /app
+"##,
+            )
+            .map(|comment| comment.comment_text)
+            .collect();
+
+        assert_eq!(comments, vec!["  The only comment here\n".to_string()]);
 
         Ok(())
     }

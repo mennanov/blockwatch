@@ -18,6 +18,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   ([#123](https://github.com/mennanov/blockwatch/issues/123)).
 - `check-lua` accepts scripts that start with a `#!` line or a UTF-8 byte order mark. Fixes
   ([#121](https://github.com/mennanov/blockwatch/issues/121)).
+- Block markers written inside a Markdown table cell are now found. Fixes
+  ([#116](https://github.com/mennanov/blockwatch/issues/116)).
+- Marker text inside a string is no longer read as a block. An HTML attribute value and a quoted Dockerfile argument
+  each invented a block the source never declared, which could also report a violation against a file nobody had
+  tagged.
 
 ## [0.4.1] - 2026-08-20
 

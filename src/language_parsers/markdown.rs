@@ -33,6 +33,7 @@ impl MdCommentsParser {
             &markdown_lang,
             "(html_block) @html_block \
              (inline) @inline \
+             (pipe_table_cell) @pipe_table_cell \
              (link_reference_definition) @link_reference_definition",
         )
         .unwrap();
@@ -90,17 +91,18 @@ impl MdCommentsParser {
             }
             // Inline regions may contain code spans whose contents must not be mistaken for
             // comments, but a code span requires a backtick; without one the region is parsed
-            // as is.
-            let html_comments: Vec<Comment> = if node.kind() == "inline" && region.contains('`') {
-                let view = Self::inline_html_view(
-                    &mut self.inline_tree_sitter_parser,
-                    &self.code_span_query,
-                    region,
-                );
-                self.html_comments_parser.parse(&view).collect()
-            } else {
-                self.html_comments_parser.parse(region).collect()
-            };
+            // as is. A table cell carries inline content too, code spans included.
+            let html_comments: Vec<Comment> =
+                if matches!(node.kind(), "inline" | "pipe_table_cell") && region.contains('`') {
+                    let view = Self::inline_html_view(
+                        &mut self.inline_tree_sitter_parser,
+                        &self.code_span_query,
+                        region,
+                    );
+                    self.html_comments_parser.parse(&view).collect()
+                } else {
+                    self.html_comments_parser.parse(region).collect()
+                };
             for mut comment in html_comments {
                 // The comment's positions are relative to the region; shift them to the source.
                 offset_comment(&mut comment, &node);
@@ -308,6 +310,31 @@ Closing text <!-- </block> --> tail.
 
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].attributes["name"], "mixed");
+
+        Ok(())
+    }
+
+    #[test]
+    fn parses_blocks_opened_and_closed_inside_table_cells() -> anyhow::Result<()> {
+        let mut parser = parser()?;
+
+        // GitHub-flavored Markdown renders HTML comments inside table cells, so a table is a
+        // place a reader can reasonably put a marker and a table of values is exactly the
+        // shape a `keep-sorted` rule is written for.
+        let content = r#"| item |
+| --- |
+| <!-- <block name="table_rows"> --> first |
+| second |
+| <!-- </block> --> third |
+"#;
+        let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].attributes["name"], "table_rows");
+        assert_eq!(
+            *blocks[0].start_tag_position_range.start(),
+            Position::new(3, 8)
+        );
 
         Ok(())
     }

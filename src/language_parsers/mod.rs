@@ -209,6 +209,25 @@ impl TreeSitterCommentsParser {
             tree: None,
         }
     }
+
+    /// Stops the walk at nodes of `kinds` without reading a comment out of them.
+    fn with_break_at_node_kinds(self, kinds: &'static [&'static str]) -> Self {
+        let Self {
+            parser,
+            node_visitor,
+            tree,
+        } = self;
+        Self {
+            parser,
+            node_visitor: Box::new(move |node, source_code| {
+                if kinds.contains(&node.kind()) {
+                    return Visit::Break(None);
+                }
+                node_visitor(node, source_code)
+            }),
+            tree,
+        }
+    }
 }
 
 impl CommentsParser for TreeSitterCommentsParser {

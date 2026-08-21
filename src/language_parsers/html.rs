@@ -8,7 +8,8 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let html_language = tree_sitter_html::LANGUAGE.into();
-    let parser = xml_style_comments_parser(&html_language, "comment");
+    let parser = xml_style_comments_parser(&html_language, "comment")
+        .with_break_at_node_kinds(&["quoted_attribute_value"]);
     Ok(parser)
 }
 
@@ -63,6 +64,24 @@ mod tests {
                 },
             ]
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn comment_syntax_inside_an_attribute_value_is_not_a_comment() -> anyhow::Result<()> {
+        let mut comments_parser = comments_parser()?;
+
+        let comments: Vec<String> = comments_parser
+            .parse(
+                r#"<div data-template="<!-- not a comment -->">text</div>
+<!-- The only comment here -->
+"#,
+            )
+            .map(|comment| comment.comment_text)
+            .collect();
+
+        assert_eq!(comments, vec!["     The only comment here    ".to_string()]);
 
         Ok(())
     }
