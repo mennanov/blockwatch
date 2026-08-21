@@ -116,6 +116,9 @@ equal. Under text comparison, `"60.0" != "60"` would fail.
 - **Hard errors** (not violations): an unrecognized `same-as-mode` or `same-as-format` value, or an invalid regex.
 - Because `same-as` fires without a diff, a periodic bare `blockwatch` run — which scans the whole tree — catches drift
   that an `--only-changed` check would miss. See [CI integration](../ci.md).
+- **A pure rename is invisible to diff input.** Renaming a `same-as` target with no content change (a plain `git mv`)
+  produces no content hunk, so `--only-changed` has nothing to check and exits `0`. A full-tree run does catch it,
+  because the old path no longer resolves — another reason to schedule the periodic run above.
 - **Targets are read, not reported.** Under `--only-changed`, a target the diff did not touch is still resolved and
   compared, but it does not appear in a `--verbosity` run report. See
   [Reports Under a Diff](../cli.md#reports-under-a-diff).
