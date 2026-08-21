@@ -102,19 +102,19 @@ impl ValidatorSync for KeepUniqueValidator {
                     if let Some((matched_line, line_range)) = line_match
                         && !seen.insert(matched_line)
                     {
-                        let violation_line_number = block_with_context
+                        // `line_range` is a 1-based column range within the content line, which is
+                        // not where that line starts in the source: content begins where the start
+                        // tag's comment ends.
+                        let violation_start = block_with_context
                             .block
-                            .start_tag_position_range
-                            .start()
-                            .line
-                            + line_number;
-                        let line_character_start = *line_range.start(); // Start position is 1-based.
-                        let line_character_end = *line_range.end(); // End position is 1-based and inclusive.
+                            .content_position(line_number, *line_range.start() - 1);
+                        let line_character_end =
+                            violation_start.character + (*line_range.end() - *line_range.start()); // End position is inclusive.
                         block_violations.push(create_violation(
                             file_path,
                             &block_with_context.block,
-                            violation_line_number,
-                            line_character_start,
+                            violation_start.line,
+                            violation_start.character,
                             line_character_end,
                         )?);
                         break;
@@ -240,6 +240,28 @@ C
         let violations = validator.validate(context)?.violations;
 
         assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn block_with_a_multiline_start_tag_returns_a_violation_on_the_duplicate_line()
+    -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.rs",
+            "/* <block\nkeep-unique> */\nA\nA\n/* </block> */",
+        );
+
+        let violations = KeepUniqueValidator::new().validate(context)?.violations;
+
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.rs")?)
+            .unwrap();
+        // The start tag spans lines 1-2, so the content starts on line 2 and the repeat sits on
+        // line 4. Anchoring to the start tag instead would name line 3, the first occurrence.
+        assert_eq!(
+            file_violations[0].range,
+            ViolationRange::new(Position::new(4, 1), Position::new(4, 1))
+        );
         Ok(())
     }
 
