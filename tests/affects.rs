@@ -360,3 +360,38 @@ index abc123..def456 100644
             "tests/testdata/affects_cross_file_target.md:limits is not",
         ));
 }
+
+#[test]
+fn custom_extension_mapping_applies_to_a_target_outside_the_globs() {
+    // The globs keep the target file out of the validation context, so `affects` reads it from disk
+    // to see whether the diff changed it. That read has to honor `-E`: without the mapping the
+    // file looks unparseable and its modified block is reported as unmodified.
+    let diff = r#"
+diff --git a/tests/testdata/affects_custom_ext_source.javascript b/tests/testdata/affects_custom_ext_source.javascript
+index 1111111..2222222 100644
+--- a/tests/testdata/affects_custom_ext_source.javascript
++++ b/tests/testdata/affects_custom_ext_source.javascript
+@@ -1,3 +1,3 @@
+ // <block affects="tests/testdata/affects_custom_ext_target.javascript:port">
+-const PORT = 8000;
++const PORT = 8080;
+ // </block>
+diff --git a/tests/testdata/affects_custom_ext_target.javascript b/tests/testdata/affects_custom_ext_target.javascript
+index 1111111..2222222 100644
+--- a/tests/testdata/affects_custom_ext_target.javascript
++++ b/tests/testdata/affects_custom_ext_target.javascript
+@@ -1,3 +1,3 @@
+ // <block name="port">
+-const PORT = 8000;
++const PORT = 8080;
+ // </block>"#;
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args([
+        "--diff",
+        "--only-changed",
+        "-E",
+        "javascript=js",
+        "tests/testdata/affects_custom_ext_source.javascript",
+    ]);
+    cmd.write_stdin(diff).output().unwrap().assert().success();
+}

@@ -123,12 +123,13 @@ mod test_utils {
                 &file_system,
                 &FakePathChecker::allow_all(),
                 &parsers,
-                HashMap::new(),
+                &HashMap::new(),
             )
             .unwrap()
             .blocks,
             parsers,
             line_changes_by_file,
+            HashMap::new(),
         ))
     }
 
@@ -162,6 +163,7 @@ mod test_utils {
             merged_modified_blocks,
             parsers,
             merged_line_changes,
+            HashMap::new(),
         ))
     }
 }

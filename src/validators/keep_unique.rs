@@ -427,6 +427,7 @@ C
             HashMap::new(),
             HashMap::new(),
             HashMap::new(),
+            HashMap::new(),
         ));
 
         let violations = validator.validate(context)?.violations;

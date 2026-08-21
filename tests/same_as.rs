@@ -38,3 +38,23 @@ index 1111111..2222222 100644
     cmd.args(["--diff", "--only-changed"]);
     cmd.write_stdin(diff).output().unwrap().assert().success();
 }
+
+#[test]
+fn custom_extension_mapping_applies_to_a_target_read_from_disk() {
+    // The target file is outside the diff, so it is parsed from the disk rather than taken from the
+    // validation context. That read has to honor `-E` too, or an extension the mapping made
+    // parseable looks unsupported to `same-as` alone.
+    let diff = r#"
+diff --git a/tests/testdata/same_as_custom_ext_source.javascript b/tests/testdata/same_as_custom_ext_source.javascript
+index 1111111..2222222 100644
+--- a/tests/testdata/same_as_custom_ext_source.javascript
++++ b/tests/testdata/same_as_custom_ext_source.javascript
+@@ -1,3 +1,3 @@
+ // <block same-as="tests/testdata/same_as_custom_ext_target.javascript:port">
+-const PORT = 8000;
++const PORT = 8080;
+ // </block>"#;
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed", "-E", "javascript=js"]);
+    cmd.write_stdin(diff).output().unwrap().assert().success();
+}

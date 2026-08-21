@@ -179,14 +179,13 @@ fn resolve_target_items<Fs: FileSystem>(
     let file_blocks = match cache.entry(target_file.clone()) {
         Entry::Occupied(entry) => entry.into_mut(),
         Entry::Vacant(entry) => {
-            // Referenced target files are resolved without applying extension overrides.
             let parsed = parse_file(
                 file_system,
                 target_file,
                 &[],
                 every_block,
                 context.parsers(),
-                &HashMap::new(),
+                context.extra_file_extensions(),
             )?
             .ok_or_else(|| {
                 anyhow!(

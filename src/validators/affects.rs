@@ -164,15 +164,13 @@ fn target_modified_outside_scope<Fs: FileSystem>(
     let file_blocks = match cache.entry(target_file.clone()) {
         Entry::Occupied(entry) => entry.into_mut(),
         Entry::Vacant(entry) => {
-            // Referenced target files are resolved without applying extension overrides, matching
-            // how `same-as` reads the files it references.
             let Some(parsed) = parse_file(
                 file_system,
                 target_file.as_path(),
                 line_changes,
                 every_block,
                 context.parsers(),
-                &HashMap::new(),
+                context.extra_file_extensions(),
             )?
             else {
                 return Ok(false);
@@ -294,7 +292,7 @@ mod validate_tests {
             file_system,
             &crate::fs::test_utils::FakePathChecker::allow_only("source.py"),
             &parsers,
-            HashMap::new(),
+            &HashMap::new(),
         )?;
         assert!(
             !parsed
@@ -306,6 +304,7 @@ mod validate_tests {
             parsed.blocks,
             parsers,
             line_changes,
+            HashMap::new(),
         )))
     }
 

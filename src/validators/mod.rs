@@ -25,6 +25,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::ffi::OsString;
 use std::sync::Arc;
 
 /// Validates the given `Context` and returns a list of the violations grouped by filename.
@@ -233,6 +234,8 @@ pub struct ValidationContext {
     pub(crate) parsers: LanguageParsers,
     /// Every line change from the diff (if any).
     pub(crate) line_changes: HashMap<RepoPath, Vec<LineChange>>,
+    /// Extension remappings from the command line.
+    pub(crate) extra_file_extensions: HashMap<OsString, OsString>,
 }
 
 impl ValidationContext {
@@ -241,17 +244,24 @@ impl ValidationContext {
         blocks: HashMap<RepoPath, FileBlocks>,
         parsers: LanguageParsers,
         line_changes: HashMap<RepoPath, Vec<LineChange>>,
+        extra_file_extensions: HashMap<OsString, OsString>,
     ) -> Self {
         Self {
             blocks,
             parsers,
             line_changes,
+            extra_file_extensions,
         }
     }
 
     /// Returns the language parsers available to validators.
     pub fn parsers(&self) -> &LanguageParsers {
         &self.parsers
+    }
+
+    /// The extension remappings the run was given.
+    pub(crate) fn extra_file_extensions(&self) -> &HashMap<OsString, OsString> {
+        &self.extra_file_extensions
     }
 
     /// The line changes the diff reported for the `file_path`.

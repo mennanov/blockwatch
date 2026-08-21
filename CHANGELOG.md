@@ -12,6 +12,12 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Fixed
+
+- `-E` extension mappings now apply to the files `same-as` and `affects` read to resolve a reference, not only to the
+  files the run scans. A referenced file the mapping made parseable was reported as an unsupported format by `same-as`,
+  and treated as unchanged by `affects`. Fixes ([#105](https://github.com/mennanov/blockwatch/issues/105)).
+
 ## [0.4.2] - 2026-08-21
 
 ### Fixed

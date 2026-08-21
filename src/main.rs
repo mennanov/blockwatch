@@ -160,10 +160,15 @@ fn build_context(
         file_system,
         &path_checker,
         &language_parsers,
-        extra_file_extensions,
+        &extra_file_extensions,
     )?;
     Ok((
-        validators::ValidationContext::new(parsed.blocks, language_parsers, modified_lines_by_file),
+        validators::ValidationContext::new(
+            parsed.blocks,
+            language_parsers,
+            modified_lines_by_file,
+            extra_file_extensions,
+        ),
         parsed.stats,
     ))
 }
