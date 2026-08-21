@@ -7,6 +7,7 @@ use anyhow::{Context, anyhow, bail};
 use serde_repr::Serialize_repr;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::ffi::OsString;
 use std::ops::{Range, RangeInclusive};
 use std::path::Path;
@@ -519,6 +520,8 @@ pub fn parse_file(
         Some(p) => p,
     };
     let source_code = file_system.read_to_string(file_path)?;
+    // Tracks each named block's first position in this file, to reject duplicate blocks.
+    let mut names_seen: HashMap<String, Position> = HashMap::new();
     // Blocks are filtered as the parser yields them, so only the ones this run will validate are
     // ever held. The parser's lock lives until the end of the statement, which is as long as the
     // iterator borrowing it does.
@@ -532,6 +535,9 @@ pub fn parse_file(
                 Err(error) => return Some(Err(error)),
             };
             if let Err(err) = validate_block_syntax(&block, file_path) {
+                return Some(Err(err));
+            }
+            if let Err(err) = reject_duplicate_name(&block, file_path, &mut names_seen) {
                 return Some(Err(err));
             }
             let block_with_context = BlockWithContext {
@@ -595,6 +601,39 @@ fn validate_block_syntax(block: &Block, file_path: &Path) -> anyhow::Result<()> 
         block.start_tag_position_range.start().line,
         block.start_tag_position_range.start().character,
     ))
+}
+
+/// Rejects a block whose `name` was already used earlier in the same file, recording it in
+/// `names_seen` otherwise. A block with no `name` is not a reference target and is ignored.
+///
+/// Two blocks sharing a name make every `affects`/`same-as` reference to it ambiguous, silently
+/// binding to whichever block the parser happens to reach first.
+fn reject_duplicate_name(
+    block: &Block,
+    file_path: &Path,
+    names_seen: &mut HashMap<String, Position>,
+) -> anyhow::Result<()> {
+    let Some(name) = block.name() else {
+        return Ok(());
+    };
+    let position = block.start_tag_position_range.start();
+    match names_seen.entry(name.to_string()) {
+        Entry::Occupied(entry) => {
+            bail!(
+                "Block {}:{} at line {}, column {} duplicates the name of the block at line {}, column {}",
+                file_path.display(),
+                name,
+                position.line,
+                position.character,
+                entry.get().line,
+                entry.get().character,
+            )
+        }
+        Entry::Vacant(entry) => {
+            entry.insert(position.clone());
+            Ok(())
+        }
+    }
 }
 
 fn parser_for_file_path<'p>(
@@ -1486,6 +1525,58 @@ mod parse_blocks_tests {
             file_blocks.unwrap_err().source().unwrap().to_string(),
             "Block a.py:(unnamed) at line 1, column 3 contains unrecognized severity value"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn duplicate_block_name_in_the_same_file_fails_with_error() -> anyhow::Result<()> {
+        let file_system = FakeFileSystem::new(HashMap::from([(
+            "a.py".to_string(),
+            "# <block name=\"x\">\n1\n# </block>\n# <block name=\"x\">\n2\n# </block>".to_string(),
+        )]));
+        let parsers = language_parsers()?;
+        let file_blocks = parse_file(
+            &file_system,
+            Path::new("a.py"),
+            &[],
+            every_block,
+            &parsers,
+            &HashMap::new(),
+        );
+
+        assert!(file_blocks.is_err());
+        assert_eq!(
+            file_blocks.unwrap_err().source().unwrap().to_string(),
+            "Block a.py:x at line 4, column 3 duplicates the name of the block at line 1, column 3"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn same_block_name_in_different_files_does_not_fail() -> anyhow::Result<()> {
+        let file_system = FakeFileSystem::new(HashMap::from([
+            (
+                "a.py".to_string(),
+                "# <block name=\"x\">\n1\n# </block>".to_string(),
+            ),
+            (
+                "b.py".to_string(),
+                "# <block name=\"x\">\n2\n# </block>".to_string(),
+            ),
+        ]));
+        let parsers = language_parsers()?;
+
+        let blocks = parse_blocks(
+            &HashMap::new(),
+            ScanMode::All,
+            &file_system,
+            &FakePathChecker::allow_all(),
+            &parsers,
+            &HashMap::new(),
+        )?
+        .blocks;
+
+        assert_eq!(blocks.len(), 2);
         Ok(())
     }
 }

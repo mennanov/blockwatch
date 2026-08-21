@@ -20,6 +20,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - `same-as` now reports a violation when its `same-as-pattern` matches no lines on both the source and target sides,
   instead of treating the two empty results as trivially equal and passing. Fixes
   ([#102](https://github.com/mennanov/blockwatch/issues/102)).
+- Duplicate blocks with the same name within the same file are rejected. Fixes
+  ([#104](https://github.com/mennanov/blockwatch/issues/104)).
 
 ## [0.4.2] - 2026-08-21
 

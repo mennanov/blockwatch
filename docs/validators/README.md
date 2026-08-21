@@ -40,6 +40,9 @@ Names the block so other blocks can point at it with `affects` or `same-as`. Nam
 # </block>
 ```
 
+A name must be unique within its file — a second block reusing one is a hard error, since every
+`affects`/`same-as` reference to it would be ambiguous.
+
 ### `severity`
 
 Controls how a violation is reported. Mirrors
