@@ -197,6 +197,26 @@ impl Block {
         &source[self.content_bytes_range.clone()]
     }
 
+    /// Maps a position inside the block's content onto the position in the original source.
+    ///
+    /// `content_line_idx` is the 0-based index of a line of [`Self::content`],
+    /// `column_offset` is the 0-based offset within that line.
+    pub(crate) fn content_position(
+        &self,
+        content_line_idx: usize,
+        column_offset: usize,
+    ) -> Position {
+        let line_start_column = if content_line_idx == 0 {
+            self.content_position_range.start.character
+        } else {
+            1
+        };
+        Position::new(
+            self.content_position_range.start.line + content_line_idx,
+            line_start_column + column_offset,
+        )
+    }
+
     /// Returns the block's severity.
     pub(crate) fn severity(&self) -> anyhow::Result<BlockSeverity> {
         self.attributes

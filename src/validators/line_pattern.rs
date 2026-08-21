@@ -51,7 +51,7 @@ impl ValidatorSync for LinePatternValidator {
                     )
                 })?;
                 let mut block_violations = Vec::new();
-                for (line_number, line) in block_with_context
+                for (line_idx, line) in block_with_context
                     .block
                     .content(&file_blocks.file_content)
                     .lines()
@@ -62,21 +62,17 @@ impl ValidatorSync for LinePatternValidator {
                         continue;
                     }
                     if !re.is_match(trimmed_line) {
-                        let violation_line_number = block_with_context
+                        let column_offset = trimmed_line.as_ptr() as usize - line.as_ptr() as usize;
+                        let violation_start = block_with_context
                             .block
-                            .start_tag_position_range
-                            .start()
-                            .line
-                            + line_number;
-                        let line_character_start =
-                            trimmed_line.as_ptr() as usize - line.as_ptr() as usize + 1; // Start position is 1-based.
-                        let line_character_end = line_character_start + trimmed_line.len() - 1; // End position is 1-based and inclusive.
+                            .content_position(line_idx, column_offset);
+                        let line_character_end = violation_start.character + trimmed_line.len() - 1; // End position is inclusive.
                         block_violations.push(create_violation(
                             file_path,
                             &block_with_context.block,
                             pattern,
-                            violation_line_number,
-                            line_character_start,
+                            violation_start.line,
+                            violation_start.character,
                             line_character_end,
                         )?);
                         break;
@@ -157,65 +153,8 @@ mod validate_tests {
     use serde_json::json;
 
     #[test]
-    fn empty_blocks_returns_no_violations() -> anyhow::Result<()> {
-        let validator = LinePatternValidator::new();
-        let context = validation_context("example.py", "#<block>\n#</block>");
-        let violations = validator.validate(context)?.violations;
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn blocks_with_empty_content_returns_no_violations() -> anyhow::Result<()> {
-        let validator = LinePatternValidator::new();
-        let context = validation_context(
-            "example.py",
-            r#"# <block line-pattern="[A-Z]+">
-        # </block>"#,
-        );
-        let violations = validator.validate(context)?.violations;
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn valid_regex_all_lines_match_returns_no_violations() -> anyhow::Result<()> {
-        let validator = LinePatternValidator::new();
-        let context = validation_context(
-            "example.py",
-            r#"# <block line-pattern="^[A-Z]+$">
-        FOO
-        BAR
-        Z
-        # </block>"#,
-        );
-        let violations = validator.validate(context)?.violations;
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn empty_lines_and_spaces_are_ignored() -> anyhow::Result<()> {
-        let validator = LinePatternValidator::new();
-        let context = validation_context(
-            "example.py",
-            r#"# <block line-pattern="^[A-Z]+$">
-        FOO
-         
-        
-         BAR 
-        Z 
-        # </block>"#,
-        );
-
-        let violations = validator.validate(context)?.violations;
-
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn non_matching_line_reports_first_violation_only() -> anyhow::Result<()> {
+    fn block_with_several_non_matching_lines_returns_the_first_violation_only() -> anyhow::Result<()>
+    {
         let validator = LinePatternValidator::new();
         let context = validation_context(
             "example.py",
@@ -252,7 +191,87 @@ mod validate_tests {
     }
 
     #[test]
-    fn invalid_regex_returns_error() {
+    fn block_with_every_line_matching_returns_no_violations() -> anyhow::Result<()> {
+        let validator = LinePatternValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-pattern="^[A-Z]+$">
+        FOO
+        BAR
+        Z
+        # </block>"#,
+        );
+        let violations = validator.validate(context)?.violations;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn inline_block_with_a_non_matching_line_returns_violation_with_source_line_columns()
+    -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.rs",
+            r#"const X: &str = /* <block line-pattern="^GOOD$"> */ "BAD" /* </block> */;"#,
+        );
+
+        let violations = LinePatternValidator::new().validate(context)?.violations;
+
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.rs")?)
+            .unwrap();
+        // `"BAD"` sits at columns 53..=57 of the source line; the block's content starts at
+        // column 52, so a range measured from the content alone points at `const` instead.
+        assert_eq!(
+            file_violations[0].range,
+            ViolationRange::new(Position::new(1, 53), Position::new(1, 57))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn block_with_a_multiline_start_tag_returns_violation_with_line_the_content_starts_on()
+    -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.rs",
+            "/* <block\nline-pattern=\"^GOOD$\"> */ \"BAD\" /* </block> */",
+        );
+
+        let violations = LinePatternValidator::new().validate(context)?.violations;
+
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.rs")?)
+            .unwrap();
+        // The start tag opens on line 1 but the content only begins on line 2, after the tag's
+        // comment closes.
+        assert_eq!(
+            file_violations[0].range,
+            ViolationRange::new(Position::new(2, 27), Position::new(2, 31))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn block_with_blank_and_whitespace_only_lines_returns_no_violations() -> anyhow::Result<()> {
+        let validator = LinePatternValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-pattern="^[A-Z]+$">
+        FOO
+         
+        
+         BAR 
+        Z 
+        # </block>"#,
+        );
+
+        let violations = validator.validate(context)?.violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn block_with_an_invalid_regex_returns_an_error() {
         let validator = LinePatternValidator::new();
         let context = validation_context(
             "example.py",
@@ -266,7 +285,30 @@ mod validate_tests {
     }
 
     #[test]
-    fn validate_records_a_check_for_every_examined_block() -> anyhow::Result<()> {
+    fn block_without_a_line_pattern_attribute_returns_no_violations() -> anyhow::Result<()> {
+        let validator = LinePatternValidator::new();
+        let context = validation_context("example.py", "#<block>\n#</block>");
+        let violations = validator.validate(context)?.violations;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn block_with_empty_content_returns_no_violations() -> anyhow::Result<()> {
+        let validator = LinePatternValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-pattern="[A-Z]+">
+        # </block>"#,
+        );
+        let violations = validator.validate(context)?.violations;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn blocks_with_and_without_a_line_pattern_records_a_check_for_the_examined_ones_only()
+    -> anyhow::Result<()> {
         let context = validation_context(
             "example.py",
             r#"# <block name="matching" line-pattern="^[a-z]+$">
