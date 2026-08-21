@@ -14,6 +14,7 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Fixed
 
+- A proper handling of non-ASCII chars. Fixes ([#127](https://github.com/mennanov/blockwatch/issues/127)).
 - `line-pattern`, `keep-sorted` and `keep-unique` violations now point at the failing text in the source file. Fixes
   ([#123](https://github.com/mennanov/blockwatch/issues/123)).
 - `check-lua` accepts scripts that start with a `#!` line or a UTF-8 byte order mark. Fixes

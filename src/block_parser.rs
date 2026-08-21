@@ -246,24 +246,25 @@ impl BlockStart {
             start_tag_position_range,
         }
     }
+
+    /// Maps a byte offset within a comment's text onto its position in the source file.
+    ///
+    /// Columns count characters, so the offset is converted by counting the characters it skips
+    /// rather than the bytes: the two differ on any line holding a multi-byte character.
     fn source_position_at(position_in_comment: usize, comment: &Comment) -> Position {
-        let line_number = comment.position_range.start.line
-            + comment.comment_text[..position_in_comment + 1]
-                .lines()
-                .count()
-            - 1;
-        Position::new(
-            line_number,
-            if line_number == comment.position_range.start.line {
-                // The given `position_in_comment` is in the same line as the comment's start.
-                comment.position_range.start.character + position_in_comment
-            } else {
-                position_in_comment
-                    - comment.comment_text[..position_in_comment]
-                        .rfind('\n')
-                        .unwrap_or(0)
-            },
-        )
+        let text_before = &comment.comment_text[..position_in_comment];
+        match text_before.rfind('\n') {
+            // Past the comment's first line, so the column is measured from that line's start.
+            Some(line_break) => Position::new(
+                comment.position_range.start.line + text_before.matches('\n').count(),
+                text_before[line_break + 1..].chars().count() + 1,
+            ),
+            // Still on the comment's first line, which starts at the comment's own column.
+            None => Position::new(
+                comment.position_range.start.line,
+                comment.position_range.start.character + text_before.chars().count(),
+            ),
+        }
     }
 }
 
@@ -324,65 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn block_closed_inside_unclosed_ones_is_discarded() {
-        let mut parser = create_parser();
-        // `inner` is complete, but both of the blocks holding it are left open. Its tags could
-        // just as well have been mispaired by the missing ones, so it is not handed over.
-        let contents = "// <block name=\"outer\">\n// <block name=\"middle\">\n// <block name=\"inner\">\n// </block>";
-
-        let mut blocks = parser.parse(contents);
-
-        assert_eq!(
-            blocks
-                .next()
-                .expect("an error")
-                .expect_err("the unclosed block")
-                .to_string(),
-            "Block at line 2 is not closed"
-        );
-        assert!(blocks.next().is_none());
-    }
-
-    #[test]
-    fn iteration_stops_at_the_first_error() {
-        let mut parser = create_parser();
-        // The stray end tag has nothing to close, so the block following it is never reached.
-        let contents = "// </block>\n// <block>\n// </block>";
-
-        let mut blocks = parser.parse(contents);
-
-        assert!(blocks.next().expect("an error").is_err());
-        assert!(blocks.next().is_none());
-    }
-
-    #[test]
-    fn blocks_closed_before_an_unclosed_one_are_yielded_ahead_of_the_error() {
-        let mut parser = create_parser();
-        let contents = "// <block name=\"closed\">\n// </block>\n// <block name=\"open\">";
-
-        let mut blocks = parser.parse(contents);
-
-        assert_eq!(
-            blocks
-                .next()
-                .expect("a block")
-                .expect("no parse error")
-                .attributes["name"],
-            "closed"
-        );
-        assert_eq!(
-            blocks
-                .next()
-                .expect("an error")
-                .expect_err("the unclosed block")
-                .to_string(),
-            "Block at line 3 is not closed"
-        );
-        assert!(blocks.next().is_none());
-    }
-
-    #[test]
-    fn no_defined_blocks_returns_empty_blocks() -> anyhow::Result<()> {
+    fn source_without_blocks_returns_no_blocks() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#""
             fn say_hello_world() {
@@ -395,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn single_block_with_single_line_content() -> anyhow::Result<()> {
+    fn block_with_single_line_content_returns_correct_block() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"/* <block> */ let say = "hi"; /* </block> */"#;
         let blocks = parse_all(&mut parser, contents)?;
@@ -412,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn single_block_with_multiple_lines_content() -> anyhow::Result<()> {
+    fn block_with_multiline_content_returns_correct_block() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = "// <block>\nlet say = \"hi\";\n// </block>";
         let blocks = parse_all(&mut parser, contents)?;
@@ -429,41 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn single_block_with_multiline_starting_block_tag() -> anyhow::Result<()> {
-        let mut parser = create_parser();
-        let contents = "/* <block\n> */ let say = \"hi\"; // </block>";
-        let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![Block::new(
-                HashMap::new(),
-                Position::new(1, 4)..=Position::new(2, 1),
-                test_utils::substr_range(contents, " let say = \"hi\"; "),
-                Position::new(2, 5)..Position::new(2, 22),
-            ),]
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn single_block_with_multiline_ending_block_tag() -> anyhow::Result<()> {
-        let mut parser = create_parser();
-        let contents = "/* <block> */ let say = \"hi\"; /* </block\n> */";
-        let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![Block::new(
-                HashMap::new(),
-                Position::new(1, 4)..=Position::new(1, 10),
-                test_utils::substr_range(contents, " let say = \"hi\"; "),
-                Position::new(1, 14)..Position::new(1, 31),
-            ),]
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn multiple_blocks_on_separate_lines() -> anyhow::Result<()> {
+    fn blocks_on_separate_lines_return_correct_blocks() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"// <block>
 println!("hello1");
@@ -493,32 +402,7 @@ println!("hello2");
     }
 
     #[test]
-    fn multiple_blocks_on_intersecting_lines() -> anyhow::Result<()> {
-        let mut parser = create_parser();
-        let contents = "// <block>\nprintln!(\"hello1\");\n/* </block><block> */\nprintln!(\"hello2\");\n// </block>";
-        let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![
-                Block::new(
-                    HashMap::new(),
-                    Position::new(1, 4)..=Position::new(1, 10),
-                    test_utils::substr_range(contents, "\nprintln!(\"hello1\");\n"),
-                    Position::new(1, 11)..Position::new(3, 1),
-                ),
-                Block::new(
-                    HashMap::new(),
-                    Position::new(3, 12)..=Position::new(3, 18),
-                    test_utils::substr_range(contents, "\nprintln!(\"hello2\");\n"),
-                    Position::new(3, 22)..Position::new(5, 1),
-                )
-            ]
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn multiple_blocks_on_single_line() -> anyhow::Result<()> {
+    fn blocks_on_a_single_line_return_correct_blocks() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = "/* <block> */println!(\"hello1\");/* </block><block> */println!(\"hello2\");// </block>";
         let blocks = parse_all(&mut parser, contents)?;
@@ -543,41 +427,32 @@ println!("hello2");
     }
 
     #[test]
-    fn block_starts_on_non_first_comment_line() -> anyhow::Result<()> {
+    fn adjacent_blocks_sharing_one_comment_return_correct_blocks() -> anyhow::Result<()> {
         let mut parser = create_parser();
-        let contents = "/* Some comment\n<block> */println!(\"hello1\");// </block>";
+        let contents = "// <block>\nprintln!(\"hello1\");\n/* </block><block> */\nprintln!(\"hello2\");\n// </block>";
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
-            vec![Block::new(
-                HashMap::new(),
-                Position::new(2, 1)..=Position::new(2, 7),
-                test_utils::substr_range(contents, "println!(\"hello1\");"),
-                Position::new(2, 11)..Position::new(2, 30),
-            ),]
+            vec![
+                Block::new(
+                    HashMap::new(),
+                    Position::new(1, 4)..=Position::new(1, 10),
+                    test_utils::substr_range(contents, "\nprintln!(\"hello1\");\n"),
+                    Position::new(1, 11)..Position::new(3, 1),
+                ),
+                Block::new(
+                    HashMap::new(),
+                    Position::new(3, 12)..=Position::new(3, 18),
+                    test_utils::substr_range(contents, "\nprintln!(\"hello2\");\n"),
+                    Position::new(3, 22)..Position::new(5, 1),
+                )
+            ]
         );
         Ok(())
     }
 
     #[test]
-    fn block_ends_on_non_first_comment_line() -> anyhow::Result<()> {
-        let mut parser = create_parser();
-        let contents = "/* <block> */println!(\"hello1\");/* Some comment\n</block> */";
-        let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![Block::new(
-                HashMap::new(),
-                Position::new(1, 4)..=Position::new(1, 10),
-                test_utils::substr_range(contents, "println!(\"hello1\");"),
-                Position::new(1, 14)..Position::new(1, 33),
-            ),]
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn nested_blocks() -> anyhow::Result<()> {
+    fn nested_blocks_return_correct_blocks() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
         // <block name="foo">
@@ -647,7 +522,7 @@ println!("hello2");
     }
 
     #[test]
-    fn multiple_nested_blocks_at_same_level() -> anyhow::Result<()> {
+    fn nested_blocks_at_the_same_level_are_returned_in_start_order() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
         // <block name="parent">
@@ -672,7 +547,7 @@ println!("hello2");
     }
 
     #[test]
-    fn block_contents_in_comments_is_ignored() -> anyhow::Result<()> {
+    fn text_around_the_tags_in_a_comment_is_excluded_from_the_content() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"// <block name="foo">This text is ignored
         let word = "hello";
@@ -685,6 +560,124 @@ println!("hello2");
                 Position::new(1, 4)..=Position::new(1, 21),
                 test_utils::substr_range(contents, "\n        let word = \"hello\";\n        "),
                 Position::new(1, 42)..Position::new(3, 9),
+            ),]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn blocks_with_different_line_endings_return_correct_content() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        let contents = "// <block>\r\nWindows\r\n// </block>\n// <block>\nUnix\n// </block>";
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(blocks.len(), 2);
+        assert!(blocks[0].content(contents).contains("\r\n"));
+        assert!(blocks[1].content(contents).contains("\n"));
+        Ok(())
+    }
+
+    #[test]
+    fn block_with_a_multiline_start_tag_returns_correct_block() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        let contents = "/* <block\n> */ let say = \"hi\"; // </block>";
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(
+            blocks,
+            vec![Block::new(
+                HashMap::new(),
+                Position::new(1, 4)..=Position::new(2, 1),
+                test_utils::substr_range(contents, " let say = \"hi\"; "),
+                Position::new(2, 5)..Position::new(2, 22),
+            ),]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn block_with_a_multiline_end_tag_returns_correct_block() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        let contents = "/* <block> */ let say = \"hi\"; /* </block\n> */";
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(
+            blocks,
+            vec![Block::new(
+                HashMap::new(),
+                Position::new(1, 4)..=Position::new(1, 10),
+                test_utils::substr_range(contents, " let say = \"hi\"; "),
+                Position::new(1, 14)..Position::new(1, 31),
+            ),]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn block_starting_on_a_non_first_comment_line_returns_correct_block() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        let contents = "/* Some comment\n<block> */println!(\"hello1\");// </block>";
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(
+            blocks,
+            vec![Block::new(
+                HashMap::new(),
+                Position::new(2, 1)..=Position::new(2, 7),
+                test_utils::substr_range(contents, "println!(\"hello1\");"),
+                Position::new(2, 11)..Position::new(2, 30),
+            ),]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn block_ending_on_a_non_first_comment_line_returns_correct_block() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        let contents = "/* <block> */println!(\"hello1\");/* Some comment\n</block> */";
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(
+            blocks,
+            vec![Block::new(
+                HashMap::new(),
+                Position::new(1, 4)..=Position::new(1, 10),
+                test_utils::substr_range(contents, "println!(\"hello1\");"),
+                Position::new(1, 14)..Position::new(1, 33),
+            ),]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn non_ascii_before_a_start_tag_returns_a_character_based_column() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        // `é` occupies two bytes but one column, so the tag sits at the same column as it would
+        // with a plain `e`.
+        let contents = "// café <block>\nlet say = \"hi\";\n// </block>";
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(
+            blocks,
+            vec![Block::new(
+                HashMap::new(),
+                Position::new(1, 9)..=Position::new(1, 15),
+                test_utils::substr_range(contents, "\nlet say = \"hi\";\n"),
+                Position::new(1, 16)..Position::new(3, 1)
+            ),]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn non_ascii_before_a_start_tag_on_a_later_comment_line_returns_a_character_based_column()
+    -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        // The tag sits on the second line of a block comment, past a multi-byte character on that
+        // same line.
+        let contents = "/*\n   café <block> */\nlet say = \"hi\";\n// </block>";
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(
+            blocks,
+            vec![Block::new(
+                HashMap::new(),
+                Position::new(2, 9)..=Position::new(2, 15),
+                test_utils::substr_range(contents, "\nlet say = \"hi\";\n"),
+                Position::new(2, 19)..Position::new(4, 1)
             ),]
         );
         Ok(())
@@ -705,7 +698,7 @@ println!("hello2");
     }
 
     #[test]
-    fn unclosed_nested_block_returns_error() -> anyhow::Result<()> {
+    fn unclosed_block_with_a_closed_nested_one_returns_error() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
         // <block name="foo">
@@ -724,7 +717,7 @@ println!("hello2");
     }
 
     #[test]
-    fn incorrect_endblock_returns_error() -> anyhow::Result<()> {
+    fn unmatched_end_tag_returns_error() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
         fn say_hello_world() {
@@ -738,7 +731,77 @@ println!("hello2");
     }
 
     #[test]
-    fn attributes_on_single_line() -> anyhow::Result<()> {
+    fn malformed_block_tag_returns_error() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        let contents = r#"
+        // <block name="foo" affects="file:block" invalid-attr=">
+        fn foo() {}
+        // </block>
+        "#;
+        assert!(parse_all(&mut parser, contents).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn block_closed_before_an_unclosed_one_is_returned_ahead_of_the_error() {
+        let mut parser = create_parser();
+        let contents = "// <block name=\"closed\">\n// </block>\n// <block name=\"open\">";
+
+        let mut blocks = parser.parse(contents);
+
+        assert_eq!(
+            blocks
+                .next()
+                .expect("a block")
+                .expect("no parse error")
+                .attributes["name"],
+            "closed"
+        );
+        assert_eq!(
+            blocks
+                .next()
+                .expect("an error")
+                .expect_err("the unclosed block")
+                .to_string(),
+            "Block at line 3 is not closed"
+        );
+        assert!(blocks.next().is_none());
+    }
+
+    #[test]
+    fn block_closed_inside_unclosed_ones_is_not_returned() {
+        let mut parser = create_parser();
+        // `inner` is complete, but both of the blocks holding it are left open. Its tags could
+        // just as well have been mispaired by the missing ones, so it is not handed over.
+        let contents = "// <block name=\"outer\">\n// <block name=\"middle\">\n// <block name=\"inner\">\n// </block>";
+
+        let mut blocks = parser.parse(contents);
+
+        assert_eq!(
+            blocks
+                .next()
+                .expect("an error")
+                .expect_err("the unclosed block")
+                .to_string(),
+            "Block at line 2 is not closed"
+        );
+        assert!(blocks.next().is_none());
+    }
+
+    #[test]
+    fn block_following_the_first_error_is_not_returned() {
+        let mut parser = create_parser();
+        // The stray end tag has nothing to close, so the block following it is never reached.
+        let contents = "// </block>\n// <block>\n// </block>";
+
+        let mut blocks = parser.parse(contents);
+
+        assert!(blocks.next().expect("an error").is_err());
+        assert!(blocks.next().is_none());
+    }
+
+    #[test]
+    fn tag_with_attributes_on_a_single_line_returns_correct_attributes() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
         // <block foo="bar" fizz="buzz">
@@ -760,7 +823,7 @@ println!("hello2");
     }
 
     #[test]
-    fn attributes_on_multiple_lines() -> anyhow::Result<()> {
+    fn tag_with_attributes_on_multiple_lines_returns_correct_attributes() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
         /* <block
@@ -784,32 +847,7 @@ println!("hello2");
     }
 
     #[test]
-    fn attributes_with_single_quotes() -> anyhow::Result<()> {
-        let mut parser = create_parser();
-        let contents = r#"
-        // <block text='He said "Hello"'>
-        // </block>
-        "#;
-        let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks[0].attributes["text"], "He said \"Hello\"");
-        Ok(())
-    }
-
-    #[test]
-    fn attributes_with_html_escaped_quotes_are_not_decoded() -> anyhow::Result<()> {
-        let mut parser = create_parser();
-        let contents = r#"
-        // <block text="He said &quot;Hello&quot;">
-        // </block>
-        "#;
-        let blocks = parse_all(&mut parser, contents)?;
-
-        assert_eq!(blocks[0].attributes["text"], "He said &quot;Hello&quot;");
-        Ok(())
-    }
-
-    #[test]
-    fn attributes_with_no_quotes() -> anyhow::Result<()> {
+    fn unquoted_attribute_values_return_correct_values() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
         // <block color=red flavor=sweet>
@@ -822,7 +860,19 @@ println!("hello2");
     }
 
     #[test]
-    fn attributes_with_no_value() -> anyhow::Result<()> {
+    fn single_quoted_attribute_value_returns_the_value_verbatim() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        let contents = r#"
+        // <block text='He said "Hello"'>
+        // </block>
+        "#;
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(blocks[0].attributes["text"], "He said \"Hello\"");
+        Ok(())
+    }
+
+    #[test]
+    fn valueless_attributes_return_empty_strings() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
         // <block attr1 attr2>
@@ -835,7 +885,7 @@ println!("hello2");
     }
 
     #[test]
-    fn attributes_with_empty_string_value() -> anyhow::Result<()> {
+    fn attributes_with_an_empty_quoted_value_return_empty_strings() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
         // <block name="" foo="" bar=''>
@@ -855,33 +905,7 @@ println!("hello2");
     }
 
     #[test]
-    fn attributes_with_html_symbols() -> anyhow::Result<()> {
-        let mut parser = create_parser();
-        let contents = r#"
-        // <block keep-unique="(?P<value>\w+)">
-        // </block>
-        "#;
-        let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks[0].attributes["keep-unique"], r"(?P<value>\w+)");
-        Ok(())
-    }
-
-    #[test]
-    fn attributes_with_unicode_value() -> anyhow::Result<()> {
-        let mut parser = create_parser();
-        let contents = r#"
-        // <block name="🦀" desc="Rust">
-        fn unicode() {}
-        // </block>
-        "#;
-        let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks[0].attributes["name"], "🦀");
-        assert_eq!(blocks[0].attributes["desc"], "Rust");
-        Ok(())
-    }
-
-    #[test]
-    fn attributes_with_spaces_around_values() -> anyhow::Result<()> {
+    fn attributes_with_spaces_around_the_equals_sign_return_correct_values() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
         // <block name = "foo" desc = 'bar'>
@@ -895,7 +919,8 @@ println!("hello2");
     }
 
     #[test]
-    fn multiple_mixed_attributes() -> anyhow::Result<()> {
+    fn tag_mixing_valued_and_valueless_attributes_returns_correct_attributes() -> anyhow::Result<()>
+    {
         let mut parser = create_parser();
         let contents = r#"
         // <block color="red" attr1 align="center" attr2>
@@ -911,7 +936,7 @@ println!("hello2");
     }
 
     #[test]
-    fn duplicated_attributes_uses_last_value() -> anyhow::Result<()> {
+    fn duplicated_attribute_returns_the_last_value() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
         // <block color="red" color="blue">
@@ -927,7 +952,46 @@ println!("hello2");
     }
 
     #[test]
-    fn nested_blocks_with_attributes() -> anyhow::Result<()> {
+    fn html_escaped_quotes_in_an_attribute_value_are_not_decoded() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        let contents = r#"
+        // <block text="He said &quot;Hello&quot;">
+        // </block>
+        "#;
+        let blocks = parse_all(&mut parser, contents)?;
+
+        assert_eq!(blocks[0].attributes["text"], "He said &quot;Hello&quot;");
+        Ok(())
+    }
+
+    #[test]
+    fn attribute_value_holding_angle_brackets_returns_the_value_verbatim() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        let contents = r#"
+        // <block keep-unique="(?P<value>\w+)">
+        // </block>
+        "#;
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(blocks[0].attributes["keep-unique"], r"(?P<value>\w+)");
+        Ok(())
+    }
+
+    #[test]
+    fn non_ascii_attribute_value_returns_the_value_verbatim() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        let contents = r#"
+        // <block name="🦀" desc="Rust">
+        fn unicode() {}
+        // </block>
+        "#;
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(blocks[0].attributes["name"], "🦀");
+        assert_eq!(blocks[0].attributes["desc"], "Rust");
+        Ok(())
+    }
+
+    #[test]
+    fn nested_blocks_return_their_own_attributes() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
         // <block name="outer" foo="bar">
@@ -958,30 +1022,7 @@ println!("hello2");
     }
 
     #[test]
-    fn malformed_block_tag_returns_error() -> anyhow::Result<()> {
-        let mut parser = create_parser();
-        let contents = r#"
-        // <block name="foo" affects="file:block" invalid-attr=">
-        fn foo() {}
-        // </block>
-        "#;
-        assert!(parse_all(&mut parser, contents).is_err());
-        Ok(())
-    }
-
-    #[test]
-    fn blocks_with_different_line_endings() -> anyhow::Result<()> {
-        let mut parser = create_parser();
-        let contents = "// <block>\r\nWindows\r\n// </block>\n// <block>\nUnix\n// </block>";
-        let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks.len(), 2);
-        assert!(blocks[0].content(contents).contains("\r\n"));
-        assert!(blocks[1].content(contents).contains("\n"));
-        Ok(())
-    }
-
-    #[test]
-    fn comments_with_xml_like_symbols() -> anyhow::Result<()> {
+    fn comment_with_xml_like_symbols_returns_the_block() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
         /*
@@ -998,7 +1039,7 @@ println!("hello2");
     }
 
     #[test]
-    fn comments_with_quotes_and_parenthesis_symbols() -> anyhow::Result<()> {
+    fn comment_with_quotes_and_parentheses_returns_the_block() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
 /// "cxx" -> "c")
@@ -1013,7 +1054,7 @@ println!("hello2");
     }
 
     #[test]
-    fn comments_with_unrelated_tags() -> anyhow::Result<()> {
+    fn comment_with_unrelated_tags_returns_the_block() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
         // <p>Paragraph</p><block><b>bold</b>
@@ -1026,7 +1067,7 @@ println!("hello2");
     }
 
     #[test]
-    fn comments_with_unclosed_unrelated_tags() -> anyhow::Result<()> {
+    fn comment_with_unclosed_unrelated_tags_returns_the_block() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
         // <p>this tag has no ending tag <block></b> this tag has no starting tag
@@ -1039,7 +1080,7 @@ println!("hello2");
     }
 
     #[test]
-    fn comments_with_invalid_tags() -> anyhow::Result<()> {
+    fn comment_with_an_invalid_tag_before_a_block_returns_the_block() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
         // <invalid tag

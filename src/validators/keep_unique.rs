@@ -1,4 +1,5 @@
 use crate::blocks::{Block, BlockWithContext};
+use crate::character_column_at;
 use crate::fs::FileSystem;
 use crate::validators::{
     ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
@@ -61,28 +62,23 @@ impl ValidatorSync for KeepUniqueValidator {
                             if trimmed_line.is_empty() {
                                 None
                             } else {
-                                let line_character_start =
-                                    trimmed_line.as_ptr() as usize - line.as_ptr() as usize + 1;
+                                let byte_offset =
+                                    trimmed_line.as_ptr() as usize - line.as_ptr() as usize;
+                                let line_character_start = character_column_at(line, byte_offset);
                                 let line_character_end =
-                                    line_character_start + trimmed_line.len() - 1;
+                                    line_character_start + trimmed_line.chars().count() - 1;
                                 Some((trimmed_line, line_character_start..=line_character_end))
                             }
                         }
                         Some(Ok(re)) => {
-                            if let Some(c) = re.captures(line) {
-                                // If named group "value" exists use it, otherwise use whole match
-                                if let Some(m) = c.name("value") {
-                                    let range = m.range();
-                                    Some((m.as_str(), range.start + 1..=range.end))
-                                } else {
-                                    c.get(0).map(|m| {
-                                        let range = m.range();
-                                        (m.as_str(), range.start + 1..=range.end)
-                                    })
-                                }
-                            } else {
-                                None // Skip line when no match
-                            }
+                            // If named group "value" exists use it, otherwise use whole match.
+                            // A line with no match at all is skipped.
+                            re.captures(line)
+                                .and_then(|c| c.name("value").or_else(|| c.get(0)))
+                                .map(|m| {
+                                    let start = character_column_at(line, m.start());
+                                    (m.as_str(), start..=start + m.as_str().chars().count() - 1)
+                                })
                         }
                         Some(Err(e)) => {
                             // Invalid regex: return an error for the validator
@@ -221,6 +217,28 @@ BB
         assert_eq!(
             file_violations[0].range,
             ViolationRange::new(Position::new(5, 1), Position::new(5, 2))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn duplicated_line_holding_non_ascii_returns_a_range_measured_in_characters()
+    -> anyhow::Result<()> {
+        let validator = KeepUniqueValidator::new();
+        let context = validation_context(
+            "example.py",
+            "# <block keep-unique>\ncafé\ncafé\n# </block>",
+        );
+
+        let violations = validator.validate(context)?.violations;
+
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py")?)
+            .unwrap();
+        // `café` is four characters long even though it takes five bytes.
+        assert_eq!(
+            file_violations[0].range,
+            ViolationRange::new(Position::new(3, 1), Position::new(3, 4))
         );
         Ok(())
     }

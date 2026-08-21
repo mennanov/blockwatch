@@ -34,6 +34,36 @@ fn list_subcommand_with_specific_file_returns_correct_json_from_that_file_only()
 }
 
 #[test]
+fn list_subcommand_reports_the_column_of_a_tag_preceded_by_non_ascii_in_characters() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("list").arg("tests/testdata/unicode_columns.py");
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.clone().assert().success();
+
+    let actual: Value =
+        serde_json::from_slice(&output.stdout).expect("Failed to parse JSON output");
+
+    // The `é` earlier on the line takes two bytes but one column, so the tag stays at column 27.
+    let expected = json!({
+        "tests/testdata/unicode_columns.py": [
+            {
+                "name": "fruits",
+                "line": 1,
+                "column": 27,
+                "is_content_modified": false,
+                "attributes": {
+                    "name": "fruits",
+                    "keep-sorted": "asc",
+                }
+            }
+        ]
+    });
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn list_subcommand_with_glob_returns_multiple_files() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("list").arg("tests/testdata/list/*.py");

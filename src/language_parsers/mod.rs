@@ -36,8 +36,8 @@ mod typescript;
 mod xml;
 mod yaml;
 
-use crate::Position;
 use crate::block_parser::BlocksParser;
+use crate::{Position, character_column_at};
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::ops::Range;
@@ -253,7 +253,7 @@ where
     Box::new(
         move |node, source_code| match comment_text(node, source_code) {
             None => Visit::Continue,
-            Some(text) => Visit::Break(Some(comment_from_node(node, text))),
+            Some(text) => Visit::Break(Some(Comment::from_node(node, source_code, text))),
         },
     )
 }
@@ -352,34 +352,40 @@ pub(crate) struct Comment {
     pub(crate) comment_text: String,
 }
 
-/// Builds a [`Comment`] spanning `node`, converting tree-sitter's 0-based rows/columns to the
-/// 1-based positions used throughout.
-fn comment_from_node(node: &Node, comment_text: String) -> Comment {
-    Comment {
-        position_range: Position::new(
-            node.start_position().row + 1,
-            node.start_position().column + 1,
-        )
-            ..Position::new(node.end_position().row + 1, node.end_position().column + 1),
-        source_range: node.start_byte()..node.end_byte(),
-        comment_text,
+impl Comment {
+    /// Builds a [`Comment`] spanning `node`, converting tree-sitter's 0-based rows and byte columns
+    /// to the 1-based line/character positions used throughout.
+    fn from_node(node: &Node, source_code: &str, comment_text: String) -> Self {
+        Self {
+            position_range: Position::new(
+                node.start_position().row + 1,
+                character_column_at(source_code, node.start_byte()),
+            )
+                ..Position::new(
+                    node.end_position().row + 1,
+                    character_column_at(source_code, node.end_byte()),
+                ),
+            source_range: node.start_byte()..node.end_byte(),
+            comment_text,
+        }
     }
-}
 
-/// Shifts a `comment` that was parsed from the sub-region spanned by `region_node` into the
-/// coordinates of the full source. A region can start mid-line, so comments on its first line
-/// also need their columns shifted.
-fn offset_comment(comment: &mut Comment, region_node: &Node) {
-    if comment.position_range.start.line == 1 {
-        comment.position_range.start.character += region_node.start_position().column;
+    /// Sets the columns from where the comment's bytes fall in `source`.
+    fn set_character_columns(&mut self, source: &str) {
+        self.position_range.start.character = character_column_at(source, self.source_range.start);
+        self.position_range.end.character = character_column_at(source, self.source_range.end);
     }
-    if comment.position_range.end.line == 1 {
-        comment.position_range.end.character += region_node.start_position().column;
+
+    /// Shifts a comment that was parsed from the sub-region spanned by `region_node` into the
+    /// coordinates of the full `source`.
+    fn shift_into_source(&mut self, region_node: &Node, source: &str) {
+        self.position_range.start.line += region_node.start_position().row;
+        self.position_range.end.line += region_node.start_position().row;
+        self.source_range.start += region_node.start_byte();
+        self.source_range.end += region_node.start_byte();
+        // A region can start mid-line, so the columns from the region parse are not source columns.
+        self.set_character_columns(source);
     }
-    comment.position_range.start.line += region_node.start_position().row;
-    comment.position_range.end.line += region_node.start_position().row;
-    comment.source_range.start += region_node.start_byte();
-    comment.source_range.end += region_node.start_byte();
 }
 
 /// Blanks every byte to a space, keeping line breaks (`\n`, `\r`) so that row and column offsets

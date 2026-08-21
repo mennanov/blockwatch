@@ -1,7 +1,7 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{
-    CommentsParser, TreeSitterCommentsParser, Visit, c_style_and_doc_line_and_block_comment_text,
-    comment_from_node,
+    Comment, CommentsParser, TreeSitterCommentsParser, Visit,
+    c_style_and_doc_line_and_block_comment_text,
 };
 
 /// Returns a [`BlocksParser`] for Java.
@@ -25,7 +25,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
                 "line_comment",
                 "block_comment",
             ) {
-                Some(text) => Visit::Break(Some(comment_from_node(node, text))),
+                Some(text) => Visit::Break(Some(Comment::from_node(node, source_code, text))),
                 None => Visit::Continue,
             }
         }),

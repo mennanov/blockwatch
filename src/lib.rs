@@ -38,6 +38,12 @@ impl Position {
     }
 }
 
+/// The 1-based character column of `byte_offset` within its line in `text`.
+pub(crate) fn character_column_at(text: &str, byte_offset: usize) -> usize {
+    let line_start = text[..byte_offset].rfind('\n').map_or(0, |i| i + 1);
+    text[line_start..byte_offset].chars().count() + 1
+}
+
 #[cfg(test)]
 mod test_utils {
     use crate::blocks::{FileBlocks, ScanMode, parse_blocks};

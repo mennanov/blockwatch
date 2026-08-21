@@ -83,7 +83,7 @@ impl CommentsParser for PhpCommentsParser {
                 let text = language_parsers::hash_and_c_style_comment_text(
                     &source_code[node.byte_range()],
                 );
-                comments.push(language_parsers::comment_from_node(&node, text));
+                comments.push(Comment::from_node(&node, source_code, text));
             } else if let Some(view) = html_view.as_mut() {
                 // A `text` node: copy the HTML template section back into the blanked view.
                 let range = node.byte_range();
@@ -95,7 +95,12 @@ impl CommentsParser for PhpCommentsParser {
         if let Some(view) = html_view {
             let view =
                 String::from_utf8(view).expect("HTML view is built from the valid-UTF-8 source");
-            comments.extend(self.html_comments_parser.parse(&view));
+            comments.extend(self.html_comments_parser.parse(&view).map(|mut comment| {
+                // Blanking rewrites a PHP region byte by byte, so a multi-byte character there
+                // becomes several spaces and the view's columns run ahead of the source's.
+                comment.set_character_columns(source_code);
+                comment
+            }));
         }
         comments.sort_by_key(|comment| comment.source_range.start);
         comments.into_iter()
@@ -159,6 +164,24 @@ spanning two lines -->
             ]
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn html_comment_after_a_php_island_holding_non_ascii_reports_a_character_column()
+    -> anyhow::Result<()> {
+        let mut parser = parser()?;
+        // PHP regions are blanked byte by byte to build the HTML view, which turns one multi-byte
+        // character into several spaces; the column must still count the source's characters.
+        let content =
+            "<?php $x = \"café\"; ?><!-- <block name=\"x\"> -->\n<li>a</li>\n<!-- </block> -->\n";
+
+        let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
+
+        assert_eq!(
+            *blocks[0].start_tag_position_range.start(),
+            Position::new(1, 27)
+        );
         Ok(())
     }
 

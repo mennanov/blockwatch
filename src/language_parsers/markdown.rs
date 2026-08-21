@@ -1,7 +1,7 @@
 use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{
     Comment, CommentsParser, TreeSitterCommentsParser, blank_preserving_line_breaks,
-    comment_from_node, offset_comment, xml_style_comments_parser,
+    xml_style_comments_parser,
 };
 use tree_sitter::StreamingIterator;
 
@@ -80,7 +80,7 @@ impl MdCommentsParser {
             // already the source positions.
             if node.kind() == "link_reference_definition" {
                 if let Some(text) = link_reference_definition_comment_text(region) {
-                    comments.push(comment_from_node(&node, text));
+                    comments.push(Comment::from_node(&node, contents, text));
                 }
                 continue;
             }
@@ -105,7 +105,7 @@ impl MdCommentsParser {
                 };
             for mut comment in html_comments {
                 // The comment's positions are relative to the region; shift them to the source.
-                offset_comment(&mut comment, &node);
+                comment.shift_into_source(&node, contents);
                 comments.push(comment);
             }
         }
@@ -264,6 +264,23 @@ Text
         assert_eq!(blocks[0].attributes["name"], "unicode_title");
         assert_eq!(blocks[0].content(content), "Text\n\n");
 
+        Ok(())
+    }
+
+    #[test]
+    fn inline_comment_after_a_code_span_holding_non_ascii_reports_a_character_column()
+    -> anyhow::Result<()> {
+        let mut parser = parser()?;
+        // Code spans are blanked byte by byte before the HTML pass, which turns one multi-byte
+        // character into several spaces; the column must still count the source's characters.
+        let content = "`café` <!-- <block name=\"x\"> -->\nText\n\n<!-- </block> -->\n";
+
+        let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
+
+        assert_eq!(
+            *blocks[0].start_tag_position_range.start(),
+            Position::new(1, 13)
+        );
         Ok(())
     }
 

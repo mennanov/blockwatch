@@ -1,4 +1,5 @@
 use crate::blocks::{Block, BlockWithContext};
+use crate::character_column_at;
 use crate::fs::FileSystem;
 use crate::validators::{
     ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
@@ -55,8 +56,9 @@ impl KeepSortedValidator {
         if trimmed_line.is_empty() {
             None
         } else {
-            let start = trimmed_line.as_ptr() as usize - line.as_ptr() as usize + 1;
-            let end = start + trimmed_line.len() - 1;
+            let byte_offset = trimmed_line.as_ptr() as usize - line.as_ptr() as usize;
+            let start = character_column_at(line, byte_offset);
+            let end = start + trimmed_line.chars().count() - 1;
             Some((trimmed_line, start..=end))
         }
     }
@@ -65,19 +67,11 @@ impl KeepSortedValidator {
         line: &'a str,
         regex: &regex::Regex,
     ) -> Option<(&'a str, RangeInclusive<usize>)> {
-        if let Some(caps) = regex.captures(line) {
-            if let Some(m) = caps.name("value") {
-                let range = m.range();
-                Some((m.as_str(), range.start + 1..=range.end))
-            } else if let Some(m) = caps.get(0) {
-                let range = m.range();
-                Some((m.as_str(), range.start + 1..=range.end))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
+        let caps = regex.captures(line)?;
+        // A named `value` group selects the part to compare; without one the whole match is used.
+        let m = caps.name("value").or_else(|| caps.get(0))?;
+        let start = character_column_at(line, m.start());
+        Some((m.as_str(), start..=start + m.as_str().chars().count() - 1))
     }
 }
 
@@ -295,6 +289,52 @@ mod validate_tests {
     use crate::repo_path::RepoPath;
     use crate::test_utils::{checked_lines, validation_context, violation_count};
     use serde_json::json;
+
+    #[test]
+    fn out_of_order_line_holding_non_ascii_returns_a_range_measured_in_characters()
+    -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        let context = validation_context(
+            "example.py",
+            "# <block keep-sorted=\"asc\">\nzebra\ncafé\n# </block>",
+        );
+
+        let violations = validator.validate(context)?.violations;
+
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py")?)
+            .unwrap();
+        // `café` is four characters long even though it takes five bytes.
+        assert_eq!(
+            file_violations[0].range,
+            ViolationRange::new(Position::new(3, 1), Position::new(3, 4))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn out_of_order_line_with_non_ascii_before_the_sort_key_returns_a_character_based_range()
+    -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        // The key is matched past a multi-byte character, so its offset within the line differs
+        // in bytes and in characters.
+        let context = validation_context(
+            "example.py",
+            "# <block keep-sorted keep-sorted-pattern=\"café (?<value>\\w+)$\">\ncafé zebra\ncafé apple\n# </block>",
+        );
+
+        let violations = validator.validate(context)?.violations;
+
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py")?)
+            .unwrap();
+        // `apple` starts at the 6th character of the line and ends at the 10th.
+        assert_eq!(
+            file_violations[0].range,
+            ViolationRange::new(Position::new(3, 6), Position::new(3, 10))
+        );
+        Ok(())
+    }
 
     #[test]
     fn block_out_of_ascending_order_returns_a_violation() -> anyhow::Result<()> {

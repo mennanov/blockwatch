@@ -192,6 +192,9 @@ during non-interactive scripts or pipeline commands (e.g. `blockwatch list "src/
 Each block entry carries an `is_content_modified` boolean field. Without a diff nothing marks a block as changed, so it
 is `false` throughout; under `--diff` it identifies the blocks the diff touched.
 
+Lines and columns are 1-based, and a column counts characters rather than bytes, so a multi-byte character such as `é`
+or an emoji advances it by one. The `range` of a violation follows the same convention.
+
 ### Output Example
 
 [//]: # (<block name="list-output-example">)

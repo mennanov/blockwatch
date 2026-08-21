@@ -342,6 +342,13 @@ mod modified_line_ranges_tests {
     }
 
     #[test]
+    fn replaced_character_after_a_multi_byte_one_returns_a_character_range() {
+        let ranges = line_diff("café x", "café y");
+
+        assert_eq!(ranges, vec![5..6]);
+    }
+
+    #[test]
     fn inserted_nonconsecutive_characters_returns_separate_ranges() {
         let ranges = line_diff("box", "aboxa");
 

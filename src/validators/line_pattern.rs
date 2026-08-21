@@ -1,4 +1,5 @@
 use crate::blocks::{Block, BlockWithContext};
+use crate::character_column_at;
 use crate::fs::FileSystem;
 use crate::validators::{
     ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
@@ -62,11 +63,13 @@ impl ValidatorSync for LinePatternValidator {
                         continue;
                     }
                     if !re.is_match(trimmed_line) {
-                        let column_offset = trimmed_line.as_ptr() as usize - line.as_ptr() as usize;
+                        let byte_offset = trimmed_line.as_ptr() as usize - line.as_ptr() as usize;
+                        let column_offset = character_column_at(line, byte_offset) - 1;
                         let violation_start = block_with_context
                             .block
                             .content_position(line_idx, column_offset);
-                        let line_character_end = violation_start.character + trimmed_line.len() - 1; // End position is inclusive.
+                        let line_character_end =
+                            violation_start.character + trimmed_line.chars().count() - 1; // End position is inclusive.
                         block_violations.push(create_violation(
                             file_path,
                             &block_with_context.block,
@@ -186,6 +189,27 @@ mod validate_tests {
             Some(json!({
                 "pattern": "^[A-Z]+$"
             }))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn non_matching_line_holding_non_ascii_returns_a_range_measured_in_characters()
+    -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            "# <block line-pattern=\"^[A-Z]+$\">\ncaféx\n# </block>",
+        );
+
+        let violations = LinePatternValidator::new().validate(context)?.violations;
+
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py")?)
+            .unwrap();
+        // `caféx` is five characters long even though it takes six bytes.
+        assert_eq!(
+            file_violations[0].range,
+            ViolationRange::new(Position::new(2, 1), Position::new(2, 5))
         );
         Ok(())
     }
