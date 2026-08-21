@@ -1,5 +1,5 @@
 times = [
-    # <block check-lua="tests/testdata/check_lua_os.lua">
+    # <block check-lua="tests/testdata/check_lua/os.lua">
     'morning',
     'afternoon',
     # </block>

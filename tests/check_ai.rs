@@ -76,10 +76,10 @@ async fn check_ai_ok_succeeds() {
     cmd.env(API_KEY_ENV_VAR_NAME, "test-key");
 
     let diff_content = r#"
-diff --git a/tests/testdata/check_ai.py b/tests/testdata/check_ai.py
+diff --git a/tests/testdata/check_ai/two_blocks.py b/tests/testdata/check_ai/two_blocks.py
 index 54d1d99..a95a452 100644
---- a/tests/testdata/check_ai.py
-+++ b/tests/testdata/check_ai.py
+--- a/tests/testdata/check_ai/two_blocks.py
++++ b/tests/testdata/check_ai/two_blocks.py
 @@ -1,5 +1,5 @@
  # AI check integration
 
@@ -103,10 +103,10 @@ async fn check_ai_violation_fails_and_reports_message() {
     cmd.env(API_KEY_ENV_VAR_NAME, "test-key");
 
     let diff_content = r#"
-diff --git a/tests/testdata/check_ai.py b/tests/testdata/check_ai.py
+diff --git a/tests/testdata/check_ai/two_blocks.py b/tests/testdata/check_ai/two_blocks.py
 index 1111111..2222222 100644
---- a/tests/testdata/check_ai.py
-+++ b/tests/testdata/check_ai.py
+--- a/tests/testdata/check_ai/two_blocks.py
++++ b/tests/testdata/check_ai/two_blocks.py
 @@ -5,5 +5,5 @@
  # </block>
 
@@ -126,7 +126,7 @@ index 1111111..2222222 100644
             let output_json: Value =
                 serde_json::from_str(output).expect("invalid json");
             let value: Value = json!({
-              "tests/testdata/check_ai.py": [
+              "tests/testdata/check_ai/two_blocks.py": [
                 {
                   "range": {
                     "start": {
@@ -139,7 +139,7 @@ index 1111111..2222222 100644
                     }
                   },
                   "code": "check-ai",
-                  "message": "Block tests/testdata/check_ai.py:(unnamed) defined at line 7 failed AI check: The block does not mention 'banana'. Add it.",
+                  "message": "Block tests/testdata/check_ai/two_blocks.py:(unnamed) defined at line 7 failed AI check: The block does not mention 'banana'. Add it.",
                   "severity": 1,
                   "data": {
                     "condition": "must mention banana",
@@ -158,7 +158,7 @@ async fn without_a_diff_every_block_in_the_file_is_checked() {
     let (addr, _handle) = start_fake_openai().await;
 
     let mut cmd = cargo_bin_cmd!();
-    cmd.arg("tests/testdata/check_ai.py");
+    cmd.arg("tests/testdata/check_ai/two_blocks.py");
     cmd.env(API_URL_ENV_VAR_NAME, format!("http://{addr}/v1"));
     cmd.env(API_KEY_ENV_VAR_NAME, "test-key");
 
@@ -169,7 +169,7 @@ async fn without_a_diff_every_block_in_the_file_is_checked() {
         .failure()
         .code(1)
         .stderr(predicates::prelude::predicate::str::contains(
-            "Block tests/testdata/check_ai.py:(unnamed) defined at line 7 failed AI check",
+            "Block tests/testdata/check_ai/two_blocks.py:(unnamed) defined at line 7 failed AI check",
         ));
 }
 
@@ -184,10 +184,10 @@ async fn when_api_key_is_empty_error_is_printed() {
         .env(API_URL_ENV_VAR_NAME, format!("http://{addr}/v1"));
 
     let diff_content = r#"
-diff --git a/tests/testdata/check_ai.py b/tests/testdata/check_ai.py
+diff --git a/tests/testdata/check_ai/two_blocks.py b/tests/testdata/check_ai/two_blocks.py
 index 54d1d99..a95a452 100644
---- a/tests/testdata/check_ai.py
-+++ b/tests/testdata/check_ai.py
+--- a/tests/testdata/check_ai/two_blocks.py
++++ b/tests/testdata/check_ai/two_blocks.py
 @@ -1,5 +1,5 @@
  # AI check integration
 

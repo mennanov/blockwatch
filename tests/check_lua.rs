@@ -6,18 +6,18 @@ use serde_json::json;
 const LUA_MODE_ENV_VAR: &str = "BLOCKWATCH_LUA_MODE";
 
 /// A one-block fixture whose Lua checker calls into `os`.
-const MODE_FIXTURE: &str = "tests/testdata/check_lua_mode.py";
+const MODE_FIXTURE: &str = "tests/testdata/check_lua/mode.py";
 
 #[test]
 fn with_valid_lua_script_succeeds() {
     let diff_content = r#"
-diff --git a/tests/testdata/check_lua.py b/tests/testdata/check_lua.py
+diff --git a/tests/testdata/check_lua/success_and_failure.py b/tests/testdata/check_lua/success_and_failure.py
 index 1111111..2222222 100644
---- a/tests/testdata/check_lua.py
-+++ b/tests/testdata/check_lua.py
+--- a/tests/testdata/check_lua/success_and_failure.py
++++ b/tests/testdata/check_lua/success_and_failure.py
 @@ -1,7 +1,7 @@
  colors = [
-     # <block check-lua="tests/testdata/check_lua_success.lua">
+     # <block check-lua="tests/testdata/check_lua/success.lua">
      'red',
 -    'green',
 +    'yellow',
@@ -36,13 +36,13 @@ index 1111111..2222222 100644
 #[test]
 fn with_failing_lua_script_fails() {
     let diff_content = r#"
-diff --git a/tests/testdata/check_lua.py b/tests/testdata/check_lua.py
+diff --git a/tests/testdata/check_lua/success_and_failure.py b/tests/testdata/check_lua/success_and_failure.py
 index 1111111..2222222 100644
---- a/tests/testdata/check_lua.py
-+++ b/tests/testdata/check_lua.py
+--- a/tests/testdata/check_lua/success_and_failure.py
++++ b/tests/testdata/check_lua/success_and_failure.py
 @@ -9,7 +9,7 @@
  numbers = [
-     # <block check-lua="tests/testdata/check_lua_fail.lua">
+     # <block check-lua="tests/testdata/check_lua/fail.lua">
      '1',
 -    '2',
 +    '4',
@@ -63,7 +63,7 @@ index 1111111..2222222 100644
             let output_json: serde_json::Value =
                 serde_json::from_str(output).expect("invalid json");
             let value: serde_json::Value = json!({
-              "tests/testdata/check_lua.py": [
+              "tests/testdata/check_lua/success_and_failure.py": [
                 {
                   "range": {
                     "start": {
@@ -76,10 +76,10 @@ index 1111111..2222222 100644
                     }
                   },
                   "code": "check-lua",
-                  "message": "Block tests/testdata/check_lua.py:(unnamed) defined at line 10 failed Lua check: block content is invalid",
+                  "message": "Block tests/testdata/check_lua/success_and_failure.py:(unnamed) defined at line 10 failed Lua check: block content is invalid",
                   "severity": 1,
                   "data": {
-                    "script": "tests/testdata/check_lua_fail.lua",
+                    "script": "tests/testdata/check_lua/fail.lua",
                     "lua_error": "block content is invalid"
                   }
                 }
@@ -93,7 +93,7 @@ index 1111111..2222222 100644
 #[test]
 fn with_pattern_extracts_matching_content() {
     let mut cmd = cargo_bin_cmd!();
-    cmd.arg("tests/testdata/check_lua_pattern.py");
+    cmd.arg("tests/testdata/check_lua/pattern.py");
     let output = cmd.output().unwrap();
 
     output.assert().success();
@@ -102,7 +102,7 @@ fn with_pattern_extracts_matching_content() {
 #[test]
 fn with_pattern_no_match_passes_empty_content() {
     let mut cmd = cargo_bin_cmd!();
-    cmd.arg("tests/testdata/check_lua_pattern_no_match.py");
+    cmd.arg("tests/testdata/check_lua/pattern_no_match.py");
     let output = cmd.output().unwrap();
 
     output.assert().success();
@@ -137,10 +137,10 @@ fn ctx_affects_exposes_in_sync_affected_blocks_succeeds() {
     // The diff touches both the check-lua block and the affected docs block so the `affects`
     // validator is satisfied and the check-lua script runs against an in-sync pair.
     let diff_content = r#"
-diff --git a/tests/testdata/check_lua_affects.py b/tests/testdata/check_lua_affects.py
+diff --git a/tests/testdata/check_lua/affects.py b/tests/testdata/check_lua/affects.py
 index 1111111..2222222 100644
---- a/tests/testdata/check_lua_affects.py
-+++ b/tests/testdata/check_lua_affects.py
+--- a/tests/testdata/check_lua/affects.py
++++ b/tests/testdata/check_lua/affects.py
 @@ -3,3 +3,3 @@
      'blue',
 -    'yellow',
@@ -165,10 +165,10 @@ fn ctx_affects_detects_out_of_sync_affected_block_fails() {
     // Both blocks are touched (so the `affects` validator passes), but their content has drifted
     // apart on disk, so the check-lua script reports the mismatch via ctx.affects.
     let diff_content = r#"
-diff --git a/tests/testdata/check_lua_affects_drift.py b/tests/testdata/check_lua_affects_drift.py
+diff --git a/tests/testdata/check_lua/affects_drift.py b/tests/testdata/check_lua/affects_drift.py
 index 1111111..2222222 100644
---- a/tests/testdata/check_lua_affects_drift.py
-+++ b/tests/testdata/check_lua_affects_drift.py
+--- a/tests/testdata/check_lua/affects_drift.py
++++ b/tests/testdata/check_lua/affects_drift.py
 @@ -3,3 +3,3 @@
      'blue',
 -    'yellow',
@@ -190,7 +190,7 @@ index 1111111..2222222 100644
         .failure()
         .code(1)
         .stderr(predicate::str::contains(
-            "block 'allowed-colors-docs' in tests/testdata/check_lua_affects_drift.py is out of sync",
+            "block 'allowed-colors-docs' in tests/testdata/check_lua/affects_drift.py is out of sync",
         ));
 }
 
@@ -209,12 +209,12 @@ fn lua_script_using_os_succeeds_in_unsafe_mode() {
 /// native separators) and a diff scan (which uses the diff's forward slashes) on Windows.
 #[test]
 fn ctx_file_is_identical_in_glob_and_diff_modes() {
-    let expected = "ctx.file=tests/testdata/pathfmt/source.py";
+    let expected = "ctx.file=tests/testdata/check_lua/pathfmt/source.py";
 
     let mut glob_command = cargo_bin_cmd!();
     let glob_stderr = String::from_utf8(
         glob_command
-            .arg("tests/testdata/pathfmt/source.py")
+            .arg("tests/testdata/check_lua/pathfmt/source.py")
             .output()
             .unwrap()
             .stderr,
@@ -222,11 +222,11 @@ fn ctx_file_is_identical_in_glob_and_diff_modes() {
     .unwrap();
 
     let diff = "\
-diff --git a/tests/testdata/pathfmt/source.py b/tests/testdata/pathfmt/source.py
---- a/tests/testdata/pathfmt/source.py
-+++ b/tests/testdata/pathfmt/source.py
+diff --git a/tests/testdata/check_lua/pathfmt/source.py b/tests/testdata/check_lua/pathfmt/source.py
+--- a/tests/testdata/check_lua/pathfmt/source.py
++++ b/tests/testdata/check_lua/pathfmt/source.py
 @@ -1,3 +1,3 @@
- # <block check-lua=\"tests/testdata/pathfmt/report_path.lua\">
+ # <block check-lua=\"tests/testdata/check_lua/pathfmt/report_path.lua\">
 -value = 1
 +value = 2
  # </block>

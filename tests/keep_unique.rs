@@ -6,10 +6,10 @@ use serde_json::json;
 #[test]
 fn with_all_lines_unique_succeeds() {
     let diff_content = r#"
-diff --git a/tests/testdata/keep_unique.py b/tests/testdata/keep_unique.py
+diff --git a/tests/testdata/keep_unique/basic_and_pattern.py b/tests/testdata/keep_unique/basic_and_pattern.py
 index d69398d..c5cbb7f 100644
---- a/tests/testdata/keep_unique.py
-+++ b/tests/testdata/keep_unique.py
+--- a/tests/testdata/keep_unique/basic_and_pattern.py
++++ b/tests/testdata/keep_unique/basic_and_pattern.py
 @@ -2,7 +2,7 @@ fruits = [
      # <block keep-unique=>
      'apple',
@@ -29,7 +29,7 @@ index d69398d..c5cbb7f 100644
 #[test]
 fn without_a_diff_the_whole_file_is_checked() {
     let mut cmd = cargo_bin_cmd!();
-    cmd.arg("tests/testdata/keep_unique.py");
+    cmd.arg("tests/testdata/keep_unique/basic_and_pattern.py");
     let output = cmd.output().unwrap();
 
     output
@@ -42,10 +42,10 @@ fn without_a_diff_the_whole_file_is_checked() {
 #[test]
 fn with_non_unique_lines_fails() {
     let diff_content = r#"
-diff --git a/tests/testdata/keep_unique.py b/tests/testdata/keep_unique.py
+diff --git a/tests/testdata/keep_unique/basic_and_pattern.py b/tests/testdata/keep_unique/basic_and_pattern.py
 index d69398d..9b29f11 100644
---- a/tests/testdata/keep_unique.py
-+++ b/tests/testdata/keep_unique.py
+--- a/tests/testdata/keep_unique/basic_and_pattern.py
++++ b/tests/testdata/keep_unique/basic_and_pattern.py
 @@ -10,6 +10,6 @@ unique_prefixes = [
      # <block keep-unique="ID:(?P<value>\d+)">
      'ID:1 A',
@@ -65,7 +65,7 @@ index d69398d..9b29f11 100644
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
             let value: serde_json::Value  = json!({
-              "tests/testdata/keep_unique.py": [
+              "tests/testdata/keep_unique/basic_and_pattern.py": [
                 {
                   "range": {
                     "start": {
@@ -78,7 +78,7 @@ index d69398d..9b29f11 100644
                     }
                   },
                   "code": "keep-unique",
-                  "message": "Block tests/testdata/keep_unique.py:(unnamed) defined at line 10 has a duplicated line 13",
+                  "message": "Block tests/testdata/keep_unique/basic_and_pattern.py:(unnamed) defined at line 10 has a duplicated line 13",
                   "severity": 1,
                 }
               ]

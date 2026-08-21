@@ -4,21 +4,21 @@ use predicates::prelude::predicate;
 use serde_json::Value;
 
 /// Matches three files with one block each, plus one file whose extension has no parser.
-const CLEAN_GLOB: &str = "tests/testdata/verbosity/**";
+const CLEAN_GLOB: &str = "tests/testdata/verbosity/clean/**";
 /// Matches one file with a block that fails validation.
-const FAILING_GLOB: &str = "tests/testdata/verbosity_failing/**";
+const FAILING_GLOB: &str = "tests/testdata/verbosity/failing/**";
 /// Matches one file whose single block carries both a synchronous and an asynchronous validator.
-const MIXED_GLOB: &str = "tests/testdata/verbosity_mixed/**";
+const MIXED_GLOB: &str = "tests/testdata/verbosity/mixed/**";
 /// Matches one file holding an `affects` source and the block it points at.
-const AFFECTS_GLOB: &str = "tests/testdata/verbosity_affects/**";
+const AFFECTS_GLOB: &str = "tests/testdata/verbosity/affects/**";
 
 /// Touches the content of both blocks in `verbosity_affects/pair.py`, so the `affects` obligation
 /// the source declares is met.
 const DIFF_TOUCHING_THE_AFFECTS_PAIR: &str = r#"
-diff --git a/tests/testdata/verbosity_affects/pair.py b/tests/testdata/verbosity_affects/pair.py
+diff --git a/tests/testdata/verbosity/affects/pair.py b/tests/testdata/verbosity/affects/pair.py
 index 1111111..2222222 100644
---- a/tests/testdata/verbosity_affects/pair.py
-+++ b/tests/testdata/verbosity_affects/pair.py
+--- a/tests/testdata/verbosity/affects/pair.py
++++ b/tests/testdata/verbosity/affects/pair.py
 @@ -1,7 +1,7 @@
  # <block name="source" affects=":target">
 -SOURCE = "old"
@@ -33,10 +33,10 @@ index 1111111..2222222 100644
 /// Touches only the `target` block in `verbosity_affects/pair.py`, leaving the `affects` source
 /// block untouched — so the rule that block carries never gets a chance to run.
 const DIFF_TOUCHING_ONLY_THE_AFFECTS_TARGET: &str = r#"
-diff --git a/tests/testdata/verbosity_affects/pair.py b/tests/testdata/verbosity_affects/pair.py
+diff --git a/tests/testdata/verbosity/affects/pair.py b/tests/testdata/verbosity/affects/pair.py
 index 1111111..2222222 100644
---- a/tests/testdata/verbosity_affects/pair.py
-+++ b/tests/testdata/verbosity_affects/pair.py
+--- a/tests/testdata/verbosity/affects/pair.py
++++ b/tests/testdata/verbosity/affects/pair.py
 @@ -4,4 +4,4 @@
 
  # <block name="target">
@@ -171,7 +171,7 @@ fn full_level_lists_every_block_and_the_validators_that_examined_it() {
     assert_eq!(report["summary"]["checks"], 2);
     assert_eq!(report["summary"]["files_skipped"], 1);
     assert_eq!(
-        report["files"]["tests/testdata/verbosity/sorted.py"][0]["checks"],
+        report["files"]["tests/testdata/verbosity/clean/sorted.py"][0]["checks"],
         serde_json::json!(["keep-sorted"])
     );
 }
@@ -215,7 +215,7 @@ fn full_level_shows_a_block_no_validator_examined() {
     let output = cmd.output().unwrap();
 
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let block = &report["files"]["tests/testdata/verbosity/noop.py"][0];
+    let block = &report["files"]["tests/testdata/verbosity/clean/noop.py"][0];
 
     // A block carrying only a `name` declares no rule, so no validator claims it. It is still
     // listed, with an empty check list, and it counts towards `blocks_unchecked`.
@@ -237,11 +237,11 @@ fn full_level_with_violations_writes_two_parseable_documents() {
 
     assert_eq!(report["summary"]["violations"], 1);
     assert_eq!(
-        report["files"]["tests/testdata/verbosity_failing/unsorted.py"][0]["checks"],
+        report["files"]["tests/testdata/verbosity/failing/unsorted.py"][0]["checks"],
         serde_json::json!(["keep-sorted"])
     );
     assert!(
-        violations["tests/testdata/verbosity_failing/unsorted.py"]
+        violations["tests/testdata/verbosity/failing/unsorted.py"]
             .as_array()
             .is_some_and(|entries| !entries.is_empty())
     );
@@ -249,10 +249,10 @@ fn full_level_with_violations_writes_two_parseable_documents() {
 
 /// Touches the first of the two blocks in `verbosity_diff/two_blocks.py`, leaving the second alone.
 const DIFF_TOUCHING_ONE_BLOCK: &str = r#"
-diff --git a/tests/testdata/verbosity_diff/two_blocks.py b/tests/testdata/verbosity_diff/two_blocks.py
+diff --git a/tests/testdata/verbosity/diff/two_blocks.py b/tests/testdata/verbosity/diff/two_blocks.py
 index 1111111..2222222 100644
---- a/tests/testdata/verbosity_diff/two_blocks.py
-+++ b/tests/testdata/verbosity_diff/two_blocks.py
+--- a/tests/testdata/verbosity/diff/two_blocks.py
++++ b/tests/testdata/verbosity/diff/two_blocks.py
 @@ -1,6 +1,6 @@
  fruits = [
      # <block name="fruits" keep-sorted="asc">
@@ -276,7 +276,7 @@ fn full_level_under_a_diff_describes_only_the_blocks_in_scope() {
 
     // A diff puts only the blocks it touches in scope, so the untouched `vegetables` block in the
     // same file is absent from the report rather than listed as unchecked.
-    let blocks = report["files"]["tests/testdata/verbosity_diff/two_blocks.py"]
+    let blocks = report["files"]["tests/testdata/verbosity/diff/two_blocks.py"]
         .as_array()
         .expect("the touched file is reported");
     assert_eq!(blocks.len(), 1);
@@ -315,10 +315,10 @@ fn summary_level_under_a_diff_counts_only_the_blocks_in_scope() {
 #[test]
 fn diff_mode_with_a_violation_writes_the_report_and_the_violations() {
     let diff = r#"
-diff --git a/tests/testdata/verbosity_failing/unsorted.py b/tests/testdata/verbosity_failing/unsorted.py
+diff --git a/tests/testdata/verbosity/failing/unsorted.py b/tests/testdata/verbosity/failing/unsorted.py
 index 1111111..2222222 100644
---- a/tests/testdata/verbosity_failing/unsorted.py
-+++ b/tests/testdata/verbosity_failing/unsorted.py
+--- a/tests/testdata/verbosity/failing/unsorted.py
++++ b/tests/testdata/verbosity/failing/unsorted.py
 @@ -1,6 +1,6 @@
  vegetables = [
      # <block name="vegetables" keep-sorted="asc">
@@ -340,11 +340,11 @@ index 1111111..2222222 100644
 
     assert_eq!(report["summary"]["violations"], 1);
     assert_eq!(
-        report["files"]["tests/testdata/verbosity_failing/unsorted.py"][0]["checks"],
+        report["files"]["tests/testdata/verbosity/failing/unsorted.py"][0]["checks"],
         serde_json::json!(["keep-sorted"])
     );
     assert!(
-        violations["tests/testdata/verbosity_failing/unsorted.py"]
+        violations["tests/testdata/verbosity/failing/unsorted.py"]
             .as_array()
             .is_some_and(|entries| !entries.is_empty())
     );
@@ -355,12 +355,12 @@ fn full_level_under_a_diff_omits_a_reference_target_the_diff_did_not_touch() {
     // Only the source side is in the diff. The target lives in another file and is resolved from
     // disk to run the comparison.
     let diff = r#"
-diff --git a/tests/testdata/same_as_source.rs b/tests/testdata/same_as_source.rs
+diff --git a/tests/testdata/same_as/source.rs b/tests/testdata/same_as/source.rs
 index 1111111..2222222 100644
---- a/tests/testdata/same_as_source.rs
-+++ b/tests/testdata/same_as_source.rs
+--- a/tests/testdata/same_as/source.rs
++++ b/tests/testdata/same_as/source.rs
 @@ -1,3 +1,3 @@
- // <block same-as="tests/testdata/same_as_target.md:port">
+ // <block same-as="tests/testdata/same_as/target.md:port">
 -const PORT: u16 = 8000;
 +const PORT: u16 = 8080;
  // </block>"#;
@@ -376,11 +376,11 @@ index 1111111..2222222 100644
 
     // Reading a block to compare against it is not checking it, so the target file is absent from
     // the report and uncounted, even though the run had to parse it.
-    assert!(report["files"]["tests/testdata/same_as_target.md"].is_null());
+    assert!(report["files"]["tests/testdata/same_as/target.md"].is_null());
     assert_eq!(report["summary"]["files_scanned"], 1);
     assert_eq!(report["summary"]["blocks"], 1);
     assert_eq!(
-        report["files"]["tests/testdata/same_as_source.rs"][0]["checks"],
+        report["files"]["tests/testdata/same_as/source.rs"][0]["checks"],
         serde_json::json!(["same-as"])
     );
 }
@@ -397,7 +397,7 @@ fn full_level_names_both_a_sync_and_an_async_validator_of_one_block() {
     // Synchronous and asynchronous validators run apart from each other and their results are
     // combined afterwards, so a block checked by one of each has to end up naming both.
     assert_eq!(
-        report["files"]["tests/testdata/verbosity_mixed/both_kinds.py"][0]["checks"],
+        report["files"]["tests/testdata/verbosity/mixed/both_kinds.py"][0]["checks"],
         serde_json::json!(["check-lua", "keep-sorted"])
     );
     assert_eq!(report["summary"]["checks"], 2);

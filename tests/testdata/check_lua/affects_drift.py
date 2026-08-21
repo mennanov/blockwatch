@@ -1,5 +1,5 @@
 allowed_colors = [
-    # <block check-lua="tests/testdata/check_lua_affects.lua" affects=":allowed-colors-docs">
+    # <block check-lua="tests/testdata/check_lua/affects.lua" affects=":allowed-colors-docs">
     'blue',
     'green',
     'red',

@@ -6,10 +6,10 @@ use serde_json::json;
 #[test]
 fn diff_with_unsatisfied_blocks_fails() {
     let diff_content = r#"
-diff --git a/tests/testdata/affects.md b/tests/testdata/affects.md
+diff --git a/tests/testdata/affects/sibling.md b/tests/testdata/affects/sibling.md
 index abc123..def456 100644
---- a/tests/testdata/affects.md
-+++ b/tests/testdata/affects.md
+--- a/tests/testdata/affects/sibling.md
++++ b/tests/testdata/affects/sibling.md
 @@ -1,6 +1,5 @@
  # Testing data for integration tests
 
@@ -29,7 +29,7 @@ index abc123..def456 100644
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
             let value: serde_json::Value = json!({
-              "tests/testdata/affects.md": [
+              "tests/testdata/affects/sibling.md": [
                 {
                   "range": {
                     "start": {
@@ -42,10 +42,10 @@ index abc123..def456 100644
                     }
                   },
                   "code": "affects",
-                  "message": "Block tests/testdata/affects.md:(unnamed) at line 3 is modified, but tests/testdata/affects.md:foo is not",
+                  "message": "Block tests/testdata/affects/sibling.md:(unnamed) at line 3 is modified, but tests/testdata/affects/sibling.md:foo is not",
                   "severity": 1,
                   "data": {
-                    "affected_block_file_path": "tests/testdata/affects.md",
+                    "affected_block_file_path": "tests/testdata/affects/sibling.md",
                     "affected_block_name": "foo",
                   }
                 }
@@ -61,10 +61,10 @@ fn diff_with_satisfied_blocks_succeeds() {
     // The diff deletes one line inside each block, so its post-image matches the on-disk fixture
     // and both blocks' contents count as modified.
     let diff_content = r#"
-diff --git a/tests/testdata/affects.md b/tests/testing_data
+diff --git a/tests/testdata/affects/sibling.md b/tests/testing_data
 index abc123..def456 100644
---- a/tests/testdata/affects.md
-+++ b/tests/testdata/affects.md
+--- a/tests/testdata/affects/sibling.md
++++ b/tests/testdata/affects/sibling.md
 @@ -1,13 +1,11 @@
  # Testing data for integration tests
 
@@ -94,10 +94,10 @@ index abc123..def456 100644
 fn diff_with_satisfied_blocks_non_root_dir_succeeds() {
     // Same post-image-consistent diff as `diff_with_satisfied_blocks_succeeds`.
     let diff_content = r#"
-diff --git a/tests/testdata/affects.md b/tests/testing_data
+diff --git a/tests/testdata/affects/sibling.md b/tests/testing_data
 index abc123..def456 100644
---- a/tests/testdata/affects.md
-+++ b/tests/testdata/affects.md
+--- a/tests/testdata/affects/sibling.md
++++ b/tests/testdata/affects/sibling.md
 @@ -1,13 +1,11 @@
  # Testing data for integration tests
 
@@ -127,10 +127,10 @@ index abc123..def456 100644
 #[test]
 fn diff_with_only_tag_modified_succeeds() {
     let diff_content = r#"
-diff --git a/tests/testdata/affects.md b/tests/testdata/affects.md
+diff --git a/tests/testdata/affects/sibling.md b/tests/testdata/affects/sibling.md
 index abc123..def456 100644
---- a/tests/testdata/affects.md
-+++ b/tests/testdata/affects.md
+--- a/tests/testdata/affects/sibling.md
++++ b/tests/testdata/affects/sibling.md
 @@ -1,6 +1,6 @@
  # Testing data for integration tests
 
@@ -156,24 +156,24 @@ fn diff_with_both_the_tag_and_the_content_modified_succeeds() {
     // content, all in one change group. The content change is the one that satisfies `affects`, and
     // the two changes above it must not hide it.
     let diff_content = r#"
-diff --git a/tests/testdata/affects_tag_and_content_source.ts b/tests/testdata/affects_tag_and_content_source.ts
+diff --git a/tests/testdata/affects/tag_and_content_source.ts b/tests/testdata/affects/tag_and_content_source.ts
 index abc123..def456 100644
---- a/tests/testdata/affects_tag_and_content_source.ts
-+++ b/tests/testdata/affects_tag_and_content_source.ts
+--- a/tests/testdata/affects/tag_and_content_source.ts
++++ b/tests/testdata/affects/tag_and_content_source.ts
 @@ -1,3 +1,3 @@
- // <block name="source" affects="tests/testdata/affects_tag_and_content_target.ts:target">
+ // <block name="source" affects="tests/testdata/affects/tag_and_content_target.ts:target">
 -const value = 1;
 +const value = 2;
  // </block>
-diff --git a/tests/testdata/affects_tag_and_content_target.ts b/tests/testdata/affects_tag_and_content_target.ts
+diff --git a/tests/testdata/affects/tag_and_content_target.ts b/tests/testdata/affects/tag_and_content_target.ts
 index abc123..def456 100644
---- a/tests/testdata/affects_tag_and_content_target.ts
-+++ b/tests/testdata/affects_tag_and_content_target.ts
+--- a/tests/testdata/affects/tag_and_content_target.ts
++++ b/tests/testdata/affects/tag_and_content_target.ts
 @@ -1,3 +1,4 @@
--// <block name="target" affects="tests/testdata/affects_tag_and_content_source.ts:source">
+-// <block name="target" affects="tests/testdata/affects/tag_and_content_source.ts:source">
 -const value = 1;
 +// Added explanation.
-+// <block name="target" affects="tests/testdata/affects_tag_and_content_source.ts:source" severity="warning">
++// <block name="target" affects="tests/testdata/affects/tag_and_content_source.ts:source" severity="warning">
 +const value = 2;
  // </block>
 "#;
@@ -190,10 +190,10 @@ index abc123..def456 100644
 #[test]
 fn diff_with_only_tag_modified_in_hunk_with_more_added_than_deleted_lines_succeeds() {
     let diff_content = r#"
-diff --git a/tests/testdata/affects.py b/tests/testdata/affects.py
+diff --git a/tests/testdata/affects/more_added_than_deleted.py b/tests/testdata/affects/more_added_than_deleted.py
 index abc123..def456 100644
---- a/tests/testdata/affects.py
-+++ b/tests/testdata/affects.py
+--- a/tests/testdata/affects/more_added_than_deleted.py
++++ b/tests/testdata/affects/more_added_than_deleted.py
 @@ -1,2 +1,3 @@
 -# Project dependencies.
 -# <block name="deps" affects=":deps-docs">
@@ -214,10 +214,10 @@ index abc123..def456 100644
 #[test]
 fn diff_dependent_block_with_only_tag_modified_fails() {
     let diff_content = r#"
-diff --git a/tests/testdata/affects.md b/tests/testing_data
+diff --git a/tests/testdata/affects/sibling.md b/tests/testing_data
 index abc123..def456 100644
---- a/tests/testdata/affects.md
-+++ b/tests/testdata/affects.md
+--- a/tests/testdata/affects/sibling.md
++++ b/tests/testdata/affects/sibling.md
 @@ -1,11 +1,9 @@
  # Testing data for integration tests
 
@@ -245,7 +245,7 @@ index abc123..def456 100644
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
             let value: serde_json::Value = json!({
-              "tests/testdata/affects.md": [
+              "tests/testdata/affects/sibling.md": [
                 {
                   "range": {
                     "start": {
@@ -258,10 +258,10 @@ index abc123..def456 100644
                     }
                   },
                   "code": "affects",
-                  "message": "Block tests/testdata/affects.md:(unnamed) at line 3 is modified, but tests/testdata/affects.md:foo is not",
+                  "message": "Block tests/testdata/affects/sibling.md:(unnamed) at line 3 is modified, but tests/testdata/affects/sibling.md:foo is not",
                   "severity": 1,
                   "data": {
-                    "affected_block_file_path": "tests/testdata/affects.md",
+                    "affected_block_file_path": "tests/testdata/affects/sibling.md",
                     "affected_block_name": "foo",
                   }
                 }
@@ -275,19 +275,19 @@ index abc123..def456 100644
 /// The diff that both cross-file tests below feed in. It changes the source block and its `affects`
 /// target together, which is exactly what the rule asks for, so no invocation over it may fail.
 const CROSS_FILE_DIFF: &str = r#"
-diff --git a/tests/testdata/affects_cross_file_source.rs b/tests/testdata/affects_cross_file_source.rs
+diff --git a/tests/testdata/affects/cross_file_source.rs b/tests/testdata/affects/cross_file_source.rs
 index abc123..def456 100644
---- a/tests/testdata/affects_cross_file_source.rs
-+++ b/tests/testdata/affects_cross_file_source.rs
+--- a/tests/testdata/affects/cross_file_source.rs
++++ b/tests/testdata/affects/cross_file_source.rs
 @@ -1,3 +1,3 @@
- // <block name="limits" affects="tests/testdata/affects_cross_file_target.md:limits">
+ // <block name="limits" affects="tests/testdata/affects/cross_file_target.md:limits">
 -pub const MAX: usize = 10;
 +pub const MAX: usize = 20;
  // </block>
-diff --git a/tests/testdata/affects_cross_file_target.md b/tests/testdata/affects_cross_file_target.md
+diff --git a/tests/testdata/affects/cross_file_target.md b/tests/testdata/affects/cross_file_target.md
 index abc123..def456 100644
---- a/tests/testdata/affects_cross_file_target.md
-+++ b/tests/testdata/affects_cross_file_target.md
+--- a/tests/testdata/affects/cross_file_target.md
++++ b/tests/testdata/affects/cross_file_target.md
 @@ -1,5 +1,5 @@
  [//]: # (<block name="limits">)
 
@@ -305,7 +305,7 @@ fn only_changed_with_globs_excluding_a_modified_affects_target_succeeds() {
     cmd.args([
         "--diff",
         "--only-changed",
-        "tests/testdata/affects_cross_file_source.rs",
+        "tests/testdata/affects/cross_file_source.rs",
     ]);
     cmd.write_stdin(CROSS_FILE_DIFF);
 
@@ -318,7 +318,7 @@ fn only_changed_with_globs_excluding_a_modified_affects_target_succeeds() {
 fn diff_with_globs_excluding_a_modified_affects_target_succeeds() {
     // The same guarantee on a full-tree run, where the globs filter the walk rather than the diff.
     let mut cmd = cargo_bin_cmd!();
-    cmd.args(["--diff", "tests/testdata/affects_cross_file_source.rs"]);
+    cmd.args(["--diff", "tests/testdata/affects/cross_file_source.rs"]);
     cmd.write_stdin(CROSS_FILE_DIFF);
 
     let output = cmd.output().expect("Failed to get command output");
@@ -331,12 +331,12 @@ fn only_changed_with_globs_excluding_an_unmodified_affects_target_fails() {
     // The counterpart of the two tests above: resolving targets outside the validated set must
     // still report the ones the diff left alone, rather than assuming any excluded target is fine.
     let diff_content = r#"
-diff --git a/tests/testdata/affects_cross_file_source.rs b/tests/testdata/affects_cross_file_source.rs
+diff --git a/tests/testdata/affects/cross_file_source.rs b/tests/testdata/affects/cross_file_source.rs
 index abc123..def456 100644
---- a/tests/testdata/affects_cross_file_source.rs
-+++ b/tests/testdata/affects_cross_file_source.rs
+--- a/tests/testdata/affects/cross_file_source.rs
++++ b/tests/testdata/affects/cross_file_source.rs
 @@ -1,3 +1,3 @@
- // <block name="limits" affects="tests/testdata/affects_cross_file_target.md:limits">
+ // <block name="limits" affects="tests/testdata/affects/cross_file_target.md:limits">
 -pub const MAX: usize = 10;
 +pub const MAX: usize = 20;
  // </block>
@@ -346,7 +346,7 @@ index abc123..def456 100644
     cmd.args([
         "--diff",
         "--only-changed",
-        "tests/testdata/affects_cross_file_source.rs",
+        "tests/testdata/affects/cross_file_source.rs",
     ]);
     cmd.write_stdin(diff_content);
 
@@ -357,7 +357,7 @@ index abc123..def456 100644
         .failure()
         .code(1)
         .stderr(predicate::str::contains(
-            "tests/testdata/affects_cross_file_target.md:limits is not",
+            "tests/testdata/affects/cross_file_target.md:limits is not",
         ));
 }
 
@@ -367,19 +367,19 @@ fn custom_extension_mapping_applies_to_a_target_outside_the_globs() {
     // to see whether the diff changed it. That read has to honor `-E`: without the mapping the
     // file looks unparseable and its modified block is reported as unmodified.
     let diff = r#"
-diff --git a/tests/testdata/affects_custom_ext_source.javascript b/tests/testdata/affects_custom_ext_source.javascript
+diff --git a/tests/testdata/affects/custom_ext_source.javascript b/tests/testdata/affects/custom_ext_source.javascript
 index 1111111..2222222 100644
---- a/tests/testdata/affects_custom_ext_source.javascript
-+++ b/tests/testdata/affects_custom_ext_source.javascript
+--- a/tests/testdata/affects/custom_ext_source.javascript
++++ b/tests/testdata/affects/custom_ext_source.javascript
 @@ -1,3 +1,3 @@
- // <block affects="tests/testdata/affects_custom_ext_target.javascript:port">
+ // <block affects="tests/testdata/affects/custom_ext_target.javascript:port">
 -const PORT = 8000;
 +const PORT = 8080;
  // </block>
-diff --git a/tests/testdata/affects_custom_ext_target.javascript b/tests/testdata/affects_custom_ext_target.javascript
+diff --git a/tests/testdata/affects/custom_ext_target.javascript b/tests/testdata/affects/custom_ext_target.javascript
 index 1111111..2222222 100644
---- a/tests/testdata/affects_custom_ext_target.javascript
-+++ b/tests/testdata/affects_custom_ext_target.javascript
+--- a/tests/testdata/affects/custom_ext_target.javascript
++++ b/tests/testdata/affects/custom_ext_target.javascript
 @@ -1,3 +1,3 @@
  // <block name="port">
 -const PORT = 8000;
@@ -391,7 +391,7 @@ index 1111111..2222222 100644
         "--only-changed",
         "-E",
         "javascript=js",
-        "tests/testdata/affects_custom_ext_source.javascript",
+        "tests/testdata/affects/custom_ext_source.javascript",
     ]);
     cmd.write_stdin(diff).output().unwrap().assert().success();
 }

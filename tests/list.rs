@@ -36,7 +36,8 @@ fn list_subcommand_with_specific_file_returns_correct_json_from_that_file_only()
 #[test]
 fn list_subcommand_reports_the_column_of_a_tag_preceded_by_non_ascii_in_characters() {
     let mut cmd = cargo_bin_cmd!();
-    cmd.arg("list").arg("tests/testdata/unicode_columns.py");
+    cmd.arg("list")
+        .arg("tests/testdata/positions/unicode_columns.py");
 
     let output = cmd.output().expect("Failed to get command output");
 
@@ -47,7 +48,7 @@ fn list_subcommand_reports_the_column_of_a_tag_preceded_by_non_ascii_in_characte
 
     // The `é` earlier on the line takes two bytes but one column, so the tag stays at column 27.
     let expected = json!({
-        "tests/testdata/unicode_columns.py": [
+        "tests/testdata/positions/unicode_columns.py": [
             {
                 "name": "fruits",
                 "line": 1,

@@ -6,10 +6,10 @@ use serde_json::json;
 #[test]
 fn with_all_lines_matching_pattern_succeeds() {
     let diff_content = r#"
-diff --git a/tests/testdata/line_pattern.py b/tests/testdata/line_pattern.py
+diff --git a/tests/testdata/line_pattern/hex_and_word_patterns.py b/tests/testdata/line_pattern/hex_and_word_patterns.py
 index ca94c7e..cd73191 100644
---- a/tests/testdata/line_pattern.py
-+++ b/tests/testdata/line_pattern.py
+--- a/tests/testdata/line_pattern/hex_and_word_patterns.py
++++ b/tests/testdata/line_pattern/hex_and_word_patterns.py
 @@ -2,7 +2,7 @@ colors = [
      # <block line-pattern="0x[A-F0-9]{6,6}"> Empty lines are ignored.
      '0xFF0000',
@@ -30,7 +30,7 @@ index ca94c7e..cd73191 100644
 #[test]
 fn without_a_diff_the_whole_file_is_checked() {
     let mut cmd = cargo_bin_cmd!();
-    cmd.arg("tests/testdata/line_pattern.py");
+    cmd.arg("tests/testdata/line_pattern/hex_and_word_patterns.py");
     let output = cmd.output().unwrap();
 
     output
@@ -43,10 +43,10 @@ fn without_a_diff_the_whole_file_is_checked() {
 #[test]
 fn with_some_lines_not_matching_pattern_fails() {
     let diff_content = r#"
-diff --git a/tests/testdata/line_pattern.py b/tests/testdata/line_pattern.py
+diff --git a/tests/testdata/line_pattern/hex_and_word_patterns.py b/tests/testdata/line_pattern/hex_and_word_patterns.py
 index ca94c7e..8a99694 100644
---- a/tests/testdata/line_pattern.py
-+++ b/tests/testdata/line_pattern.py
+--- a/tests/testdata/line_pattern/hex_and_word_patterns.py
++++ b/tests/testdata/line_pattern/hex_and_word_patterns.py
 @@ -10,7 +10,7 @@ colors = [
  uppercase_words = [
      # <block line-pattern="'[A-Z]+'">
@@ -67,7 +67,7 @@ index ca94c7e..8a99694 100644
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
             let value: serde_json::Value  = json!({
-              "tests/testdata/line_pattern.py": [
+              "tests/testdata/line_pattern/hex_and_word_patterns.py": [
                 {
                   "range": {
                     "start": {
@@ -80,7 +80,7 @@ index ca94c7e..8a99694 100644
                     }
                   },
                   "code": "line-pattern",
-                  "message": "Block tests/testdata/line_pattern.py:(unnamed) defined at line 11 has a non-matching line 13 (pattern: /'[A-Z]+'/)",
+                  "message": "Block tests/testdata/line_pattern/hex_and_word_patterns.py:(unnamed) defined at line 11 has a non-matching line 13 (pattern: /'[A-Z]+'/)",
                   "severity": 1,
                   "data": {
                     "pattern": "'[A-Z]+'"

@@ -6,10 +6,10 @@ use serde_json::json;
 #[test]
 fn with_correct_number_of_lines_succeeds() {
     let diff_content = r#"
-diff --git a/tests/testdata/line_count.py b/tests/testdata/line_count.py
+diff --git a/tests/testdata/line_count/equality_and_greater_than.py b/tests/testdata/line_count/equality_and_greater_than.py
 index 6781fec..1a59757 100644
---- a/tests/testdata/line_count.py
-+++ b/tests/testdata/line_count.py
+--- a/tests/testdata/line_count/equality_and_greater_than.py
++++ b/tests/testdata/line_count/equality_and_greater_than.py
 @@ -2,7 +2,7 @@ colors = [
      # <block line-count="==4">
      'red',
@@ -30,7 +30,7 @@ index 6781fec..1a59757 100644
 #[test]
 fn without_a_diff_the_whole_file_is_checked() {
     let mut cmd = cargo_bin_cmd!();
-    cmd.arg("tests/testdata/line_count.py");
+    cmd.arg("tests/testdata/line_count/equality_and_greater_than.py");
     let output = cmd.output().unwrap();
 
     output
@@ -45,10 +45,10 @@ fn without_a_diff_the_whole_file_is_checked() {
 #[test]
 fn with_incorrect_number_of_lines_fails() {
     let diff_content = r#"
-diff --git a/tests/testdata/line_count.py b/tests/testdata/line_count.py
+diff --git a/tests/testdata/line_count/equality_and_greater_than.py b/tests/testdata/line_count/equality_and_greater_than.py
 index 6781fec..4ce6a3b 100644
---- a/tests/testdata/line_count.py
-+++ b/tests/testdata/line_count.py
+--- a/tests/testdata/line_count/equality_and_greater_than.py
++++ b/tests/testdata/line_count/equality_and_greater_than.py
 @@ -11,6 +11,6 @@ fruits = [
      # <block line-count=">3">
      'apple',
@@ -68,7 +68,7 @@ index 6781fec..4ce6a3b 100644
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
             let value: serde_json::Value  = json!({
-              "tests/testdata/line_count.py": [
+              "tests/testdata/line_count/equality_and_greater_than.py": [
                 {
                   "range": {
                     "start": {
@@ -81,7 +81,7 @@ index 6781fec..4ce6a3b 100644
                     }
                   },
                   "code": "line-count",
-                  "message": "Block tests/testdata/line_count.py:(unnamed) defined at line 12 has 3 lines, which does not satisfy >3",
+                  "message": "Block tests/testdata/line_count/equality_and_greater_than.py:(unnamed) defined at line 12 has 3 lines, which does not satisfy >3",
                   "severity": 1,
                   "data": {
                     "actual": 3,
