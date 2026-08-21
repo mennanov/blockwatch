@@ -152,7 +152,7 @@ async fn run_lua_script<Fs: FileSystem>(
         .read_to_string(Path::new(script_path))
         .with_context(|| format!("failed to read Lua script: {script_path}"))?;
 
-    lua.load(&script_content)
+    lua.load(lua_chunk(&script_content))
         .exec_async()
         .await
         .with_context(|| format!("failed to execute Lua script: {script_path}"))?;
@@ -227,6 +227,21 @@ async fn run_lua_script<Fs: FileSystem>(
             "validate() must return nil or a string, got: {:?}",
             other.type_name()
         )),
+    }
+}
+
+/// Returns the part of a Lua script that is an actual chunk, skipping a UTF-8 BOM and a leading
+/// `#!` line.
+fn lua_chunk(script: &str) -> &str {
+    let script = script.strip_prefix('\u{feff}').unwrap_or(script);
+    if !script.starts_with('#') {
+        return script;
+    }
+    // The shebang line is emptied rather than dropped, so the line numbers Lua reports in syntax
+    // and runtime errors keep matching the lines of the file on disk.
+    match script.find('\n') {
+        Some(line_end) => &script[line_end..],
+        None => "",
     }
 }
 
@@ -530,6 +545,105 @@ some content
         assert!(
             err_chain.contains("check-lua-pattern is not a valid regex"),
             "unexpected error: {err_chain}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn script_with_a_shebang_line_runs() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua">
+some content
+# </block>"#,
+        );
+
+        let report = validator(&[(
+            "check.lua",
+            r#"#!/usr/bin/env lua
+function validate(ctx, content)
+    return nil
+end
+"#,
+        )])
+        .validate(context)
+        .await?;
+
+        assert!(report.violations.is_empty());
+        assert_eq!(checked_lines(&report), vec![1]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn script_with_a_utf8_bom_runs() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua">
+some content
+# </block>"#,
+        );
+
+        let report = validator(&[(
+            "check.lua",
+            "\u{feff}function validate(ctx, content)\n    return nil\nend\n",
+        )])
+        .validate(context)
+        .await?;
+
+        assert!(report.violations.is_empty());
+        assert_eq!(checked_lines(&report), vec![1]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn script_with_a_utf8_bom_before_a_shebang_line_runs() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua">
+some content
+# </block>"#,
+        );
+
+        let report = validator(&[(
+            "check.lua",
+            "\u{feff}#!/usr/bin/env lua\nfunction validate(ctx, content)\n    return nil\nend\n",
+        )])
+        .validate(context)
+        .await?;
+
+        assert!(report.violations.is_empty());
+        assert_eq!(checked_lines(&report), vec![1]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn script_with_a_shebang_line_reports_lua_errors_at_their_original_line()
+    -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua">
+some content
+# </block>"#,
+        );
+
+        // The error is on line 3 of the file. Dropping the shebang line instead of blanking it
+        // would shift every line the script reports by one.
+        let err = validator(&[(
+            "check.lua",
+            r#"#!/usr/bin/env lua
+function validate(ctx, content)
+    this is not lua
+end
+"#,
+        )])
+        .validate(context)
+        .await
+        .unwrap_err();
+
+        let err_chain = format!("{err:#}");
+        assert!(
+            err_chain.contains(":3:"),
+            "expected the error to name line 3: {err_chain}"
         );
         Ok(())
     }

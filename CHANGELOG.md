@@ -16,6 +16,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 - `line-pattern`, `keep-sorted` and `keep-unique` violations now point at the failing text in the source file. Fixes
   ([#123](https://github.com/mennanov/blockwatch/issues/123)).
+- `check-lua` accepts scripts that start with a `#!` line or a UTF-8 byte order mark. Fixes
+  ([#121](https://github.com/mennanov/blockwatch/issues/121)).
 
 ## [0.4.1] - 2026-08-20
 

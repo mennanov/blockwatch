@@ -16,6 +16,9 @@ string when it fails.
 The script path must point to a file inside the repository. Paths that escape it — absolute paths outside the project,
 `../` traversal, or symlinks pointing outward — are rejected.
 
+A leading `#!` line and a UTF-8 byte order mark are skipped, as the `lua` interpreter skips them, so a script that runs
+standalone runs here unchanged.
+
 ## Example
 
 ```python
