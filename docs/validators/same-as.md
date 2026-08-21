@@ -111,8 +111,9 @@ equal. Under text comparison, `"60.0" != "60"` would fail.
 
 - **Which block governs what.** The source block's `same-as-mode` and `same-as-format` govern the comparison. Each
   block's own `same-as-pattern` governs only how *that* block is read.
-- **Violations:** a missing target block, a non-numeric token under `numeric`, or a `single` /
-  `subset` side with the wrong number of tokens.
+- **Violations:** a missing target block, a non-numeric token under `numeric`, a `single` /
+  `subset` side with the wrong number of tokens, or a `same-as-pattern` that matches nothing on
+  both sides — an empty match on both blocks is not treated as trivially equal.
 - **Hard errors** (not violations): an unrecognized `same-as-mode` or `same-as-format` value, or an invalid regex.
 - Because `same-as` fires without a diff, a periodic bare `blockwatch` run — which scans the whole tree — catches drift
   that an `--only-changed` check would miss. See [CI integration](../ci.md).

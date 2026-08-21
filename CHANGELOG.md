@@ -17,6 +17,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - `-E` extension mappings now apply to the files `same-as` and `affects` read to resolve a reference, not only to the
   files the run scans. A referenced file the mapping made parseable was reported as an unsupported format by `same-as`,
   and treated as unchanged by `affects`. Fixes ([#105](https://github.com/mennanov/blockwatch/issues/105)).
+- `same-as` now reports a violation when its `same-as-pattern` matches no lines on both the source and target sides,
+  instead of treating the two empty results as trivially equal and passing. Fixes
+  ([#102](https://github.com/mennanov/blockwatch/issues/102)).
 
 ## [0.4.2] - 2026-08-21
 

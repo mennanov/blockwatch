@@ -270,6 +270,9 @@ fn parse_mode(block: &Block) -> anyhow::Result<Mode> {
 /// `Mode::Single` requires exactly one value per side; a side with a different count is itself a
 /// mismatch (the block's content does not meet the asserted shape), reported like any other.
 fn disagreement(source: &[String], target: &[String], mode: &Mode) -> Option<String> {
+    if source.is_empty() && target.is_empty() {
+        return Some("same-as-pattern matched no values in this block or its target".to_string());
+    }
     match mode {
         Mode::Single => {
             if source.len() != 1 || target.len() != 1 {
@@ -498,6 +501,23 @@ mod validate_tests {
             validation_context(
                 "b.md",
                 "[//]: # (<block name=\"langs\" same-as-pattern=\"[a-z]+\">)\n\ngo\n\n[//]: # (</block>)",
+            ),
+        ]);
+        assert_eq!(validator(&[]).validate(context)?.violations.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_matching_nothing_on_both_sides_returns_a_violation() -> anyhow::Result<()> {
+        // Neither block contains a digit, so the pattern extracts zero items on both sides.
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "a.rs",
+                "// <block same-as=\"b.md:langs\" same-as-pattern=\"[0-9]+\">\ngo\nrust\n// </block>",
+            ),
+            validation_context(
+                "b.md",
+                "[//]: # (<block name=\"langs\" same-as-pattern=\"[0-9]+\">)\n\nrust\ngo\n\n[//]: # (</block>)",
             ),
         ]);
         assert_eq!(validator(&[]).validate(context)?.violations.len(), 1);
