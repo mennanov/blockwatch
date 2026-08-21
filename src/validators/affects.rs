@@ -310,44 +310,7 @@ mod validate_tests {
     }
 
     #[test]
-    fn modified_block_with_modified_targets_validate_returns_no_violations() -> anyhow::Result<()> {
-        let validator = validator(&[]);
-        let context = merge_validation_contexts(vec![
-            validation_context(
-                "file1.py",
-                r#"# <block affects="file2.py:foo">
-print("first")
-# </block>
-
-# <block affects="file3.py:bar">
-print("second")
-# </block>
-"#,
-            ),
-            validation_context(
-                "file2.py",
-                r#"# <block name="foo">
-print("foo")
-# </block>
-"#,
-            ),
-            validation_context(
-                "file3.py",
-                r#"# <block name="bar">
-print("bar")
-# </block>
-"#,
-            ),
-        ]);
-
-        let violations = validator.validate(context)?.violations;
-
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn modified_block_with_unmodified_targets_validate_returns_violations() -> anyhow::Result<()> {
+    fn modified_block_with_unmodified_targets_returns_violations() -> anyhow::Result<()> {
         let validator = validator(&[]);
         let context = merge_validation_contexts(vec![
             validation_context(
@@ -405,7 +368,117 @@ print("file3")
     }
 
     #[test]
-    fn modified_block_with_unmodified_target_in_same_file_validate_returns_violation()
+    fn modified_block_with_modified_targets_returns_no_violations() -> anyhow::Result<()> {
+        let validator = validator(&[]);
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "file1.py",
+                r#"# <block affects="file2.py:foo">
+print("first")
+# </block>
+
+# <block affects="file3.py:bar">
+print("second")
+# </block>
+"#,
+            ),
+            validation_context(
+                "file2.py",
+                r#"# <block name="foo">
+print("foo")
+# </block>
+"#,
+            ),
+            validation_context(
+                "file3.py",
+                r#"# <block name="bar">
+print("bar")
+# </block>
+"#,
+            ),
+        ]);
+
+        let violations = validator.validate(context)?.violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn modified_block_with_one_unmodified_target_returns_a_violation() -> anyhow::Result<()> {
+        let validator = validator(&[]);
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "file1.py",
+                r#"# <block name="foo" affects=":bar, file2.py:buzz">
+print("foo")
+# </block>
+
+# <block name="bar" affects=":foo">
+print("bar")
+# </block>
+"#,
+            ),
+            validation_context_with_changes(
+                "file2.py",
+                r#"# <block name="buzz" affects="file1.py:bar">
+print("not-buzz")
+# </block>
+print("hello")
+"#,
+                vec![LineChange {
+                    line: 4, // Line outside the block is changed.
+                    ranges: None,
+                }],
+            ),
+        ]);
+
+        let violations = validator.validate(context)?.violations;
+
+        assert_eq!(violations.len(), 1);
+        let file1_violations = violations
+            .get(&RepoPath::from_reference("file1.py").unwrap())
+            .unwrap();
+        assert_eq!(file1_violations.len(), 1);
+        assert_eq!(
+            file1_violations[0].message,
+            "Block file1.py:foo at line 1 is modified, but file2.py:buzz is not"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn modified_block_with_multiple_modified_targets_returns_no_violations() -> anyhow::Result<()> {
+        let validator = validator(&[]);
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "file1.py",
+                r#"# <block name="foo" affects=":bar, file2.py:buzz">
+print("foo")
+# </block>
+
+# <block name="bar" affects=":foo">
+print("bar")
+# </block>
+"#,
+            ),
+            validation_context(
+                "file2.py",
+                r#"# <block name="buzz" affects="file1.py:bar">
+print("buzz")
+# </block>
+"#,
+            ),
+        ]);
+
+        let violations = validator.validate(context)?.violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn modified_block_with_an_unmodified_target_in_the_same_file_returns_a_violation()
     -> anyhow::Result<()> {
         let validator = validator(&[]);
         let context = validation_context_with_changes(
@@ -440,7 +513,7 @@ print("second")
     }
 
     #[test]
-    fn block_with_unmodified_content_validate_returns_no_violations() -> anyhow::Result<()> {
+    fn block_with_unmodified_content_returns_no_violations() -> anyhow::Result<()> {
         let validator = validator(&[]);
         let context = merge_validation_contexts(vec![
             validation_context_with_changes(
@@ -495,82 +568,29 @@ pass
     }
 
     #[test]
-    fn modified_block_with_multiple_modified_targets_validate_returns_no_violations()
-    -> anyhow::Result<()> {
-        let validator = validator(&[]);
-        let context = merge_validation_contexts(vec![
-            validation_context(
-                "file1.py",
-                r#"# <block name="foo" affects=":bar, file2.py:buzz">
-print("foo")
-# </block>
+    fn unmodified_target_outside_the_globs_returns_a_violation() -> anyhow::Result<()> {
+        // The counterpart of the test above: resolving a target the run did not read must report
+        // the ones the diff never touched, rather than assuming anything out of scope is fine.
+        let file_system = two_file_system();
+        let line_changes = HashMap::from([(
+            RepoPath::from_reference("source.py")?,
+            vec![LineChange {
+                line: 2,
+                ranges: None,
+            }],
+        )]);
+        let context = context_scoped_to_source(&file_system, line_changes)?;
 
-# <block name="bar" affects=":foo">
-print("bar")
-# </block>
-"#,
-            ),
-            validation_context(
-                "file2.py",
-                r#"# <block name="buzz" affects="file1.py:bar">
-print("buzz")
-# </block>
-"#,
-            ),
-        ]);
-
-        let violations = validator.validate(context)?.violations;
-
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn modified_block_with_one_unmodified_target_validate_returns_violation() -> anyhow::Result<()>
-    {
-        let validator = validator(&[]);
-        let context = merge_validation_contexts(vec![
-            validation_context(
-                "file1.py",
-                r#"# <block name="foo" affects=":bar, file2.py:buzz">
-print("foo")
-# </block>
-
-# <block name="bar" affects=":foo">
-print("bar")
-# </block>
-"#,
-            ),
-            validation_context_with_changes(
-                "file2.py",
-                r#"# <block name="buzz" affects="file1.py:bar">
-print("not-buzz")
-# </block>
-print("hello")
-"#,
-                vec![LineChange {
-                    line: 4, // Line outside the block is changed.
-                    ranges: None,
-                }],
-            ),
-        ]);
-
-        let violations = validator.validate(context)?.violations;
+        let violations = AffectsValidator::new(Arc::new(file_system))
+            .validate(context)?
+            .violations;
 
         assert_eq!(violations.len(), 1);
-        let file1_violations = violations
-            .get(&RepoPath::from_reference("file1.py").unwrap())
-            .unwrap();
-        assert_eq!(file1_violations.len(), 1);
-        assert_eq!(
-            file1_violations[0].message,
-            "Block file1.py:foo at line 1 is modified, but file2.py:buzz is not"
-        );
         Ok(())
     }
 
     #[test]
-    fn modified_target_outside_the_globs_validate_returns_no_violations() -> anyhow::Result<()> {
+    fn modified_target_outside_the_globs_returns_no_violations() -> anyhow::Result<()> {
         let file_system = two_file_system();
         let line_changes = HashMap::from([
             (
@@ -599,52 +619,7 @@ print("hello")
     }
 
     #[test]
-    fn unmodified_target_outside_the_globs_validate_returns_violation() -> anyhow::Result<()> {
-        // The counterpart of the test above: resolving a target the run did not read must report
-        // the ones the diff never touched, rather than assuming anything out of scope is fine.
-        let file_system = two_file_system();
-        let line_changes = HashMap::from([(
-            RepoPath::from_reference("source.py")?,
-            vec![LineChange {
-                line: 2,
-                ranges: None,
-            }],
-        )]);
-        let context = context_scoped_to_source(&file_system, line_changes)?;
-
-        let violations = AffectsValidator::new(Arc::new(file_system))
-            .validate(context)?
-            .violations;
-
-        assert_eq!(violations.len(), 1);
-        Ok(())
-    }
-
-    #[test]
-    fn blocks_with_cyclic_references_all_modified_validate_returns_no_violations()
-    -> anyhow::Result<()> {
-        let validator = validator(&[]);
-        let context = validation_context(
-            "file1.py",
-            r#"# <block name="foo" affects=":bar">
-print("foo")
-# </block>
-
-# <block name="bar" affects=":foo">
-print("bar")
-# </block>
-"#,
-        );
-
-        let violations = validator.validate(context)?.violations;
-
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn blocks_with_cyclic_references_partly_modified_validate_returns_violations()
-    -> anyhow::Result<()> {
+    fn blocks_with_cyclic_references_partly_modified_returns_violations() -> anyhow::Result<()> {
         let validator = validator(&[]);
         let contents = r#"# <block name="foo" affects=":bar">
 print("foo")
@@ -673,8 +648,28 @@ pass
     }
 
     #[test]
-    fn reference_with_leading_current_directory_validate_returns_no_violations()
-    -> anyhow::Result<()> {
+    fn blocks_with_cyclic_references_all_modified_returns_no_violations() -> anyhow::Result<()> {
+        let validator = validator(&[]);
+        let context = validation_context(
+            "file1.py",
+            r#"# <block name="foo" affects=":bar">
+print("foo")
+# </block>
+
+# <block name="bar" affects=":foo">
+print("bar")
+# </block>
+"#,
+        );
+
+        let violations = validator.validate(context)?.violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn reference_with_a_leading_current_directory_returns_no_violations() -> anyhow::Result<()> {
         // `./target.py` and `target.py` name the same file, so a change to both blocks satisfies
         // the reference regardless of which spelling the author used.
         let context = merge_validation_contexts(vec![
@@ -689,7 +684,7 @@ pass
     }
 
     #[test]
-    fn blocks_without_affects_attribute_validate_returns_no_violations() -> anyhow::Result<()> {
+    fn blocks_without_an_affects_attribute_returns_no_violations() -> anyhow::Result<()> {
         let validator = validator(&[]);
         let context = validation_context(
             "file1.py",
@@ -706,7 +701,7 @@ pass
     }
 
     #[test]
-    fn modified_block_with_affects_validate_records_one_check() -> anyhow::Result<()> {
+    fn modified_block_with_affects_records_one_check() -> anyhow::Result<()> {
         let context = validation_context(
             "example.py",
             r#"# <block name="source" affects=":target">

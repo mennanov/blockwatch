@@ -201,64 +201,6 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn parse_constraint_with_valid_syntax_returns_correct_result() {
-        assert!(matches!(parse_constraint("< 50").unwrap(), (Op::Lt, 50)));
-        assert!(matches!(parse_constraint(">=10").unwrap(), (Op::Ge, 10)));
-        assert!(matches!(parse_constraint("== 0").unwrap(), (Op::Eq, 0)));
-    }
-
-    #[test]
-    fn parse_constraint_with_invalid_syntax_returns_error() {
-        assert!(parse_constraint("50").is_err());
-        assert!(parse_constraint("").is_err());
-        assert!(parse_constraint("> -1").is_err());
-        assert!(parse_constraint("<== 50").is_err());
-    }
-
-    #[test]
-    fn validate_with_correct_number_of_lines_returns_no_violations() -> anyhow::Result<()> {
-        let validator = LineCountValidator::new();
-        let context = validation_context(
-            "example.py",
-            r#"# <block line-count="<3">
-        a
-        b
-        # </block>
-        # <block line-count="<=3">
-        a
-        b
-        # </block>
-        # <block line-count="<=3">
-        a
-        b
-        c
-        # </block>
-        # <block line-count="== 2">
-        a
-        b
-        # </block>
-        # <block line-count=">= 2">
-        a
-        b
-        # </block>
-        # <block line-count=">= 2">
-        a
-        b
-        c
-        # </block>
-        # <block line-count="> 3">
-        a
-        b
-        c
-        d
-        # </block>"#,
-        );
-        let violations = validator.validate(context)?.violations;
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[test]
     fn validate_with_incorrect_number_of_lines_returns_violations() -> anyhow::Result<()> {
         let validator = LineCountValidator::new();
         let context = validation_context(
@@ -389,7 +331,50 @@ mod tests {
     }
 
     #[test]
-    fn empty_lines_and_lines_with_spaces_only_are_ignored() -> anyhow::Result<()> {
+    fn validate_with_correct_number_of_lines_returns_no_violations() -> anyhow::Result<()> {
+        let validator = LineCountValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-count="<3">
+        a
+        b
+        # </block>
+        # <block line-count="<=3">
+        a
+        b
+        # </block>
+        # <block line-count="<=3">
+        a
+        b
+        c
+        # </block>
+        # <block line-count="== 2">
+        a
+        b
+        # </block>
+        # <block line-count=">= 2">
+        a
+        b
+        # </block>
+        # <block line-count=">= 2">
+        a
+        b
+        c
+        # </block>
+        # <block line-count="> 3">
+        a
+        b
+        c
+        d
+        # </block>"#,
+        );
+        let violations = validator.validate(context)?.violations;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn validate_with_blank_and_whitespace_only_lines_returns_no_violations() -> anyhow::Result<()> {
         let validator = LineCountValidator::new();
         let context = validation_context(
             "example.py",
@@ -409,7 +394,23 @@ mod tests {
     }
 
     #[test]
-    fn validate_records_a_check_for_every_examined_block() -> anyhow::Result<()> {
+    fn parse_constraint_with_invalid_syntax_returns_error() {
+        assert!(parse_constraint("50").is_err());
+        assert!(parse_constraint("").is_err());
+        assert!(parse_constraint("> -1").is_err());
+        assert!(parse_constraint("<== 50").is_err());
+    }
+
+    #[test]
+    fn parse_constraint_with_valid_syntax_returns_correct_result() {
+        assert!(matches!(parse_constraint("< 50").unwrap(), (Op::Lt, 50)));
+        assert!(matches!(parse_constraint(">=10").unwrap(), (Op::Ge, 10)));
+        assert!(matches!(parse_constraint("== 0").unwrap(), (Op::Eq, 0)));
+    }
+
+    #[test]
+    fn validate_with_blocks_without_line_count_records_a_check_for_the_examined_ones_only()
+    -> anyhow::Result<()> {
         let context = validation_context(
             "example.py",
             r#"# <block name="within" line-count="<=2">

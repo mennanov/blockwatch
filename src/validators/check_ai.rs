@@ -364,95 +364,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn when_ai_returns_ok_returns_no_violations() -> anyhow::Result<()> {
-        let validator = CheckAiValidator::with_client(FakeClient::new(HashMap::from([(
-            ("must mention banana".into(), "I like banana".into()),
-            FakeAiResponse::None,
-        )])));
-        let context = validation_context(
-            "example.py",
-            r#"# <block check-ai="must mention banana">
-I like banana
-# </block>"#,
-        );
-        let violations = validator.validate(context).await?.violations;
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn validate_records_a_check_for_every_examined_block() -> anyhow::Result<()> {
-        let validator = CheckAiValidator::with_client(FakeClient::new(HashMap::from([
-            (
-                ("must mention banana".into(), "I like banana".into()),
-                FakeAiResponse::None,
-            ),
-            (
-                ("must mention apple".into(), "I like banana".into()),
-                FakeAiResponse::Some("no apple".into()),
-            ),
-        ])));
-        let context = validation_context(
-            "example.py",
-            r#"# <block name="passing" check-ai="must mention banana">
-I like banana
-# </block>
-# <block name="failing" check-ai="must mention apple">
-I like banana
-# </block>
-# <block name="unrelated">
-I like banana
-# </block>"#,
-        );
-
-        let report = validator.validate(context).await?;
-
-        // Both blocks are recorded whatever the answer comes back as, and the block without a
-        // check-ai attribute is not checked, so it records nothing.
-        assert_eq!(checked_lines(&report), vec![1, 4]);
-        assert_eq!(violation_count(&report), 1);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn pattern_match_is_used_as_block_content() -> anyhow::Result<()> {
-        let validator = CheckAiValidator::with_client(FakeClient::new(HashMap::from([(
-            ("must mention banana".into(), "I like banana".into()),
-            FakeAiResponse::None,
-        )])));
-        let context = validation_context(
-            "example.py",
-            r#"# <block check-ai="must mention banana" check-ai-pattern="I like \w+">
-I like banana and apples
-# </block>"#,
-        );
-        let report = validator.validate(context).await?;
-
-        assert!(report.violations.is_empty());
-        // The block was checked and passed. That is different from never being checked at all.
-        assert_eq!(checked_lines(&report), vec![1]);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn pattern_group_match_is_used_as_block_content() -> anyhow::Result<()> {
-        let validator = CheckAiValidator::with_client(FakeClient::new(HashMap::from([(
-            ("must mention banana".into(), "banana and apples".into()),
-            FakeAiResponse::None,
-        )])));
-        let context = validation_context(
-            "example.py",
-            r#"# <block check-ai="must mention banana" check-ai-pattern="I like (?P<value>banana and \w+)">
-I like banana and apples
-# </block>"#,
-        );
-        let violations = validator.validate(context).await?.violations;
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn when_ai_returns_violation_message_returns_violation() -> anyhow::Result<()> {
+    async fn block_with_a_failing_ai_check_returns_a_violation() -> anyhow::Result<()> {
         let validator = CheckAiValidator::with_client(FakeClient::new(HashMap::from([(
             ("must mention banana".into(), "I like apples".into()),
             FakeAiResponse::Some("The block does not mention 'banana'. Add it.".into()),
@@ -486,7 +398,24 @@ I like apples
     }
 
     #[tokio::test]
-    async fn when_ai_fails_with_error_it_is_propagated() -> anyhow::Result<()> {
+    async fn block_with_a_passing_ai_check_returns_no_violations() -> anyhow::Result<()> {
+        let validator = CheckAiValidator::with_client(FakeClient::new(HashMap::from([(
+            ("must mention banana".into(), "I like banana".into()),
+            FakeAiResponse::None,
+        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-ai="must mention banana">
+I like banana
+# </block>"#,
+        );
+        let violations = validator.validate(context).await?.violations;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn failing_ai_request_returns_an_error() -> anyhow::Result<()> {
         let validator = CheckAiValidator::with_client(FakeClient::new(HashMap::from([(
             ("condition".into(), "text".into()),
             FakeAiResponse::Err("API error".into()),
@@ -503,7 +432,45 @@ text
     }
 
     #[tokio::test]
-    async fn empty_condition_returns_error() -> anyhow::Result<()> {
+    async fn block_with_a_check_ai_pattern_sends_only_the_matched_text() -> anyhow::Result<()> {
+        let validator = CheckAiValidator::with_client(FakeClient::new(HashMap::from([(
+            ("must mention banana".into(), "I like banana".into()),
+            FakeAiResponse::None,
+        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-ai="must mention banana" check-ai-pattern="I like \w+">
+I like banana and apples
+# </block>"#,
+        );
+        let report = validator.validate(context).await?;
+
+        assert!(report.violations.is_empty());
+        // The block was checked and passed. That is different from never being checked at all.
+        assert_eq!(checked_lines(&report), vec![1]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn block_with_a_check_ai_pattern_group_sends_only_the_captured_group()
+    -> anyhow::Result<()> {
+        let validator = CheckAiValidator::with_client(FakeClient::new(HashMap::from([(
+            ("must mention banana".into(), "banana and apples".into()),
+            FakeAiResponse::None,
+        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-ai="must mention banana" check-ai-pattern="I like (?P<value>banana and \w+)">
+I like banana and apples
+# </block>"#,
+        );
+        let violations = validator.validate(context).await?.violations;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn block_with_an_empty_check_ai_condition_returns_an_error() -> anyhow::Result<()> {
         let validator = CheckAiValidator::with_client(FakeClient::default());
         let context = validation_context(
             "example.py",
@@ -516,6 +483,41 @@ text
             err.to_string()
                 .contains("check-ai requires a non-empty condition")
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn blocks_with_and_without_check_ai_records_a_check_for_the_examined_ones_only()
+    -> anyhow::Result<()> {
+        let validator = CheckAiValidator::with_client(FakeClient::new(HashMap::from([
+            (
+                ("must mention banana".into(), "I like banana".into()),
+                FakeAiResponse::None,
+            ),
+            (
+                ("must mention apple".into(), "I like banana".into()),
+                FakeAiResponse::Some("no apple".into()),
+            ),
+        ])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block name="passing" check-ai="must mention banana">
+I like banana
+# </block>
+# <block name="failing" check-ai="must mention apple">
+I like banana
+# </block>
+# <block name="unrelated">
+I like banana
+# </block>"#,
+        );
+
+        let report = validator.validate(context).await?;
+
+        // Both blocks are recorded whatever the answer comes back as, and the block without a
+        // check-ai attribute is not checked, so it records nothing.
+        assert_eq!(checked_lines(&report), vec![1, 4]);
+        assert_eq!(violation_count(&report), 1);
         Ok(())
     }
 }

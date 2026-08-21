@@ -385,27 +385,7 @@ mod validate_tests {
     }
 
     #[test]
-    fn block_with_same_as_attribute_runs_without_violations() -> anyhow::Result<()> {
-        let context = validation_context(
-            "config.py",
-            "# <block same-as=\":b\">\nvalue = 10\n# </block>\n# <block name=\"b\">\nvalue = 10\n# </block>",
-        );
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn same_file_equal_content_passes() -> anyhow::Result<()> {
-        let context = validation_context(
-            "config.py",
-            "# <block same-as=\":b\">\nvalue = 10\n# </block>\n# <block name=\"b\">\nvalue = 10\n# </block>",
-        );
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn same_file_differing_content_fails() -> anyhow::Result<()> {
+    fn block_differing_from_a_target_in_the_same_file_returns_a_violation() -> anyhow::Result<()> {
         let context = validation_context(
             "config.py",
             "# <block same-as=\":b\">\nvalue = 10\n# </block>\n# <block name=\"b\">\nvalue = 20\n# </block>",
@@ -420,7 +400,18 @@ mod validate_tests {
     }
 
     #[test]
-    fn cross_file_both_in_scope_compares() -> anyhow::Result<()> {
+    fn block_equal_to_a_target_in_the_same_file_returns_no_violations() -> anyhow::Result<()> {
+        let context = validation_context(
+            "config.py",
+            "# <block same-as=\":b\">\nvalue = 10\n# </block>\n# <block name=\"b\">\nvalue = 10\n# </block>",
+        );
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn block_equal_to_a_target_in_another_in_scope_file_returns_no_violations() -> anyhow::Result<()>
+    {
         let context = merge_validation_contexts(vec![
             validation_context("a.rs", "// <block same-as=\"b.md:doc\">\nX\n// </block>"),
             validation_context(
@@ -433,7 +424,7 @@ mod validate_tests {
     }
 
     #[test]
-    fn missing_target_block_reports_violation() -> anyhow::Result<()> {
+    fn block_referencing_a_missing_target_returns_a_violation() -> anyhow::Result<()> {
         let source = "# <block same-as=\":nope\">\nvalue = 10\n# </block>";
         let context = validation_context("config.py", source);
         // The file exists but has no block named "nope"; confirming its absence requires reading the
@@ -452,7 +443,7 @@ mod validate_tests {
     }
 
     #[test]
-    fn resolves_out_of_scope_target_from_injected_fs() -> anyhow::Result<()> {
+    fn block_referencing_an_out_of_scope_target_resolves_it_from_disk() -> anyhow::Result<()> {
         // Only the source is in scope; the target file is provided through the fake filesystem.
         let context = validation_context("a.rs", "// <block same-as=\"b.md:doc\">\nX\n// </block>");
         let v = validator(&[(
@@ -464,7 +455,7 @@ mod validate_tests {
     }
 
     #[test]
-    fn in_scope_file_with_unmodified_sibling_target_resolves_from_disk() -> anyhow::Result<()> {
+    fn block_with_an_unmodified_sibling_target_resolves_it_from_disk() -> anyhow::Result<()> {
         // Diff mode: only the source block is modified, so the sibling target block in the same file
         // is filtered out of the validation context. The target must still be resolved (from disk),
         // not reported as missing.
@@ -483,7 +474,7 @@ mod validate_tests {
     }
 
     #[test]
-    fn pattern_set_equality_ignores_order() -> anyhow::Result<()> {
+    fn pattern_in_the_default_mode_ignores_value_order() -> anyhow::Result<()> {
         let context = merge_validation_contexts(vec![
             validation_context(
                 "a.rs",
@@ -499,7 +490,7 @@ mod validate_tests {
     }
 
     #[test]
-    fn pattern_set_mismatch_fails() -> anyhow::Result<()> {
+    fn pattern_with_a_missing_value_returns_a_violation() -> anyhow::Result<()> {
         let context = merge_validation_contexts(vec![
             validation_context(
                 "a.rs",
@@ -515,7 +506,7 @@ mod validate_tests {
     }
 
     #[test]
-    fn sequence_mode_is_order_sensitive() -> anyhow::Result<()> {
+    fn sequence_mode_with_reordered_values_returns_a_violation() -> anyhow::Result<()> {
         let context = merge_validation_contexts(vec![
             validation_context(
                 "a.rs",
@@ -531,7 +522,7 @@ mod validate_tests {
     }
 
     #[test]
-    fn single_mode_extra_value_reports_violation() -> anyhow::Result<()> {
+    fn single_mode_with_an_extra_value_returns_a_violation() -> anyhow::Result<()> {
         let context = validation_context(
             "a.rs",
             "// <block same-as=\":b\" same-as-pattern=\"(?P<value>[0-9]+)\" same-as-mode=\"single\">\n1\n2\n// </block>\n// <block name=\"b\">\n1\n// </block>",
@@ -544,50 +535,7 @@ mod validate_tests {
     }
 
     #[test]
-    fn numeric_format_ignores_representation() -> anyhow::Result<()> {
-        let context = merge_validation_contexts(vec![
-            validation_context(
-                "a.yaml",
-                "# <block same-as=\"b.rs:port\" same-as-pattern=\"(?P<value>[0-9]+)\" same-as-format=\"numeric\" same-as-mode=\"single\">\nport: 8080\n# </block>",
-            ),
-            validation_context(
-                "b.rs",
-                "// <block name=\"port\" same-as-pattern=\"(?P<value>[0-9.]+)\">\n8080.0\n// </block>",
-            ),
-        ]);
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn numeric_format_non_number_reports_violation() -> anyhow::Result<()> {
-        // A non-numeric token under `same-as-format=numeric` is a shape mismatch of the asserted
-        // value, reported as a violation on the block rather than aborting the run.
-        let context = validation_context(
-            "a.rs",
-            "// <block same-as=\":b\" same-as-pattern=\"(?P<value>\\w+)\" same-as-format=\"numeric\">\nabc\n// </block>\n// <block name=\"b\">\n1\n// </block>",
-        );
-        let violations = validator(&[]).validate(context)?.violations;
-        let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
-        assert_eq!(file.len(), 1);
-        assert_eq!(file[0].code, "same-as");
-        Ok(())
-    }
-
-    #[test]
-    fn unknown_format_value_errors() -> anyhow::Result<()> {
-        // Unlike bad content, an unrecognized `same-as-format` value is an authoring error and
-        // aborts the run, mirroring how an unknown `same-as-mode` is handled.
-        let context = validation_context(
-            "a.rs",
-            "// <block same-as=\":b\" same-as-format=\"number\">\n1\n// </block>\n// <block name=\"b\">\n1\n// </block>",
-        );
-        assert!(validator(&[]).validate(context).is_err());
-        Ok(())
-    }
-
-    #[test]
-    fn subset_mode_passes_when_contained() -> anyhow::Result<()> {
+    fn subset_mode_with_all_values_present_returns_no_violations() -> anyhow::Result<()> {
         let context = merge_validation_contexts(vec![
             validation_context(
                 "test.rs",
@@ -603,7 +551,7 @@ mod validate_tests {
     }
 
     #[test]
-    fn subset_mode_fails_when_not_contained() -> anyhow::Result<()> {
+    fn subset_mode_with_a_missing_value_returns_a_violation() -> anyhow::Result<()> {
         let context = merge_validation_contexts(vec![
             validation_context(
                 "test.rs",
@@ -624,7 +572,7 @@ mod validate_tests {
     }
 
     #[test]
-    fn subset_mode_is_directional() -> anyhow::Result<()> {
+    fn subset_mode_with_a_superset_source_returns_a_violation() -> anyhow::Result<()> {
         // Subset is not symmetric: a superset on the source side fails even though the reverse
         // relation would hold.
         let context = merge_validation_contexts(vec![
@@ -642,7 +590,52 @@ mod validate_tests {
     }
 
     #[test]
-    fn validate_records_a_check_for_every_examined_block() -> anyhow::Result<()> {
+    fn numeric_format_with_equal_values_written_differently_returns_no_violations()
+    -> anyhow::Result<()> {
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "a.yaml",
+                "# <block same-as=\"b.rs:port\" same-as-pattern=\"(?P<value>[0-9]+)\" same-as-format=\"numeric\" same-as-mode=\"single\">\nport: 8080\n# </block>",
+            ),
+            validation_context(
+                "b.rs",
+                "// <block name=\"port\" same-as-pattern=\"(?P<value>[0-9.]+)\">\n8080.0\n// </block>",
+            ),
+        ]);
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_with_a_non_numeric_value_returns_a_violation() -> anyhow::Result<()> {
+        // A non-numeric token under `same-as-format=numeric` is a shape mismatch of the asserted
+        // value, reported as a violation on the block rather than aborting the run.
+        let context = validation_context(
+            "a.rs",
+            "// <block same-as=\":b\" same-as-pattern=\"(?P<value>\\w+)\" same-as-format=\"numeric\">\nabc\n// </block>\n// <block name=\"b\">\n1\n// </block>",
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert_eq!(file[0].code, "same-as");
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_same_as_format_value_returns_an_error() -> anyhow::Result<()> {
+        // Unlike bad content, an unrecognized `same-as-format` value is an authoring error and
+        // aborts the run, mirroring how an unknown `same-as-mode` is handled.
+        let context = validation_context(
+            "a.rs",
+            "// <block same-as=\":b\" same-as-format=\"number\">\n1\n// </block>\n// <block name=\"b\">\n1\n// </block>",
+        );
+        assert!(validator(&[]).validate(context).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn blocks_with_and_without_same_as_records_a_check_for_the_examined_ones_only()
+    -> anyhow::Result<()> {
         let context = validation_context(
             "example.py",
             r#"# <block name="source" same-as=":target">

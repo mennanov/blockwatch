@@ -191,105 +191,7 @@ mod validate_tests {
     use std::collections::HashMap;
 
     #[test]
-    fn empty_blocks_returns_no_violations() -> anyhow::Result<()> {
-        let validator = KeepUniqueValidator::new();
-        let context = Arc::new(validators::ValidationContext::new(
-            HashMap::new(),
-            HashMap::new(),
-            HashMap::new(),
-        ));
-
-        let violations = validator.validate(context)?.violations;
-
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn blocks_with_empty_content_returns_no_violations() -> anyhow::Result<()> {
-        let validator = KeepUniqueValidator::new();
-        let context = validation_context(
-            "example.py",
-            r#"# <block keep-unique>
-# </block>"#,
-        );
-
-        let violations = validator.validate(context)?.violations;
-
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn all_unique_returns_no_violations() -> anyhow::Result<()> {
-        let validator = KeepUniqueValidator::new();
-        let context = validation_context(
-            "example.py",
-            r#"# <block keep-unique>
-A
-B
-C
-# </block>"#,
-        );
-
-        let violations = validator.validate(context)?.violations;
-
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn empty_lines_and_spaces_are_ignored() -> anyhow::Result<()> {
-        let validator = KeepUniqueValidator::new();
-        let context = validation_context(
-            "example.py",
-            r#"# <block keep-unique>
-A
-B
- 
- 
-  
-  
-C
-# </block>"#,
-        );
-
-        let violations = validator.validate(context)?.violations;
-
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn spaces_in_regex_are_not_ignored() -> anyhow::Result<()> {
-        let validator = KeepUniqueValidator::new();
-        let context = validation_context(
-            "example.py",
-            r#"# <block keep-unique=" \d+ ">
- 1 
- 2 
-1
- 1 
-# </block>"#,
-        );
-
-        let violations = validator.validate(context)?.violations;
-
-        assert_eq!(violations.len(), 1);
-        let file_violations = violations
-            .get(&RepoPath::from_reference("example.py")?)
-            .unwrap();
-        assert_eq!(file_violations.len(), 1);
-        // The last line ` 1 ` is the only duplicate.
-        assert_eq!(
-            file_violations[0].range,
-            ViolationRange::new(Position::new(5, 1), Position::new(5, 3))
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn duplicate_returns_violation_first_dup_line_reported() -> anyhow::Result<()> {
+    fn block_with_a_duplicate_line_returns_a_violation_on_the_repeat() -> anyhow::Result<()> {
         let validator = KeepUniqueValidator::new();
         let context = validation_context(
             "example.py",
@@ -324,7 +226,26 @@ BB
     }
 
     #[test]
-    fn regex_with_named_group_detects_duplicates() -> anyhow::Result<()> {
+    fn block_with_all_unique_lines_returns_no_violations() -> anyhow::Result<()> {
+        let validator = KeepUniqueValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-unique>
+A
+B
+C
+# </block>"#,
+        );
+
+        let violations = validator.validate(context)?.violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_with_a_named_group_returns_a_violation_for_a_duplicate_group_value()
+    -> anyhow::Result<()> {
         let validator = KeepUniqueValidator::new();
         let context = validation_context(
             "example.py",
@@ -350,7 +271,8 @@ ID:1 C
     }
 
     #[test]
-    fn regex_without_named_group_uses_full_match() -> anyhow::Result<()> {
+    fn pattern_without_a_named_group_returns_a_violation_for_a_duplicate_whole_match()
+    -> anyhow::Result<()> {
         let validator = KeepUniqueValidator::new();
         let context = validation_context(
             "example.py",
@@ -376,7 +298,7 @@ ID:1 C
     }
 
     #[test]
-    fn regex_non_matching_lines_are_skipped() -> anyhow::Result<()> {
+    fn block_with_lines_not_matching_the_pattern_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepUniqueValidator::new();
         let context = validation_context(
             "example.py",
@@ -393,7 +315,89 @@ ID:2
     }
 
     #[test]
-    fn validate_records_a_check_for_every_examined_block() -> anyhow::Result<()> {
+    fn pattern_with_spaces_returns_a_violation_for_the_exact_duplicate_only() -> anyhow::Result<()>
+    {
+        let validator = KeepUniqueValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-unique=" \d+ ">
+ 1 
+ 2 
+1
+ 1 
+# </block>"#,
+        );
+
+        let violations = validator.validate(context)?.violations;
+
+        assert_eq!(violations.len(), 1);
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py")?)
+            .unwrap();
+        assert_eq!(file_violations.len(), 1);
+        // The last line ` 1 ` is the only duplicate.
+        assert_eq!(
+            file_violations[0].range,
+            ViolationRange::new(Position::new(5, 1), Position::new(5, 3))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn block_with_blank_and_whitespace_only_lines_returns_no_violations() -> anyhow::Result<()> {
+        let validator = KeepUniqueValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-unique>
+A
+B
+ 
+ 
+  
+  
+C
+# </block>"#,
+        );
+
+        let violations = validator.validate(context)?.violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn block_with_empty_content_returns_no_violations() -> anyhow::Result<()> {
+        let validator = KeepUniqueValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-unique>
+# </block>"#,
+        );
+
+        let violations = validator.validate(context)?.violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn context_without_any_blocks_returns_no_violations() -> anyhow::Result<()> {
+        let validator = KeepUniqueValidator::new();
+        let context = Arc::new(validators::ValidationContext::new(
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        ));
+
+        let violations = validator.validate(context)?.violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn blocks_with_and_without_keep_unique_records_a_check_for_the_examined_ones_only()
+    -> anyhow::Result<()> {
         let context = validation_context(
             "example.py",
             r#"# <block name="unique" keep-unique>
