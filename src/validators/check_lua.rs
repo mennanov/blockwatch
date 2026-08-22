@@ -4,7 +4,7 @@ use crate::repo_path::RepoPath;
 use crate::validators::parse_block_references;
 use crate::validators::{
     ValidationContext, ValidationReport, ValidatorAsync, ValidatorDetector, ValidatorType,
-    Violation, ViolationRange,
+    Violation, ViolationRange, block_content_for_pattern,
 };
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -92,7 +92,11 @@ impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
                     let file_blocks = &context.blocks[&file_path];
                     let block_with_context = &file_blocks.blocks_with_context[block_idx];
                     let script_path = &block_with_context.block.attributes["check-lua"];
-                    let content = block_content(block_with_context, &file_blocks.file_content)?;
+                    let content = block_content_for_pattern(
+                        block_with_context,
+                        &file_blocks.file_content,
+                        "check-lua-pattern",
+                    )?;
                     let affected_blocks =
                         resolve_affected_blocks(&context, &file_path, &block_with_context.block)?;
 
@@ -324,30 +328,6 @@ fn resolve_affected_blocks(
         }
     }
     Ok(result)
-}
-
-fn block_content<'c>(
-    block_with_context: &BlockWithContext,
-    file_content: &'c str,
-) -> anyhow::Result<&'c str> {
-    let content = if let Some(pattern) =
-        block_with_context.block.attributes.get("check-lua-pattern")
-    {
-        let re = regex::Regex::new(pattern).context("check-lua-pattern is not a valid regex")?;
-        if let Some(c) = re.captures(block_with_context.block.content(file_content)) {
-            // If named group "value" exists use it, otherwise use the whole match
-            if let Some(m) = c.name("value") {
-                m.as_str()
-            } else {
-                c.get(0).map_or("", |m| m.as_str())
-            }
-        } else {
-            ""
-        }
-    } else {
-        block_with_context.block.content(file_content).trim()
-    };
-    Ok(content)
 }
 
 /// Selects [`CheckLuaValidator`] for blocks carrying a `check-lua` attribute.

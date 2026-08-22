@@ -124,7 +124,7 @@ fn create_violation(
 pub(crate) struct LineCountValidatorDetector();
 
 impl LineCountValidatorDetector {
-    /// Creates the detector. Registered in [`crate::validators::detector_factories`].
+    /// Creates the detector. Registered in [`validators::detector_factories`].
     pub fn new() -> Self {
         Self {}
     }

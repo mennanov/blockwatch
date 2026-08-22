@@ -9,6 +9,7 @@ mod same_as;
 
 use crate::Position;
 use crate::blocks::{Block, BlockSeverity, BlockWithContext, FileBlocks};
+use crate::character_column_at;
 use crate::diff_parser::LineChange;
 use crate::fs::FileSystem;
 use crate::language_parsers::LanguageParsers;
@@ -26,6 +27,7 @@ use async_trait::async_trait;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
+use std::ops::RangeInclusive;
 use std::sync::Arc;
 
 /// Validates the given `Context` and returns a list of the violations grouped by filename.
@@ -511,6 +513,67 @@ pub(in crate::validators) fn parse_block_references(
         ));
     }
     Ok(result)
+}
+
+/// Returns the captured named regexp group `value`, or the whole match if there is no named group.
+pub(in crate::validators) fn value_match<'h>(
+    captures: &regex::Captures<'h>,
+) -> Option<regex::Match<'h>> {
+    captures.name("value").or_else(|| captures.get(0))
+}
+
+/// Returns the non-empty trimmed content of `line` together with its inclusive character-column
+/// range within `line`, or `None` for a blank line. The range is measured in characters rather than
+/// bytes.
+pub(in crate::validators) fn trimmed_line_value(
+    line: &str,
+) -> Option<(&str, RangeInclusive<usize>)> {
+    let trimmed_line = line.trim();
+    if trimmed_line.is_empty() {
+        None
+    } else {
+        let byte_offset = trimmed_line.as_ptr() as usize - line.as_ptr() as usize;
+        let start = character_column_at(line, byte_offset);
+        let end = start + trimmed_line.chars().count() - 1;
+        Some((trimmed_line, start..=end))
+    }
+}
+
+/// Returns the substring `regex` selects from `line` (see [`value_match`]) together with its
+/// inclusive character-column range, or `None` when the line does not match.
+pub(in crate::validators) fn regex_value<'a>(
+    line: &'a str,
+    regex: &regex::Regex,
+) -> Option<(&'a str, RangeInclusive<usize>)> {
+    let caps = regex.captures(line)?;
+    let m = value_match(&caps)?;
+    let start = character_column_at(line, m.start());
+    Some((m.as_str(), start..=start + m.as_str().chars().count() - 1))
+}
+
+/// Returns the content for the `*-pattern` attribute, e.g. `check-ai-pattern` for `check-ai`.
+///
+/// Returns the matched content (also handles the named `value` regexp group). An empty string may
+/// be returned if the pattern does not match. Returns the whole block's content if there is no
+/// attribute with the name `pattern_attribute`.
+pub(in crate::validators) fn block_content_for_pattern<'c>(
+    block_with_context: &BlockWithContext,
+    file_content: &'c str,
+    pattern_attribute: &str,
+) -> anyhow::Result<&'c str> {
+    let content = if let Some(pattern) = block_with_context.block.attributes.get(pattern_attribute)
+    {
+        let re = regex::Regex::new(pattern)
+            .with_context(|| format!("{pattern_attribute} is not a valid regex"))?;
+        if let Some(captures) = re.captures(block_with_context.block.content(file_content)) {
+            value_match(&captures).map_or("", |m| m.as_str())
+        } else {
+            ""
+        }
+    } else {
+        block_with_context.block.content(file_content).trim()
+    };
+    Ok(content)
 }
 
 #[cfg(test)]

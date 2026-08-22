@@ -1,8 +1,8 @@
 use crate::blocks::{Block, BlockWithContext};
-use crate::character_column_at;
 use crate::fs::FileSystem;
 use crate::validators::{
     ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
+    regex_value, trimmed_line_value,
 };
 use crate::{Position, validators};
 use anyhow::{Context, anyhow};
@@ -49,29 +49,6 @@ impl KeepSortedValidator {
     /// Creates the validator. It is stateless; all input arrives through the validation context.
     pub(super) fn new() -> Self {
         Self {}
-    }
-
-    fn trimmed_line_value(line: &str) -> Option<(&str, RangeInclusive<usize>)> {
-        let trimmed_line = line.trim();
-        if trimmed_line.is_empty() {
-            None
-        } else {
-            let byte_offset = trimmed_line.as_ptr() as usize - line.as_ptr() as usize;
-            let start = character_column_at(line, byte_offset);
-            let end = start + trimmed_line.chars().count() - 1;
-            Some((trimmed_line, start..=end))
-        }
-    }
-
-    fn regex_value<'a>(
-        line: &'a str,
-        regex: &regex::Regex,
-    ) -> Option<(&'a str, RangeInclusive<usize>)> {
-        let caps = regex.captures(line)?;
-        // A named `value` group selects the part to compare; without one the whole match is used.
-        let m = caps.name("value").or_else(|| caps.get(0))?;
-        let start = character_column_at(line, m.start());
-        Some((m.as_str(), start..=start + m.as_str().chars().count() - 1))
     }
 }
 
@@ -161,8 +138,8 @@ impl ValidatorSync for KeepSortedValidator {
                     {
                         // Determine current comparable value and its character range within the line
                         let value = match &re {
-                            None => Self::trimmed_line_value(line),
-                            Some(Ok(regex)) => Self::regex_value(line, regex),
+                            None => trimmed_line_value(line),
+                            Some(Ok(regex)) => regex_value(line, regex),
                             Some(Err(e)) => {
                                 return Err(anyhow!(
                                     "Invalid keep-sorted-pattern expression in block {}:{} defined at line {}: {}",
@@ -226,7 +203,7 @@ impl ValidatorSync for KeepSortedValidator {
 pub(crate) struct KeepSortedValidatorDetector();
 
 impl KeepSortedValidatorDetector {
-    /// Creates the detector. Registered in [`crate::validators::detector_factories`].
+    /// Creates the detector. Registered in [`validators::detector_factories`].
     pub fn new() -> Self {
         Self {}
     }

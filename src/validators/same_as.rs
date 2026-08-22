@@ -3,7 +3,7 @@ use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
     self, ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation,
-    ViolationRange,
+    ViolationRange, value_match,
 };
 use anyhow::{Context, anyhow};
 use regex::Regex;
@@ -120,7 +120,7 @@ fn extract_items(block: &Block, file_content: &str) -> anyhow::Result<Vec<String
         .lines()
         .filter_map(|line| {
             let captures = regex.captures(line.trim())?;
-            let matched = captures.name("value").or_else(|| captures.get(0))?;
+            let matched = value_match(&captures)?;
             Some(matched.as_str().to_string())
         })
         .collect())
@@ -344,7 +344,7 @@ fn create_violation(
 pub(crate) struct SameAsValidatorDetector();
 
 impl SameAsValidatorDetector {
-    /// Creates the detector. Registered in [`crate::validators::detector_factories`].
+    /// Creates the detector. Registered in [`validators::detector_factories`].
     pub fn new() -> Self {
         Self()
     }

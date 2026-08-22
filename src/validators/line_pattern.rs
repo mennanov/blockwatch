@@ -92,7 +92,7 @@ impl ValidatorSync for LinePatternValidator {
 pub(crate) struct LinePatternValidatorDetector();
 
 impl LinePatternValidatorDetector {
-    /// Creates the detector. Registered in [`crate::validators::detector_factories`].
+    /// Creates the detector. Registered in [`validators::detector_factories`].
     pub fn new() -> Self {
         Self {}
     }

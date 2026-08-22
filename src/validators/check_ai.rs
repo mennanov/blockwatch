@@ -3,7 +3,7 @@ use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
     ValidationContext, ValidationReport, ValidatorAsync, ValidatorDetector, ValidatorType,
-    Violation, ViolationRange,
+    Violation, ViolationRange, block_content_for_pattern,
 };
 use anyhow::{Context, anyhow};
 use async_openai::Client;
@@ -82,7 +82,11 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
                     let file_blocks = &context.blocks[&file_path];
                     let block_with_context = &file_blocks.blocks_with_context[block_idx];
                     let condition = &block_with_context.block.attributes["check-ai"];
-                    let content = block_content(block_with_context, &file_blocks.file_content)?;
+                    let content = block_content_for_pattern(
+                        block_with_context,
+                        &file_blocks.file_content,
+                        "check-ai-pattern",
+                    )?;
 
                     let result = client.check_block(condition, content).await;
                     let violation =
@@ -124,29 +128,6 @@ impl<Fs: FileSystem> ValidatorDetector<Fs> for CheckAiValidatorDetector {
             Ok(None)
         }
     }
-}
-
-fn block_content<'c>(
-    block_with_context: &BlockWithContext,
-    file_content: &'c str,
-) -> anyhow::Result<&'c str> {
-    let content = if let Some(pattern) = block_with_context.block.attributes.get("check-ai-pattern")
-    {
-        let re = regex::Regex::new(pattern).context("check-ai-pattern is not a valid regex")?;
-        if let Some(c) = re.captures(block_with_context.block.content(file_content)) {
-            // If named group "value" exists use it, otherwise use the whole match
-            if let Some(m) = c.name("value") {
-                m.as_str()
-            } else {
-                c.get(0).map_or("", |m| m.as_str())
-            }
-        } else {
-            ""
-        }
-    } else {
-        block_with_context.block.content(file_content).trim()
-    };
-    Ok(content)
 }
 
 fn create_violation(

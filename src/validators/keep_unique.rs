@@ -1,8 +1,8 @@
 use crate::blocks::{Block, BlockWithContext};
-use crate::character_column_at;
 use crate::fs::FileSystem;
 use crate::validators::{
     ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
+    regex_value, trimmed_line_value,
 };
 use crate::{Position, validators};
 use std::collections::HashSet;
@@ -57,29 +57,8 @@ impl ValidatorSync for KeepUniqueValidator {
                     .enumerate()
                 {
                     let line_match = match &re {
-                        None => {
-                            let trimmed_line = line.trim();
-                            if trimmed_line.is_empty() {
-                                None
-                            } else {
-                                let byte_offset =
-                                    trimmed_line.as_ptr() as usize - line.as_ptr() as usize;
-                                let line_character_start = character_column_at(line, byte_offset);
-                                let line_character_end =
-                                    line_character_start + trimmed_line.chars().count() - 1;
-                                Some((trimmed_line, line_character_start..=line_character_end))
-                            }
-                        }
-                        Some(Ok(re)) => {
-                            // If named group "value" exists use it, otherwise use whole match.
-                            // A line with no match at all is skipped.
-                            re.captures(line)
-                                .and_then(|c| c.name("value").or_else(|| c.get(0)))
-                                .map(|m| {
-                                    let start = character_column_at(line, m.start());
-                                    (m.as_str(), start..=start + m.as_str().chars().count() - 1)
-                                })
-                        }
+                        None => trimmed_line_value(line),
+                        Some(Ok(re)) => regex_value(line, re),
                         Some(Err(e)) => {
                             // Invalid regex: return an error for the validator
                             return Err(anyhow::anyhow!(
@@ -127,7 +106,7 @@ impl ValidatorSync for KeepUniqueValidator {
 pub(crate) struct KeepUniqueValidatorDetector();
 
 impl KeepUniqueValidatorDetector {
-    /// Creates the detector. Registered in [`crate::validators::detector_factories`].
+    /// Creates the detector. Registered in [`validators::detector_factories`].
     pub fn new() -> Self {
         Self {}
     }
