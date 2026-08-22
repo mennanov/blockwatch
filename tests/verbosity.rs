@@ -89,8 +89,10 @@ fn summary_level_without_a_diff_counts_the_rules_it_could_not_check() {
     cmd.arg(AFFECTS_GLOB).arg("--verbosity").arg("summary");
     let output = cmd.output().unwrap();
 
+    // The `affects` block is checked for reference integrity even without a diff, so it counts as a
+    // check; its modified-together rule still needs a diff, so it also counts under `needs --diff`.
     output.assert().success().stdout(
-        "blockwatch: mode=all, 1/1 files, 2 blocks (2 unchecked, 1 needs --diff), 0 checks, 0 violations\n",
+        "blockwatch: mode=all, 1/1 files, 2 blocks (1 unchecked, 1 needs --diff), 1 checks, 0 violations\n",
     );
 }
 
@@ -136,11 +138,12 @@ fn summary_level_with_a_diff_that_misses_the_rule_omits_the_needs_diff_clause() 
         .write_stdin(DIFF_TOUCHING_ONLY_THE_AFFECTS_TARGET);
     let output = cmd.output().unwrap();
 
-    // The diff never reached the `affects` block, so its rule did not run — but a block the diff
-    // simply did not touch is the normal state of an incremental check, not something to report.
-    // Counting it would say nothing a reader could act on, so the clause stays out of diff runs.
+    // The diff never reached the `affects` block, so its modified-together rule did not run (only
+    // its reference-integrity check, which needs no diff). A block the diff simply did not touch is
+    // the normal state of an incremental check, not something to report, so once a diff is given the
+    // `needs --diff` clause stays out: counting it would say nothing a reader could act on.
     output.assert().success().stdout(
-        "blockwatch: mode=all+diff, 1/1 files, 2 blocks (2 unchecked), 0 checks, 0 violations\n",
+        "blockwatch: mode=all+diff, 1/1 files, 2 blocks (1 unchecked), 1 checks, 0 violations\n",
     );
 }
 
@@ -205,7 +208,9 @@ fn full_level_under_a_diff_omits_the_needs_diff_key() {
 
     // Absent, not zero: a run given a diff has no opinion on how many blocks need one.
     assert_eq!(report["summary"].get("blocks_needing_diff"), None);
-    assert_eq!(report["summary"]["blocks_unchecked"], 2);
+    // The `affects` block is checked for reference integrity, so only the plain `name` block is left
+    // unchecked.
+    assert_eq!(report["summary"]["blocks_unchecked"], 1);
 }
 
 #[test]

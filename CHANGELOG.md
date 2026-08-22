@@ -25,6 +25,10 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - A `<block>`/`</block>` tag that fails to parse (for example a missing closing `>`) now fails the whole run with
   `Malformed block tag at line N, column N`, instead of being silently skipped. Fixes
   ([#108](https://github.com/mennanov/blockwatch/issues/108)).
+- `affects` now checks that each referenced block still exists, matching `same-as`. A reference to a renamed or deleted
+  target block is reported as a violation (rather than passing silently, or reporting the misleading "is modified, but X
+  is not"), and this check runs even without a diff; a reference to a missing target *file* fails the run. Fixes
+  ([#109](https://github.com/mennanov/blockwatch/issues/109)).
 
 ## [0.4.2] - 2026-08-21
 

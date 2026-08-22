@@ -3,19 +3,19 @@ use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{ValidationReport, ValidatorType, Violation, ViolationRange};
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 /// Enforces `affects="file:name"`: when a block's content changes, every block it declares it
-/// affects must have changed in the same diff.
+/// affects must have changed in the same diff. It also checks reference integrity.
 ///
 /// E.g., catches a constant edited without its documentation, or an enum extended without its
 /// switch statement.
 pub(crate) struct AffectsValidator<Fs: FileSystem> {
-    /// Reads target files that the run's scope excluded but the diff still names.
+    /// Reads target files that are not already parsed into the validation context.
     file_system: Arc<Fs>,
 }
 
@@ -37,41 +37,51 @@ impl<Fs: FileSystem + 'static> validators::ValidatorSync for AffectsValidator<Fs
         &self,
         context: Arc<validators::ValidationContext>,
     ) -> anyhow::Result<ValidationReport> {
-        let modified_names = modified_block_names(&context);
-        // Caches target files read from disk so each is parsed at most once. `validate` runs on a
-        // single thread, so no synchronization is needed.
-        let mut cache: HashMap<RepoPath, FileBlocks> = HashMap::new();
+        // Named blocks per file along with their modification bit, indexed by file path.
+        let in_scope_index: HashMap<&RepoPath, HashMap<String, bool>> = context
+            .blocks
+            .iter()
+            .map(|(file_path, file_blocks)| (file_path, name_index(file_blocks)))
+            .collect();
+        // Named blocks per file read from the filesystem, indexed by file path.
+        let mut cache: HashMap<RepoPath, HashMap<String, bool>> = HashMap::new();
         let mut report = ValidationReport::default();
-        for (file_path, block_with_context) in content_modified_blocks(&context) {
-            // A block without the attribute places no obligation on anything, and must not be
-            // recorded as checked either.
-            let Some(affects) = block_with_context.block.attributes.get("affects") else {
-                continue;
-            };
-            let violations = self.unsatisfied_references(
-                &context,
-                &modified_names,
-                &mut cache,
-                file_path,
-                block_with_context,
-                affects,
-            )?;
-            report.add_all(file_path, &block_with_context.block, violations);
+        // Every block carrying `affects` is examined, not only the ones the diff touched: reference
+        // integrity has to catch a dangling target even when the referencing block is unchanged.
+        for (file_path, file_blocks) in &context.blocks {
+            for block_with_context in &file_blocks.blocks_with_context {
+                let Some(affects) = block_with_context.block.attributes.get("affects") else {
+                    continue;
+                };
+                let violations = self.reference_violations(
+                    &context,
+                    &in_scope_index,
+                    &mut cache,
+                    file_path,
+                    block_with_context,
+                    affects,
+                )?;
+                report.add_all(file_path, &block_with_context.block, violations);
+            }
         }
         Ok(report)
     }
 }
 
 impl<Fs: FileSystem + 'static> AffectsValidator<Fs> {
-    /// One violation for every block that `affects` names but the same diff left unchanged.
+    /// One violation per block reference.
+    ///
+    /// 2 violation kinds possible:
+    /// 1. Invalid block reference
+    /// 2. The referenced block is not modified while `block_with_context` is.
     ///
     /// `affects` is the attribute's raw value; the caller has already established that
-    /// `block_with_context` carries it and that the diff modified the block's content.
-    fn unsatisfied_references(
+    /// `block_with_context` carries it.
+    fn reference_violations(
         &self,
         context: &validators::ValidationContext,
-        modified_names: &HashSet<(RepoPath, String)>,
-        cache: &mut HashMap<RepoPath, FileBlocks>,
+        in_scope_index: &HashMap<&RepoPath, HashMap<String, bool>>,
+        cache: &mut HashMap<RepoPath, HashMap<String, bool>>,
         file_path: &RepoPath,
         block_with_context: &BlockWithContext,
         affects: &str,
@@ -92,79 +102,71 @@ impl<Fs: FileSystem + 'static> AffectsValidator<Fs> {
         for (target_file, target_name) in references {
             // A reference like ":foo" is resolved relative to the file the block is in.
             let target_file = target_file.unwrap_or_else(|| file_path.clone());
-            let was_modified = modified_names.contains(&(target_file.clone(), target_name.clone()))
-                || target_modified_outside_scope(
-                    context,
-                    self.file_system.as_ref(),
-                    cache,
-                    &target_file,
-                    &target_name,
-                )?;
-            if !was_modified {
-                violations.push(create_violation(
+            match resolve_target(
+                context,
+                self.file_system.as_ref(),
+                in_scope_index,
+                cache,
+                &target_file,
+                &target_name,
+            )? {
+                None => violations.push(dangling_reference_violation(
                     file_path,
                     &block_with_context.block,
                     &target_file,
-                    target_name.as_str(),
-                )?);
+                    &target_name,
+                )?),
+                // The "affects" only applies when this block's content changed: an
+                // unchanged block places no obligation on the blocks it references.
+                Some(target_modified) => {
+                    if block_with_context.is_content_modified && !target_modified {
+                        violations.push(create_violation(
+                            file_path,
+                            &block_with_context.block,
+                            &target_file,
+                            target_name.as_str(),
+                        )?);
+                    }
+                }
             }
         }
         Ok(violations)
     }
 }
 
-/// Every block in the run whose content the diff changed, paired with the file it was found in.
-fn content_modified_blocks(
-    context: &validators::ValidationContext,
-) -> impl Iterator<Item = (&RepoPath, &BlockWithContext)> {
-    context.blocks.iter().flat_map(|(file_path, file_blocks)| {
-        file_blocks
-            .blocks_with_context
-            .iter()
-            .filter(|block_with_context| block_with_context.is_content_modified)
-            .map(move |block_with_context| (file_path, block_with_context))
-    })
-}
-
-/// The `(file, name)` key of every named block the diff modified, which is what a reference has to
-/// match to be satisfied. Unnamed blocks are skipped because they can't be referenced.
-fn modified_block_names(context: &validators::ValidationContext) -> HashSet<(RepoPath, String)> {
-    content_modified_blocks(context)
-        .filter_map(|(file_path, block_with_context)| {
-            block_with_context
-                .block
-                .name()
-                .map(|name| (file_path.clone(), name.to_string()))
-        })
-        .collect()
-}
-
-/// Whether the target *outside* the validation context was modified.
+/// Resolves a referenced target block, mirroring `same-as`'s three-step lookup:
+/// 1. blocks already parsed into the validation context (no I/O), via `in_scope_index`,
+/// 2. the index of files read earlier during this run, via `cache`,
+/// 3. reading and parsing the file through `file_system`, indexing and caching the result.
 ///
-/// This can happen when the globs constrain the validation context: the diff may mention a block in
-/// a file that does not match the given globs.
-fn target_modified_outside_scope<Fs: FileSystem>(
+/// Returns `Some(was_modified)` when the block exists, where `was_modified` reports whether the diff
+/// changed its content; `None` when the file parses but holds no block with that name — a dangling
+/// reference. A missing or unsupported target file is an `Err`, aborting the run, the same
+/// abort-on-missing-file behavior `same-as` has.
+///
+/// A target file present in scope but missing the named block falls through to a disk read: under
+/// `--only-changed` the in-scope blocks are just the ones the diff touched, so the named block may
+/// live in the same file yet outside that subset.
+fn resolve_target<Fs: FileSystem>(
     context: &validators::ValidationContext,
     file_system: &Fs,
-    cache: &mut HashMap<RepoPath, FileBlocks>,
+    in_scope_index: &HashMap<&RepoPath, HashMap<String, bool>>,
+    cache: &mut HashMap<RepoPath, HashMap<String, bool>>,
     target_file: &RepoPath,
     target_name: &str,
-) -> anyhow::Result<bool> {
-    if context.blocks.contains_key(target_file) {
-        // Target file is in the validation context, so it must already be in scope.
-        return Ok(false);
+) -> anyhow::Result<Option<bool>> {
+    if let Some(index) = in_scope_index.get(target_file)
+        && let Some(&modified) = index.get(target_name)
+    {
+        return Ok(Some(modified));
     }
-    let Some(line_changes) = context.line_changes_for(target_file) else {
-        // The target file is not in the diff.
-        return Ok(false);
-    };
-    if !file_system.exists(target_file.as_path()) {
-        return Ok(false);
-    }
-    let file_blocks = match cache.entry(target_file.clone()) {
+    // Parsing with the target's own line changes recovers both its blocks and their modified state;
+    // a file the diff never referenced simply has no line changes, so nothing in it counts as modified.
+    let line_changes = context.line_changes_for(target_file).unwrap_or(&[]);
+    let index = match cache.entry(target_file.clone()) {
         Entry::Occupied(entry) => entry.into_mut(),
         Entry::Vacant(entry) => {
-            let Some(parsed) = parse_file(
+            let parsed = parse_file(
                 file_system,
                 target_file.as_path(),
                 line_changes,
@@ -172,24 +174,40 @@ fn target_modified_outside_scope<Fs: FileSystem>(
                 context.parsers(),
                 context.extra_file_extensions(),
             )?
-            else {
-                return Ok(false);
-            };
-            entry.insert(parsed)
+            .ok_or_else(|| {
+                anyhow!(
+                    "affects target file format is unsupported: {}",
+                    target_file.display()
+                )
+            })?;
+            entry.insert(name_index(&parsed))
         }
     };
-    Ok(file_blocks
-        .blocks_with_context
-        .iter()
-        .any(|block| block.is_content_modified && block.block.name() == Some(target_name)))
+    Ok(index.get(target_name).copied())
 }
 
-/// Selects [`AffectsValidator`] for blocks that carry an `affects` attribute *and* were modified —
-/// an unchanged block places no obligation on anything.
+/// Builds a map of the named blocks in `file_blocks` together with their modification bit.
+fn name_index(file_blocks: &FileBlocks) -> HashMap<String, bool> {
+    let mut index = HashMap::new();
+    for block in &file_blocks.blocks_with_context {
+        if let Some(name) = block.block.name() {
+            index
+                .entry(name.to_string())
+                .or_insert(block.is_content_modified);
+        }
+    }
+    index
+}
+
+/// Selects [`AffectsValidator`] for every block that carries an `affects` attribute.
+///
+/// It does not gate on whether the block was modified: the validator also checks that each
+/// referenced target still resolves, and a dangling reference has to be reported even when the
+/// referencing block itself is untouched.
 pub(crate) struct AffectsValidatorDetector();
 
 impl AffectsValidatorDetector {
-    /// Creates the detector. Registered in [`crate::validators::detector_factories`].
+    /// Creates the detector. Registered in [`validators::detector_factories`].
     pub fn new() -> Self {
         Self {}
     }
@@ -201,9 +219,7 @@ impl<Fs: FileSystem + 'static> validators::ValidatorDetector<Fs> for AffectsVali
         block_with_context: &BlockWithContext,
         file_system: &Arc<Fs>,
     ) -> anyhow::Result<Option<ValidatorType>> {
-        if block_with_context.is_content_modified
-            && block_with_context.block.attributes.contains_key("affects")
-        {
+        if block_with_context.block.attributes.contains_key("affects") {
             Ok(Some(ValidatorType::Sync(Box::new(AffectsValidator::new(
                 Arc::clone(file_system),
             )))))
@@ -227,6 +243,43 @@ fn create_violation(
         affected_block_file_path.display(),
         affected_block_name
     );
+    affects_violation(
+        modified_block,
+        affected_block_file_path,
+        affected_block_name,
+        message,
+    )
+}
+
+/// A reference whose target block no longer exists (renamed or deleted). Reported instead of
+/// `create_violation`'s "is modified, but X is not", which would misdescribe a missing target as an
+/// unchanged one.
+fn dangling_reference_violation(
+    referencing_block_file_path: &RepoPath,
+    referencing_block: &Block,
+    target_file_path: &RepoPath,
+    target_name: &str,
+) -> anyhow::Result<Violation> {
+    let message = format!(
+        "Block {}:{} at line {} references {}:{}, which does not exist",
+        referencing_block_file_path.display(),
+        referencing_block.name_display(),
+        referencing_block.start_tag_position_range.start().line,
+        target_file_path.display(),
+        target_name,
+    );
+    affects_violation(referencing_block, target_file_path, target_name, message)
+}
+
+/// Builds an `affects` violation anchored on the referencing block's start tag, carrying the
+/// referenced target as machine-readable details. Shared by both violation kinds so they serialize
+/// the same shape and differ only in their human-readable `message`.
+fn affects_violation(
+    block: &Block,
+    affected_block_file_path: &RepoPath,
+    affected_block_name: &str,
+    message: String,
+) -> anyhow::Result<Violation> {
     let details = serde_json::to_value(AffectsViolation {
         affected_block_file_path,
         affected_block_name,
@@ -234,12 +287,12 @@ fn create_violation(
     .context("failed to serialize AffectsViolation block")?;
     Ok(Violation::new(
         ViolationRange::new(
-            modified_block.start_tag_position_range.start().clone(),
-            modified_block.start_tag_position_range.end().clone(),
+            block.start_tag_position_range.start().clone(),
+            block.start_tag_position_range.end().clone(),
         ),
         "affects".to_string(),
         message,
-        modified_block.severity()?,
+        block.severity()?,
         Some(details),
     ))
 }
@@ -310,6 +363,8 @@ mod validate_tests {
 
     #[test]
     fn modified_block_with_unmodified_targets_returns_violations() -> anyhow::Result<()> {
+        // Both targets exist but only their start tags changed, so they stay in scope with
+        // unmodified content and each modified source that points at them is a violation.
         let validator = validator(&[]);
         let context = merge_validation_contexts(vec![
             validation_context(
@@ -336,13 +391,13 @@ print("file2")
             ),
             validation_context_with_changes(
                 "file3.py",
-                r#"# <block name="not-bar">
+                r#"# <block name="bar">
 print("file3")
 # </block>
 "#,
                 vec![LineChange {
-                    line: 3, // Only the end tag is modified, not the content.
-                    ranges: None,
+                    line: 1, // Only the start tag is changed, not the content.
+                    ranges: Some(vec![3..8, 10..15]),
                 }],
             ),
         ]);
@@ -351,7 +406,7 @@ print("file3")
 
         assert_eq!(violations.len(), 1);
         let file1_violations = violations
-            .get(&RepoPath::from_reference("file1.py").unwrap())
+            .get(&RepoPath::from_reference("file1.py")?)
             .unwrap();
         assert_eq!(file1_violations.len(), 2);
         assert_eq!(
@@ -405,7 +460,12 @@ print("bar")
 
     #[test]
     fn modified_block_with_one_unmodified_target_returns_a_violation() -> anyhow::Result<()> {
-        let validator = validator(&[]);
+        let file2 = r#"# <block name="buzz" affects="file1.py:bar">
+print("not-buzz")
+# </block>
+print("hello")
+"#;
+        let validator = validator(&[("file2.py", file2)]);
         let context = merge_validation_contexts(vec![
             validation_context(
                 "file1.py",
@@ -420,11 +480,7 @@ print("bar")
             ),
             validation_context_with_changes(
                 "file2.py",
-                r#"# <block name="buzz" affects="file1.py:bar">
-print("not-buzz")
-# </block>
-print("hello")
-"#,
+                file2,
                 vec![LineChange {
                     line: 4, // Line outside the block is changed.
                     ranges: None,
@@ -436,7 +492,7 @@ print("hello")
 
         assert_eq!(violations.len(), 1);
         let file1_violations = violations
-            .get(&RepoPath::from_reference("file1.py").unwrap())
+            .get(&RepoPath::from_reference("file1.py")?)
             .unwrap();
         assert_eq!(file1_violations.len(), 1);
         assert_eq!(
@@ -479,17 +535,18 @@ print("buzz")
     #[test]
     fn modified_block_with_an_unmodified_target_in_the_same_file_returns_a_violation()
     -> anyhow::Result<()> {
-        let validator = validator(&[]);
-        let context = validation_context_with_changes(
-            "file1.py",
-            r#"# <block affects=":foo">
+        let source = r#"# <block affects=":foo">
 print("first")
 # </block>
 
 # <block name="foo">
 print("second")
 # </block>
-"#,
+"#;
+        let validator = validator(&[("file1.py", source)]);
+        let context = validation_context_with_changes(
+            "file1.py",
+            source,
             vec![LineChange {
                 line: 2,
                 ranges: None,
@@ -500,7 +557,7 @@ print("second")
 
         assert_eq!(violations.len(), 1);
         let file1_violations = violations
-            .get(&RepoPath::from_reference("file1.py").unwrap())
+            .get(&RepoPath::from_reference("file1.py")?)
             .unwrap();
         assert_eq!(file1_violations.len(), 1);
         assert_eq!(
@@ -619,7 +676,6 @@ pass
 
     #[test]
     fn blocks_with_cyclic_references_partly_modified_returns_violations() -> anyhow::Result<()> {
-        let validator = validator(&[]);
         let contents = r#"# <block name="foo" affects=":bar">
 print("foo")
 # </block>
@@ -628,6 +684,7 @@ print("foo")
 pass
 # </block>
 "#;
+        let validator = validator(&[("file1.py", contents)]);
         let line_changes = vec![
             LineChange {
                 line: 2,
@@ -696,6 +753,64 @@ pass
         let violations = validator.validate(context)?.violations;
 
         assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn modified_block_referencing_a_nonexistent_target_reports_a_dangling_reference()
+    -> anyhow::Result<()> {
+        // A renamed or deleted target block is a dangling reference.
+        let source = "# <block name=\"s\" affects=\":nope\">\nvalue = 1\n# </block>";
+        let context = validation_context("file.py", source);
+        let violations = validator(&[("file.py", source)])
+            .validate(context)?
+            .violations;
+        let file = violations
+            .get(&RepoPath::from_reference("file.py")?)
+            .unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0].message.contains("does not exist"),
+            "expected a dangling-reference message, got: {}",
+            file[0].message
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unmodified_block_referencing_a_deleted_target_returns_a_violation() -> anyhow::Result<()> {
+        let source = "# <block name=\"s\" affects=\":nope\">\nvalue = 1\n# </block>";
+        let context = validation_context_with_changes(
+            "file.py",
+            source,
+            // Touch only the start tag, so the block stays in scope but its content is unmodified.
+            vec![LineChange {
+                line: 1,
+                ranges: Some(vec![3..8, 10..15]),
+            }],
+        );
+        let violations = validator(&[("file.py", source)])
+            .validate(context)?
+            .violations;
+        let file = violations
+            .get(&RepoPath::from_reference("file.py")?)
+            .unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0].message.contains("does not exist"),
+            "expected a dangling-reference message, got: {}",
+            file[0].message
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn reference_to_a_missing_target_file_fails_the_run() -> anyhow::Result<()> {
+        let context = validation_context(
+            "source.py",
+            "# <block name=\"s\" affects=\"gone.py:t\">\nvalue = 1\n# </block>",
+        );
+        assert!(validator(&[]).validate(context).is_err());
         Ok(())
     }
 

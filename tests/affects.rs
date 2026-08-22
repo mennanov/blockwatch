@@ -395,3 +395,17 @@ index 1111111..2222222 100644
     ]);
     cmd.write_stdin(diff).output().unwrap().assert().success();
 }
+
+#[test]
+fn full_tree_run_reports_a_dangling_affects_reference() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/affects/dangling.md");
+    cmd.output()
+        .unwrap()
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "references tests/testdata/affects/dangling.md:missing, which does not exist",
+        ));
+}
