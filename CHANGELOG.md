@@ -22,6 +22,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   ([#102](https://github.com/mennanov/blockwatch/issues/102)).
 - Duplicate blocks with the same name within the same file are rejected. Fixes
   ([#104](https://github.com/mennanov/blockwatch/issues/104)).
+- A `<block>`/`</block>` tag that fails to parse (for example a missing closing `>`) now fails the whole run with
+  `Malformed block tag at line N, column N`, instead of being silently skipped. Fixes
+  ([#108](https://github.com/mennanov/blockwatch/issues/108)).
 
 ## [0.4.2] - 2026-08-21
 

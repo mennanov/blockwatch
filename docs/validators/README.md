@@ -3,6 +3,9 @@
 Every rule is declared as an attribute on a `<block>` tag inside a comment. One block can carry several attributes at
 once.
 
+A start or end tag that fails to parse — most commonly a missing closing `>` — fails the whole run with `Malformed
+block tag at line N, column N`, rather than being silently ignored.
+
 ## Which validator do I want?
 
 [//]: # (<block name="validators-index" affects=".agents/skills/blockwatch/SKILL.md:validator-catalog">)

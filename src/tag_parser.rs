@@ -30,6 +30,22 @@ pub(crate) enum BlockTag {
     },
 }
 
+/// A start or end tag that was recognized as an attempt (see [`looks_like_tag_attempt`]) but
+/// failed to parse as a complete tag, for example, a missing closing `>`.
+#[derive(Debug)]
+pub(crate) struct MalformedBlockTagError {
+    /// Byte offset of the offending `<` within the comment text passed to the parser.
+    pub(crate) position: usize,
+}
+
+impl std::fmt::Display for MalformedBlockTagError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "malformed block tag")
+    }
+}
+
+impl std::error::Error for MalformedBlockTagError {}
+
 /// A winnow-based parser for block tags.
 pub(crate) struct WinnowBlockTagParser<'source> {
     source: &'source str,
@@ -91,6 +107,14 @@ impl<'source> BlockTagParser for WinnowBlockTagParser<'source> {
                     return Ok(Some(BlockTag::End { start_position }));
                 }
 
+                // An input that looks like a misspelled block tag is an error.
+                if looks_like_tag_attempt(potential_tag_start) {
+                    return Err(MalformedBlockTagError {
+                        position: self.cursor + offset,
+                    }
+                    .into());
+                }
+
                 // Not a valid tag, skip past this '<' and continue searching
                 current_input = &potential_tag_start[1..];
                 offset += 1;
@@ -100,6 +124,35 @@ impl<'source> BlockTagParser for WinnowBlockTagParser<'source> {
                 return Ok(None);
             }
         }
+    }
+}
+
+/// Whether `c` can appear in an attribute name or an unquoted attribute value (see
+/// [`parse_attribute_name`] and [`parse_attribute_value`]).
+fn is_attribute_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '-' || c == '_'
+}
+
+/// Whether `input`, which starts with `<`, looks like an attempt at a block start or end tag.
+///
+/// The text right after continues as `block` (an end tag's optional `/` and whitespace aside) and
+/// stops at a word boundary there, rather than running on into an unrelated word such as
+/// `blockquote` or a generic type parameter such as `Vec<blockstart>`.
+fn looks_like_tag_attempt(input: &str) -> bool {
+    let after_marker = input.strip_prefix("<block").or_else(|| {
+        // Not a start-tag attempt; try an end-tag one instead.
+        input
+            .strip_prefix('<')
+            .map(str::trim_start)
+            .and_then(|rest| rest.strip_prefix('/'))
+            .map(str::trim_start)
+            .and_then(|rest| rest.strip_prefix("block"))
+    });
+    match after_marker {
+        // A word character right after `block` means it's just a longer word (e.g. `blockquote`),
+        // not a tag attempt.
+        Some(rest) => !rest.starts_with(is_attribute_char),
+        None => false,
     }
 }
 
@@ -163,7 +216,7 @@ fn parse_attributes(input: &mut &str) -> PResult<HashMap<String, String>> {
 /// Valid characters: alphanumeric, '-', and '_'
 /// Examples: `name`, `data-value`, `ng_bind`
 fn parse_attribute_name(input: &mut &str) -> PResult<String> {
-    take_while(1.., |c: char| c.is_alphanumeric() || c == '-' || c == '_')
+    take_while(1.., is_attribute_char)
         .map(|s: &str| s.to_string())
         .parse_next(input)
 }
@@ -183,7 +236,7 @@ fn parse_attribute_value(input: &mut &str) -> PResult<String> {
         // Single-quoted value
         delimited(literal("'"), take_till(0.., '\''), literal("'")),
         // Unquoted value (restricted character set)
-        take_while(1.., |c: char| c.is_alphanumeric() || c == '-' || c == '_'),
+        take_while(1.., is_attribute_char),
     ))
     .map(|s: &str| s.to_string())
     .parse_next(input)

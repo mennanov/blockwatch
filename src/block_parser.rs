@@ -1,7 +1,7 @@
 use crate::Position;
 use crate::blocks::Block;
 use crate::language_parsers::{Comment, CommentsParser};
-use crate::tag_parser::{BlockTag, BlockTagParser, WinnowBlockTagParser};
+use crate::tag_parser::{BlockTag, BlockTagParser, MalformedBlockTagError, WinnowBlockTagParser};
 use std::collections::{HashMap, VecDeque};
 use std::ops::{Range, RangeInclusive};
 use std::rc::Rc;
@@ -207,7 +207,19 @@ impl<I: Iterator<Item = Comment>> Iterator for PartialBlocksIterator<I> {
                     self.comment = None;
                     continue;
                 }
-                Err(e) => Some(Err(e)),
+                // A malformed tag carries its own byte offset; everything else propagates as-is.
+                Err(e) => match e.downcast_ref::<MalformedBlockTagError>() {
+                    Some(malformed) => {
+                        let position =
+                            BlockStart::source_position_at(malformed.position, comment_rc);
+                        Some(Err(anyhow::anyhow!(
+                            "Malformed block tag at line {}, column {}",
+                            position.line,
+                            position.character
+                        )))
+                    }
+                    None => Some(Err(e)),
+                },
             };
         }
     }
@@ -739,6 +751,47 @@ println!("hello2");
         // </block>
         "#;
         assert!(parse_all(&mut parser, contents).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn unclosed_start_tag_with_nothing_else_in_the_file_returns_error() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        // No other tag anywhere in the file, so nothing else can trip an error: the missing `>`
+        // has to be caught on its own.
+        let contents = "// <block name=\"foo\" keep-sorted\nfn foo() {}\n";
+        let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
+        assert_eq!(error_message, "Malformed block tag at line 1, column 4");
+        Ok(())
+    }
+
+    #[test]
+    fn unclosed_end_tag_with_nothing_else_in_the_file_returns_error() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        let contents = "// </block\nfn foo() {}\n";
+        let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
+        assert_eq!(error_message, "Malformed block tag at line 1, column 4");
+        Ok(())
+    }
+
+    #[test]
+    fn malformed_tag_on_a_later_line_reports_that_line_and_column() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        let contents = "fn foo() {}\n    // <block name=\"foo\" keep-sorted\n";
+        let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
+        assert_eq!(error_message, "Malformed block tag at line 2, column 8");
+        Ok(())
+    }
+
+    #[test]
+    fn word_continuing_past_the_block_prefix_is_not_treated_as_a_tag_attempt() -> anyhow::Result<()>
+    {
+        let mut parser = create_parser();
+        // "blockquote" continues past "block" rather than ending at a boundary, so this is
+        // ordinary text, not an attempted tag.
+        let contents = "// see <blockquote> for details\nfn foo() {}\n";
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(blocks, vec![]);
         Ok(())
     }
 
