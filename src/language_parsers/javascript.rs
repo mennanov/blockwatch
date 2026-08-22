@@ -8,10 +8,9 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 }
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
-    let js_language = tree_sitter_javascript::LANGUAGE.into();
-    let parser =
-        language_parsers::c_style_and_html_comments_parser(&js_language, "comment", "html_comment");
-    Ok(parser)
+    Ok(language_parsers::ecmascript_comments_parser(
+        &tree_sitter_javascript::LANGUAGE.into(),
+    ))
 }
 
 #[cfg(test)]

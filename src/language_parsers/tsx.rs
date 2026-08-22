@@ -8,13 +8,9 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 }
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
-    let tsx_language = tree_sitter_typescript::LANGUAGE_TSX.into();
-    let parser = language_parsers::c_style_and_html_comments_parser(
-        &tsx_language,
-        "comment",
-        "html_comment",
-    );
-    Ok(parser)
+    Ok(language_parsers::ecmascript_comments_parser(
+        &tree_sitter_typescript::LANGUAGE_TSX.into(),
+    ))
 }
 
 #[cfg(test)]

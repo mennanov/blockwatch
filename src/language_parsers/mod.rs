@@ -544,6 +544,14 @@ fn c_style_and_html_comments_parser(
     )
 }
 
+/// Comments parser shared by the ECMAScript-family grammars (JavaScript, TypeScript, TSX). All
+/// three expose their comments under the same `comment` node kind and recognize the legacy
+/// HTML-like comments (`<!--` / `-->`) as `html_comment`, so they differ only in which grammar is
+/// loaded.
+fn ecmascript_comments_parser(language: &Language) -> TreeSitterCommentsParser {
+    c_style_and_html_comments_parser(language, "comment", "html_comment")
+}
+
 /// Comments parser for languages that support `#` line comments in addition to the C-style
 /// `//` and `/* */` comments.
 /// Blanks the leading `//` or `#` line-comment marker, or the `/* */` block-comment delimiters,
