@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.4.3] - 2026-08-24
+
 ### Added
 
 - Add a `check-lua-timeout` block attribute which limits how long a Lua script may run (default: 30 seconds). Fixes
