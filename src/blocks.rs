@@ -563,6 +563,7 @@ const RECOGNIZED_ATTRIBUTES: &[&str] = &[
     "check-ai-pattern",
     "check-lua",
     "check-lua-pattern",
+    "check-lua-timeout",
     "keep-sorted",
     "keep-sorted-format",
     "keep-sorted-pattern",

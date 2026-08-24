@@ -8,13 +8,28 @@ use crate::validators::{
 };
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
-use mlua::{Lua, StdLib};
+use mlua::{HookTriggers, Lua, StdLib, VmState};
 use serde::Serialize;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::task::JoinSet;
+use std::time::{Duration, Instant};
+use tokio::task::{JoinSet, spawn_blocking};
 
 const LUA_STDLIB_ENV_VAR: &str = "BLOCKWATCH_LUA_MODE";
+
+/// The wall-clock budget a `check-lua` script gets when the block does not set `check-lua-timeout`.
+const DEFAULT_CHECK_LUA_TIMEOUT_SECS: u64 = 30;
+
+/// How many Lua VM instructions run between two checks of the timeout deadline. Small enough that a
+/// runaway script is stopped promptly, large enough that the hook stays negligible for scripts that
+/// terminate on their own.
+const CHECK_LUA_INSTRUCTION_HOOK_INTERVAL: u32 = 1_000;
+
+/// Extra wall-clock time the out-of-VM backstop waits beyond the configured budget. The instruction
+/// hook stops any script it can reach right at the budget; this window lets that graceful, in-VM
+/// stop win the race, so the backstop only ever fires for a script wedged in a native call the hook
+/// cannot interrupt (a blocking system call, say).
+const CHECK_LUA_TIMEOUT_BACKSTOP_GRACE: Duration = Duration::from_secs(1);
 
 /// Returns the Lua standard library set based on the `BLOCKWATCH_LUA_MODE` environment variable.
 ///
@@ -148,18 +163,104 @@ async fn run_lua_script<Fs: FileSystem>(
     content: &str,
     affected_blocks: &[AffectedBlock],
 ) -> anyhow::Result<Option<String>> {
-    let lua = lua_from_env();
-
-    // `FileSystemImpl` canonicalizes the path and confines it to the repository root, so the
-    // bespoke `resolve_script_path` security check that used to live here now lives in one place.
+    let timeout = parse_check_lua_timeout(&block_with_context.block)?;
     let script_content = file_system
         .read_to_string(Path::new(script_path))
         .with_context(|| format!("failed to read Lua script: {script_path}"))?;
 
-    lua.load(lua_chunk(&script_content))
-        .exec_async()
-        .await
-        .with_context(|| format!("failed to execute Lua script: {script_path}"))?;
+    let inputs = LuaScriptInputs::new(
+        script_path,
+        script_content,
+        timeout,
+        file_path,
+        block_with_context,
+        content,
+        affected_blocks,
+    );
+
+    // Run the Lua script in a blocking thread for CPU-heavy scripts that never yield control back.
+    // I/O-heavy scripts won't invoke the hook, in this case the Tokio's timeout will fire.
+    let worker = spawn_blocking(move || run_lua_script_sync(inputs));
+    match tokio::time::timeout(timeout + CHECK_LUA_TIMEOUT_BACKSTOP_GRACE, worker).await {
+        Ok(worker_result) => worker_result.context("the check-lua worker thread panicked")?,
+        Err(_elapsed) => Err(anyhow!(timeout_error_message(timeout))),
+    }
+}
+
+/// All the context needed to run the Lua script.
+///
+/// See [`run_lua_script`] for why the work runs off the async thread.
+struct LuaScriptInputs {
+    script_path: String,
+    script_content: String,
+    timeout: Duration,
+    file: String,
+    line: usize,
+    attributes: Vec<(String, String)>,
+    /// `Some` exactly when the block carries an `affects` attribute, so `ctx.affects` is present in
+    /// the script precisely when the attribute is.
+    affects: Option<Vec<LuaAffected>>,
+    content: String,
+}
+
+/// One affected block exposed to a script as an entry of `ctx.affects`.
+struct LuaAffected {
+    file: String,
+    name: String,
+    content: String,
+}
+
+impl LuaScriptInputs {
+    /// Copies out of the borrowed validation context everything the script needs, so the result can
+    /// outlive the borrow and move onto the blocking thread.
+    fn new(
+        script_path: &str,
+        script_content: String,
+        timeout: Duration,
+        file_path: &RepoPath,
+        block_with_context: &BlockWithContext,
+        content: &str,
+        affected_blocks: &[AffectedBlock],
+    ) -> Self {
+        let block = &block_with_context.block;
+        let affects = block.attributes.contains_key("affects").then(|| {
+            affected_blocks
+                .iter()
+                .map(|affected| LuaAffected {
+                    file: affected.file.as_str().to_string(),
+                    name: affected.name.clone(),
+                    content: affected.content.clone(),
+                })
+                .collect()
+        });
+        Self {
+            script_path: script_path.to_string(),
+            script_content,
+            timeout,
+            file: file_path.as_str().to_string(),
+            line: block.start_tag_position_range.start().line,
+            attributes: block
+                .attributes
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+            affects,
+            content: content.to_string(),
+        }
+    }
+}
+
+/// Runs the script synchronously so its whole Lua lifetime stays on one thread, which lets
+/// [`run_lua_script`] host it on a blocking thread and bound it with a wall-clock timeout.
+fn run_lua_script_sync(inputs: LuaScriptInputs) -> anyhow::Result<Option<String>> {
+    let lua = lua_from_env();
+    // Install the hook that stops the script from inside the VM once `timeout` elapses.
+    // Needed for the CPU-heavy Lua scripts that never yield control back to the runtime.
+    install_timeout_hook(&lua, inputs.timeout)?;
+
+    lua.load(lua_chunk(&inputs.script_content))
+        .exec()
+        .with_context(|| format!("failed to execute Lua script: {}", inputs.script_path))?;
 
     let validate_fn: mlua::Function = lua
         .globals()
@@ -168,21 +269,14 @@ async fn run_lua_script<Fs: FileSystem>(
 
     let ctx_table = lua.create_table().context("failed to create ctx table")?;
     ctx_table
-        .set("file", file_path.as_str())
+        .set("file", inputs.file.as_str())
         .context("failed to set ctx.file")?;
     ctx_table
-        .set(
-            "line",
-            block_with_context
-                .block
-                .start_tag_position_range
-                .start()
-                .line,
-        )
+        .set("line", inputs.line)
         .context("failed to set ctx.line")?;
 
     let attrs_table = lua.create_table().context("failed to create attrs table")?;
-    for (key, value) in &block_with_context.block.attributes {
+    for (key, value) in &inputs.attributes {
         attrs_table
             .set(key.as_str(), value.as_str())
             .with_context(|| format!("failed to set attr {key}"))?;
@@ -193,7 +287,7 @@ async fn run_lua_script<Fs: FileSystem>(
 
     // When the block carries an `affects` attribute, expose the affected blocks as
     // `ctx.affects = [{ file, name, content }, …]` so scripts can inspect them in sandboxed mode.
-    if block_with_context.block.attributes.contains_key("affects") {
+    if let Some(affected_blocks) = &inputs.affects {
         let affects_table = lua
             .create_table()
             .context("failed to create affects table")?;
@@ -220,9 +314,8 @@ async fn run_lua_script<Fs: FileSystem>(
     }
 
     let result: mlua::Value = validate_fn
-        .call_async((ctx_table, content.to_string()))
-        .await
-        .with_context(|| format!("failed to call validate() in {script_path}"))?;
+        .call((ctx_table, inputs.content.as_str()))
+        .with_context(|| format!("failed to call validate() in {}", inputs.script_path))?;
 
     match result {
         mlua::Value::Nil => Ok(None),
@@ -232,6 +325,53 @@ async fn run_lua_script<Fs: FileSystem>(
             other.type_name()
         )),
     }
+}
+
+/// Reads the block's `check-lua-timeout` as a wall-clock budget in whole seconds, defaulting to
+/// [`DEFAULT_CHECK_LUA_TIMEOUT_SECS`] when it is absent.
+///
+/// A value below one second is rejected: a timeout that short cannot tell a runaway script from a
+/// slow-but-terminating one, which is the false-violation trap the timeout exists to avoid.
+fn parse_check_lua_timeout(block: &Block) -> anyhow::Result<Duration> {
+    let Some(raw) = block.attributes.get("check-lua-timeout") else {
+        return Ok(Duration::from_secs(DEFAULT_CHECK_LUA_TIMEOUT_SECS));
+    };
+    let seconds: u64 = raw
+        .trim()
+        .parse()
+        .ok()
+        .filter(|&seconds| seconds >= 1)
+        .ok_or_else(|| {
+            anyhow!("check-lua-timeout must be a whole number of seconds >= 1, got {raw:?}")
+        })?;
+    Ok(Duration::from_secs(seconds))
+}
+
+/// The message both timeout layers report, so a script stopped inside the VM by the hook and one
+/// stopped from outside by the wall-clock backstop read identically. `timeout` is the configured
+/// budget, not the slightly longer window the backstop actually waits.
+fn timeout_error_message(timeout: Duration) -> String {
+    let seconds = timeout.as_secs();
+    format!(
+        "check-lua script timed out after {seconds} second{}",
+        if seconds == 1 { "" } else { "s" }
+    )
+}
+
+/// Installs a hook that stops the script from inside the VM once `timeout` elapses.
+fn install_timeout_hook(lua: &Lua, timeout: Duration) -> anyhow::Result<()> {
+    let deadline = Instant::now() + timeout;
+    lua.set_global_hook(
+        HookTriggers::new().every_nth_instruction(CHECK_LUA_INSTRUCTION_HOOK_INTERVAL),
+        move |_lua, _debug| {
+            if Instant::now() >= deadline {
+                Err(mlua::Error::runtime(timeout_error_message(timeout)))
+            } else {
+                Ok(VmState::Continue)
+            }
+        },
+    )
+    .context("failed to install the check-lua timeout hook")
 }
 
 /// Returns the part of a Lua script that is an actual chunk, skipping a UTF-8 BOM and a leading
@@ -895,6 +1035,98 @@ end
         // attribute is not checked, so it records nothing.
         assert_eq!(checked_lines(&report), vec![1, 4]);
         assert_eq!(violation_count(&report), 1);
+        Ok(())
+    }
+
+    // An endless loop is stopped by the in-VM instruction hook, which needs no help from the
+    // runtime: the runaway is interrupted on its own blocking thread, so the flavor is irrelevant.
+    #[tokio::test]
+    async fn block_whose_lua_check_exceeds_the_timeout_fails_the_run() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="loop.lua" check-lua-timeout="1">
+some content
+# </block>"#,
+        );
+
+        let err = validator(&[(
+            "loop.lua",
+            r#"
+function validate(ctx, content)
+    while true do end
+end
+"#,
+        )])
+        .validate(context)
+        .await
+        .unwrap_err();
+
+        let err_chain = format!("{err:#}");
+        assert!(
+            err_chain.contains("timed out") && err_chain.contains("1 second"),
+            "unexpected error: {err_chain}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn block_within_its_check_lua_timeout_passes() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" check-lua-timeout="5">
+some content
+# </block>"#,
+        );
+
+        let report = validator(&[(
+            "check.lua",
+            r#"
+function validate(ctx, content)
+    return nil
+end
+"#,
+        )])
+        .validate(context)
+        .await?;
+
+        assert!(report.violations.is_empty());
+        assert_eq!(checked_lines(&report), vec![1]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn block_with_a_non_numeric_check_lua_timeout_returns_an_error() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" check-lua-timeout="soon">
+some content
+# </block>"#,
+        );
+        // The invalid timeout fails before the script is read, so no script needs seeding.
+        let err = validator(&[]).validate(context).await.unwrap_err();
+        let err_chain = format!("{err:#}");
+        assert!(
+            err_chain.contains("check-lua-timeout must be a whole number of seconds"),
+            "unexpected error: {err_chain}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn block_with_a_zero_check_lua_timeout_returns_an_error() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" check-lua-timeout="0">
+some content
+# </block>"#,
+        );
+        // Zero is rejected as a value error, not silently treated as an instant deadline.
+        let err = validator(&[]).validate(context).await.unwrap_err();
+        let err_chain = format!("{err:#}");
+        assert!(
+            err_chain.contains("check-lua-timeout must be a whole number of seconds"),
+            "unexpected error: {err_chain}"
+        );
         Ok(())
     }
 }

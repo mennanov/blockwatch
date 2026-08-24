@@ -313,7 +313,7 @@ fn run_async_validators(
     validators: AsyncValidators,
 ) -> anyhow::Result<ValidationLog> {
     let tokio_runtime = tokio::runtime::Runtime::new()?;
-    tokio_runtime.block_on(async move {
+    let result = tokio_runtime.block_on(async move {
         let mut tasks = tokio::task::JoinSet::new();
         for (name, validator) in validators {
             let context = Arc::clone(&context);
@@ -331,7 +331,11 @@ fn run_async_validators(
         }
 
         Ok(log)
-    })
+    });
+
+    // Shutdown background tasks, if any.
+    tokio_runtime.shutdown_background();
+    result
 }
 
 /// Run the given sync and async validators in separate threads in parallel.

@@ -204,6 +204,22 @@ fn lua_script_using_os_succeeds_in_unsafe_mode() {
     output.assert().success();
 }
 
+#[cfg(unix)]
+#[test]
+fn lua_script_blocked_in_io_call_times_out() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/check_lua/blocking_io.py");
+    cmd.env(LUA_MODE_ENV_VAR, "unsafe");
+    cmd.timeout(std::time::Duration::from_secs(20));
+    let output = cmd.output().unwrap();
+
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("timed out"));
+}
+
 /// A Lua checker sees the same repository-relative, forward-slash path however the run was scoped.
 /// Without this, a checker that branches on paths changes verdict between a glob scan (which uses
 /// native separators) and a diff scan (which uses the diff's forward slashes) on Windows.

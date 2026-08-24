@@ -12,6 +12,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- Add a `check-lua-timeout` block attribute which limits how long a Lua script may run (default: 30 seconds). Fixes
+  ([#107](https://github.com/mennanov/blockwatch/issues/107)).
+
 ### Fixed
 
 - `-E` extension mappings now apply to the files `same-as` and `affects` read to resolve a reference, not only to the

@@ -12,6 +12,7 @@ string when it fails.
 |---------------------|-------------------------------------------------------|-------------|
 | `check-lua`         | path to a `.lua` script, relative to the project root | —           |
 | `check-lua-pattern` | regex; the `(?P<value>…)` group, or the whole match   | whole block |
+| `check-lua-timeout` | whole number of seconds (≥ 1) the script may run      | `30`        |
 
 The script path must point to a file inside the repository. Paths that escape it — absolute paths outside the project,
 `../` traversal, or symlinks pointing outward — are rejected.
