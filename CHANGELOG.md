@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.4.4] - 2026-08-25
+
 ### Added
 
 - Accept `_` digit separators in `keep-sorted-format="numeric"` and `same-as-format="numeric"`, so long literals can keep
