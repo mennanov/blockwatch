@@ -545,14 +545,29 @@ pub(in crate::validators) fn trimmed_line_value(
 }
 
 /// Returns the substring `regex` selects from `line` (see [`value_match`]) together with its
-/// inclusive character-column range, or `None` when the line does not match.
+/// inclusive character-column range, or `None` when the line yields no value to compare.
+///
+/// The regex is applied to the trimmed line so that anchors such as `^` and `$` refer to the entry
+/// itself rather than to its indentation, which is what makes a pattern keep working once the
+/// entries are nested inside a list or a block of code.
+///
+/// A blank line, an unmatched line, and a line whose match is empty all return `None`: none of them
+/// carry a value.
 pub(in crate::validators) fn regex_value<'a>(
     line: &'a str,
     regex: &regex::Regex,
 ) -> Option<(&'a str, RangeInclusive<usize>)> {
-    let caps = regex.captures(line)?;
+    let trimmed_line = line.trim();
+    if trimmed_line.is_empty() {
+        return None;
+    }
+    let caps = regex.captures(trimmed_line)?;
     let m = value_match(&caps)?;
-    let start = character_column_at(line, m.start());
+    if m.is_empty() {
+        return None;
+    }
+    let trimmed_byte_offset = trimmed_line.as_ptr() as usize - line.as_ptr() as usize;
+    let start = character_column_at(line, trimmed_byte_offset + m.start());
     Some((m.as_str(), start..=start + m.as_str().chars().count() - 1))
 }
 

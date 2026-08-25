@@ -27,7 +27,7 @@ Compare only part of each line:
 
 ```python
 ids = [
-    # <block keep-unique="^ID:(?P<value>\d+)">
+    # <block keep-unique="ID:(?P<value>\d+)">
     "ID:1 Alice",
     "ID:2 Bob",
     "ID:1 Carol",  # Violation: ID:1 is already used
@@ -35,12 +35,15 @@ ids = [
 ]
 ```
 
-Without a `value` group the whole match is compared. Lines that do not match are skipped.
+Without a `value` group the whole match is compared. Lines that do not match are skipped, as are
+lines whose match is empty.
 
 ## Notes
 
 - Blank lines are ignored.
-- Comparison is on the trimmed line, so indentation does not create false uniqueness.
+- Comparison is on the trimmed line, so indentation does not create false uniqueness. A regex is
+  applied to the trimmed line too, so `^` and `$` anchor to the entry rather than to the
+  indentation.
 - Commonly combined with [`keep-sorted`](keep-sorted.md) on the same block.
 
 ---

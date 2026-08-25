@@ -290,6 +290,59 @@ ID:1 C
     }
 
     #[test]
+    fn pattern_matches_within_the_trimmed_line() -> anyhow::Result<()> {
+        let validator = KeepUniqueValidator::new();
+        // `^` and `$` anchor to the trimmed line, so entries keep matching once they are nested
+        // inside a list or a block of code.
+        let context = validation_context(
+            "example.py",
+            "# <block keep-unique=\"^ID:(?P<value>\\d+)$\">\n  ID:1\n  ID:1\n# </block>",
+        );
+
+        let violations = validator.validate(context)?.violations;
+
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py")?)
+            .unwrap();
+        // The range still points into the original line, indentation included.
+        assert_eq!(
+            file_violations[0].range,
+            ViolationRange::new(Position::new(3, 6), Position::new(3, 6))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_matching_empty_text_skips_blank_lines() -> anyhow::Result<()> {
+        let validator = KeepUniqueValidator::new();
+        let context = validation_context(
+            "example.py",
+            "# <block keep-unique=\"(?P<value>.*)\">\nA\n\nB\n\n# </block>",
+        );
+
+        let violations = validator.validate(context)?.violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_matching_empty_text_skips_the_line() -> anyhow::Result<()> {
+        let validator = KeepUniqueValidator::new();
+        // An empty match carries no value to compare, so the line counts as unmatched rather than
+        // as an entry that is equal to every other empty match.
+        let context = validation_context(
+            "example.py",
+            "# <block keep-unique=\"(?P<value>\\d*)\">\nabc\ndef\n# </block>",
+        );
+
+        let violations = validator.validate(context)?.violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn pattern_without_a_named_group_returns_a_violation_for_a_duplicate_whole_match()
     -> anyhow::Result<()> {
         let validator = KeepUniqueValidator::new();
@@ -334,17 +387,14 @@ ID:2
     }
 
     #[test]
-    fn pattern_with_spaces_returns_a_violation_for_the_exact_duplicate_only() -> anyhow::Result<()>
-    {
+    fn pattern_spaces_match_within_the_trimmed_line() -> anyhow::Result<()> {
         let validator = KeepUniqueValidator::new();
+        // Spaces the pattern asks for still have to be there inside the entry; the padding around
+        // the entry is not part of what the pattern sees, so the same value written with and
+        // without padding is one value.
         let context = validation_context(
             "example.py",
-            r#"# <block keep-unique=" \d+ ">
- 1 
- 2 
-1
- 1 
-# </block>"#,
+            "# <block keep-unique=\"^ID: (?P<value>\\d+)$\">\n  ID: 1  \nID:2\nID: 1\n# </block>",
         );
 
         let violations = validator.validate(context)?.violations;
@@ -354,10 +404,10 @@ ID:2
             .get(&RepoPath::from_reference("example.py")?)
             .unwrap();
         assert_eq!(file_violations.len(), 1);
-        // The last line ` 1 ` is the only duplicate.
+        // `ID:2` lacks the space the pattern requires, so line 4 is the first repeat of `1`.
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(5, 1), Position::new(5, 3))
+            ViolationRange::new(Position::new(4, 5), Position::new(4, 5))
         );
         Ok(())
     }

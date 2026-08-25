@@ -312,6 +312,59 @@ mod validate_tests {
     }
 
     #[test]
+    fn pattern_matches_within_the_trimmed_line() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        // `^` and `$` anchor to the trimmed line, so entries keep matching once they are nested
+        // inside a list or a block of code.
+        let context = validation_context(
+            "example.py",
+            "# <block keep-sorted keep-sorted-pattern=\"^ID:(?P<value>\\d+)$\">\n  ID:2\n  ID:1\n# </block>",
+        );
+
+        let violations = validator.validate(context)?.violations;
+
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py")?)
+            .unwrap();
+        // The range still points into the original line, indentation included.
+        assert_eq!(
+            file_violations[0].range,
+            ViolationRange::new(Position::new(3, 6), Position::new(3, 6))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_matching_empty_text_skips_blank_lines() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        let context = validation_context(
+            "example.py",
+            "# <block keep-sorted keep-sorted-pattern=\"(?P<value>.*)\">\nA\n\nB\n\n# </block>",
+        );
+
+        let violations = validator.validate(context)?.violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_pattern_matching_empty_text_skips_blank_lines() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        // A blank line holds no number, so it must be skipped rather than reported as a line whose
+        // value cannot be parsed.
+        let context = validation_context(
+            "example.py",
+            "# <block keep-sorted keep-sorted-format=\"numeric\" keep-sorted-pattern=\"(?P<value>\\d*)\">\n1\n\n2\n# </block>",
+        );
+
+        let violations = validator.validate(context)?.violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn block_out_of_ascending_order_returns_a_violation() -> anyhow::Result<()> {
         let validator = KeepSortedValidator::new();
         let context = validation_context(

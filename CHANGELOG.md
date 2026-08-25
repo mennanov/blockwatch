@@ -19,6 +19,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Fixed
 
+- Apply the `keep-unique` and `keep-sorted-pattern` regexes to the trimmed line. A line whose match is empty is now
+  skipped like any other unmatched line. Fixes ([#120](https://github.com/mennanov/blockwatch/issues/120)).
 - Compare numbers exactly in `keep-sorted-format="numeric"` and `same-as-format="numeric"`. Values that exceed the
   precision or the range of a 64-bit float — long identifiers, for instance — no longer compare equal to each other.
   `inf` and `NaN` are no longer accepted as numbers. Fixes
