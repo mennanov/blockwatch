@@ -68,11 +68,30 @@ items = [
 Without `keep-sorted-format="numeric"` that block would fail, since `"10"` is lexicographically less
 than `"2"`.
 
+Values are compared as exact decimals of any length, so identifiers far beyond the range of a 64-bit
+float still order correctly. A value may carry a sign, a fractional part and an exponent
+(`-1`, `.5`, `1e9`); `inf` and `NaN` are not numbers a source file can hold and are rejected.
+
+`_` is accepted as a digit separator, so long literals keep the spelling their language gives them:
+
+```rust
+const LIMITS: [u64; 3] = [
+    // <block keep-sorted keep-sorted-format="numeric">
+    1_000,
+    1_000_000,
+    1_000_000_000,
+    // </block>
+];
+```
+
+A separator must sit between two digits — `_1`, `1_`, `1__0` and `1_.0` are typos, not numbers.
+
 ## Notes
 
 - Blank lines and lines the pattern does not match are ignored, not treated as out of order.
 - Comparison is on the trimmed line, so indentation does not affect ordering.
 - An unrecognized `keep-sorted` or `keep-sorted-format` value is a hard error, not a violation.
+- Under `numeric`, a line whose value is not a number is a hard error too.
 - Pairs naturally with [`keep-unique`](keep-unique.md) on the same block.
 
 ---

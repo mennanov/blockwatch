@@ -12,6 +12,18 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- Accept `_` digit separators in `keep-sorted-format="numeric"` and `same-as-format="numeric"`, so long literals can keep
+  the spelling their language gives them (`1_000_000`). A separator must sit between two digits.
+
+### Fixed
+
+- Compare numbers exactly in `keep-sorted-format="numeric"` and `same-as-format="numeric"`. Values that exceed the
+  precision or the range of a 64-bit float — long identifiers, for instance — no longer compare equal to each other.
+  `inf` and `NaN` are no longer accepted as numbers. Fixes
+  ([#103](https://github.com/mennanov/blockwatch/issues/103)).
+
 ## [0.4.3] - 2026-08-24
 
 ### Added

@@ -3,7 +3,7 @@ use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
     self, ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation,
-    ViolationRange, value_match,
+    ViolationRange, parse_number, value_match,
 };
 use anyhow::{Context, anyhow};
 use regex::Regex;
@@ -221,19 +221,23 @@ fn parse_format(block: &Block) -> anyhow::Result<Format> {
 
 /// Canonicalizes extracted items ahead of comparison.
 ///
-/// Under [`Format::Numeric`] each item is parsed as an `f64` and re-formatted so that different
-/// spellings of the same number (`"10"`, `"10.0"`) compare equal; an item that is not a number
-/// yields `Err` with a human-readable reason, which the caller surfaces as a violation rather than
-/// aborting the run. Under [`Format::Verbatim`] the items are returned unchanged.
+/// Under [`Format::Numeric`] each item is parsed as a number (see [`parse_number`]) and re-formatted
+/// so that different spellings of the same value (`"10"`, `"10.0"`, `"1_0"`) compare equal; an item
+/// that is not a number yields `Err` with a human-readable reason, which the caller surfaces as a
+/// violation rather than aborting the run. Under [`Format::Verbatim`] the items are returned
+/// unchanged.
+///
+/// Normalizing drops the trailing zeros and the exponent notation that would otherwise leave two
+/// spellings of one value differing as strings.
 fn canonicalize(items: Vec<String>, format: &Format) -> Result<Vec<String>, String> {
     match format {
         Format::Verbatim => Ok(items),
         Format::Numeric => items
             .into_iter()
             .map(|item| {
-                item.parse::<f64>()
-                    .map(|number| number.to_string())
-                    .map_err(|_| format!("same-as-format=numeric but \"{item}\" is not a number"))
+                parse_number(&item)
+                    .map(|number| number.normalized().to_string())
+                    .ok_or_else(|| format!("same-as-format=numeric but \"{item}\" is not a number"))
             })
             .collect(),
     }
@@ -637,6 +641,92 @@ mod validate_tests {
         let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
         assert_eq!(file.len(), 1);
         assert_eq!(file[0].code, "same-as");
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_with_integers_beyond_float_precision_returns_a_violation()
+    -> anyhow::Result<()> {
+        // Both identifiers round to the same floating point number, so comparing them as floats
+        // would call two different ids equal.
+        let context = validation_context(
+            "a.py",
+            "# <block same-as=\":b\" same-as-pattern=\"(?P<value>\\d+)\" same-as-format=\"numeric\" same-as-mode=\"single\">\nid = 9007199254740992\n# </block>\n# <block name=\"b\" same-as-pattern=\"(?P<value>\\d+)\">\nid = 9007199254740993\n# </block>",
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert_eq!(file[0].code, "same-as");
+        assert!(
+            file[0]
+                .message
+                .contains("9007199254740992 != 9007199254740993"),
+            "unexpected message: {}",
+            file[0].message
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_with_values_beyond_float_range_returns_a_violation() -> anyhow::Result<()> {
+        // Values this large overflow a floating point number to infinity, which makes every one of
+        // them compare equal to the others.
+        let context = validation_context(
+            "a.py",
+            "# <block same-as=\":b\" same-as-format=\"numeric\" same-as-mode=\"single\">\n1e400\n# </block>\n# <block name=\"b\">\n1e500\n# </block>",
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert_eq!(file[0].code, "same-as");
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_ignores_digit_separators() -> anyhow::Result<()> {
+        // The same quantity spelled with and without separators, as two languages would write it.
+        let context = validation_context(
+            "a.rs",
+            "// <block same-as=\":b\" same-as-format=\"numeric\" same-as-mode=\"single\">\n1_000_000\n// </block>\n// <block name=\"b\">\n1000000\n// </block>",
+        );
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_with_a_misplaced_digit_separator_returns_a_violation() -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.rs",
+            "// <block same-as=\":b\" same-as-format=\"numeric\" same-as-mode=\"single\">\n1_000_\n// </block>\n// <block name=\"b\">\n1000\n// </block>",
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0].message.contains("is not a number"),
+            "unexpected message: {}",
+            file[0].message
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_with_an_infinite_value_returns_a_violation() -> anyhow::Result<()> {
+        // Infinity and NaN are float-specific spellings, not numbers a source file can hold, so
+        // they are rejected like any other non-numeric token even when both sides spell them the
+        // same way.
+        let context = validation_context(
+            "a.py",
+            "# <block same-as=\":b\" same-as-format=\"numeric\" same-as-mode=\"single\">\ninf\n# </block>\n# <block name=\"b\">\ninf\n# </block>",
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0].message.contains("is not a number"),
+            "unexpected message: {}",
+            file[0].message
+        );
         Ok(())
     }
 

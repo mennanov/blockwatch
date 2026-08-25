@@ -2,7 +2,7 @@ use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
 use crate::validators::{
     ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
-    regex_value, trimmed_line_value,
+    parse_number, regex_value, trimmed_line_value,
 };
 use crate::{Position, validators};
 use anyhow::{Context, anyhow};
@@ -27,13 +27,11 @@ impl SortFormat {
         match self {
             Self::Lexicographic => Ok(a.cmp(b)),
             Self::Numeric => {
-                let a_num: f64 = a
-                    .parse()
-                    .map_err(|_| anyhow!("\"{}\" is not a valid number", a))?;
-                let b_num: f64 = b
-                    .parse()
-                    .map_err(|_| anyhow!("\"{}\" is not a valid number", b))?;
-                Ok(a_num.total_cmp(&b_num))
+                let a_num =
+                    parse_number(a).ok_or_else(|| anyhow!("\"{}\" is not a valid number", a))?;
+                let b_num =
+                    parse_number(b).ok_or_else(|| anyhow!("\"{}\" is not a valid number", b))?;
+                Ok(a_num.cmp(&b_num))
             }
         }
     }
@@ -821,6 +819,152 @@ mod validate_tests {
         2
         abc
         10
+        # </block>"#,
+        );
+        let result = validator.validate(context);
+        assert!(result.is_err());
+        let err = format!("{:#}", result.unwrap_err());
+        assert!(
+            err.contains("is not a valid number"),
+            "unexpected error: {err}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_with_integers_beyond_float_precision_out_of_order_returns_a_violation()
+    -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        // Both values round to the same floating point number, so comparing them as floats hides
+        // the swap.
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc" keep-sorted-format="numeric">
+        9007199254740993
+        9007199254740992
+        # </block>"#,
+        );
+        let violations = validator.validate(context)?.violations;
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py")?)
+            .unwrap();
+        assert_eq!(file_violations.len(), 1);
+        assert_eq!(
+            file_violations[0].message,
+            "Block example.py:(unnamed) defined at line 1 has an out-of-order line 3 (asc)"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_with_values_beyond_float_range_out_of_order_returns_a_violation()
+    -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        // Values this large overflow a floating point number to infinity, which makes every one of
+        // them compare equal to the others.
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc" keep-sorted-format="numeric">
+        1e500
+        1e400
+        # </block>"#,
+        );
+        let violations = validator.validate(context)?.violations;
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py")?)
+            .unwrap();
+        assert_eq!(file_violations.len(), 1);
+        assert_eq!(
+            file_violations[0].message,
+            "Block example.py:(unnamed) defined at line 1 has an out-of-order line 3 (asc)"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_treats_negative_zero_as_equal_to_zero() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc" keep-sorted-format="numeric">
+        0
+        -0
+        1
+        # </block>"#,
+        );
+        let violations = validator.validate(context)?.violations;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_with_digit_separators_sorted_returns_no_violations() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc" keep-sorted-format="numeric">
+        999
+        1_000
+        1_000_000
+        # </block>"#,
+        );
+        let violations = validator.validate(context)?.violations;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_with_digit_separators_out_of_order_returns_a_violation() -> anyhow::Result<()>
+    {
+        let validator = KeepSortedValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc" keep-sorted-format="numeric">
+        1_000_000
+        1_000
+        # </block>"#,
+        );
+        let violations = validator.validate(context)?.violations;
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py")?)
+            .unwrap();
+        assert_eq!(file_violations.len(), 1);
+        assert_eq!(
+            file_violations[0].message,
+            "Block example.py:(unnamed) defined at line 1 has an out-of-order line 3 (asc)"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_with_a_misplaced_digit_separator_returns_an_error() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc" keep-sorted-format="numeric">
+        1
+        1_000_
+        # </block>"#,
+        );
+        let result = validator.validate(context);
+        assert!(result.is_err());
+        let err = format!("{:#}", result.unwrap_err());
+        assert!(
+            err.contains("is not a valid number"),
+            "unexpected error: {err}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_with_an_infinite_value_returns_an_error() -> anyhow::Result<()> {
+        let validator = KeepSortedValidator::new();
+        // Infinity and NaN are float-specific spellings, not numbers a source file can hold.
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-sorted="asc" keep-sorted-format="numeric">
+        1
+        inf
         # </block>"#,
         );
         let result = validator.validate(context);

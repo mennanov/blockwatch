@@ -107,6 +107,14 @@ export const timeout = /* <block name="timeout"> */ 60 /* </block> */; // second
 Rust's `from_secs_f64` takes a float (`60.0`) while TypeScript uses a plain `60`; `numeric` parses both and they compare
 equal. Under text comparison, `"60.0" != "60"` would fail.
 
+Values are compared as exact decimals of any length, so two identifiers far beyond the range of a 64-bit float never
+compare equal by accident. A value may carry a sign, a fractional part and an exponent (`-1`, `.5`, `1e9`); `inf` and
+`NaN` are not numbers a source file can hold and are reported like any other non-numeric token.
+
+`_` is accepted as a digit separator, so each side keeps the spelling its language gives it — a Rust `1_000_000` and a
+JSON `1000000` are the same value. A separator must sit between two digits: `_1`, `1_`, `1__0` and `1_.0` are typos, not
+numbers.
+
 ## Notes
 
 - **Which block governs what.** The source block's `same-as-mode` and `same-as-format` govern the comparison. Each
