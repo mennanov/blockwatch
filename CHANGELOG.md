@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.5.0] - 2026-08-26
+
 ### Changed
 
 - A `check-ai-pattern` that matches nothing in its block is now reported as a violation and no request is made. The
