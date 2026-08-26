@@ -100,6 +100,15 @@ fn with_pattern_extracts_matching_content() {
 }
 
 #[test]
+fn with_pattern_passes_every_match_in_the_block() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/check_lua/pattern_many_matches.py");
+    let output = cmd.output().unwrap();
+
+    output.assert().success();
+}
+
+#[test]
 fn with_pattern_no_match_passes_empty_content() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/check_lua/pattern_no_match.py");

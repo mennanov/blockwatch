@@ -571,29 +571,32 @@ pub(in crate::validators) fn regex_value<'a>(
     Some((m.as_str(), start..=start + m.as_str().chars().count() - 1))
 }
 
+/// The content for the `*-pattern` attribute extracted from the block.
+pub(in crate::validators) enum PatternContent<'c> {
+    /// No `*-pattern` attribute: the block's whole content (trimmed).
+    Whole(&'c str),
+    /// A `*-pattern` attribute: the value of every match, in the order they appear in the block.
+    Matches(Vec<&'c str>),
+}
+
 /// Returns the content for the `*-pattern` attribute, e.g. `check-ai-pattern` for `check-ai`.
-///
-/// Returns the matched content (also handles the named `value` regexp group). An empty string may
-/// be returned if the pattern does not match. Returns the whole block's content if there is no
-/// attribute with the name `pattern_attribute`.
 pub(in crate::validators) fn block_content_for_pattern<'c>(
     block_with_context: &BlockWithContext,
     file_content: &'c str,
     pattern_attribute: &str,
-) -> anyhow::Result<&'c str> {
-    let content = if let Some(pattern) = block_with_context.block.attributes.get(pattern_attribute)
-    {
-        let re = regex::Regex::new(pattern)
-            .with_context(|| format!("{pattern_attribute} is not a valid regex"))?;
-        if let Some(captures) = re.captures(block_with_context.block.content(file_content)) {
-            value_match(&captures).map_or("", |m| m.as_str())
-        } else {
-            ""
-        }
-    } else {
-        block_with_context.block.content(file_content).trim()
+) -> anyhow::Result<PatternContent<'c>> {
+    let content = block_with_context.block.content(file_content);
+    let Some(pattern) = block_with_context.block.attributes.get(pattern_attribute) else {
+        return Ok(PatternContent::Whole(content.trim()));
     };
-    Ok(content)
+    let re = regex::Regex::new(pattern)
+        .with_context(|| format!("{pattern_attribute} is not a valid regex"))?;
+    Ok(PatternContent::Matches(
+        re.captures_iter(content)
+            .filter_map(|captures| value_match(&captures).map(|matched| matched.as_str()))
+            .filter(|value| !value.is_empty())
+            .collect(),
+    ))
 }
 
 /// Parses a numeric value from string.

@@ -58,6 +58,12 @@ function validate(ctx, content)
         return dep_err
     end
 
+    -- The block's `check-lua-pattern` selects the model name, so `content` is an array of matches.
+    local configured_model = content[1]
+    if not configured_model then
+        return "check-lua-pattern matched no model name in the block"
+    end
+
     local api_key = os.getenv("BLOCKWATCH_AI_API_KEY")
     local api_url = os.getenv("BLOCKWATCH_AI_API_URL")
 
@@ -71,12 +77,12 @@ function validate(ctx, content)
         return "no base nano model (gpt-N-nano) found in API response"
     end
 
-    if best_name == content then
+    if best_name == configured_model then
         return nil
     end
 
     return string.format(
         "expected %q but the latest nano model is %q",
-        content, best_name
+        configured_model, best_name
     )
 end

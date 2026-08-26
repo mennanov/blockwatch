@@ -8,11 +8,11 @@ string when it fails.
 
 ## Syntax
 
-| Attribute           | Value                                                 | Default     |
-|---------------------|-------------------------------------------------------|-------------|
-| `check-lua`         | path to a `.lua` script, relative to the project root | —           |
-| `check-lua-pattern` | regex; the `(?P<value>…)` group, or the whole match   | whole block |
-| `check-lua-timeout` | whole number of seconds (≥ 1) the script may run      | `30`        |
+| Attribute           | Value                                                     | Default     |
+|---------------------|-----------------------------------------------------------|-------------|
+| `check-lua`         | path to a `.lua` script, relative to the project root     | —           |
+| `check-lua-pattern` | regex; every match's `(?P<value>…)` group, or whole match | whole block |
+| `check-lua-timeout` | whole number of seconds (≥ 1) the script may run          | `30`        |
 
 The script path must point to a file inside the repository. Paths that escape it — absolute paths outside the project,
 `../` traversal, or symlinks pointing outward — are rejected.
@@ -56,23 +56,44 @@ end
     - `ctx.affects` — present only when the block also has an [`affects`](affects.md) attribute. A 1-based array of the
       blocks this block affects, each a table with `file`, `name`, and (trimmed)
       `content`. `file` uses the same format as `ctx.file`. References to blocks that do not exist are skipped.
-- `content` — the trimmed text content of the block, or the extracted value if `check-lua-pattern`
-  is set.
+- `content` — a **string** holding the trimmed text content of the block, or, when
+  `check-lua-pattern` is set, a **1-based array** of the values the pattern extracted.
 
 ## Narrowing the input with `check-lua-pattern`
 
-`check-lua-pattern` extracts a single value from the block and passes that to the script instead of the whole content,
-so the script does not have to re-parse the surrounding syntax. Unlike
-`same-as-pattern`, it matches **once against the entire block**, not per line, and `content` is the empty string when
-nothing matches.
+`check-lua-pattern` extracts values from the block and passes those to the script instead of the whole content. The
+`content` in the Lua script becomes a 1-based array to accommodate all the matches.
 
-This repo uses it to check that the default model constant is current:
+```python
+prices = [
+    # <block check-lua="scripts/check_prices.lua" check-lua-pattern="\$(?P<value>\d+)">
+    "Item A: $50",
+    "Item B: $150",
+    # </block>
+]
+```
+
+```lua
+function validate(ctx, content)
+    for _, price in ipairs(content) do   -- content is { "50", "150" }
+        if tonumber(price) >= 100 then
+            return "price $" .. price .. " is not under $100"
+        end
+    end
+    return nil
+end
+```
+
+A script that wants a single value reads `content[1]`:
 
 ```rust
 // <block check-lua="scripts/check_latest_gpt_nano_model.lua" check-lua-pattern='str = "(?P<value>[^"]+)"'>
 const DEFAULT_MODEL_NAME: &str = "gpt-5-nano";
 // </block>
 ```
+
+Unlike `same-as-pattern`, the regex runs against the entire block rather than line by line, so a pattern may span
+several lines.
 
 ## Checking affected blocks
 

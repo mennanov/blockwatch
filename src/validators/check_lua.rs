@@ -3,8 +3,8 @@ use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::parse_block_references;
 use crate::validators::{
-    ValidationContext, ValidationReport, ValidatorAsync, ValidatorDetector, ValidatorType,
-    Violation, ViolationRange, block_content_for_pattern,
+    PatternContent, ValidationContext, ValidationReport, ValidatorAsync, ValidatorDetector,
+    ValidatorType, Violation, ViolationRange, block_content_for_pattern,
 };
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -107,11 +107,16 @@ impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
                     let file_blocks = &context.blocks[&file_path];
                     let block_with_context = &file_blocks.blocks_with_context[block_idx];
                     let script_path = &block_with_context.block.attributes["check-lua"];
-                    let content = block_content_for_pattern(
+                    let content = match block_content_for_pattern(
                         block_with_context,
                         &file_blocks.file_content,
                         "check-lua-pattern",
-                    )?;
+                    )? {
+                        PatternContent::Whole(content) => LuaContent::Text(content.to_string()),
+                        PatternContent::Matches(matches) => {
+                            LuaContent::Matches(matches.into_iter().map(str::to_string).collect())
+                        }
+                    };
                     let affected_blocks =
                         resolve_affected_blocks(&context, &file_path, &block_with_context.block)?;
 
@@ -160,7 +165,7 @@ async fn run_lua_script<Fs: FileSystem>(
     file_system: &Fs,
     file_path: &RepoPath,
     block_with_context: &BlockWithContext,
-    content: &str,
+    content: LuaContent,
     affected_blocks: &[AffectedBlock],
 ) -> anyhow::Result<Option<String>> {
     let timeout = parse_check_lua_timeout(&block_with_context.block)?;
@@ -200,7 +205,15 @@ struct LuaScriptInputs {
     /// `Some` exactly when the block carries an `affects` attribute, so `ctx.affects` is present in
     /// the script precisely when the attribute is.
     affects: Option<Vec<LuaAffected>>,
-    content: String,
+    content: LuaContent,
+}
+
+/// The `content` argument handed to the `validate()` function in the Lua script.
+enum LuaContent {
+    /// The block's whole trimmed content, passed to the script as a string.
+    Text(String),
+    /// The values `check-lua-pattern` extracted, passed to the script as a 1-based array.
+    Matches(Vec<String>),
 }
 
 /// One affected block exposed to a script as an entry of `ctx.affects`.
@@ -219,7 +232,7 @@ impl LuaScriptInputs {
         timeout: Duration,
         file_path: &RepoPath,
         block_with_context: &BlockWithContext,
-        content: &str,
+        content: LuaContent,
         affected_blocks: &[AffectedBlock],
     ) -> Self {
         let block = &block_with_context.block;
@@ -245,7 +258,7 @@ impl LuaScriptInputs {
                 .map(|(key, value)| (key.clone(), value.clone()))
                 .collect(),
             affects,
-            content: content.to_string(),
+            content,
         }
     }
 }
@@ -313,8 +326,19 @@ fn run_lua_script_sync(inputs: LuaScriptInputs) -> anyhow::Result<Option<String>
             .context("failed to set ctx.affects")?;
     }
 
+    let content: mlua::Value = match &inputs.content {
+        LuaContent::Text(text) => mlua::Value::String(
+            lua.create_string(text.as_str())
+                .context("failed to build the content string")?,
+        ),
+        LuaContent::Matches(matches) => mlua::Value::Table(
+            lua.create_sequence_from(matches.iter().map(String::as_str))
+                .context("failed to build the content array")?,
+        ),
+    };
+
     let result: mlua::Value = validate_fn
-        .call((ctx_table, inputs.content.as_str()))
+        .call((ctx_table, content))
         .with_context(|| format!("failed to call validate() in {}", inputs.script_path))?;
 
     match result {
@@ -607,8 +631,8 @@ name: Alice, id: 42
             "check.lua",
             r#"
 function validate(ctx, content)
-    if content ~= "id: 42" then
-        return "expected 'id: 42' but got '" .. content .. "'"
+    if content[1] ~= "id: 42" then
+        return "expected 'id: 42' but got '" .. tostring(content[1]) .. "'"
     end
     return nil
 end
@@ -636,8 +660,135 @@ name: Alice, id: 42
             "check.lua",
             r#"
 function validate(ctx, content)
-    if content ~= "42" then
-        return "expected '42' but got '" .. content .. "'"
+    if content[1] ~= "42" then
+        return "expected '42' but got '" .. tostring(content[1]) .. "'"
+    end
+    return nil
+end
+"#,
+        )])
+        .validate(context)
+        .await?
+        .violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn block_with_a_check_lua_pattern_passes_every_match_in_the_block() -> anyhow::Result<()>
+    {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" check-lua-pattern="id: (?P<value>\d+)">
+name: Alice, id: 42
+name: Bob, id: 7
+# </block>"#,
+        );
+
+        // A pattern narrows what the script sees; it must never hide part of the block from it.
+        let violations = validator(&[(
+            "check.lua",
+            r#"
+function validate(ctx, content)
+    if #content ~= 2 then
+        return "expected 2 matches, got " .. #content
+    end
+    if content[1] ~= "42" or content[2] ~= "7" then
+        return "unexpected matches: " .. table.concat(content, ",")
+    end
+    return nil
+end
+"#,
+        )])
+        .validate(context)
+        .await?
+        .violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn block_with_a_check_lua_pattern_matching_nothing_passes_an_empty_table()
+    -> anyhow::Result<()> {
+        // A pattern that matches nothing is not a violation (as in `check-ai`).
+        // Lua script is responsible for checking the content.
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" check-lua-pattern="zzz_no_match">
+name: Alice, id: 42
+# </block>"#,
+        );
+
+        let violations = validator(&[(
+            "check.lua",
+            r#"
+function validate(ctx, content)
+    if type(content) ~= "table" then
+        return "expected a table, got " .. type(content)
+    end
+    if #content ~= 0 then
+        return "expected no matches, got " .. #content
+    end
+    return nil
+end
+"#,
+        )])
+        .validate(context)
+        .await?
+        .violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn block_without_a_check_lua_pattern_passes_the_content_as_a_string() -> anyhow::Result<()>
+    {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua">
+name: Alice, id: 42
+# </block>"#,
+        );
+
+        let violations = validator(&[(
+            "check.lua",
+            r#"
+function validate(ctx, content)
+    if content ~= "name: Alice, id: 42" then
+        return "expected the whole block as a string, got " .. type(content)
+    end
+    return nil
+end
+"#,
+        )])
+        .validate(context)
+        .await?
+        .violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn check_lua_pattern_can_match_across_lines() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" check-lua-pattern="(?s)BEGIN(?P<value>.*?)END">
+BEGIN
+middle
+END
+# </block>"#,
+        );
+
+        let violations = validator(&[(
+            "check.lua",
+            r#"
+function validate(ctx, content)
+    if content[1] ~= "\nmiddle\n" then
+        return "expected '\nmiddle\n' but got '" .. tostring(content[1]) .. "'"
     end
     return nil
 end

@@ -5,10 +5,10 @@ express — "must mention the company name", "no TODOs left", "the tone matches 
 
 ## Syntax
 
-| Attribute          | Value                                                    | Default |
-|--------------------|----------------------------------------------------------|---------|
-| `check-ai`         | the condition, in natural language                        | —       |
-| `check-ai-pattern` | regex; the `(?P<value>…)` group, or the whole match       | whole block |
+| Attribute          | Value                                                     | Default     |
+|--------------------|-----------------------------------------------------------|-------------|
+| `check-ai`         | the condition, in natural language                        | —           |
+| `check-ai-pattern` | regex; every match's `(?P<value>…)` group, or whole match | whole block |
 
 ## Example
 
@@ -31,6 +31,10 @@ prices = [
     # </block>
 ]
 ```
+
+Multiple matches are concatenated with `\n` (newline).
+
+A pattern that matches nothing is reported as a violation.
 
 ## Configuration
 

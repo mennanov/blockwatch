@@ -12,7 +12,26 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Changed
+
+- A `check-ai-pattern` that matches nothing in its block is now reported as a violation and no request is made. The
+  model used to be sent an empty string, answer that it met the condition, and leave the block counted as checked
+  without any of its content having been examined — so a pattern broken by a typo or by content that drifted passed
+  quietly. `check-lua-pattern` is unchanged: its script still receives an empty array and decides for itself.
+
+- **Breaking:** a `check-lua` script whose block sets `check-lua-pattern` now receives `content` as a 1-based array of
+  the extracted values instead of a string. A script that expects a single value reads `content[1]`. The argument is an
+  array whenever the attribute is present — a single match gives a one-element array and a pattern that matches nothing
+  gives an empty array — so a script never has to branch on the type of its argument. Blocks without
+  `check-lua-pattern` are unaffected: `content` is still the block's trimmed text.
+
 ### Fixed
+
+- Send every match to `check-ai` and `check-lua` when `check-ai-pattern` / `check-lua-pattern` is set. Only the first
+  match in the block was extracted, so the model or the script silently passed on content it never saw — a block of
+  prices checked with `check-ai-pattern="\$(?P<value>\d+)"` only ever showed the first price. `check-ai` receives the
+  values joined by newlines, `check-lua` receives them as an array. Fixes
+  ([#125](https://github.com/mennanov/blockwatch/issues/125)).
 
 - Scan dot-prefixed files and directories, such as `.github/`. The repository walk dropped them before the file patterns
   were applied, so blocks there were never validated and an explicit `blockwatch ".github/**"` reported nothing. The

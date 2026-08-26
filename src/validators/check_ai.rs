@@ -2,8 +2,8 @@ use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    ValidationContext, ValidationReport, ValidatorAsync, ValidatorDetector, ValidatorType,
-    Violation, ViolationRange, block_content_for_pattern,
+    PatternContent, ValidationContext, ValidationReport, ValidatorAsync, ValidatorDetector,
+    ValidatorType, Violation, ViolationRange, block_content_for_pattern,
 };
 use anyhow::{Context, anyhow};
 use async_openai::Client;
@@ -15,6 +15,7 @@ use async_openai::types::chat::{
 use async_trait::async_trait;
 use secrecy::ExposeSecret;
 use serde::Serialize;
+use std::borrow::Cow;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::task::JoinSet;
@@ -82,13 +83,26 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
                     let file_blocks = &context.blocks[&file_path];
                     let block_with_context = &file_blocks.blocks_with_context[block_idx];
                     let condition = &block_with_context.block.attributes["check-ai"];
-                    let content = block_content_for_pattern(
+                    // A prompt can only carry text, so the extracted values are flattened into one
+                    // newline-separated blob for the model to read.
+                    let content = match block_content_for_pattern(
                         block_with_context,
                         &file_blocks.file_content,
                         "check-ai-pattern",
-                    )?;
+                    )? {
+                        PatternContent::Whole(content) => Cow::Borrowed(content),
+                        PatternContent::Matches(matches) if matches.is_empty() => {
+                            let violation = create_pattern_no_match_violation(
+                                &file_path,
+                                &block_with_context.block,
+                                &block_with_context.block.attributes["check-ai-pattern"],
+                            )?;
+                            return anyhow::Ok((file_path, vec![violation]));
+                        }
+                        PatternContent::Matches(matches) => Cow::Owned(matches.join("\n")),
+                    };
 
-                    let result = client.check_block(condition, content).await;
+                    let result = client.check_block(condition, &content).await;
                     let violation =
                         Self::process_ai_response(&file_path, block_with_context, result)?;
                     anyhow::Ok((file_path, Vec::from_iter(violation)))
@@ -135,21 +149,63 @@ fn create_violation(
     block: &Block,
     ai_message: &str,
 ) -> anyhow::Result<Violation> {
-    let details = serde_json::to_value(CheckAiViolation {
-        condition: block
-            .attributes
-            .get("check-ai")
-            .expect("check-ai attribute must be present")
-            .trim(),
-        ai_message: Some(ai_message),
-    })
-    .context("failed to serialize CheckAiDetails")?;
     let error_message = format!(
         "Block {}:{} defined at line {} failed AI check: {ai_message}",
         file_path.display(),
         block.name_display(),
         block.start_tag_position_range.start().line,
     );
+    block_violation(
+        block,
+        error_message,
+        CheckAiViolation {
+            condition: condition_of(block),
+            ai_message: Some(ai_message),
+            pattern: None,
+        },
+    )
+}
+
+/// Reports a `check-ai-pattern` that matches nothing from its block.
+fn create_pattern_no_match_violation(
+    file_path: &Path,
+    block: &Block,
+    pattern: &str,
+) -> anyhow::Result<Violation> {
+    let error_message = format!(
+        "Block {}:{} defined at line {} was not checked: check-ai-pattern \"{pattern}\" matched nothing in the block",
+        file_path.display(),
+        block.name_display(),
+        block.start_tag_position_range.start().line,
+    );
+    block_violation(
+        block,
+        error_message,
+        CheckAiViolation {
+            condition: condition_of(block),
+            ai_message: None,
+            pattern: Some(pattern),
+        },
+    )
+}
+
+/// The block's `check-ai` condition.
+fn condition_of(block: &Block) -> &str {
+    block
+        .attributes
+        .get("check-ai")
+        .expect("check-ai attribute must be present")
+        .trim()
+}
+
+/// Builds a `check-ai` violation spanning the block's start tag, shared by everything the validator
+/// reports so the range and severity are decided in one place.
+fn block_violation(
+    block: &Block,
+    error_message: String,
+    details: CheckAiViolation,
+) -> anyhow::Result<Violation> {
+    let details = serde_json::to_value(details).context("failed to serialize CheckAiDetails")?;
     Ok(Violation::new(
         ViolationRange::new(
             block.start_tag_position_range.start().clone(),
@@ -202,6 +258,9 @@ struct CheckAiViolation<'a> {
     condition: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     ai_message: Option<&'a str>,
+    /// Present only when the block's `check-ai-pattern` matches nothing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pattern: Option<&'a str>,
 }
 
 /// The single call [`CheckAiValidator`] makes against a model provider.
@@ -447,6 +506,79 @@ I like banana and apples
         );
         let violations = validator.validate(context).await?.violations;
         assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn block_with_a_check_ai_pattern_sends_every_match_in_the_block() -> anyhow::Result<()> {
+        let validator = CheckAiValidator::with_client(FakeClient::new(HashMap::from([(
+            ("Prices must be under $100".into(), "50\n150".into()),
+            FakeAiResponse::Some("Item B costs $150.".into()),
+        )])));
+        let context = validation_context(
+            "example.py",
+            r#"prices = [
+    # <block check-ai="Prices must be under $100" check-ai-pattern="\$(?P<value>\d+)">
+    "Item A: $50",
+    "Item B: $150",
+    # </block>
+]"#,
+        );
+        let violations = validator.validate(context).await?.violations;
+
+        assert_eq!(
+            violations[&RepoPath::from_reference("example.py")?].len(),
+            1
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn check_ai_pattern_matches_that_are_empty_are_skipped() -> anyhow::Result<()> {
+        let validator = CheckAiValidator::with_client(FakeClient::new(HashMap::from([(
+            ("must list the ids".into(), "1\n22".into()),
+            FakeAiResponse::None,
+        )])));
+        // "\d*" matches the empty string at every position that does not start a digit run. Those
+        // carry no value, so they must not pad the extracted content with blank lines.
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-ai="must list the ids" check-ai-pattern="\d*">
+a1
+b22
+# </block>"#,
+        );
+        let violations = validator.validate(context).await?.violations;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn block_with_a_check_ai_pattern_that_matches_nothing_returns_a_violation()
+    -> anyhow::Result<()> {
+        let validator = CheckAiValidator::with_client(FakeClient::default());
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-ai="must mention banana" check-ai-pattern="zzz_no_match">
+I like apples
+# </block>"#,
+        );
+        let report = validator.validate(context).await?;
+
+        let file_violations = &report.violations[&RepoPath::from_reference("example.py")?];
+        assert_eq!(file_violations.len(), 1);
+        assert_eq!(file_violations[0].code, "check-ai");
+        assert_eq!(
+            file_violations[0].message,
+            "Block example.py:(unnamed) defined at line 1 was not checked: check-ai-pattern \"zzz_no_match\" matched nothing in the block"
+        );
+        assert_eq!(
+            file_violations[0].data,
+            Some(json!({
+                "condition": "must mention banana",
+                "pattern": "zzz_no_match"
+            }))
+        );
         Ok(())
     }
 
