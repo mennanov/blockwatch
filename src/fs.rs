@@ -1,8 +1,15 @@
 use crate::repo_path::RepoPath;
 use anyhow::{Context, anyhow};
 use globset::GlobSet;
-use ignore::Walk;
+use ignore::WalkBuilder;
 use std::path::{Path, PathBuf};
+
+/// Directory names a version control system keeps its own state in.
+///
+/// A superset of the markers that identify a repository root.
+// <block name="vcs-metadata-directories">
+const VCS_METADATA_DIRECTORY_NAMES: [&str; 4] = [".git", ".hg", ".jj", ".svn"];
+// </block>
 
 /// Every read the program performs, behind a trait.
 ///
@@ -96,19 +103,29 @@ impl FileSystem for FileSystemImpl {
     fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>> {
         // Clone root_path for the closure.
         let root_path = self.root_path.clone();
-        Walk::new(&self.root_path).filter_map(move |entry| match entry {
-            Ok(entry) => {
-                let path = entry.path();
-                if path.is_dir() {
-                    return None;
+        WalkBuilder::new(&self.root_path)
+            // Hidden files should not be ignored as e.g. `.github` directory should be scanned.
+            .hidden(false)
+            .filter_entry(|entry| {
+                !entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| VCS_METADATA_DIRECTORY_NAMES.contains(&name))
+            })
+            .build()
+            .filter_map(move |entry| match entry {
+                Ok(entry) => {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        return None;
+                    }
+                    // Relative to the root. A name that is not valid UTF-8 cannot be written in a
+                    // glob or a block reference, so it is skipped rather than failing the run.
+                    let relative_path = path.strip_prefix(&root_path).unwrap_or(path);
+                    RepoPath::from_relative(relative_path).ok().map(Ok)
                 }
-                // Relative to the root. A name that is not valid UTF-8 cannot be written in a
-                // glob or a block reference, so it is skipped rather than failing the run.
-                let relative_path = path.strip_prefix(&root_path).unwrap_or(path);
-                RepoPath::from_relative(relative_path).ok().map(Ok)
-            }
-            Err(err) => Some(Err(anyhow::Error::from(err))),
-        })
+                Err(err) => Some(Err(anyhow::Error::from(err))),
+            })
     }
 }
 
@@ -153,6 +170,67 @@ mod file_system_impl_tests {
         let path = root.path().join(name);
         std::fs::write(&path, content).unwrap();
         (root, path)
+    }
+
+    /// Writes `content` to `relative_path` below `root`, creating the intermediate directories.
+    fn write_file(root: &Path, relative_path: &str, content: &str) {
+        let path = root.join(relative_path);
+        std::fs::create_dir_all(path.parent().expect("a file path has a parent")).unwrap();
+        std::fs::write(&path, content).unwrap();
+    }
+
+    /// The paths [`FileSystem::walk`] yields, relative to the root and sorted for comparison.
+    fn walked_paths(file_system: &FileSystemImpl) -> anyhow::Result<Vec<String>> {
+        let mut paths = file_system
+            .walk()
+            .map(|path| path.map(|path| path.as_str().to_owned()))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        paths.sort();
+        Ok(paths)
+    }
+
+    #[test]
+    fn walk_yields_files_inside_hidden_directories() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        write_file(root.path(), ".github/workflows/ci.yml", "name: CI");
+        let file_system = FileSystemImpl::new(root.path())?;
+
+        assert_eq!(walked_paths(&file_system)?, [".github/workflows/ci.yml"]);
+        Ok(())
+    }
+
+    #[test]
+    fn walk_yields_hidden_files() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        write_file(root.path(), ".eslintrc.yml", "root: true");
+        let file_system = FileSystemImpl::new(root.path())?;
+
+        assert_eq!(walked_paths(&file_system)?, [".eslintrc.yml"]);
+        Ok(())
+    }
+
+    #[test]
+    fn walk_skips_version_control_metadata_directories() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        for marker in [".git", ".hg", ".jj", ".svn"] {
+            write_file(root.path(), &format!("{marker}/config.yml"), "internal");
+        }
+        write_file(root.path(), "src/main.yml", "name: app");
+        let file_system = FileSystemImpl::new(root.path())?;
+
+        assert_eq!(walked_paths(&file_system)?, ["src/main.yml"]);
+        Ok(())
+    }
+
+    #[test]
+    fn walk_skips_version_control_metadata_directories_below_the_root() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        write_file(root.path(), "vendor/dep/.git/config.yml", "internal");
+        write_file(root.path(), "vendor/dep/main.yml", "name: dep");
+        let file_system = FileSystemImpl::new(root.path())?;
+
+        assert_eq!(walked_paths(&file_system)?, ["vendor/dep/main.yml"]);
+        Ok(())
     }
 
     #[test]

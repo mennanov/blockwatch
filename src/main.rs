@@ -219,7 +219,9 @@ fn process_violations(violations: &HashMap<RepoPath, Vec<Violation>>) -> anyhow:
 fn repository_root_path(current_path: PathBuf) -> anyhow::Result<PathBuf> {
     current_path
         .ancestors()
+        // <block affects="src/fs.rs:vcs-metadata-directories">
         .find(|path| path.join(".git").exists() || path.join(".hg").exists())
+        // </block>
         .map(|path| path.to_path_buf())
         .ok_or_else(|| anyhow::anyhow!("Could not find the repository root directory"))
 }

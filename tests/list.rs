@@ -104,6 +104,35 @@ fn list_subcommand_with_ignore_excludes_files() {
 }
 
 #[test]
+fn list_subcommand_lists_blocks_inside_hidden_directories() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("list")
+        .arg("tests/testdata/hidden/.github/**/*.yml");
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.clone().assert().success();
+
+    let actual: Value =
+        serde_json::from_slice(&output.stdout).expect("Failed to parse JSON output");
+
+    let expected = json!({
+        "tests/testdata/hidden/.github/workflows/ci.yml": [
+            {
+                "name": "workflow-name",
+                "line": 1,
+                "column": 3,
+                "is_content_modified": false,
+                "attributes": {
+                    "name": "workflow-name",
+                }
+            }
+        ]
+    });
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn list_subcommand_with_no_args_checks_all_files() {
     let mut cmd = cargo_bin_cmd!();
     cmd.current_dir("tests/testdata/list");

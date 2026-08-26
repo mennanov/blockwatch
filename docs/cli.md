@@ -24,6 +24,8 @@ By default, `blockwatch` scans every file in the repository, respecting `.gitign
 repository root, whichever directory you run from. Linked worktrees and submodules are supported too: a run inside one
 checks that repository only.
 
+VCS directories like `.git`, `.hg`, `.jj` and `.svn` are skipped.
+
 ```shell
 # Check everything in the repository
 blockwatch

@@ -12,6 +12,13 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Fixed
+
+- Scan dot-prefixed files and directories, such as `.github/`. The repository walk dropped them before the file patterns
+  were applied, so blocks there were never validated and an explicit `blockwatch ".github/**"` reported nothing. The
+  directories a version control system keeps its state in (`.git`, `.hg`, `.jj`, `.svn`) are still skipped, and
+  `.gitignore` and `--ignore` still apply. Fixes ([#100](https://github.com/mennanov/blockwatch/issues/100)).
+
 ## [0.4.4] - 2026-08-25
 
 ### Added
