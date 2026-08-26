@@ -710,6 +710,39 @@ end
     }
 
     #[tokio::test]
+    async fn check_lua_pattern_matches_that_are_empty_are_skipped() -> anyhow::Result<()> {
+        // "\d*" produces 6 matches, 4 of which are empty.
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" check-lua-pattern="\d*">
+a1
+b22
+# </block>"#,
+        );
+
+        let violations = validator(&[(
+            "check.lua",
+            r#"
+function validate(ctx, content)
+    if #content ~= 2 then
+        return "expected 2 matches, got " .. #content
+    end
+    if content[1] ~= "1" or content[2] ~= "22" then
+        return "unexpected matches: " .. table.concat(content, ",")
+    end
+    return nil
+end
+"#,
+        )])
+        .validate(context)
+        .await?
+        .violations;
+
+        assert!(violations.is_empty(), "{violations:?}");
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn block_with_a_check_lua_pattern_matching_nothing_passes_an_empty_table()
     -> anyhow::Result<()> {
         // A pattern that matches nothing is not a violation (as in `check-ai`).

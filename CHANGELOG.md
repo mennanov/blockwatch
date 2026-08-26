@@ -27,10 +27,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Fixed
 
-- Send every match to `check-ai` and `check-lua` when `check-ai-pattern` / `check-lua-pattern` is set. Only the first
-  match in the block was extracted, so the model or the script silently passed on content it never saw — a block of
-  prices checked with `check-ai-pattern="\$(?P<value>\d+)"` only ever showed the first price. `check-ai` receives the
-  values joined by newlines, `check-lua` receives them as an array. Fixes
+- Use every match a `*-pattern` finds, in `check-ai`, `check-lua` and `same-as`. Each of them kept only the first match
+  and silently ignored the rest. Now `check-ai` receives the values joined by newlines, `check-lua` receives them as an
+  array, and `same-as` compares them as separate items. Matches whose value is empty are skipped everywhere. One
+  consequence for `same-as`: because every line's matches now flow into one list, two blocks holding the same values
+  across the lines now agree where they used to differ earlier. Fixes
   ([#125](https://github.com/mennanov/blockwatch/issues/125)).
 
 - Scan dot-prefixed files and directories, such as `.github/`. The repository walk dropped them before the file patterns

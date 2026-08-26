@@ -105,10 +105,24 @@ impl<Fs: FileSystem + 'static> ValidatorSync for SameAsValidator<Fs> {
 
 /// Extracts a block's comparable items.
 ///
-/// With a `same-as-pattern` attribute, each content line is matched against the regex and the
-/// `value` named group (or the whole match, if there is no such group) becomes one item; lines that
-/// do not match are skipped. Without a pattern, the comparable value is the block's normalized whole
-/// content as a single item.
+/// With a `same-as-pattern` attribute, every match on every content line contributes its `value`
+/// named group (or the whole match, if there is no such group) as one item; lines that do not match
+/// are skipped. A pattern selects which parts of a block take part in the comparison.
+/// Matches whose value is empty carry nothing to compare and are skipped.
+///
+/// The regex runs against each trimmed line rather than the whole block, so `^` and `$` anchor to
+/// the entry rather than to its indentation, and the items stay in the order the two sides list
+/// them.
+///
+/// Line boundaries are deliberately not preserved: every line's matches flow into one flat list, so
+/// two blocks listing the same values in the same order agree however those values are spread over
+/// lines. That is what lets a Rust file of one constant per line be compared against a Markdown
+/// list that packs several values onto a line — the point of the attribute is to compare the values
+/// a block yields, not its layout. The cost is that regrouping alone is invisible here; a block
+/// whose line structure is itself meaningful wants no pattern at all, since the pattern-free path
+/// below compares the content newline by newline.
+///
+/// Without a pattern, the comparable value is the block's normalized whole content as a single item.
 fn extract_items(block: &Block, file_content: &str) -> anyhow::Result<Vec<String>> {
     let content = block.content(file_content);
     let Some(pattern) = block.attributes.get("same-as-pattern") else {
@@ -118,10 +132,12 @@ fn extract_items(block: &Block, file_content: &str) -> anyhow::Result<Vec<String
         .map_err(|e| anyhow!("same-as-pattern is not a valid regex ({pattern}): {e}"))?;
     Ok(content
         .lines()
-        .filter_map(|line| {
-            let captures = regex.captures(line.trim())?;
-            let matched = value_match(&captures)?;
-            Some(matched.as_str().to_string())
+        .flat_map(|line| {
+            regex
+                .captures_iter(line.trim())
+                .filter_map(|captures| value_match(&captures).map(|matched| matched.as_str()))
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
         })
         .collect())
 }
@@ -508,6 +524,61 @@ mod validate_tests {
             ),
         ]);
         assert_eq!(validator(&[]).validate(context)?.violations.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_collects_every_value_on_a_line() -> anyhow::Result<()> {
+        // Both sides hold the same two values; only the layout differs.
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "a.rs",
+                "// <block same-as=\"b.md:langs\" same-as-pattern=\"(?P<value>[a-z]+)\">\ngo rust\n// </block>",
+            ),
+            validation_context(
+                "b.md",
+                "[//]: # (<block name=\"langs\" same-as-pattern=\"[a-z]+\">)\n\ngo\nrust\n\n[//]: # (</block>)",
+            ),
+        ]);
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_compares_values_regardless_of_how_lines_group_them() -> anyhow::Result<()> {
+        // Both sides list A, B, C, D in that order, split across lines differently. A pattern
+        // compares the values a block yields, not the layout it yields them in, which is what lets
+        // two blocks in unrelated formats be compared at all. Regrouping alone is therefore not a
+        // disagreement, even in sequence mode.
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "a.rs",
+                "// <block same-as=\"b.md:langs\" same-as-pattern=\"(?P<value>[A-Z]+)\" same-as-mode=\"sequence\">\nA, B\nC, D\n// </block>",
+            ),
+            validation_context(
+                "b.md",
+                "[//]: # (<block name=\"langs\" same-as-pattern=\"[A-Z]+\">)\n\nA, B, C\nD\n\n[//]: # (</block>)",
+            ),
+        ]);
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_matches_that_are_empty_are_skipped() -> anyhow::Result<()> {
+        // "[a-z]*" produces the following matches: "go", "", "", "", "rust", "".
+        // The empty ones should be skipped.
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "a.rs",
+                "// <block same-as=\"b.md:langs\" same-as-pattern=\"(?P<value>[a-z]*)\" same-as-mode=\"sequence\">\ngo 1 rust\n// </block>",
+            ),
+            validation_context(
+                "b.md",
+                "[//]: # (<block name=\"langs\" same-as-pattern=\"[a-z]*\">)\n\ngo\nrust\n\n[//]: # (</block>)",
+            ),
+        ]);
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
         Ok(())
     }
 

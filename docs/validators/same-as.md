@@ -11,7 +11,7 @@ Unlike `affects`, it also runs on a full-tree scan, not only on a diff.
 | Attribute         | Value                                                                   | Default    |
 |-------------------|-------------------------------------------------------------------------|------------|
 | `same-as`         | `file:name`, or `:name` for the same file; comma-separated for multiple | —          |
-| `same-as-pattern` | regex; the `(?P<value>…)` group, or the whole match                     | whole line |
+| `same-as-pattern` | regex; every match's `(?P<value>…)` group, or the whole match           | whole line |
 | `same-as-mode`    | `set`, `sequence`, `single`, `subset`                                   | `set`      |
 | `same-as-format`  | `numeric`                                                               | text       |
 
@@ -44,8 +44,9 @@ Most couplings, though, do not share verbatim text. For those, each block descri
 
 ## Extract values with `same-as-pattern`
 
-Each side extracts one token per line via its own regex — the `(?P<value>…)` capture group, or the whole match if there
-is none. Lines that do not match are skipped. Because each block self-describes, blocks in different formats can still
+Each side extracts tokens via its own regex — the `(?P<value>…)` capture group, or the whole match if there is none.
+Every match on a line counts, so a line listing several values contributes all of them; lines that do not match are
+skipped, as are matches whose value is empty. Because each block self-describes, blocks in different formats can still
 be compared:
 
 ```rust
@@ -63,6 +64,30 @@ const API_URL: &str = "BLOCKWATCH_AI_API_URL";
 
 [//]: # (</block>)
 ```
+
+### Lines are not part of the comparison
+
+A pattern compares the **values** a block yields, not the lines they are written on: every line's matches flow into one
+flat list. That is what makes the example above work, and it means regrouping the same values across lines is not a
+disagreement; these two blocks agree, in `sequence` mode as much as in `set`:
+
+```rust
+// <block same-as="b.md:letters" same-as-pattern="[A-Z]+" same-as-mode="sequence">
+A, B
+C, D
+// </block>
+```
+
+```markdown
+[//]: # (<block name="letters" same-as-pattern="[A-Z]+">)
+
+A, B, C D
+
+[//]: # (</block>)
+```
+
+If a block's line structure is itself meaningful, leave the pattern off. Without one, the whole content is compared
+newline by newline, so the layout has to match too.
 
 ## Comparison modes
 
@@ -119,6 +144,8 @@ numbers.
 
 - **Which block governs what.** The source block's `same-as-mode` and `same-as-format` govern the comparison. Each
   block's own `same-as-pattern` governs only how *that* block is read.
+- **Not a violation:** the same values regrouped across lines, when a `same-as-pattern` is set. See
+  [Lines are not part of the comparison](#lines-are-not-part-of-the-comparison).
 - **Violations:** a missing target block, a non-numeric token under `numeric`, a `single` /
   `subset` side with the wrong number of tokens, or a `same-as-pattern` that matches nothing on
   both sides — an empty match on both blocks is not treated as trivially equal.
