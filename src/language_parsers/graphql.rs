@@ -56,4 +56,32 @@ type Query {
 
         Ok(())
     }
+
+    #[test]
+    fn real_block_is_parsed_while_string_markers_are_ignored() -> anyhow::Result<()> {
+        let contents = r##"# <block name="real">
+type Query {
+  hello: String
+}
+# </block>
+
+"""
+# <block name="fake_description">
+this text lives inside a block string
+# </block>
+"""
+type Other {
+  field(message: "# <block name='fake_string'> x # </block>"): String
+}
+"##;
+        let blocks = parser()?
+            .parse(contents)
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let names: Vec<&str> = blocks
+            .iter()
+            .map(|block| block.attributes["name"].as_str())
+            .collect();
+        assert_eq!(names, ["real"]);
+        Ok(())
+    }
 }

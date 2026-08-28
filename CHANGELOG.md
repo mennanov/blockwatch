@@ -20,6 +20,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   touches the file at all; `same-as` compares against the file's entire content, read under the referencing block's
   `same-as-pattern`; a `ctx.affects` entry for a whole file carries the file's text and no `name`.
 
+### Fixed
+
+- A `<block>` tag written inside a GraphQL string is no longer picked up as a real rule. The same text inside the JSON
+  form of a Dockerfile instruction (`CMD ["…"]`) is still misread; see the README's known limitations.
+
 ### Changed
 
 - A reference whose block name is empty (`affects="config.json:"`) is now rejected as an authoring error instead of

@@ -190,12 +190,12 @@ blockwatch -E cxx=cpp
 
 - Deleted blocks are currently ignored.
 - Files with unsupported comment syntaxes are ignored.
-- Text inside quotes can be mistaken for a comment in two places: GraphQL strings, and the JSON form of a
-  Dockerfile instruction (`CMD ["…"]`). In both, a `#` inside the quotes is treated as the start of a comment,
-  so a `<block>` tag written inside such a string is picked up as a real rule:
+- Text inside the JSON form of a Dockerfile instruction (`CMD ["…"]`) can be mistaken for a comment: a `#` inside the
+  quotes is treated as the start of a comment, so a `<block>` tag written inside such a string is picked up as a real
+  rule:
 
-  ```graphql
-  query { field(message: "# <block name='example'> ...") }
+  ```dockerfile
+  CMD ["sh", "-c", "# <block name='example'> ..."]
   ```
 
   BlockWatch lists a block named `example` here and tries to enforce it, even though it is only text inside a
