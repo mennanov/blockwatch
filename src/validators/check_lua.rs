@@ -3,8 +3,8 @@ use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::parse_block_references;
 use crate::validators::{
-    PatternContent, ValidationContext, ValidationReport, ValidatorAsync, ValidatorDetector,
-    ValidatorType, Violation, ViolationRange, block_content_for_pattern,
+    BlockReference, PatternContent, ValidationContext, ValidationReport, ValidatorAsync,
+    ValidatorDetector, ValidatorType, Violation, ViolationRange, block_content_for_pattern,
 };
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -117,8 +117,12 @@ impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
                             LuaContent::Matches(matches.into_iter().map(str::to_string).collect())
                         }
                     };
-                    let affected_blocks =
-                        resolve_affected_blocks(&context, &file_path, &block_with_context.block)?;
+                    let affected_blocks = resolve_affected_blocks(
+                        &context,
+                        file_system.as_ref(),
+                        &file_path,
+                        &block_with_context.block,
+                    )?;
 
                     let result = run_lua_script(
                         script_path,
@@ -216,10 +220,12 @@ enum LuaContent {
     Matches(Vec<String>),
 }
 
-/// One affected block exposed to a script as an entry of `ctx.affects`.
+/// One affected target exposed to a script as an entry of `ctx.affects`.
 struct LuaAffected {
     file: String,
-    name: String,
+    /// `None` for a whole-file reference; the entry's `name` key is then absent, so a script sees
+    /// `nil` and can distinguish a whole file from a named block.
+    name: Option<String>,
     content: String,
 }
 
@@ -311,9 +317,11 @@ fn run_lua_script_sync(inputs: LuaScriptInputs) -> anyhow::Result<Option<String>
             entry
                 .set("file", affected.file.as_str())
                 .context("failed to set ctx.affects[].file")?;
-            entry
-                .set("name", affected.name.as_str())
-                .context("failed to set ctx.affects[].name")?;
+            if let Some(name) = &affected.name {
+                entry
+                    .set("name", name.as_str())
+                    .context("failed to set ctx.affects[].name")?;
+            }
             entry
                 .set("content", affected.content.as_str())
                 .context("failed to set ctx.affects[].content")?;
@@ -442,21 +450,22 @@ fn create_violation(
     ))
 }
 
-/// A block referenced by the validated block's `affects` attribute, exposed to Lua scripts.
+/// A target referenced by the validated block's `affects` attribute, exposed to Lua scripts.
 struct AffectedBlock {
     file: RepoPath,
-    name: String,
+    /// `None` for a whole-file reference, which names no block.
+    name: Option<String>,
     content: String,
 }
 
-/// Resolves the blocks referenced by the `affects` attribute of `block` to their `(file, name,
+/// Resolves the targets referenced by the `affects` attribute of `block` to their `(file, name,
 /// content)` so they can be exposed to the Lua script.
 ///
-/// References to blocks that don't exist in the validation context are skipped (the `affects`
-/// validator is responsible for reporting those). The content is trimmed to mirror how the
-/// validated block's own content is presented.
-fn resolve_affected_blocks(
+/// References that don't resolve are skipped (the `affects` validator is responsible for reporting
+/// those). The content is trimmed to mirror how the validated block's own content is presented.
+fn resolve_affected_blocks<Fs: FileSystem>(
     context: &ValidationContext,
+    file_system: &Fs,
     current_file_path: &RepoPath,
     block: &Block,
 ) -> anyhow::Result<Vec<AffectedBlock>> {
@@ -472,21 +481,39 @@ fn resolve_affected_blocks(
             block.start_tag_position_range.start().line,
         )
     })?;
-    for (file, name) in references {
-        let file = file.unwrap_or_else(|| current_file_path.clone());
-        let Some(file_blocks) = context.blocks.get(&file) else {
-            continue;
-        };
-        for block_with_context in &file_blocks.blocks_with_context {
-            if block_with_context.block.name() == Some(name.as_str()) {
+    for reference in references {
+        match reference {
+            BlockReference::Block { file, name } => {
+                let file = file.unwrap_or_else(|| current_file_path.clone());
+                let Some(file_blocks) = context.blocks.get(&file) else {
+                    continue;
+                };
+                for block_with_context in &file_blocks.blocks_with_context {
+                    if block_with_context.block.name() == Some(name.as_str()) {
+                        result.push(AffectedBlock {
+                            file: file.clone(),
+                            name: Some(name.clone()),
+                            content: block_with_context
+                                .block
+                                .content(&file_blocks.file_content)
+                                .trim()
+                                .to_string(),
+                        });
+                    }
+                }
+            }
+            BlockReference::File(file) => {
+                let content = match context.blocks.get(&file) {
+                    Some(file_blocks) => file_blocks.file_content.clone(),
+                    None => match file_system.read_to_string(file.as_path()) {
+                        Ok(content) => content,
+                        Err(_) => continue,
+                    },
+                };
                 result.push(AffectedBlock {
-                    file: file.clone(),
-                    name: name.clone(),
-                    content: block_with_context
-                        .block
-                        .content(&file_blocks.file_content)
-                        .trim()
-                        .to_string(),
+                    file,
+                    name: None,
+                    content: content.trim().to_string(),
                 });
             }
         }
@@ -551,7 +578,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn block_whose_lua_check_fails_returns_a_violation() -> anyhow::Result<()> {
+    async fn block_whose_script_fails_returns_a_violation() -> anyhow::Result<()> {
         let context = validation_context(
             "example.py",
             r#"# <block check-lua="check.lua">
@@ -593,7 +620,7 @@ end
     }
 
     #[tokio::test]
-    async fn block_whose_lua_check_passes_returns_no_violations() -> anyhow::Result<()> {
+    async fn block_whose_script_passes_returns_no_violations() -> anyhow::Result<()> {
         let context = validation_context(
             "example.py",
             r#"# <block check-lua="check.lua">
@@ -615,164 +642,6 @@ end
         assert!(report.violations.is_empty());
         // The block was checked and passed. That is different from never being checked at all.
         assert_eq!(checked_lines(&report), vec![1]);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn block_with_a_check_lua_pattern_passes_only_the_matched_text() -> anyhow::Result<()> {
-        let context = validation_context(
-            "example.py",
-            r#"# <block check-lua="check.lua" check-lua-pattern="id: \d+">
-name: Alice, id: 42
-# </block>"#,
-        );
-
-        let violations = validator(&[(
-            "check.lua",
-            r#"
-function validate(ctx, content)
-    if content[1] ~= "id: 42" then
-        return "expected 'id: 42' but got '" .. tostring(content[1]) .. "'"
-    end
-    return nil
-end
-"#,
-        )])
-        .validate(context)
-        .await?
-        .violations;
-
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn block_with_a_check_lua_pattern_group_passes_only_the_captured_group()
-    -> anyhow::Result<()> {
-        let context = validation_context(
-            "example.py",
-            r#"# <block check-lua="check.lua" check-lua-pattern="id: (?P<value>\d+)">
-name: Alice, id: 42
-# </block>"#,
-        );
-
-        let violations = validator(&[(
-            "check.lua",
-            r#"
-function validate(ctx, content)
-    if content[1] ~= "42" then
-        return "expected '42' but got '" .. tostring(content[1]) .. "'"
-    end
-    return nil
-end
-"#,
-        )])
-        .validate(context)
-        .await?
-        .violations;
-
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn block_with_a_check_lua_pattern_passes_every_match_in_the_block() -> anyhow::Result<()>
-    {
-        let context = validation_context(
-            "example.py",
-            r#"# <block check-lua="check.lua" check-lua-pattern="id: (?P<value>\d+)">
-name: Alice, id: 42
-name: Bob, id: 7
-# </block>"#,
-        );
-
-        // A pattern narrows what the script sees; it must never hide part of the block from it.
-        let violations = validator(&[(
-            "check.lua",
-            r#"
-function validate(ctx, content)
-    if #content ~= 2 then
-        return "expected 2 matches, got " .. #content
-    end
-    if content[1] ~= "42" or content[2] ~= "7" then
-        return "unexpected matches: " .. table.concat(content, ",")
-    end
-    return nil
-end
-"#,
-        )])
-        .validate(context)
-        .await?
-        .violations;
-
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn check_lua_pattern_matches_that_are_empty_are_skipped() -> anyhow::Result<()> {
-        // "\d*" produces 6 matches, 4 of which are empty.
-        let context = validation_context(
-            "example.py",
-            r#"# <block check-lua="check.lua" check-lua-pattern="\d*">
-a1
-b22
-# </block>"#,
-        );
-
-        let violations = validator(&[(
-            "check.lua",
-            r#"
-function validate(ctx, content)
-    if #content ~= 2 then
-        return "expected 2 matches, got " .. #content
-    end
-    if content[1] ~= "1" or content[2] ~= "22" then
-        return "unexpected matches: " .. table.concat(content, ",")
-    end
-    return nil
-end
-"#,
-        )])
-        .validate(context)
-        .await?
-        .violations;
-
-        assert!(violations.is_empty(), "{violations:?}");
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn block_with_a_check_lua_pattern_matching_nothing_passes_an_empty_table()
-    -> anyhow::Result<()> {
-        // A pattern that matches nothing is not a violation (as in `check-ai`).
-        // Lua script is responsible for checking the content.
-        let context = validation_context(
-            "example.py",
-            r#"# <block check-lua="check.lua" check-lua-pattern="zzz_no_match">
-name: Alice, id: 42
-# </block>"#,
-        );
-
-        let violations = validator(&[(
-            "check.lua",
-            r#"
-function validate(ctx, content)
-    if type(content) ~= "table" then
-        return "expected a table, got " .. type(content)
-    end
-    if #content ~= 0 then
-        return "expected no matches, got " .. #content
-    end
-    return nil
-end
-"#,
-        )])
-        .validate(context)
-        .await?
-        .violations;
-
-        assert!(violations.is_empty());
         Ok(())
     }
 
@@ -806,7 +675,164 @@ end
     }
 
     #[tokio::test]
-    async fn check_lua_pattern_can_match_across_lines() -> anyhow::Result<()> {
+    async fn check_lua_pattern_without_a_value_group_passes_the_whole_match() -> anyhow::Result<()>
+    {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" check-lua-pattern="id: \d+">
+name: Alice, id: 42
+# </block>"#,
+        );
+
+        let violations = validator(&[(
+            "check.lua",
+            r#"
+function validate(ctx, content)
+    if content[1] ~= "id: 42" then
+        return "expected 'id: 42' but got '" .. tostring(content[1]) .. "'"
+    end
+    return nil
+end
+"#,
+        )])
+        .validate(context)
+        .await?
+        .violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn check_lua_pattern_with_a_value_group_passes_the_captured_value() -> anyhow::Result<()>
+    {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" check-lua-pattern="id: (?P<value>\d+)">
+name: Alice, id: 42
+# </block>"#,
+        );
+
+        let violations = validator(&[(
+            "check.lua",
+            r#"
+function validate(ctx, content)
+    if content[1] ~= "42" then
+        return "expected '42' but got '" .. tostring(content[1]) .. "'"
+    end
+    return nil
+end
+"#,
+        )])
+        .validate(context)
+        .await?
+        .violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn check_lua_pattern_with_several_matches_passes_all_of_them() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" check-lua-pattern="id: (?P<value>\d+)">
+name: Alice, id: 42
+name: Bob, id: 7
+# </block>"#,
+        );
+
+        // A pattern narrows what the script sees; it must never hide part of the block from it.
+        let violations = validator(&[(
+            "check.lua",
+            r#"
+function validate(ctx, content)
+    if #content ~= 2 then
+        return "expected 2 matches, got " .. #content
+    end
+    if content[1] ~= "42" or content[2] ~= "7" then
+        return "unexpected matches: " .. table.concat(content, ",")
+    end
+    return nil
+end
+"#,
+        )])
+        .validate(context)
+        .await?
+        .violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn check_lua_pattern_matching_nothing_passes_an_empty_array() -> anyhow::Result<()> {
+        // A pattern that matches nothing is not a violation (as in `check-ai`).
+        // Lua script is responsible for checking the content.
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" check-lua-pattern="zzz_no_match">
+name: Alice, id: 42
+# </block>"#,
+        );
+
+        let violations = validator(&[(
+            "check.lua",
+            r#"
+function validate(ctx, content)
+    if type(content) ~= "table" then
+        return "expected a table, got " .. type(content)
+    end
+    if #content ~= 0 then
+        return "expected no matches, got " .. #content
+    end
+    return nil
+end
+"#,
+        )])
+        .validate(context)
+        .await?
+        .violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn check_lua_pattern_matching_empty_values_skips_them() -> anyhow::Result<()> {
+        // "\d*" produces 6 matches, 4 of which are empty.
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" check-lua-pattern="\d*">
+a1
+b22
+# </block>"#,
+        );
+
+        let violations = validator(&[(
+            "check.lua",
+            r#"
+function validate(ctx, content)
+    if #content ~= 2 then
+        return "expected 2 matches, got " .. #content
+    end
+    if content[1] ~= "1" or content[2] ~= "22" then
+        return "unexpected matches: " .. table.concat(content, ",")
+    end
+    return nil
+end
+"#,
+        )])
+        .validate(context)
+        .await?
+        .violations;
+
+        assert!(violations.is_empty(), "{violations:?}");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn check_lua_pattern_spanning_several_lines_matches_across_them() -> anyhow::Result<()> {
         let context = validation_context(
             "example.py",
             r#"# <block check-lua="check.lua" check-lua-pattern="(?s)BEGIN(?P<value>.*?)END">
@@ -836,7 +862,7 @@ end
     }
 
     #[tokio::test]
-    async fn block_with_an_invalid_check_lua_pattern_returns_an_error() -> anyhow::Result<()> {
+    async fn invalid_check_lua_pattern_returns_an_error() -> anyhow::Result<()> {
         let context = validation_context(
             "example.py",
             r#"# <block check-lua="check.lua" check-lua-pattern="[invalid">
@@ -848,6 +874,397 @@ some content
         let err_chain = format!("{err:#}");
         assert!(
             err_chain.contains("check-lua-pattern is not a valid regex"),
+            "unexpected error: {err_chain}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn lua_context_exposes_the_block_fields() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua">
+some content
+# </block>"#,
+        );
+
+        let violations = validator(&[(
+            "check.lua",
+            r#"
+function validate(ctx, content)
+    if ctx.file ~= "example.py" then
+        return "ctx.file is not 'example.py'"
+    end
+    if ctx.line ~= 1 then
+        return "ctx.line is not 1"
+    end
+    if ctx.attrs == nil then
+        return "ctx.attrs is nil"
+    end
+    if ctx.attrs["check-lua"] == nil then
+        return "ctx.attrs['check-lua'] is nil"
+    end
+    return nil
+end
+"#,
+        )])
+        .validate(context)
+        .await?
+        .violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn lua_context_exposes_the_affected_blocks() -> anyhow::Result<()> {
+        let script = r#"
+function validate(ctx, content)
+    if ctx.affects == nil then
+        return "ctx.affects is nil"
+    end
+    if #ctx.affects ~= 2 then
+        return "expected 2 affected blocks, got " .. tostring(#ctx.affects)
+    end
+    if ctx.affects[1].file ~= "example.py" then
+        return "ctx.affects[1].file is '" .. tostring(ctx.affects[1].file) .. "'"
+    end
+    if ctx.affects[1].name ~= "local-block" then
+        return "ctx.affects[1].name is '" .. tostring(ctx.affects[1].name) .. "'"
+    end
+    if ctx.affects[1].content ~= "local content" then
+        return "ctx.affects[1].content is '" .. tostring(ctx.affects[1].content) .. "'"
+    end
+    if ctx.affects[2].file ~= "other.py" then
+        return "ctx.affects[2].file is '" .. tostring(ctx.affects[2].file) .. "'"
+    end
+    if ctx.affects[2].name ~= "remote-block" then
+        return "ctx.affects[2].name is '" .. tostring(ctx.affects[2].name) .. "'"
+    end
+    if ctx.affects[2].content ~= "remote content" then
+        return "ctx.affects[2].content is '" .. tostring(ctx.affects[2].content) .. "'"
+    end
+    return nil
+end
+"#;
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "example.py",
+                r#"# <block check-lua="check.lua" affects=":local-block, other.py:remote-block">
+some content
+# </block>
+
+# <block name="local-block">
+local content
+# </block>"#,
+            ),
+            validation_context(
+                "other.py",
+                r#"# <block name="remote-block">
+remote content
+# </block>"#,
+            ),
+        ]);
+
+        let violations = validator(&[("check.lua", script)])
+            .validate(context)
+            .await?
+            .violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn lua_context_exposes_a_whole_file_affects_target() -> anyhow::Result<()> {
+        // A whole-file target carries the file's text and no block name, which is how a script
+        // distinguishes it from a named block.
+        let script = r#"
+function validate(ctx, content)
+    if #ctx.affects ~= 1 then
+        return "expected 1 affected target, got " .. tostring(#ctx.affects)
+    end
+    if ctx.affects[1].file ~= "config.json" then
+        return "ctx.affects[1].file is '" .. tostring(ctx.affects[1].file) .. "'"
+    end
+    if ctx.affects[1].name ~= nil then
+        return "ctx.affects[1].name is '" .. tostring(ctx.affects[1].name) .. "'"
+    end
+    if ctx.affects[1].content ~= '{"value": 2}' then
+        return "ctx.affects[1].content is '" .. tostring(ctx.affects[1].content) .. "'"
+    end
+    return nil
+end
+"#;
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" affects="config.json">
+some content
+# </block>"#,
+        );
+
+        let violations = validator(&[("check.lua", script), ("config.json", "{\"value\": 2}\n")])
+            .validate(context)
+            .await?
+            .violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn lua_context_skips_unresolved_affects_references() -> anyhow::Result<()> {
+        let script = r#"
+function validate(ctx, content)
+    if ctx.affects == nil then
+        return "ctx.affects is nil"
+    end
+    if #ctx.affects ~= 0 then
+        return "expected 0 affected blocks, got " .. tostring(#ctx.affects)
+    end
+    return nil
+end
+"#;
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" affects=":does-not-exist">
+some content
+# </block>"#,
+        );
+
+        let violations = validator(&[("check.lua", script)])
+            .validate(context)
+            .await?
+            .violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn lua_context_skips_an_unreadable_whole_file_affects_target() -> anyhow::Result<()> {
+        // Reporting a missing target is the `affects` validator's job, not the script's.
+        let script = r#"
+function validate(ctx, content)
+    if #ctx.affects ~= 0 then
+        return "expected 0 affected targets, got " .. tostring(#ctx.affects)
+    end
+    return nil
+end
+"#;
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" affects="gone.json">
+some content
+# </block>"#,
+        );
+
+        let violations = validator(&[("check.lua", script)])
+            .validate(context)
+            .await?
+            .violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn lua_context_excludes_affected_blocks_absent_from_the_diff() -> anyhow::Result<()> {
+        // The affected block lives in a file that has no diff changes, so it is filtered out of the
+        // validation context entirely. It must therefore NOT appear in ctx.affects.
+        let script = r#"
+function validate(ctx, content)
+    if ctx.affects == nil then
+        return "ctx.affects is nil"
+    end
+    if #ctx.affects ~= 0 then
+        return "expected 0 affected blocks, got " .. tostring(#ctx.affects)
+    end
+    return nil
+end
+"#;
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "example.py",
+                r#"# <block check-lua="check.lua" affects="other.py:remote-block">
+some content
+# </block>"#,
+            ),
+            validation_context_with_changes(
+                "other.py",
+                r#"# <block name="remote-block">
+remote content
+# </block>"#,
+                vec![], // No changes: this block is absent from the diff.
+            ),
+        ]);
+
+        let violations = validator(&[("check.lua", script)])
+            .validate(context)
+            .await?
+            .violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn block_without_an_affects_attribute_has_no_lua_context_affects() -> anyhow::Result<()> {
+        let script = r#"
+function validate(ctx, content)
+    if ctx.affects ~= nil then
+        return "ctx.affects should be nil"
+    end
+    return nil
+end
+"#;
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua">
+some content
+# </block>"#,
+        );
+
+        let violations = validator(&[("check.lua", script)])
+            .validate(context)
+            .await?
+            .violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn blocks_with_and_without_check_lua_record_a_check_only_for_the_examined_ones()
+    -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block name="passing" check-lua="ok.lua">
+some content
+# </block>
+# <block name="failing" check-lua="fail.lua">
+some content
+# </block>
+# <block name="unrelated">
+some content
+# </block>"#,
+        );
+
+        let report = validator(&[
+            (
+                "ok.lua",
+                r#"
+function validate(ctx, content)
+    return nil
+end
+"#,
+            ),
+            (
+                "fail.lua",
+                r#"
+function validate(ctx, content)
+    return "bad content"
+end
+"#,
+            ),
+        ])
+        .validate(context)
+        .await?;
+
+        // Both blocks are recorded whatever the script returns, and the block without a check-lua
+        // attribute is not checked, so it records nothing.
+        assert_eq!(checked_lines(&report), vec![1, 4]);
+        assert_eq!(violation_count(&report), 1);
+        Ok(())
+    }
+
+    // An endless loop is stopped by the in-VM instruction hook, which needs no help from the
+    // runtime: the runaway is interrupted on its own blocking thread, so the flavor is irrelevant.
+    #[tokio::test]
+    async fn block_exceeding_its_check_lua_timeout_fails_the_run() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="loop.lua" check-lua-timeout="1">
+some content
+# </block>"#,
+        );
+
+        let err = validator(&[(
+            "loop.lua",
+            r#"
+function validate(ctx, content)
+    while true do end
+end
+"#,
+        )])
+        .validate(context)
+        .await
+        .unwrap_err();
+
+        let err_chain = format!("{err:#}");
+        assert!(
+            err_chain.contains("timed out") && err_chain.contains("1 second"),
+            "unexpected error: {err_chain}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn block_within_its_check_lua_timeout_passes() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" check-lua-timeout="5">
+some content
+# </block>"#,
+        );
+
+        let report = validator(&[(
+            "check.lua",
+            r#"
+function validate(ctx, content)
+    return nil
+end
+"#,
+        )])
+        .validate(context)
+        .await?;
+
+        assert!(report.violations.is_empty());
+        assert_eq!(checked_lines(&report), vec![1]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn non_numeric_check_lua_timeout_returns_an_error() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" check-lua-timeout="soon">
+some content
+# </block>"#,
+        );
+        // The invalid timeout fails before the script is read, so no script needs seeding.
+        let err = validator(&[]).validate(context).await.unwrap_err();
+        let err_chain = format!("{err:#}");
+        assert!(
+            err_chain.contains("check-lua-timeout must be a whole number of seconds"),
+            "unexpected error: {err_chain}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn zero_check_lua_timeout_returns_an_error() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" check-lua-timeout="0">
+some content
+# </block>"#,
+        );
+        // Zero is rejected as a value error, not silently treated as an instant deadline.
+        let err = validator(&[]).validate(context).await.unwrap_err();
+        let err_chain = format!("{err:#}");
+        assert!(
+            err_chain.contains("check-lua-timeout must be a whole number of seconds"),
             "unexpected error: {err_chain}"
         );
         Ok(())
@@ -953,7 +1370,7 @@ end
     }
 
     #[tokio::test]
-    async fn script_that_does_not_exist_returns_an_error() -> anyhow::Result<()> {
+    async fn missing_script_returns_an_error() -> anyhow::Result<()> {
         let context = validation_context(
             "example.py",
             r#"# <block check-lua="missing.lua">
@@ -971,7 +1388,7 @@ text
     }
 
     #[tokio::test]
-    async fn script_with_an_empty_path_returns_an_error() -> anyhow::Result<()> {
+    async fn empty_script_path_returns_an_error() -> anyhow::Result<()> {
         let context = validation_context(
             "example.py",
             r#"# <block check-lua=" ">
@@ -982,334 +1399,6 @@ text
         assert!(
             err.to_string()
                 .contains("check-lua requires a non-empty script path")
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn lua_context_exposes_the_block_fields() -> anyhow::Result<()> {
-        let context = validation_context(
-            "example.py",
-            r#"# <block check-lua="check.lua">
-some content
-# </block>"#,
-        );
-
-        let violations = validator(&[(
-            "check.lua",
-            r#"
-function validate(ctx, content)
-    if ctx.file ~= "example.py" then
-        return "ctx.file is not 'example.py'"
-    end
-    if ctx.line ~= 1 then
-        return "ctx.line is not 1"
-    end
-    if ctx.attrs == nil then
-        return "ctx.attrs is nil"
-    end
-    if ctx.attrs["check-lua"] == nil then
-        return "ctx.attrs['check-lua'] is nil"
-    end
-    return nil
-end
-"#,
-        )])
-        .validate(context)
-        .await?
-        .violations;
-
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn lua_context_exposes_the_affected_blocks() -> anyhow::Result<()> {
-        let script = r#"
-function validate(ctx, content)
-    if ctx.affects == nil then
-        return "ctx.affects is nil"
-    end
-    if #ctx.affects ~= 2 then
-        return "expected 2 affected blocks, got " .. tostring(#ctx.affects)
-    end
-    if ctx.affects[1].file ~= "example.py" then
-        return "ctx.affects[1].file is '" .. tostring(ctx.affects[1].file) .. "'"
-    end
-    if ctx.affects[1].name ~= "local-block" then
-        return "ctx.affects[1].name is '" .. tostring(ctx.affects[1].name) .. "'"
-    end
-    if ctx.affects[1].content ~= "local content" then
-        return "ctx.affects[1].content is '" .. tostring(ctx.affects[1].content) .. "'"
-    end
-    if ctx.affects[2].file ~= "other.py" then
-        return "ctx.affects[2].file is '" .. tostring(ctx.affects[2].file) .. "'"
-    end
-    if ctx.affects[2].name ~= "remote-block" then
-        return "ctx.affects[2].name is '" .. tostring(ctx.affects[2].name) .. "'"
-    end
-    if ctx.affects[2].content ~= "remote content" then
-        return "ctx.affects[2].content is '" .. tostring(ctx.affects[2].content) .. "'"
-    end
-    return nil
-end
-"#;
-        let context = merge_validation_contexts(vec![
-            validation_context(
-                "example.py",
-                r#"# <block check-lua="check.lua" affects=":local-block, other.py:remote-block">
-some content
-# </block>
-
-# <block name="local-block">
-local content
-# </block>"#,
-            ),
-            validation_context(
-                "other.py",
-                r#"# <block name="remote-block">
-remote content
-# </block>"#,
-            ),
-        ]);
-
-        let violations = validator(&[("check.lua", script)])
-            .validate(context)
-            .await?
-            .violations;
-
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn lua_context_excludes_affected_blocks_absent_from_the_diff() -> anyhow::Result<()> {
-        // The affected block lives in a file that has no diff changes, so it is filtered out of the
-        // validation context entirely. It must therefore NOT appear in ctx.affects.
-        let script = r#"
-function validate(ctx, content)
-    if ctx.affects == nil then
-        return "ctx.affects is nil"
-    end
-    if #ctx.affects ~= 0 then
-        return "expected 0 affected blocks, got " .. tostring(#ctx.affects)
-    end
-    return nil
-end
-"#;
-        let context = merge_validation_contexts(vec![
-            validation_context(
-                "example.py",
-                r#"# <block check-lua="check.lua" affects="other.py:remote-block">
-some content
-# </block>"#,
-            ),
-            validation_context_with_changes(
-                "other.py",
-                r#"# <block name="remote-block">
-remote content
-# </block>"#,
-                vec![], // No changes: this block is absent from the diff.
-            ),
-        ]);
-
-        let violations = validator(&[("check.lua", script)])
-            .validate(context)
-            .await?
-            .violations;
-
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn lua_context_skips_unresolved_affects_references() -> anyhow::Result<()> {
-        let script = r#"
-function validate(ctx, content)
-    if ctx.affects == nil then
-        return "ctx.affects is nil"
-    end
-    if #ctx.affects ~= 0 then
-        return "expected 0 affected blocks, got " .. tostring(#ctx.affects)
-    end
-    return nil
-end
-"#;
-        let context = validation_context(
-            "example.py",
-            r#"# <block check-lua="check.lua" affects=":does-not-exist">
-some content
-# </block>"#,
-        );
-
-        let violations = validator(&[("check.lua", script)])
-            .validate(context)
-            .await?
-            .violations;
-
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn block_without_an_affects_attribute_has_a_nil_lua_context_affects() -> anyhow::Result<()>
-    {
-        let script = r#"
-function validate(ctx, content)
-    if ctx.affects ~= nil then
-        return "ctx.affects should be nil"
-    end
-    return nil
-end
-"#;
-        let context = validation_context(
-            "example.py",
-            r#"# <block check-lua="check.lua">
-some content
-# </block>"#,
-        );
-
-        let violations = validator(&[("check.lua", script)])
-            .validate(context)
-            .await?
-            .violations;
-
-        assert!(violations.is_empty());
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn blocks_with_and_without_check_lua_records_a_check_for_the_examined_ones_only()
-    -> anyhow::Result<()> {
-        let context = validation_context(
-            "example.py",
-            r#"# <block name="passing" check-lua="ok.lua">
-some content
-# </block>
-# <block name="failing" check-lua="fail.lua">
-some content
-# </block>
-# <block name="unrelated">
-some content
-# </block>"#,
-        );
-
-        let report = validator(&[
-            (
-                "ok.lua",
-                r#"
-function validate(ctx, content)
-    return nil
-end
-"#,
-            ),
-            (
-                "fail.lua",
-                r#"
-function validate(ctx, content)
-    return "bad content"
-end
-"#,
-            ),
-        ])
-        .validate(context)
-        .await?;
-
-        // Both blocks are recorded whatever the script returns, and the block without a check-lua
-        // attribute is not checked, so it records nothing.
-        assert_eq!(checked_lines(&report), vec![1, 4]);
-        assert_eq!(violation_count(&report), 1);
-        Ok(())
-    }
-
-    // An endless loop is stopped by the in-VM instruction hook, which needs no help from the
-    // runtime: the runaway is interrupted on its own blocking thread, so the flavor is irrelevant.
-    #[tokio::test]
-    async fn block_whose_lua_check_exceeds_the_timeout_fails_the_run() -> anyhow::Result<()> {
-        let context = validation_context(
-            "example.py",
-            r#"# <block check-lua="loop.lua" check-lua-timeout="1">
-some content
-# </block>"#,
-        );
-
-        let err = validator(&[(
-            "loop.lua",
-            r#"
-function validate(ctx, content)
-    while true do end
-end
-"#,
-        )])
-        .validate(context)
-        .await
-        .unwrap_err();
-
-        let err_chain = format!("{err:#}");
-        assert!(
-            err_chain.contains("timed out") && err_chain.contains("1 second"),
-            "unexpected error: {err_chain}"
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn block_within_its_check_lua_timeout_passes() -> anyhow::Result<()> {
-        let context = validation_context(
-            "example.py",
-            r#"# <block check-lua="check.lua" check-lua-timeout="5">
-some content
-# </block>"#,
-        );
-
-        let report = validator(&[(
-            "check.lua",
-            r#"
-function validate(ctx, content)
-    return nil
-end
-"#,
-        )])
-        .validate(context)
-        .await?;
-
-        assert!(report.violations.is_empty());
-        assert_eq!(checked_lines(&report), vec![1]);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn block_with_a_non_numeric_check_lua_timeout_returns_an_error() -> anyhow::Result<()> {
-        let context = validation_context(
-            "example.py",
-            r#"# <block check-lua="check.lua" check-lua-timeout="soon">
-some content
-# </block>"#,
-        );
-        // The invalid timeout fails before the script is read, so no script needs seeding.
-        let err = validator(&[]).validate(context).await.unwrap_err();
-        let err_chain = format!("{err:#}");
-        assert!(
-            err_chain.contains("check-lua-timeout must be a whole number of seconds"),
-            "unexpected error: {err_chain}"
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn block_with_a_zero_check_lua_timeout_returns_an_error() -> anyhow::Result<()> {
-        let context = validation_context(
-            "example.py",
-            r#"# <block check-lua="check.lua" check-lua-timeout="0">
-some content
-# </block>"#,
-        );
-        // Zero is rejected as a value error, not silently treated as an instant deadline.
-        let err = validator(&[]).validate(context).await.unwrap_err();
-        let err_chain = format!("{err:#}");
-        assert!(
-            err_chain.contains("check-lua-timeout must be a whole number of seconds"),
-            "unexpected error: {err_chain}"
         );
         Ok(())
     }

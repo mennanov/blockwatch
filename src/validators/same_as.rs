@@ -2,8 +2,8 @@ use crate::blocks::{Block, BlockWithContext, FileBlocks, every_block, parse_file
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    self, ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation,
-    ViolationRange, parse_number, value_match,
+    self, BlockReference, ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType,
+    Violation, ViolationRange, parse_number, value_match,
 };
 use anyhow::{Context, anyhow};
 use regex::Regex;
@@ -17,6 +17,9 @@ use std::sync::Arc;
 /// Where `affects` only checks that linked blocks were edited together, this compares their actual
 /// contents, catching a constant or version duplicated in two places that have drifted apart. That
 /// is also why it runs on a full-tree scan and not only on the blocks a diff touched.
+///
+/// A target spelled without a `:` names a whole file, whose entire text is then the thing compared
+/// against — so a file with no comments to declare a block in can still be a target.
 pub(crate) struct SameAsValidator<Fs: FileSystem> {
     /// Reads files containing referenced target blocks that are not already parsed into the
     /// validation context.
@@ -35,72 +38,138 @@ impl<Fs: FileSystem + 'static> ValidatorSync for SameAsValidator<Fs> {
         &self,
         context: Arc<validators::ValidationContext>,
     ) -> anyhow::Result<ValidationReport> {
+        let mut targets = TargetItems::new(&context, self.file_system.as_ref());
         let mut report = ValidationReport::default();
-        // Caches files read from disk so each is parsed at most once. `validate` runs on a single
-        // thread, so no synchronization is needed.
-        let mut cache: HashMap<RepoPath, FileBlocks> = HashMap::new();
         for (file_path, file_blocks) in &context.blocks {
-            for bwc in &file_blocks.blocks_with_context {
-                let Some(same_as) = bwc.block.attributes.get("same-as") else {
+            for block_with_context in &file_blocks.blocks_with_context {
+                let Some(same_as) = block_with_context.block.attributes.get("same-as") else {
                     continue;
                 };
-                let mode = parse_mode(&bwc.block)?;
-                let format = parse_format(&bwc.block)?;
-                let source_items = canonicalize(
-                    extract_items(&bwc.block, &file_blocks.file_content)?,
-                    &format,
-                );
-                let references =
-                    validators::parse_block_references(same_as).with_context(|| {
-                        format!(
-                            "invalid same-as reference on block {}:{} at line {}",
-                            file_path,
-                            bwc.block.name_display(),
-                            bwc.block.start_tag_position_range.start().line,
-                        )
-                    })?;
-                let mut block_violations = Vec::new();
-                for (target_file_opt, target_name) in references {
-                    let target_file = target_file_opt.unwrap_or_else(|| file_path.clone());
-                    let target_items = resolve_target_items(
-                        &context,
-                        self.file_system.as_ref(),
-                        &mut cache,
-                        &target_file,
-                        &target_name,
-                    )?;
-                    let Some(target_items) = target_items else {
-                        block_violations.push(create_violation(
-                            file_path,
-                            &bwc.block,
-                            &target_file,
-                            &target_name,
-                            "target block not found",
-                        )?);
-                        continue;
-                    };
-                    let reason = match &source_items {
-                        Err(reason) => Some(reason.clone()),
-                        Ok(source) => match canonicalize(target_items, &format) {
-                            Err(reason) => Some(reason),
-                            Ok(target) => disagreement(source, &target, &mode),
-                        },
-                    };
-                    if let Some(reason) = reason {
-                        block_violations.push(create_violation(
-                            file_path,
-                            &bwc.block,
-                            &target_file,
-                            &target_name,
-                            &reason,
-                        )?);
-                    }
-                }
-                report.add_all(file_path, &bwc.block, block_violations);
+                let violations = block_violations(
+                    &mut targets,
+                    file_path,
+                    &file_blocks.file_content,
+                    &block_with_context.block,
+                    same_as,
+                )?;
+                report.add_all(file_path, &block_with_context.block, violations);
             }
         }
         Ok(report)
     }
+}
+
+/// One block's side of a `same-as` comparison: the items it contributes and the rules the two sides
+/// are held to. Built once per block and reused for each of its references.
+struct Comparison {
+    mode: Mode,
+    format: Format,
+    /// `Err` carries the reason the block's own items could not be canonicalized. It is reported
+    /// against every reference the block makes rather than aborting the run, since content that does
+    /// not meet the asserted shape is a violation like any other.
+    source_items: Result<Vec<String>, String>,
+    /// The block's `same-as-pattern`, which governs a whole-file target too: such a target has no
+    /// block of its own to carry one.
+    pattern: Option<String>,
+}
+
+impl Comparison {
+    fn new(block: &Block, file_content: &str) -> anyhow::Result<Self> {
+        let format = parse_format(block)?;
+        Ok(Self {
+            mode: parse_mode(block)?,
+            source_items: canonicalize(extract_items(block, file_content)?, &format),
+            pattern: block.attributes.get("same-as-pattern").cloned(),
+            format,
+        })
+    }
+
+    /// Why the target disagrees with the block, or `None` when the two agree.
+    fn disagreement_with(&self, target_items: Vec<String>) -> Option<String> {
+        match &self.source_items {
+            Err(reason) => Some(reason.clone()),
+            Ok(source) => match canonicalize(target_items, &self.format) {
+                Err(reason) => Some(reason),
+                Ok(target) => disagreement(source, &target, &self.mode),
+            },
+        }
+    }
+}
+
+/// Every violation one block's `same-as` produces: at most one per reference it names.
+///
+/// `same_as` is the attribute's raw value; the caller has already established that `block` carries
+/// it.
+fn block_violations<Fs: FileSystem>(
+    targets: &mut TargetItems<'_, Fs>,
+    file_path: &RepoPath,
+    file_content: &str,
+    block: &Block,
+    same_as: &str,
+) -> anyhow::Result<Vec<Violation>> {
+    let comparison = Comparison::new(block, file_content)?;
+    let mut violations = Vec::new();
+    for reference in parse_references(file_path, block, same_as)? {
+        let violation = reference_violation(targets, &comparison, file_path, block, reference)?;
+        violations.extend(violation);
+    }
+    Ok(violations)
+}
+
+/// Parses the attribute's raw value, naming the block that wrote it so an author can find the
+/// offending reference without searching for it.
+fn parse_references(
+    file_path: &RepoPath,
+    block: &Block,
+    same_as: &str,
+) -> anyhow::Result<Vec<BlockReference>> {
+    validators::parse_block_references(same_as).with_context(|| {
+        format!(
+            "invalid same-as reference on block {}:{} at line {}",
+            file_path,
+            block.name_display(),
+            block.start_tag_position_range.start().line,
+        )
+    })
+}
+
+/// The violation one reference produces, or `None` when the block and the target agree.
+///
+/// A target that cannot be found is reported rather than aborting the run; a target *file* that
+/// cannot be read is an `Err`, which is [`TargetItems`]'s call to make.
+fn reference_violation<Fs: FileSystem>(
+    targets: &mut TargetItems<'_, Fs>,
+    comparison: &Comparison,
+    file_path: &RepoPath,
+    block: &Block,
+    reference: BlockReference,
+) -> anyhow::Result<Option<Violation>> {
+    let (target_file, target_name, target_items) = match reference {
+        BlockReference::Block { file, name } => {
+            // A reference like ":foo" is resolved relative to the file the block is in.
+            let target_file = file.unwrap_or_else(|| file_path.clone());
+            let items = targets.named_block_items(&target_file, &name)?;
+            (target_file, Some(name), items)
+        }
+        BlockReference::File(target_file) => {
+            let items = targets.whole_file_items(&target_file, comparison.pattern.as_ref())?;
+            (target_file, None, Some(items))
+        }
+    };
+    let target_name = target_name.as_deref();
+    let Some(target_items) = target_items else {
+        return Ok(Some(create_violation(
+            file_path,
+            block,
+            &target_file,
+            target_name,
+            "target block not found",
+        )?));
+    };
+    comparison
+        .disagreement_with(target_items)
+        .map(|reason| create_violation(file_path, block, &target_file, target_name, &reason))
+        .transpose()
 }
 
 /// Extracts a block's comparable items.
@@ -114,18 +183,19 @@ impl<Fs: FileSystem + 'static> ValidatorSync for SameAsValidator<Fs> {
 /// the entry rather than to its indentation, and the items stay in the order the two sides list
 /// them.
 ///
-/// Line boundaries are deliberately not preserved: every line's matches flow into one flat list, so
-/// two blocks listing the same values in the same order agree however those values are spread over
-/// lines. That is what lets a Rust file of one constant per line be compared against a Markdown
-/// list that packs several values onto a line — the point of the attribute is to compare the values
-/// a block yields, not its layout. The cost is that regrouping alone is invisible here; a block
-/// whose line structure is itself meaningful wants no pattern at all, since the pattern-free path
-/// below compares the content newline by newline.
-///
 /// Without a pattern, the comparable value is the block's normalized whole content as a single item.
 fn extract_items(block: &Block, file_content: &str) -> anyhow::Result<Vec<String>> {
-    let content = block.content(file_content);
-    let Some(pattern) = block.attributes.get("same-as-pattern") else {
+    extract_items_from(
+        block.content(file_content),
+        block.attributes.get("same-as-pattern"),
+    )
+}
+
+/// Extracts items from `content` for the given `pattern`.
+///
+/// If `pattern` is `None` then the whole `content` is returned.
+fn extract_items_from(content: &str, pattern: Option<&String>) -> anyhow::Result<Vec<String>> {
+    let Some(pattern) = pattern else {
         return Ok(vec![normalize_content(content)]);
     };
     let regex = Regex::new(pattern)
@@ -169,50 +239,93 @@ fn extract_named(file_blocks: &FileBlocks, name: &str) -> anyhow::Result<Option<
     Ok(None)
 }
 
-/// Resolves a target block's comparable items via a three-step lookup:
-/// 1. blocks already parsed into the validation context (no I/O),
-/// 2. the cache of files read earlier during this run,
-/// 3. reading and parsing the file through `file_system`, caching the result.
-///
-/// The validation context may hold a diff-filtered subset of a file's blocks, so a target block
-/// absent from step 1 is not necessarily missing — the lookup falls through to a full read of the
-/// file. `Ok(None)` is returned only when the fully parsed file contains no block with that name. A
-/// missing or unsupported file is an `Err`. Read confinement (rejecting `..`, absolute escapes, and
-/// escaping symlinks) is a property of the filesystem implementation, so this function needs no path
-/// guard of its own.
-fn resolve_target_items<Fs: FileSystem>(
-    context: &validators::ValidationContext,
-    file_system: &Fs,
-    cache: &mut HashMap<RepoPath, FileBlocks>,
-    target_file: &RepoPath,
-    target_name: &str,
-) -> anyhow::Result<Option<Vec<String>>> {
-    if let Some(file_blocks) = context.blocks.get(target_file)
-        && let Some(items) = extract_named(file_blocks, target_name)?
-    {
-        return Ok(Some(items));
-    }
-    let file_blocks = match cache.entry(target_file.clone()) {
-        Entry::Occupied(entry) => entry.into_mut(),
-        Entry::Vacant(entry) => {
-            let parsed = parse_file(
-                file_system,
-                target_file,
-                &[],
-                every_block,
-                context.parsers(),
-                context.extra_file_extensions(),
-            )?
-            .ok_or_else(|| {
-                anyhow!(
-                    "same-as target file format is unsupported: {}",
-                    target_file.display()
-                )
-            })?;
-            entry.insert(parsed)
+/// Resolves the targets a `same-as` reference names to their comparable items.
+struct TargetItems<'a, Fs: FileSystem> {
+    context: &'a validators::ValidationContext,
+    /// Reads target files that are not already parsed into the validation context.
+    file_system: &'a Fs,
+    /// Files parsed from the disk while looking for a named target block.
+    parsed: HashMap<RepoPath, FileBlocks>,
+    /// Whole-file targets, which are read but never parsed.
+    contents: HashMap<RepoPath, String>,
+}
+
+impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
+    fn new(context: &'a validators::ValidationContext, file_system: &'a Fs) -> Self {
+        Self {
+            context,
+            file_system,
+            parsed: HashMap::new(),
+            contents: HashMap::new(),
         }
-    };
-    extract_named(file_blocks, target_name)
+    }
+
+    /// Resolves a named target block's comparable items via a three-step lookup:
+    /// 1. blocks already parsed into the validation context (no I/O),
+    /// 2. the files read earlier during this run,
+    /// 3. reading and parsing the file, keeping the result.
+    fn named_block_items(
+        &mut self,
+        target_file: &RepoPath,
+        target_name: &str,
+    ) -> anyhow::Result<Option<Vec<String>>> {
+        if let Some(file_blocks) = self.context.blocks.get(target_file)
+            && let Some(items) = extract_named(file_blocks, target_name)?
+        {
+            return Ok(Some(items));
+        }
+        let file_blocks = match self.parsed.entry(target_file.clone()) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let parsed = parse_file(
+                    self.file_system,
+                    target_file,
+                    &[],
+                    every_block,
+                    self.context.parsers(),
+                    self.context.extra_file_extensions(),
+                )?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "same-as target file format is unsupported: {}",
+                        target_file.display()
+                    )
+                })?;
+                entry.insert(parsed)
+            }
+        };
+        extract_named(file_blocks, target_name)
+    }
+
+    /// Resolves a whole-file target's comparable items from the file's entire text.
+    ///
+    /// No grammar is involved, which is what lets a `same-as` target be a file BlockWatch cannot
+    /// parse. A file already in the validation context is read from there; otherwise it is read
+    /// through the filesystem and kept. A missing or unreadable file is an `Err`, as it is for a
+    /// named target.
+    fn whole_file_items(
+        &mut self,
+        target_file: &RepoPath,
+        pattern: Option<&String>,
+    ) -> anyhow::Result<Vec<String>> {
+        if let Some(file_blocks) = self.context.blocks.get(target_file) {
+            return extract_items_from(&file_blocks.file_content, pattern);
+        }
+        let content = match self.contents.entry(target_file.clone()) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => entry.insert(
+                self.file_system
+                    .read_to_string(target_file.as_path())
+                    .with_context(|| {
+                        format!(
+                            "failed to read same-as target file: {}",
+                            target_file.display()
+                        )
+                    })?,
+            ),
+        };
+        extract_items_from(content, pattern)
+    }
 }
 
 /// How extracted items are canonicalized before comparison.
@@ -324,7 +437,9 @@ fn disagreement(source: &[String], target: &[String], mode: &Mode) -> Option<Str
 #[derive(Serialize)]
 struct SameAsViolation<'a> {
     target_file: &'a RepoPath,
-    target_name: &'a str,
+    /// Absent for a whole-file reference, which has no block name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_name: Option<&'a str>,
     reason: &'a str,
 }
 
@@ -332,17 +447,19 @@ fn create_violation(
     file_path: &RepoPath,
     block: &Block,
     target_file: &RepoPath,
-    target_name: &str,
+    target_name: Option<&str>,
     reason: &str,
 ) -> anyhow::Result<Violation> {
     let line = block.start_tag_position_range.start().line;
+    let target = match target_name {
+        Some(target_name) => format!("{}:{}", target_file.display(), target_name),
+        None => format!("file {}", target_file.display()),
+    };
     let message = format!(
-        "Block {}:{} at line {} disagrees with {}:{}: {reason}",
+        "Block {}:{} at line {} disagrees with {target}: {reason}",
         file_path.display(),
         block.name_display(),
         line,
-        target_file.display(),
-        target_name,
     );
     Ok(Violation::new(
         ViolationRange::new(
@@ -809,6 +926,82 @@ mod validate_tests {
             "a.rs",
             "// <block same-as=\":b\" same-as-format=\"number\">\n1\n// </block>\n// <block name=\"b\">\n1\n// </block>",
         );
+        assert!(validator(&[]).validate(context).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn block_equal_to_a_whole_file_target_returns_no_violations() -> anyhow::Result<()> {
+        // The target is a format with no grammar, so it can only be referenced as a whole file.
+        let context = validation_context(
+            "version.rs",
+            "// <block same-as=\"VERSION\">\n1.2.3\n// </block>",
+        );
+
+        let report = validator(&[("VERSION", "1.2.3\n")]).validate(context)?;
+
+        assert_eq!(violation_count(&report), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn block_differing_from_a_whole_file_target_returns_a_violation() -> anyhow::Result<()> {
+        let context = validation_context(
+            "version.rs",
+            "// <block same-as=\"VERSION\">\n1.2.3\n// </block>",
+        );
+
+        let violations = validator(&[("VERSION", "9.9.9\n")])
+            .validate(context)?
+            .violations;
+
+        let file = violations
+            .get(&RepoPath::from_reference("version.rs")?)
+            .unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0]
+                .message
+                .starts_with("Block version.rs:(unnamed) at line 1 disagrees with file VERSION:"),
+            "unexpected message: {}",
+            file[0].message
+        );
+        assert_eq!(
+            file[0].data.as_ref().unwrap()["target_file"],
+            serde_json::json!("VERSION")
+        );
+        assert!(
+            file[0].data.as_ref().unwrap().get("target_name").is_none(),
+            "a whole-file target names no block"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn same_as_pattern_selects_values_from_a_whole_file_target() -> anyhow::Result<()> {
+        // The file has no block to carry a pattern of its own, so the referencing block's applies.
+        let context = validation_context(
+            "version.rs",
+            "// <block same-as=\"package.json\" same-as-pattern=\"\\d+\\.\\d+\\.\\d+\">\nconst VERSION: &str = \"1.2.3\";\n// </block>",
+        );
+
+        let report = validator(&[(
+            "package.json",
+            "{\n  \"name\": \"example\",\n  \"version\": \"1.2.3\"\n}\n",
+        )])
+        .validate(context)?;
+
+        assert_eq!(violation_count(&report), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn whole_file_target_that_is_missing_returns_an_error() -> anyhow::Result<()> {
+        let context = validation_context(
+            "version.rs",
+            "// <block same-as=\"gone.json\">\n1.2.3\n// </block>",
+        );
+
         assert!(validator(&[]).validate(context).is_err());
         Ok(())
     }

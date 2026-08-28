@@ -22,7 +22,7 @@ use crate::validators::keep_unique::KeepUniqueValidatorDetector;
 use crate::validators::line_count::LineCountValidatorDetector;
 use crate::validators::line_pattern::LinePatternValidatorDetector;
 use crate::validators::same_as::SameAsValidatorDetector;
-use anyhow::Context;
+use anyhow::{Context, bail};
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
 use serde::Serialize;
@@ -492,30 +492,60 @@ pub fn detect_validators<Fs: FileSystem + 'static>(
     Ok((sync_validators, async_validators))
 }
 
-/// Parses a comma-separated list of block references in the `file:name` (or `:name` for the same
-/// file) syntax shared by the reference-based validators (`affects`, `check-lua`, `same-as`).
+/// One target named by a reference-based validator's attribute (`affects`, `check-lua`, `same-as`).
+#[derive(Debug, PartialEq, Eq)]
+pub(in crate::validators) enum BlockReference {
+    /// A named block, in `file` or — when `file` is `None` — in the referencing file itself.
+    Block {
+        file: Option<RepoPath>,
+        name: String,
+    },
+    /// A whole file. Nothing is parsed out of it, which is what lets a reference point at a format
+    /// BlockWatch has no grammar for (JSON, `.env`, lockfiles, plain-text fixtures).
+    File(RepoPath),
+}
+
+/// Parses a comma-separated list of the references shared by the reference-based validators
+/// (`affects`, `check-lua`, `same-as`).
 ///
-/// Returns each reference as an `(optional file path, block name)` pair; an empty file part yields
-/// `None`, meaning "a block in the same file".
+/// A reference containing a `:` names a block — `file:name`, or `:name` for a block in the
+/// referencing file. One without names a whole file. That split means a path containing a `:` is
+/// not addressable; no escape hatch exists yet.
+///
+/// A reference whose block name is empty (`file.rs:`) is rejected rather than treated as either
+/// form: it names no block, and reading it as a whole-file reference would silently turn a typo
+/// into a much coarser rule than the author asked for.
 pub(in crate::validators) fn parse_block_references(
     value: &str,
-) -> anyhow::Result<Vec<(Option<RepoPath>, String)>> {
+) -> anyhow::Result<Vec<BlockReference>> {
     let mut result = Vec::new();
     for block_ref in value.split(',') {
-        let block = block_ref.trim();
-        let (mut filename, block_name) = block
-            .split_once(":")
-            .context(format!("Invalid block reference: \"{block}\"",))?;
-        filename = filename.trim();
-        result.push((
-            if filename.is_empty() {
+        let reference = block_ref.trim();
+        let Some((filename, block_name)) = reference.split_once(":") else {
+            if reference.is_empty() {
+                bail!("Invalid block reference: \"{reference}\"");
+            }
+            // Normalized so `./target.json` and `target.json` resolve to the same file.
+            result.push(BlockReference::File(RepoPath::from_reference(reference)?));
+            continue;
+        };
+        let filename = filename.trim();
+        let block_name = block_name.trim();
+        if block_name.is_empty() {
+            bail!(
+                "Invalid block reference: \"{reference}\" names no block; \
+                 drop the \":\" to reference the whole file"
+            );
+        }
+        result.push(BlockReference::Block {
+            file: if filename.is_empty() {
                 None
             } else {
                 // Normalized so `./target.py` and `target.py` resolve to the same block.
                 Some(RepoPath::from_reference(filename)?)
             },
-            block_name.trim().to_string(),
-        ));
+            name: block_name.to_string(),
+        });
     }
     Ok(result)
 }
@@ -685,17 +715,20 @@ mod parse_number_tests {
 #[cfg(test)]
 mod parse_block_references_tests {
     use crate::repo_path::RepoPath;
-    use crate::validators::parse_block_references;
+    use crate::validators::{BlockReference, parse_block_references};
+
+    /// A `file:name` reference, for the expected values below.
+    fn block(file: &str, name: &str) -> anyhow::Result<BlockReference> {
+        Ok(BlockReference::Block {
+            file: Some(RepoPath::from_reference(file)?),
+            name: name.to_string(),
+        })
+    }
+
     #[test]
     fn single_reference() -> anyhow::Result<()> {
         let result = parse_block_references("file.rs:block_name")?;
-        assert_eq!(
-            result,
-            vec![(
-                Some(RepoPath::from_reference("file.rs")?),
-                "block_name".to_string()
-            )]
-        );
+        assert_eq!(result, vec![block("file.rs", "block_name")?]);
         Ok(())
     }
 
@@ -704,16 +737,7 @@ mod parse_block_references_tests {
         let result = parse_block_references("file1.rs:block1, file2.rs:block2")?;
         assert_eq!(
             result,
-            vec![
-                (
-                    Some(RepoPath::from_reference("file1.rs")?),
-                    "block1".to_string()
-                ),
-                (
-                    Some(RepoPath::from_reference("file2.rs")?),
-                    "block2".to_string()
-                )
-            ]
+            vec![block("file1.rs", "block1")?, block("file2.rs", "block2")?]
         );
         Ok(())
     }
@@ -721,7 +745,13 @@ mod parse_block_references_tests {
     #[test]
     fn empty_filename_returns_none_for_filename() -> anyhow::Result<()> {
         let result = parse_block_references(":block_name")?;
-        assert_eq!(result, vec![(None, "block_name".to_string())]);
+        assert_eq!(
+            result,
+            vec![BlockReference::Block {
+                file: None,
+                name: "block_name".to_string()
+            }]
+        );
         Ok(())
     }
 
@@ -730,15 +760,63 @@ mod parse_block_references_tests {
         let result = parse_block_references(":block1, :block2")?;
         assert_eq!(
             result,
-            vec![(None, "block1".to_string()), (None, "block2".to_string())]
+            vec![
+                BlockReference::Block {
+                    file: None,
+                    name: "block1".to_string()
+                },
+                BlockReference::Block {
+                    file: None,
+                    name: "block2".to_string()
+                }
+            ]
         );
         Ok(())
     }
 
     #[test]
-    fn invalid_block_returns_error() {
-        let result = parse_block_references("invalid_reference");
-        assert!(result.is_err());
+    fn a_reference_without_a_colon_is_a_whole_file_reference() -> anyhow::Result<()> {
+        let result = parse_block_references("config/schema.json")?;
+        assert_eq!(
+            result,
+            vec![BlockReference::File(RepoPath::from_reference(
+                "config/schema.json"
+            )?)]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn whole_file_and_block_references_can_be_mixed() -> anyhow::Result<()> {
+        let result = parse_block_references("src/lib.rs:languages-code, locales/en.json")?;
+        assert_eq!(
+            result,
+            vec![
+                block("src/lib.rs", "languages-code")?,
+                BlockReference::File(RepoPath::from_reference("locales/en.json")?)
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_whole_file_reference_is_normalized() -> anyhow::Result<()> {
+        assert_eq!(
+            parse_block_references("./config.json")?,
+            parse_block_references("config.json")?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_reference_with_an_empty_block_name_returns_error() {
+        assert!(parse_block_references("config.json:").is_err());
+    }
+
+    #[test]
+    fn an_empty_reference_returns_error() {
+        assert!(parse_block_references("").is_err());
+        assert!(parse_block_references("file.rs:block, ").is_err());
     }
 }
 

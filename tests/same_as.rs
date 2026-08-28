@@ -1,5 +1,6 @@
 use assert_cmd::assert::OutputAssertExt;
 use assert_cmd::cargo_bin_cmd;
+use predicates::prelude::predicate;
 
 #[test]
 fn source_only_diff_resolves_untouched_target_and_passes() {
@@ -57,4 +58,48 @@ index 1111111..2222222 100644
     let mut cmd = cargo_bin_cmd!();
     cmd.args(["--diff", "--only-changed", "-E", "javascript=js"]);
     cmd.write_stdin(diff).output().unwrap().assert().success();
+}
+
+#[test]
+fn whole_file_target_agreeing_with_the_block_passes() {
+    // The target is a JSON file, a format with no grammar, so it can only be referenced whole. The
+    // block's own `same-as-pattern` selects what to compare on each side.
+    let diff = r#"
+diff --git a/tests/testdata/same_as/whole_file_source.rs b/tests/testdata/same_as/whole_file_source.rs
+index 1111111..2222222 100644
+--- a/tests/testdata/same_as/whole_file_source.rs
++++ b/tests/testdata/same_as/whole_file_source.rs
+@@ -1,3 +1,3 @@
+ // <block same-as="tests/testdata/same_as/whole_file_target.json" same-as-pattern="\d{4}">
+-const PORT: u16 = 8000;
++const PORT: u16 = 8080;
+ // </block>"#;
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
+    cmd.write_stdin(diff).output().unwrap().assert().success();
+}
+
+#[test]
+fn whole_file_target_disagreeing_with_the_block_fails() {
+    let diff = r#"
+diff --git a/tests/testdata/same_as/whole_file_mismatch_source.rs b/tests/testdata/same_as/whole_file_mismatch_source.rs
+index 1111111..2222222 100644
+--- a/tests/testdata/same_as/whole_file_mismatch_source.rs
++++ b/tests/testdata/same_as/whole_file_mismatch_source.rs
+@@ -1,3 +1,3 @@
+ // <block same-as="tests/testdata/same_as/whole_file_target.json" same-as-pattern="\d{4}">
+-const PORT: u16 = 8080;
++const PORT: u16 = 9000;
+ // </block>"#;
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
+    cmd.write_stdin(diff)
+        .output()
+        .unwrap()
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "disagrees with file tests/testdata/same_as/whole_file_target.json",
+        ));
 }

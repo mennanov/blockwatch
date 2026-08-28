@@ -409,3 +409,157 @@ fn full_tree_run_reports_a_dangling_affects_reference() {
             "references tests/testdata/affects/dangling.md:missing, which does not exist",
         ));
 }
+
+#[test]
+fn diff_touching_only_the_source_of_a_whole_file_reference_fails() {
+    // The target is a JSON file, which carries no blocks to reference; the whole file is the
+    // target, and the diff leaves it untouched.
+    let diff_content = r#"
+diff --git a/tests/testdata/affects/whole_file_source.rs b/tests/testdata/affects/whole_file_source.rs
+index abc123..def456 100644
+--- a/tests/testdata/affects/whole_file_source.rs
++++ b/tests/testdata/affects/whole_file_source.rs
+@@ -1,4 +1,4 @@
+ // A source block linked to a file that carries no blocks of its own.
+ // <block affects="tests/testdata/affects/whole_file_target.json">
+-const PORT: u16 = 8000;
++const PORT: u16 = 8080;
+ // </block>
+"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
+    let output = cmd.write_stdin(diff_content).output().unwrap();
+
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::function(|output: &str| {
+            let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
+            let violations = &output_json["tests/testdata/affects/whole_file_source.rs"];
+            assert_eq!(
+                violations[0]["message"],
+                json!(
+                    "Block tests/testdata/affects/whole_file_source.rs:(unnamed) at line 2 is \
+                     modified, but file tests/testdata/affects/whole_file_target.json is not"
+                )
+            );
+            assert_eq!(
+                violations[0]["data"],
+                json!({
+                    "affected_block_file_path": "tests/testdata/affects/whole_file_target.json"
+                })
+            );
+            true
+        }));
+}
+
+#[test]
+fn diff_touching_a_whole_file_reference_target_succeeds() {
+    // Any change to the target file satisfies the reference, including one that touches no block.
+    let diff_content = r#"
+diff --git a/tests/testdata/affects/whole_file_source.rs b/tests/testdata/affects/whole_file_source.rs
+index abc123..def456 100644
+--- a/tests/testdata/affects/whole_file_source.rs
++++ b/tests/testdata/affects/whole_file_source.rs
+@@ -1,4 +1,4 @@
+ // A source block linked to a file that carries no blocks of its own.
+ // <block affects="tests/testdata/affects/whole_file_target.json">
+-const PORT: u16 = 8000;
++const PORT: u16 = 8080;
+ // </block>
+diff --git a/tests/testdata/affects/whole_file_target.json b/tests/testdata/affects/whole_file_target.json
+index abc123..def456 100644
+--- a/tests/testdata/affects/whole_file_target.json
++++ b/tests/testdata/affects/whole_file_target.json
+@@ -1,3 +1,3 @@
+ {
+-  "port": 8000
++  "port": 8080
+ }
+"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
+    cmd.write_stdin(diff_content)
+        .output()
+        .unwrap()
+        .assert()
+        .success();
+}
+
+#[test]
+fn diff_that_only_renames_a_whole_file_reference_target_fails() {
+    // A rename with no content change carries no hunks, so the diff yields nothing at all for the
+    // target. Moving a file must not discharge the references pointing at it: none of its content
+    // changed.
+    let diff_content = r#"
+diff --git a/tests/testdata/affects/whole_file_source.rs b/tests/testdata/affects/whole_file_source.rs
+index abc123..def456 100644
+--- a/tests/testdata/affects/whole_file_source.rs
++++ b/tests/testdata/affects/whole_file_source.rs
+@@ -1,4 +1,4 @@
+ // A source block linked to a file that carries no blocks of its own.
+ // <block affects="tests/testdata/affects/whole_file_target.json">
+-const PORT: u16 = 8000;
++const PORT: u16 = 8080;
+ // </block>
+diff --git a/tests/testdata/affects/old_name.json b/tests/testdata/affects/whole_file_target.json
+similarity index 100%
+rename from tests/testdata/affects/old_name.json
+rename to tests/testdata/affects/whole_file_target.json
+"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
+    let output = cmd.write_stdin(diff_content).output().unwrap();
+
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::function(|output: &str| {
+            let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
+            let violations = &output_json["tests/testdata/affects/whole_file_source.rs"];
+            assert_eq!(
+                violations[0]["message"],
+                json!(
+                    "Block tests/testdata/affects/whole_file_source.rs:(unnamed) at line 2 is \
+                     modified, but file tests/testdata/affects/whole_file_target.json is not"
+                )
+            );
+            true
+        }));
+}
+
+#[test]
+fn diff_creating_the_whole_file_reference_target_empty_succeeds() {
+    // A file the diff creates empty has a patch entry but no hunks. File creation counts as a
+    // change, so the reference is satisfied.
+    let diff_content = r#"
+diff --git a/tests/testdata/affects/whole_file_source.rs b/tests/testdata/affects/whole_file_source.rs
+index abc123..def456 100644
+--- a/tests/testdata/affects/whole_file_source.rs
++++ b/tests/testdata/affects/whole_file_source.rs
+@@ -1,4 +1,4 @@
+ // A source block linked to a file that carries no blocks of its own.
+ // <block affects="tests/testdata/affects/whole_file_target.json">
+-const PORT: u16 = 8000;
++const PORT: u16 = 8080;
+ // </block>
+diff --git a/tests/testdata/affects/whole_file_target.json b/tests/testdata/affects/whole_file_target.json
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/tests/testdata/affects/whole_file_target.json
+"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
+    cmd.write_stdin(diff_content)
+        .output()
+        .unwrap()
+        .assert()
+        .success();
+}

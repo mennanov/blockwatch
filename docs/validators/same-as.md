@@ -8,12 +8,12 @@ Unlike `affects`, it also runs on a full-tree scan, not only on a diff.
 
 ## Syntax
 
-| Attribute         | Value                                                                   | Default    |
-|-------------------|-------------------------------------------------------------------------|------------|
-| `same-as`         | `file:name`, or `:name` for the same file; comma-separated for multiple | —          |
-| `same-as-pattern` | regex; every match's `(?P<value>…)` group, or the whole match           | whole line |
-| `same-as-mode`    | `set`, `sequence`, `single`, `subset`                                   | `set`      |
-| `same-as-format`  | `numeric`                                                               | text       |
+| Attribute         | Value                                                                                            | Default    |
+|-------------------|--------------------------------------------------------------------------------------------------|------------|
+| `same-as`         | `file:name`, `:name` for the same file, or `file` for a whole file; comma-separated for multiple | —          |
+| `same-as-pattern` | regex; every match's `(?P<value>…)` group, or the whole match                                    | whole line |
+| `same-as-mode`    | `set`, `sequence`, `single`, `subset`                                                            | `set`      |
+| `same-as-format`  | `numeric`                                                                                        | text       |
 
 ## Example
 
@@ -89,6 +89,21 @@ A, B, C D
 If a block's line structure is itself meaningful, leave the pattern off. Without one, the whole content is compared
 newline by newline, so the layout has to match too.
 
+## Whole files as targets
+
+A target written without a `:` names a file rather than a block, and the file's **entire** content is what the block is
+compared against. Nothing is parsed out of it, so a format that cannot declare a block — JSON, `.env`, a lockfile — can
+still be a target:
+
+```rust
+// <block same-as="package.json" same-as-pattern="\d+\.\d+\.\d+">
+pub const VERSION: &str = "1.4.2";
+// </block>
+```
+
+The file has no block of its own to carry a `same-as-pattern`, so the referencing block's pattern reads both sides. On a
+file of any size a pattern is usually what you want: without one, the block's content has to equal the whole file.
+
 ## Comparison modes
 
 | `same-as-mode`  | Meaning                                                            |
@@ -143,13 +158,15 @@ numbers.
 ## Notes
 
 - **Which block governs what.** The source block's `same-as-mode` and `same-as-format` govern the comparison. Each
-  block's own `same-as-pattern` governs only how *that* block is read.
+  block's own `same-as-pattern` governs only how *that* block is read — except for a whole-file target, which has no
+  block of its own and is read under the referencing block's pattern.
 - **Not a violation:** the same values regrouped across lines, when a `same-as-pattern` is set. See
   [Lines are not part of the comparison](#lines-are-not-part-of-the-comparison).
 - **Violations:** a missing target block, a non-numeric token under `numeric`, a `single` /
   `subset` side with the wrong number of tokens, or a `same-as-pattern` that matches nothing on
   both sides — an empty match on both blocks is not treated as trivially equal.
-- **Hard errors** (not violations): an unrecognized `same-as-mode` or `same-as-format` value, or an invalid regex.
+- **Hard errors** (not violations): an unrecognized `same-as-mode` or `same-as-format` value, an invalid regex, or a
+  target file that does not exist.
 - Because `same-as` fires without a diff, a periodic bare `blockwatch` run — which scans the whole tree — catches drift
   that an `--only-changed` check would miss. See [CI integration](../ci.md).
 - **A pure rename is invisible to diff input.** Renaming a `same-as` target with no content change (a plain `git mv`)

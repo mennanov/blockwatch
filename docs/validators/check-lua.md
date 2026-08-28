@@ -54,8 +54,10 @@ end
       `ctx.attrs["check-lua"]`, `ctx.attrs["name"]` and `ctx.attrs["severity"]`. Only BlockWatch's own attributes can
       appear here.
     - `ctx.affects` — present only when the block also has an [`affects`](affects.md) attribute. A 1-based array of the
-      blocks this block affects, each a table with `file`, `name`, and (trimmed)
-      `content`. `file` uses the same format as `ctx.file`. References to blocks that do not exist are skipped.
+      targets this block affects, each a table with `file`, `name`, and (trimmed)
+      `content`. `file` uses the same format as `ctx.file`. References that do not resolve are skipped. A whole-file
+      target (an `affects` entry written without a `:`) carries the file's entire text as `content` and no `name`, so
+      `affected.name == nil` is how a script tells the two kinds apart.
 - `content` — a **string** holding the trimmed text content of the block, or, when
   `check-lua-pattern` is set, a **1-based array** of the values the pattern extracted.
 
@@ -133,6 +135,20 @@ end
 ```
 
 For a plain value comparison, [`same-as`](same-as.md) does this without a script.
+
+A whole-file `affects` target reaches the script the same way, which is how a sandboxed script can read a file it could
+not otherwise open:
+
+```lua
+function validate(ctx, content)
+    for _, affected in ipairs(ctx.affects) do
+        if affected.name == nil and not affected.content:find(content, 1, true) then
+            return "the value is missing from " .. affected.file
+        end
+    end
+    return nil
+end
+```
 
 <!-- <block name="lua-safety-modes"> -->
 

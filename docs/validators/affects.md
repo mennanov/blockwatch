@@ -5,14 +5,15 @@ fails.
 
 ## Syntax
 
-| Attribute | Value                                     | Default |
-|-----------|-------------------------------------------|---------|
-| `affects` | `file:name`, or `:name` for the same file | —       |
+| Attribute | Value                                                              | Default |
+|-----------|--------------------------------------------------------------------|---------|
+| `affects` | `file:name`, `:name` for the same file, or `file` for a whole file | —       |
 
-Separate multiple targets with commas:
+Separate multiple targets with commas, mixing the two forms freely:
 
 ```rust
 // <block affects="README.md:supported-langs, docs/api.md:languages">
+// <block affects="src/lib.rs:languages-code, locales/en.json">
 ```
 
 ## Example
@@ -41,6 +42,29 @@ pub enum Language {
 
 Modify the enum and BlockWatch fails until you also touch `supported-langs` in `README.html`.
 
+## Whole Files
+
+A target written without a `:` names a file rather than a block:
+
+```rust
+// <block affects="config/schema.json">
+```
+
+Declaring a block needs a comment, and some formats have none: e.g., JSON, `.env`, lockfiles, CSV, plain-text fixtures.
+A whole-file target has nothing parsed out of it, so any of those can be linked to: change the block, and the run fails
+until that file changes too.
+
+The trade-offs that come with it:
+
+- **It is coarse.** *Any* edit to the file satisfies the reference, a reformatting or a comment included. That is fine
+  for a small `en.json` and noisy for a large one; a named block better serves a file with comments.
+- **Moving the file is not an edit.** A rename that changes no content leaves the reference unsatisfied, so a commit
+  that only relocates the target still fails. Creating the file, even empty, satisfies it.
+- **It is one-way.** A file with no comments cannot carry an `affects` of its own, so "the JSON changed but the code
+  didn't" stays undetected. Point a block at a whole file, not the reverse.
+- **Deleting the target fails the run**, the same way a named target's missing file does.
+- **A file path containing a `:` cannot be addressed**, since the colon is what tells the two forms apart.
+
 ## Direction
 
 `affects` is one-way. The example above catches "code changed, docs didn't" — but not the reverse. For two-way drift
@@ -67,7 +91,8 @@ detection, name both blocks and point each at the other:
   contents. Touching the target with an unrelated edit satisfies it. When the two blocks should hold the same *value*, [
   `same-as`](same-as.md) is the stronger check.
 - **Missing targets are violations.** A reference to a block `name` that does not exist (renamed or deleted) is reported
-  as a violation, even without a diff. A reference to a target *file* that does not exist fails the run.
+  as a violation, even without a diff. A reference to a target *file* that does not exist fails the run, whether the
+  file was named alone or as the `file` half of `file:name`.
 - **Targets are read, not reported.** Under `--only-changed`, a target the diff did not touch is still resolved and
   compared, but it does not appear in a `--verbosity` run report. See
   [Reports Under a Diff](../cli.md#reports-under-a-diff).

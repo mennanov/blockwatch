@@ -12,6 +12,19 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- `affects`, `same-as` and `check-lua`'s `ctx.affects` accept a whole file as a target, written without a `:`
+  (`affects="config/schema.json"`). Nothing is parsed out of the file, so formats that cannot declare a block — JSON,
+  `.env`, lockfiles, plain-text fixtures — can now be linked to. `affects` counts the target as modified when the diff
+  touches the file at all; `same-as` compares against the file's entire content, read under the referencing block's
+  `same-as-pattern`; a `ctx.affects` entry for a whole file carries the file's text and no `name`.
+
+### Changed
+
+- A reference whose block name is empty (`affects="config.json:"`) is now rejected as an authoring error instead of
+  being reported as a dangling reference to a block with no name.
+
 ## [0.5.0] - 2026-08-26
 
 ### Changed
