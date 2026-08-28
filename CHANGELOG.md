@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.5.1] - 2026-08-28
+
 ### Added
 
 - `affects`, `same-as` and `check-lua`'s `ctx.affects` accept a whole file as a target, written without a `:`
