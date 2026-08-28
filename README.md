@@ -126,7 +126,7 @@ See [docs/cli.md](docs/cli.md) for the run modes in full, CLI flags, path exclus
 
 ```yaml
 - repo: https://github.com/mennanov/blockwatch
-  rev: v0.2.27  # Use latest release
+  rev: v0.5.1  # Use latest release
   hooks:
     - id: blockwatch
 ```
@@ -146,7 +146,7 @@ see [docs/ci.md](docs/ci.md).
 
 - Bash
 - C#
-- C/C++
+- C/C++ (`.c`, `.cc`, `.cpp`, `.h`)
 - CMake (`CMakeLists.txt`, `.cmake`)
 - CSS
 - Dart
@@ -180,10 +180,11 @@ see [docs/ci.md](docs/ci.md).
 
 [//]: # (</block>)
 
-To map custom or unknown extensions to a supported syntax, use `-E`:
+Only the extensions listed above are recognized; anything else is ignored, including spellings a grammar would otherwise
+handle — `.hpp`, `.hxx` and `.cxx` among them. Map those to a supported syntax with `-E`:
 
 ```shell
-blockwatch -E cxx=cpp
+blockwatch -E cxx=cpp -E hpp=cpp
 ```
 
 ## Known Limitations

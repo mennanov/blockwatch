@@ -11,7 +11,7 @@ from source on the first run:
 
 ```yaml
 - repo: https://github.com/mennanov/blockwatch
-  rev: v0.2.27  # Use latest release
+  rev: v0.5.1  # Use latest release
   hooks:
     - id: blockwatch
 ```
@@ -46,8 +46,8 @@ Without pre-commit, add the diff pipe directly to `.git/hooks/pre-commit` and ma
 git diff --patch --cached --unified=0 | blockwatch --diff --only-changed
 ```
 
-`set -o pipefail` is deliberately absent here — `/bin/sh` does not portably support it. Under `--diff` an empty stdin
-is rejected outright, so a failing diff command still fails the hook rather than passing silently.
+`set -o pipefail` is deliberately absent here — `/bin/sh` does not portably support it. Under `--diff` an empty stdin is
+rejected outright, so a failing diff command still fails the hook rather than passing silently.
 
 ## GitHub Actions
 

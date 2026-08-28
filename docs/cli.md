@@ -203,21 +203,36 @@ or an emoji advances it by one. The `range` of a violation follows the same conv
 
 ```json
 {
-  "README.md": [
+  "src/lib.rs": [
     {
-      "name": "available-validators",
-      "line": 18,
-      "column": 10,
-      "is_content_modified": false,
       "attributes": {
-        "name": "available-validators"
-      }
+        "affects": "README.md:supported-langs",
+        "name": "languages-code"
+      },
+      "column": 4,
+      "is_content_modified": false,
+      "line": 12,
+      "name": "languages-code"
+    },
+    {
+      "attributes": {
+        "keep-sorted": "asc"
+      },
+      "column": 8,
+      "is_content_modified": false,
+      "line": 40,
+      "name": "(unnamed)"
     }
   ]
 }
 ```
 
 [//]: # (</block>)
+
+A block with no `name` attribute is reported as `(unnamed)`. Within a file, blocks appear in source order and each
+block's attributes are sorted by name; the files themselves are not ordered, and two runs over an unchanged tree may
+emit them differently. Sort by key downstream if you need to diff one run against another — or use [
+`--verbosity full`](#full-reports), which does order its files.
 
 ## Run Reports
 
@@ -288,11 +303,37 @@ git diff --patch | blockwatch --diff --only-changed --verbosity summary
 blockwatch: mode=only-changed, 1/1 files, 1 blocks (0 unchecked), 1 checks, 1 violations
 ```
 
-Nothing about the failure is hidden by this. The violation on stderr names both sides:
+Nothing about the failure is hidden by this. Violations are printed to stderr as JSON, keyed by the file the violating
+block lives in, and the message names both sides:
 
-```console
-Block fileA.py:a at line 1 is modified, but fileB.py:b is not
+```json
+{
+  "fileA.py": [
+    {
+      "code": "affects",
+      "data": {
+        "affected_block_file_path": "fileB.py",
+        "affected_block_name": "b"
+      },
+      "message": "Block fileA.py:a at line 1 is modified, but fileB.py:b is not",
+      "range": {
+        "end": {
+          "character": 39,
+          "line": 1
+        },
+        "start": {
+          "character": 3,
+          "line": 1
+        }
+      },
+      "severity": 1
+    }
+  ]
+}
 ```
+
+`severity` follows the [LSP numbering](validators/README.md#severity): `1` error, `2` warning, `3`
+info, `4` hint.
 
 The division of labour is deliberate — the report describes what the run examined, and the violation explains what went
 wrong. Once the diff touches the target as well, it appears like any other block, with an empty `checks` array because a

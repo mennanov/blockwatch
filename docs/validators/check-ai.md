@@ -1,7 +1,7 @@
 # `check-ai`
 
-Validates a block against a rule stated in plain English, using an LLM. For rules that regex cannot
-express — "must mention the company name", "no TODOs left", "the tone matches the rest of the page".
+Validates a block against a rule stated in plain English, using an LLM. For rules that regex cannot express — "must
+mention the company name", "no TODOs left", "the tone matches the rest of the page".
 
 ## Syntax
 
@@ -20,8 +20,8 @@ express — "must mention the company name", "no TODOs left", "the tone matches 
 
 ## Targeted checks
 
-`check-ai-pattern` sends only the matching parts of the block to the model, which keeps the prompt
-focused and the token cost down:
+`check-ai-pattern` sends only the matching parts of the block to the model, which keeps the prompt focused and the token
+cost down:
 
 ```python
 prices = [
@@ -42,22 +42,24 @@ A pattern that matches nothing is reported as a violation.
 
 - `BLOCKWATCH_AI_API_KEY`: API Key.
 - `BLOCKWATCH_AI_MODEL`: Model name (default: `gpt-5-nano`).
-- `BLOCKWATCH_AI_API_URL`: Custom OpenAI compatible API URL (optional).
+- `BLOCKWATCH_AI_API_URL`: Custom OpenAI compatible API base URL (optional, default:
+  `https://api.openai.com/v1`).
 
 [//]: # (</block>)
 
-Any OpenAI-compatible endpoint works.
+Any OpenAI-compatible endpoint works. The URL is a **base**, not a full endpoint — `/chat/completions`
+is appended to it — so point it at the part of the path the provider shares across routes (`https://host/v1`, not
+`https://host/v1/chat/completions`).
 
 ## Notes
 
-- **This is the expensive validator.** It makes a network call per block and needs an API key. Reach
-  for a deterministic validator first — see [choosing a validator](README.md#which-validator-do-i-want).
+- **This is the expensive validator.** It makes a network call per block and needs an API key. Reach for a deterministic
+  validator first — see [choosing a validator](README.md#which-validator-do-i-want).
 - **Scope the run, or pay for the whole repository.** The cost of a run is set by how many `check-ai` blocks are in
   scope, and a bare `blockwatch` — or `blockwatch --diff` — puts every one of them in scope. For per-pull-request CI and
   hooks use `--diff --only-changed`, which checks only the blocks the diff touched. See
   [Run Modes](../cli.md#run-modes).
-- Blocks are checked concurrently, so a run with many `check-ai` blocks costs roughly one round trip
-  rather than N.
+- Blocks are checked concurrently, so a run with many `check-ai` blocks costs roughly one round trip rather than N.
 - Disable it for local runs with `blockwatch -d check-ai` when you do not want to spend tokens. See
   the [CLI reference](../cli.md).
 - An empty condition is a hard error.
