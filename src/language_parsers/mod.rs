@@ -228,6 +228,28 @@ impl TreeSitterCommentsParser {
             tree,
         }
     }
+
+    /// Stops the walk at every node the `predicate` accepts, without reading a comment out of it.
+    ///
+    /// Unlike [`Self::with_break_at_node_kinds`], the predicate also sees the source code, so it
+    /// can judge a node by the surrounding text.
+    fn with_break_when(self, predicate: fn(&Node, &str) -> bool) -> Self {
+        let Self {
+            parser,
+            node_visitor,
+            tree,
+        } = self;
+        Self {
+            parser,
+            node_visitor: Box::new(move |node, source_code| {
+                if predicate(node, source_code) {
+                    return Visit::Break(None);
+                }
+                node_visitor(node, source_code)
+            }),
+            tree,
+        }
+    }
 }
 
 impl CommentsParser for TreeSitterCommentsParser {

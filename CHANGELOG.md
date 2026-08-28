@@ -22,8 +22,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Fixed
 
-- A `<block>` tag written inside a GraphQL string is no longer picked up as a real rule. The same text inside the JSON
-  form of a Dockerfile instruction (`CMD ["…"]`) is still misread; see the README's known limitations.
+- A `<block>` tag written inside a string is no longer picked up as a real rule in GraphQL, nor in the JSON form of a
+  Dockerfile instruction (`CMD ["# ..."]`).
 
 ### Changed
 

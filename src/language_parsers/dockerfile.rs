@@ -10,7 +10,14 @@ pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let containerfile_language = tree_sitter_containerfile::LANGUAGE.into();
     let parser = language_parsers::python_style_comments_parser(&containerfile_language, "comment")
-        .with_break_at_node_kinds(&["double_quoted_string", "single_quoted_string"]);
+        .with_break_at_node_kinds(&["double_quoted_string", "single_quoted_string"])
+        // Because of the bug in the Dockerfile tree-sitter grammar, the strings like
+        // "# not a comment" are lexed as a comment. This is a workaround to ignore them.
+        .with_break_when(|node, source_code| {
+            node.kind() == "comment"
+                && node.start_byte() > 0
+                && source_code.as_bytes()[node.start_byte() - 1] == b'"'
+        });
     Ok(parser)
 }
 
@@ -103,6 +110,48 @@ COPY . /app
             .collect();
 
         assert_eq!(comments, vec!["  The only comment here\n".to_string()]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn hash_opening_a_json_array_argument_is_not_a_comment() -> anyhow::Result<()> {
+        let mut comments_parser = comments_parser()?;
+
+        let comments: Vec<String> = comments_parser
+            .parse(
+                r##"FROM alpine:3.20
+ENTRYPOINT ["#/bin/sh", "-c", "# neither of these is a comment"]
+
+# The only comment here
+COPY . /app
+"##,
+            )
+            .map(|comment| comment.comment_text)
+            .collect();
+
+        assert_eq!(comments, vec!["  The only comment here\n".to_string()]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn real_block_is_parsed_while_json_array_marker_is_ignored() -> anyhow::Result<()> {
+        let contents = r##"FROM alpine:3.20
+CMD ["sh", "-c", "# <block name='fake'> x # </block>"]
+# <block name="real">
+COPY . /app
+# </block>
+"##;
+        let blocks = parser()?
+            .parse(contents)
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let names: Vec<&str> = blocks
+            .iter()
+            .map(|block| block.attributes["name"].as_str())
+            .collect();
+
+        assert_eq!(names, ["real"]);
 
         Ok(())
     }
