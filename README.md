@@ -43,8 +43,10 @@ If you add a new variant to `Language` in `src/lib.rs` without modifying `README
 The [`affects`](docs/validators/affects.md) validator ensures linked blocks are modified together, while [
 `same-as`](docs/validators/same-as.md) verifies that they agree.
 
-When a diff is piped in, only the blocks that diff touched are validated. Adding a rule never fails anyone else's work,
-so you can annotate an existing codebase one file at a time instead of fixing every pre-existing violation up front.
+A piped diff tells BlockWatch which blocks changed; adding `--only-changed` narrows the run to just those blocks. See
+[Run Modes](docs/cli.md#run-modes) for the difference between `--diff` and `--diff --only-changed`. With
+`--diff --only-changed`, adding a rule never fails anyone else's work, so you can annotate an existing codebase one file
+at a time instead of fixing every pre-existing violation up front.
 
 ## Validators
 

@@ -174,6 +174,11 @@ BLOCKWATCH_LUA_MODE=unsafe blockwatch
 | `safe`                | All memory-safe libraries (including `io`, `os`, `package`)           | Memory-safe - Allows file/OS access |
 | `unsafe`              | All Lua standard libraries with no restrictions (including C modules) | Unsafe - Full system access         |
 
+If a script uses a library that is not available in the selected mode, the run stops with a Lua error. The block is not
+reported as a violation — the whole run fails. So a script that needs `io` or `os` will fail every `sandboxed` run,
+including fork pull requests that changed nothing related to it. Disable `check-lua` for those runs instead; see
+[A validator that cannot run fails the check](../ci.md#a-validator-that-cannot-run-fails-the-check).
+
 <!-- </block> -->
 
 ---

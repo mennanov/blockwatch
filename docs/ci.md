@@ -125,6 +125,38 @@ jobs:
 When `BLOCKWATCH_LUA_MODE` is set to `sandboxed`, Lua scripts run without OS or filesystem access and without API
 secrets.
 
+### A validator that cannot run fails the check
+
+Sandboxing controls what a validator may do, not whether it runs. `check-ai` and `check-lua` still run on every block in
+scope. When one of them cannot do its job, the result is not "skipped":
+
+| Situation                                                              | Result                                            |
+|------------------------------------------------------------------------|---------------------------------------------------|
+| `check-ai` and the API key is empty or rejected                        | the run stops with an error                       |
+| a `check-lua` script calls `os` or `io` under `sandboxed`              | the run stops with an error                       |
+| a `check-lua` script checks for `os`/`io` itself and returns a message | a violation, which looks like a real rule failure |
+
+None of these mean the code is wrong. A fork pull request that changed nothing related still gets a red check. Disable
+those validators if that's undesirable:
+
+```yaml
+jobs:
+  blockwatch:
+    runs-on: ubuntu-latest
+    env:
+      TRUSTED: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - uses: mennanov/blockwatch-action@v1
+        env:
+          BLOCKWATCH_LUA_MODE: ${{ env.TRUSTED == 'true' && 'safe' || 'sandboxed' }}
+          BLOCKWATCH_AI_API_KEY: ${{ env.TRUSTED == 'true' && secrets.BLOCKWATCH_AI_API_KEY || '' }}
+        with:
+          # Untrusted runs disable I/O capable validators.
+          disable: ${{ env.TRUSTED == 'true' && '' || 'check-ai,check-lua' }}
+```
+
+`--verbosity summary` prints how many blocks a run did not check.
+
 ---
 
 [← Return to README](../README.md)

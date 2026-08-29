@@ -51,6 +51,22 @@ Any OpenAI-compatible endpoint works. The URL is a **base**, not a full endpoint
 is appended to it — so point it at the part of the path the provider shares across routes (`https://host/v1`, not
 `https://host/v1/chat/completions`).
 
+## Before you send code to a model
+
+`check-ai` sends the content of every block in scope to a third-party service and asks a model whether it satisfies your
+condition. Four things follow from that:
+
+- **The block content leaves your machine.** Whatever is in the block — credentials, customer data, unreleased work —
+  goes to the provider, under the provider's retention and training policy. Keep `check-ai` off blocks that can hold
+  secrets, and scope runs with `--diff --only-changed`.
+- **The block content is part of the prompt.** Text in a block can contradict your condition and talk the model into
+  answering `OK`. Anyone who can edit a checked file can try this — a fork pull request, for example.
+- **The answer is a guess, not a proof.** The same block and condition can pass one run and fail the next. Use
+  `check-ai` for prose and style rules. For anything you have to rely on, use a deterministic validator.
+- **CI runs are not repeatable.** Outages, rate limits, a model that changed or was retired, and ordinary sampling
+  variance all change the result when nothing in the code changed. Start with `severity="warning"` until a condition
+  proves stable.
+
 ## Notes
 
 - **This is the expensive validator.** It makes a network call per block and needs an API key. Reach for a deterministic
@@ -62,7 +78,9 @@ is appended to it — so point it at the part of the path the provider shares ac
 - Blocks are checked concurrently, so a run with many `check-ai` blocks costs roughly one round trip rather than N.
 - Disable it for local runs with `blockwatch -d check-ai` when you do not want to spend tokens. See
   the [CLI reference](../cli.md).
-- An empty condition is a hard error.
+- An empty condition is a hard error. So is a missing or rejected API key: the run stops instead of reporting the block
+  as a violation. A run without a working key has to disable the validator — see
+  [A validator that cannot run fails the check](../ci.md#a-validator-that-cannot-run-fails-the-check).
 
 ---
 

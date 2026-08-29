@@ -7,7 +7,8 @@ description: Use when writing or modifying code in a project that uses BlockWatc
 
 BlockWatch is a language-agnostic linter that enforces rules declared inside HTML-like `<block ...>` tags placed in
 source-file comments. It works across Rust, Python, JS/TS, Go, Java, Markdown, YAML, TOML, HTML, and more. By default it
-checks the whole tree; given a `git diff` on stdin it can instead check only the blocks that diff changed.
+checks the whole tree; given a `git diff` on stdin plus `--diff --only-changed` it checks only the blocks that diff
+changed.
 
 Use this skill in three situations:
 
