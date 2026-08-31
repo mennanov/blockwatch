@@ -5,21 +5,22 @@
 [![Crates.io](https://img.shields.io/crates/v/blockwatch)](https://crates.io/crates/blockwatch)
 [![Downloads](https://img.shields.io/crates/d/blockwatch)](https://crates.io/crates/blockwatch)
 
-BlockWatch is a language-agnostic linter that keeps co-dependent code, documentation, and configuration files in sync.
-Rules are declared in comments right next to the code they protect.
+[//]: # (<block name="pitch">)
+Some parts of your codebase must change together: a function and its docs, a value across config files, etc. Blockwatch
+makes these relationships explicit and fails a CI run or a pre-commit hook if they drift.
 
-<p>
-  <img src="demo.gif" alt="BlockWatch Demo">
-</p>
+Supports 33 languages. No config files are needed.
+
+[//]: # (</block>)
 
 ## Quick Start
 
-Add `<block>` tags inside comments in any [supported file](#supported-languages):
+Wrap the code in a block and point it at the docs.
 
 **src/lib.rs**:
 
 ```rust
-// <block affects="README.html:supported-langs">
+// <block name="languages" affects="README.md:supported-languages">
 pub enum Language {
     Rust,
     Python,
@@ -27,47 +28,65 @@ pub enum Language {
 // </block>
 ```
 
-**README.html**:
+**README.md**:
 
-```html
-<!-- <block name="supported-langs"> -->
-<ul>
-    <li>Rust</li>
-    <li>Python</li>
-</ul>
+```markdown
+<!-- <block name="supported-languages"> -->
+
+- Rust
+- Python
+
 <!-- </block> -->
 ```
 
-If you add a new variant to `Language` in `src/lib.rs` without modifying `README.html`, BlockWatch will report an error.
+Now add a `Go` variant to the enum in the Rust code and pass the diff to `blockwatch --diff`:
 
-The [`affects`](docs/validators/affects.md) validator ensures linked blocks are modified together, while [
-`same-as`](docs/validators/same-as.md) verifies that they agree.
+```console
+$ git diff --patch | blockwatch --diff
+{
+  "src/lib.rs": [
+    {
+      "code": "affects",
+      "data": {
+        "affected_block_file_path": "README.md",
+        "affected_block_name": "supported-languages"
+      },
+      "message": "Block src/lib.rs:languages at line 1 is modified, but README.md:supported-languages is not",
+      "range": {
+        "end": {"character": 63, "line": 1},
+        "start": {"character": 4, "line": 1}
+      },
+      "severity": 1
+    }
+  ]
+}
+```
 
-A piped diff tells BlockWatch which blocks changed; adding `--only-changed` narrows the run to just those blocks. See
-[Run Modes](docs/cli.md#run-modes) for the difference between `--diff` and `--diff --only-changed`. With
-`--diff --only-changed`, adding a rule never fails anyone else's work, so you can annotate an existing codebase one file
-at a time instead of fixing every pre-existing violation up front.
+Update the contents of the block in `README.md` and it will pass the check.
 
 ## Validators
 
+`affects` and `same-as` are the two that work across files: one forces a co-edit, the other compares the actual values
+and needs no diff to do it. The rest check a single block on its own, and are the things you'd otherwise nitpick in code
+review.
+
 [//]: # (<block name="available-validators">)
 
-| Attribute                                         | Description                                                      |
-|---------------------------------------------------|------------------------------------------------------------------|
-| [`affects`](docs/validators/affects.md)           | Ensures linked blocks are updated together (e.g. code and docs)  |
-| [`same-as`](docs/validators/same-as.md)           | Verifies that two or more blocks contain identical values        |
-| [`keep-sorted`](docs/validators/keep-sorted.md)   | Enforces alphabetical or numerical ordering on list items        |
-| [`keep-unique`](docs/validators/keep-unique.md)   | Prevents duplicate lines within a block                          |
-| [`line-pattern`](docs/validators/line-pattern.md) | Enforces that every line matches a specified regex               |
-| [`line-count`](docs/validators/line-count.md)     | Enforces lower or upper bounds on the number of lines in a block |
-| [`check-ai`](docs/validators/check-ai.md)         | Validates content against natural language rules using an LLM    |
-| [`check-lua`](docs/validators/check-lua.md)       | Runs custom validation logic written in Lua                      |
+| Validator                                         | Description                                                                                  | Attributes                                                     |
+|---------------------------------------------------|----------------------------------------------------------------------------------------------|----------------------------------------------------------------|
+| [`affects`](docs/validators/affects.md)           | Forces linked blocks to be edited together (e.g. code and its docs); needs a diff            | `affects`                                                      |
+| [`same-as`](docs/validators/same-as.md)           | Asserts two or more blocks hold the same value, across languages and formats; no diff needed | `same-as`, `same-as-pattern`, `same-as-mode`, `same-as-format` |
+| [`keep-sorted`](docs/validators/keep-sorted.md)   | Enforces alphabetical or numerical ordering on list items                                    | `keep-sorted`, `keep-sorted-pattern`, `keep-sorted-format`     |
+| [`keep-unique`](docs/validators/keep-unique.md)   | Prevents duplicate lines within a block                                                      | `keep-unique`                                                  |
+| [`line-pattern`](docs/validators/line-pattern.md) | Enforces that every line matches a specified regex                                           | `line-pattern`                                                 |
+| [`line-count`](docs/validators/line-count.md)     | Enforces lower or upper bounds on the number of lines in a block                             | `line-count`                                                   |
+| [`check-ai`](docs/validators/check-ai.md)         | Validates content against natural language rules using an LLM                                | `check-ai`, `check-ai-pattern`                                 |
+| [`check-lua`](docs/validators/check-lua.md)       | Runs custom validation logic written in Lua                                                  | `check-lua`, `check-lua-pattern`, `check-lua-timeout`          |
 
 [//]: # (</block>)
 
-Blocks also support `name` (for reference by `affects` or `same-as`) and [
-`severity`](docs/validators/README.md#severity) (e.g., `severity="warning"` to log warnings without breaking builds
-during gradual rollouts).
+Blocks can have a `name`, so other blocks can point at it, and [`severity`](docs/validators/README.md#severity). The
+`error` severity fails with a non-zero exit code.
 
 See the [Validators Reference](docs/validators/README.md) for full details.
 
@@ -78,13 +97,12 @@ brew install mennanov/blockwatch/blockwatch   # macOS / Linux
 cargo install blockwatch                      # from source
 ```
 
-Prebuilt binaries are also available on the [Releases](https://github.com/mennanov/blockwatch/releases) page.
+Prebuilt binaries are on the [Releases](https://github.com/mennanov/blockwatch/releases) page.
 
-## AI Agent Integration
+## Let an agent integrate this tool
 
-Adding `<block>` tags to an existing codebase can be automated using AI coding tools. This repository includes
-a [skill](.agents/skills/blockwatch/SKILL.md) that instructs agents on how to identify candidate blocks and verify their
-edits.
+This repository ships a [skill](.agents/skills/blockwatch/SKILL.md) that tells an agent which blocks are worth linking
+and how to verify its own edits.
 
 For **Claude Code**:
 
@@ -97,8 +115,8 @@ For Cursor, Copilot, Codex, and other setup options, see [docs/agents.md](docs/a
 
 ## Usage
 
-A bare run checks the whole repository. Pass `--diff` to read a unified diff from stdin, which marks the blocks it
-changed, and add `--only-changed` to narrow the run down to those blocks:
+A bare run checks every block in the repository. Pass `--diff` to read a unified diff from stdin, which marks the blocks
+the diff changed, and add `--only-changed` to narrow the run down to those blocks:
 
 ```shell
 # Check every block in the repository
@@ -120,6 +138,9 @@ git diff --cached --patch | blockwatch --diff --only-changed
 blockwatch list
 ```
 
+Everything is flags and comments. There is no config file, deliberately: a central config is one more thing that drifts
+away from the code it describes, which is the problem this tool exists to solve.
+
 See [docs/cli.md](docs/cli.md) for the run modes in full, CLI flags, path exclusions, and custom extension mappings.
 
 ## CI Integration
@@ -139,12 +160,15 @@ See [docs/cli.md](docs/cli.md) for the run modes in full, CLI flags, path exclus
 - uses: mennanov/blockwatch-action@v1
 ```
 
-For plain git hooks, local pre-commit setups, and sandboxing untrusted Lua scripts in fork PRs,
+BlockWatch exits `1` when it finds at least one `error` severity violation, and `0` otherwise. Warnings, info, and hints
+are printed but don't fail the run.
+
+For plain git hooks, local pre-commit setups, and sandboxing untrusted Lua scripts in fork pull requests,
 see [docs/ci.md](docs/ci.md).
 
 ## Supported Languages
 
-[//]: # (<block name="supported-grammar" keep-sorted="asc">)
+[//]: # (<block name="supported-grammar" keep-sorted="asc" affects=":pitch">)
 
 - Bash
 - C#
@@ -182,8 +206,8 @@ see [docs/ci.md](docs/ci.md).
 
 [//]: # (</block>)
 
-Only the extensions listed above are recognized; anything else is ignored, including spellings a grammar would otherwise
-handle — `.hpp`, `.hxx` and `.cxx` among them. Map those to a supported syntax with `-E`:
+Only the extensions listed above are recognized. Anything else is ignored, including spellings a grammar would otherwise
+handle, `.hpp`, `.hxx` and `.cxx` among them. Map those to a supported syntax with `-E`:
 
 ```shell
 blockwatch -E cxx=cpp -E hpp=cpp
@@ -191,12 +215,17 @@ blockwatch -E cxx=cpp -E hpp=cpp
 
 ## Known Limitations
 
-- Deleted blocks are currently ignored.
-- Files with unsupported comment syntaxes are ignored.
+- **Deleting a block deletes its rule, quietly.** Remove a file, or just strip the tags out of it, and the links it
+  declared are gone. The run passes and nothing tells you a rule disappeared. Blocks still *pointing* at the deleted one
+  do fail, as a missing reference.
+- **A file needs comments to hold a block.** JSON, CSV, and `.env` files have nowhere to put a tag. Link to them with a
+  whole-file [`affects`](docs/validators/affects.md#whole-files) instead.
+- **Unsupported extensions are skipped silently.** A run that read nothing looks exactly like a run that found no
+  problems. `blockwatch --verbosity summary` prints how many files were actually read.
 
 ## Contributing
 
-Contributions are welcome! A great first issue
+Contributions are welcome. A great first issue
 is [adding support for a new grammar](https://github.com/mennanov/blockwatch/pull/2).
 
 To run tests locally:

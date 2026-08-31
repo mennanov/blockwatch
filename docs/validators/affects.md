@@ -12,8 +12,7 @@ fails.
 Separate multiple targets with commas, mixing the two forms freely:
 
 ```rust
-// <block affects="README.md:supported-langs, docs/api.md:languages">
-// <block affects="src/lib.rs:languages-code, locales/en.json">
+// <block affects="README.md:supported-langs, docs/api.md:languages, locales/en.json">
 ```
 
 ## Example
@@ -21,7 +20,7 @@ Separate multiple targets with commas, mixing the two forms freely:
 **src/lib.rs**:
 
 ```rust
-// <block affects="README.html:supported-langs">
+// <block affects="README.md:supported-langs">
 pub enum Language {
     Rust,
     Python,
@@ -29,18 +28,18 @@ pub enum Language {
 // </block>
 ```
 
-**README.html**:
+**README.md**:
 
-```html
+```markdown
 <!-- <block name="supported-langs"> -->
-<ul>
-    <li>Rust</li>
-    <li>Python</li>
-</ul>
+
+- Rust
+- Python
+
 <!-- </block> -->
 ```
 
-Modify the enum and BlockWatch fails until you also touch `supported-langs` in `README.html`.
+Modify the enum and BlockWatch fails until you also touch `supported-langs` in `README.md`.
 
 ## Whole Files
 
@@ -71,11 +70,11 @@ The trade-offs that come with it:
 detection, name both blocks and point each at the other:
 
 ```rust
-// <block name="languages-code" affects="README.html:supported-langs">
+// <block name="languages-code" affects="README.md:supported-langs">
 ```
 
-```html
-<!-- <block name="supported-langs" affects="src/lib.rs:languages-code"> -->
+```markdown
+[//]: # (<block name="supported-langs" affects="src/lib.rs:languages-code">)
 ```
 
 ## Notes
