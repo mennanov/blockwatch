@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.5.2] - 2026-09-04
+
 ### Added
 
 - `--suppress FILE[:BLOCK_NAME[:VALIDATOR[:HASH]]]`, repeatable, stops reported violations failing the run without
