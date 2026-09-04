@@ -102,6 +102,27 @@ git diff --patch <base>..<head> | blockwatch --diff
 `--verbosity summary` reports how many blocks carry a rule that needs a diff, so a run says plainly what it could not
 check.
 
+## Suppressing Violations From a Job
+
+A violation the team has looked at and decided to live with can be kept out of the exit code without touching the
+source. Pass its [address](cli.md#the-address-of-a-violation) with `--suppress`, repeating the flag once per address:
+
+```shell
+blockwatch \
+  --suppress docs/cli.md:cli-docs:keep-sorted \
+  --suppress src/lib.rs:languages:line-count
+```
+
+Dropping segments from the end widens what an address covers, so `--suppress vendor/generated.py` clears the whole file.
+
+The violations stay in the output, marked `"suppressed": true`.
+
+**BlockWatch holds no state.** It is told which addresses to suppress for the run it is about to perform and remembers
+nothing afterwards. Where that list lives is the job's decision — a variable in the workflow, a file the repository commits and
+the job expands onto the command line, or a record kept by whatever renders the annotations.
+
+An address that covers nothing does nothing, so a suppression left behind by a rename cannot break the build.
+
 ## Security: Sandboxing Fork Pull Requests
 
 If your repository uses [`check-lua`](validators/check-lua.md) or [`check-ai`](validators/check-ai.md), pull requests

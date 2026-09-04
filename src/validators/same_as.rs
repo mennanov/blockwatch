@@ -461,20 +461,23 @@ fn create_violation(
         block.name_display(),
         line,
     );
-    Ok(Violation::new(
+    Violation::new(
         ViolationRange::new(
             block.start_tag_position_range.start().clone(),
             block.start_tag_position_range.end().clone(),
         ),
+        file_path,
+        block,
         "same-as".to_string(),
         message,
-        block.severity()?,
+        // A block may be compared against several targets, so the target identifies this violation.
+        Some(&target),
         Some(serde_json::to_value(SameAsViolation {
             target_file,
             target_name,
             reason,
         })?),
-    ))
+    )
 }
 
 /// Selects [`SameAsValidator`] for blocks carrying a `same-as` attribute.

@@ -165,7 +165,6 @@ impl RunReport {
 mod tests {
     use super::*;
     use crate::Position;
-    use crate::blocks::BlockSeverity;
     use crate::repo_path::RepoPath;
     use crate::test_utils::validation_context;
     use crate::validators::{ValidationLog, ValidationReport, Violation, ViolationRange};
@@ -180,14 +179,19 @@ mod tests {
 'apple',
 # </block>"#;
 
-    fn violation() -> Violation {
+    fn violation(context: &ValidationContext) -> Violation {
+        let file_path = RepoPath::from_reference("example.py").expect("a valid repository path");
+        let block = &context.blocks[&file_path].blocks_with_context[0].block;
         Violation::new(
             ViolationRange::new(Position::new(2, 1), Position::new(2, 8)),
+            &file_path,
+            block,
             "keep-sorted".to_string(),
             "out of order".to_string(),
-            BlockSeverity::Error,
+            Some("'apple',"),
             None,
         )
+        .expect("the block declares a valid severity")
     }
 
     /// Builds a run log in which `validator` checked the block at `block_index` of `example.py`.
@@ -212,7 +216,7 @@ mod tests {
     #[test]
     fn summary_line_reports_every_count() -> anyhow::Result<()> {
         let context = validation_context("example.py", CONTENTS);
-        let log = log_with_check(&context, 0, "keep-sorted", vec![violation()])?;
+        let log = log_with_check(&context, 0, "keep-sorted", vec![violation(&context)])?;
 
         let report = RunReport::new(
             RunMode::All,
@@ -235,7 +239,7 @@ mod tests {
     #[test]
     fn summary_line_under_a_diff_leaves_out_the_needs_diff_clause() -> anyhow::Result<()> {
         let context = validation_context("example.py", CONTENTS);
-        let log = log_with_check(&context, 0, "keep-sorted", vec![violation()])?;
+        let log = log_with_check(&context, 0, "keep-sorted", vec![violation(&context)])?;
 
         let report = RunReport::new(
             RunMode::AllWithDiff,
@@ -258,7 +262,7 @@ mod tests {
     #[test]
     fn json_under_a_diff_omits_the_needs_diff_key() -> anyhow::Result<()> {
         let context = validation_context("example.py", CONTENTS);
-        let log = log_with_check(&context, 0, "keep-sorted", vec![violation()])?;
+        let log = log_with_check(&context, 0, "keep-sorted", vec![violation(&context)])?;
 
         let report = RunReport::new(
             RunMode::OnlyChanged,
@@ -288,7 +292,7 @@ mod tests {
         // `keep-sorted` checks the first two blocks and finds one violation; `line-count` checks
         // only the first. The third block's attribute is misspelled, so no validator matches it.
         let mut sorted = ValidationReport::default();
-        sorted.add_all(&file_path, &blocks[0].block, vec![violation()]);
+        sorted.add_all(&file_path, &blocks[0].block, vec![violation(&context)]);
         sorted.add_all(&file_path, &blocks[1].block, Vec::new());
         log.add_validation_report("keep-sorted", sorted);
 

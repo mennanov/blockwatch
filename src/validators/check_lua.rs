@@ -438,16 +438,19 @@ fn create_violation(
         block.name_display(),
         block.start_tag_position_range.start().line,
     );
-    Ok(Violation::new(
+    Violation::new(
         ViolationRange::new(
             block.start_tag_position_range.start().clone(),
             block.start_tag_position_range.end().clone(),
         ),
+        file_path,
+        block,
         "check-lua".to_string(),
         message,
-        block.severity()?,
+        // A script passes or fails the block as a whole, so there is never a sibling to tell apart.
+        None,
         Some(details),
-    ))
+    )
 }
 
 /// A target referenced by the validated block's `affects` attribute, exposed to Lua scripts.

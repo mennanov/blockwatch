@@ -18,6 +18,8 @@ pub mod report;
 mod tag_parser;
 /// The rules enforced on blocks (`affects`, `keep-sorted`, …) and the machinery that runs them.
 pub mod validators;
+/// Unique violation address.
+pub mod violation_address;
 
 /// A place in a source file.
 #[derive(Serialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]

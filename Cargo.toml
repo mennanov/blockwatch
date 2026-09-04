@@ -25,6 +25,7 @@ async-openai = { version = "0.41", features = [
 async-trait = "0.1"
 bigdecimal = "0.4"
 clap = { version = "4.6", features = ["cargo", "derive"] }
+fnv = "1.0"
 globset = "0.4.18"
 ignore = "0.4"
 mlua = { version = "0.12.0", features = ["lua54", "vendored", "async", "send"] }

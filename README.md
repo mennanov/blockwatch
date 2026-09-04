@@ -88,6 +88,11 @@ review.
 Blocks can have a `name`, so other blocks can point at it, and [`severity`](docs/validators/README.md#severity). The
 `error` severity fails with a non-zero exit code.
 
+Violations can be kept out of the exit code without editing the source:
+`blockwatch --suppress FILE[:BLOCK[:VALIDATOR[:HASH]]]` keeps them in the output and stops them failing the run. The
+shorter the address, the more it covers: from a single violation up to every violation in a file. Only named blocks can
+be addressed below the file level — see [Suppressing a Violation](docs/cli.md#suppressing-a-violation).
+
 See the [Validators Reference](docs/validators/README.md) for full details.
 
 ## Installation

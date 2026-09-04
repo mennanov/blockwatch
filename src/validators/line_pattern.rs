@@ -1,6 +1,7 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::character_column_at;
 use crate::fs::FileSystem;
+use crate::repo_path::RepoPath;
 use crate::validators::{
     ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
 };
@@ -8,7 +9,6 @@ use crate::{Position, validators};
 use anyhow::anyhow;
 use regex::Regex;
 use serde::Serialize;
-use std::path::Path;
 use std::sync::Arc;
 
 /// Enforces `line-pattern="<regex>"`: every non-empty line in the block must match the regex.
@@ -74,6 +74,7 @@ impl ValidatorSync for LinePatternValidator {
                             file_path,
                             &block_with_context.block,
                             pattern,
+                            trimmed_line,
                             violation_start.line,
                             violation_start.character,
                             line_character_end,
@@ -119,9 +120,10 @@ impl<Fs: FileSystem> ValidatorDetector<Fs> for LinePatternValidatorDetector {
 }
 
 fn create_violation(
-    block_file_path: &Path,
+    block_file_path: &RepoPath,
     block: &Block,
     pattern: &str,
+    violation_line: &str,
     violation_line_number: usize,
     violation_character_start: usize,
     violation_character_end: usize,
@@ -134,18 +136,22 @@ fn create_violation(
         violation_line_number,
         pattern
     );
-    Ok(Violation::new(
+    Violation::new(
         ViolationRange::new(
             Position::new(violation_line_number, violation_character_start),
             Position::new(violation_line_number, violation_character_end),
         ),
+        block_file_path,
+        block,
         "line-pattern".to_string(),
         message,
-        block.severity()?,
+        // Identify the violation by the offending line rather than its number, which shifts
+        // whenever anything above it is added or removed.
+        Some(violation_line),
         Some(serde_json::to_value(LinePatternViolation {
             pattern: pattern.to_string(),
         })?),
-    ))
+    )
 }
 
 #[cfg(test)]

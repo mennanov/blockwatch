@@ -46,6 +46,10 @@ Names the block so other blocks can point at it with `affects` or `same-as`. Nam
 A name must be unique within its file — a second block reusing one is a hard error, since every
 `affects`/`same-as` reference to it would be ambiguous.
 
+Naming a block also makes its violations suppressible one at a time: only a named block's violations carry the address
+that [`--suppress`](../cli.md#suppressing-a-violation) points at. An unnamed block's violations can only be suppressed
+along with the rest of their file.
+
 ### `severity`
 
 Controls how a violation is reported. Mirrors
@@ -67,6 +71,11 @@ block as a `warning`, clean up the existing violations, then promote it:
 "apple",
 # </block>
 ```
+
+`severity` is declared beside the code and applies to every violation the block will ever produce.
+[`--suppress`](../cli.md#suppressing-a-violation) is passed on the command line and applies to violations that were
+already reported. Lower the severity when the rule is genuinely advisory here; suppress when the rule is right in
+general and wrong about this one case.
 
 ## When a block is checked
 

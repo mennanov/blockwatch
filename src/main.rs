@@ -7,6 +7,7 @@ use blockwatch::language_parsers;
 use blockwatch::repo_path::RepoPath;
 use blockwatch::report;
 use blockwatch::validators;
+use blockwatch::violation_address::ViolationAddress;
 
 use blockwatch::fs::FileSystem;
 use blockwatch::validators::Violation;
@@ -48,7 +49,8 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
         &file_system,
     )?;
     let context = Arc::new(context);
-    let log = validators::run(Arc::clone(&context), sync_validators, async_validators)?;
+    let mut log = validators::run(Arc::clone(&context), sync_validators, async_validators)?;
+    apply_suppressions(args.suppressed_addresses(), &mut log.violations);
 
     // Violations are what the run is for; the report only describes it. Writing them first keeps a
     // failure to write the report from discarding them.
@@ -74,6 +76,34 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
         process::exit(1);
     }
     Ok(())
+}
+
+/// Marks every violation covered by a `--suppress` address, so it no longer fails the run.
+///
+/// An address covering nothing is not an error: a renamed block or a file outside the run's globs
+/// both leave one behind, and neither says anything about the code being checked.
+fn apply_suppressions(
+    suppressed_addresses: &[ViolationAddress],
+    violations: &mut HashMap<RepoPath, Vec<Violation>>,
+) {
+    if suppressed_addresses.is_empty() {
+        return;
+    }
+    for (file, violations) in violations.iter_mut() {
+        for violation in violations {
+            let covered = suppressed_addresses.iter().any(|suppressed| {
+                match violation.address() {
+                    Some(violation_address) => suppressed.matches(violation_address),
+                    // A violation on an unnamed block has no address to point at, so only an
+                    // address that covers the whole file reaches it.
+                    None => suppressed.covers_whole_file(file),
+                }
+            });
+            if covered {
+                violation.suppress();
+            }
+        }
+    }
 }
 
 /// Writes the run report to stdout at the given verbosity, and flushes it.
@@ -197,7 +227,9 @@ fn process_violations(violations: &HashMap<RepoPath, Vec<Violation>>) -> anyhow:
         let mut file_diagnostics = Vec::with_capacity(file_violations.len());
         for violation in file_violations {
             let diagnostic = violation.as_simple_diagnostic();
-            if diagnostic.severity() == BlockSeverity::Error {
+            // A suppressed violation is still reported, at the severity its author declared; only
+            // its effect on the exit code goes away.
+            if diagnostic.severity() == BlockSeverity::Error && !diagnostic.is_suppressed() {
                 has_error_severity = true;
             }
             file_diagnostics.push(serde_json::to_value(diagnostic)?);

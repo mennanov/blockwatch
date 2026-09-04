@@ -15,6 +15,8 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
 - **Enable Validators**: `blockwatch -e keep-sorted`
 - **Ignore Files**: `blockwatch --ignore "**/generated/**"`
 - **Report What Ran**: `blockwatch --verbosity summary` (or `full` for JSON on stdout)
+- **Suppress Violations**: `blockwatch --suppress FILE[:BLOCK[:VALIDATOR[:HASH]]]` reports them but stops them failing
+  the run
 
 [//]: # (</block>)
 
@@ -169,6 +171,46 @@ blockwatch -e keep-sorted -e keep-unique
 
 Note: `-e` and `-d` cannot be combined in a single invocation.
 
+## Suppressing a Violation
+
+`--suppress` takes the address of a violation and stops it failing the run. The violation is still reported, at its
+declared severity, marked `"suppressed": true`; only the exit code changes.
+
+```shell
+blockwatch --suppress docs/cli.md:cli-docs:keep-sorted
+```
+
+Use it when a rule is wrong at one particular site and you do not want to edit the source or turn the validator off
+everywhere with `-d`. Repeat the flag to suppress several violations.
+
+### The Address of a Violation
+
+    FILE[:BLOCK_NAME[:VALIDATOR[:HASH]]]
+
+Every violation of a named block carries its full address in the diagnostics, so the usual way to write a `--suppress`
+flag is to copy one from the output.
+
+- `FILE:BLOCK_NAME` is the same `file:name` grammar [`affects`](validators/affects.md) and
+  [`same-as`](validators/same-as.md) use, and identifies exactly one block. As there, a file path containing a `:`
+  cannot be addressed.
+- `VALIDATOR` is the rule that reported the violation, spelled as in `-d` and `-e`.
+- `HASH` is an opaque hex string telling one violation of a block from its siblings, emitted by the five validators that
+  can report several: `keep-sorted`, `keep-unique`, `line-pattern`, `affects` and `same-as`.
+
+**Every length is valid, and the shorter it is, the more it covers.** Only `FILE` is required:
+
+| Address                          | Suppresses                                          |
+|----------------------------------|-----------------------------------------------------|
+| `FILE`                           | every violation in that file, named blocks or not   |
+| `FILE:BLOCK_NAME`                | every violation of that block                       |
+| `FILE:BLOCK_NAME:VALIDATOR`      | every violation that validator reports on the block |
+| `FILE:BLOCK_NAME:VALIDATOR:HASH` | exactly one violation                               |
+
+**A block with no `name` can only be suppressed file-wide.** Its violations carry no `address` in the diagnostics,
+because there is nothing narrower to point at, but a `FILE` address covers the whole file and so covers them too.
+
+An invalid address that covers nothing is ignored.
+
 ## The `list` Command
 
 The `list` command outputs details on all discovered blocks in JSON format without running validation. It mirrors the
@@ -310,6 +352,7 @@ block lives in, and the message names both sides:
 {
   "fileA.py": [
     {
+      "address": "fileA.py:a:affects:1d7a4c02",
       "code": "affects",
       "data": {
         "affected_block_file_path": "fileB.py",
@@ -334,6 +377,11 @@ block lives in, and the message names both sides:
 
 `severity` follows the [LSP numbering](validators/README.md#severity): `1` error, `2` warning, `3`
 info, `4` hint.
+
+`address` is what a `--suppress` flag points at — see [Suppressing a Violation](#suppressing-a-violation). It is absent
+when the block has no `name`, which leaves a file-wide address as the only way to suppress the violation. A suppressed
+violation carries `"suppressed": true` alongside it; the key is absent otherwise. **A consumer that decides on
+`severity` alone has to skip the suppressed violations**, which keep the severity their author declared.
 
 The division of labour is deliberate — the report describes what the run examined, and the violation explains what went
 wrong. Once the diff touches the target as well, it appears like any other block, with an empty `checks` array because a
@@ -402,10 +450,10 @@ stay on stderr, under the same file paths and line numbers.
 
 ## Exit Codes
 
-| Code | Description                                                                                                                  |
-|------|------------------------------------------------------------------------------------------------------------------------------|
-| `0`  | Success. No violations found, or all reported violations have a non-`error` [severity level](validators/README.md#severity). |
-| `1`  | Failure. At least one `error`-severity violation was detected.                                                               |
+| Code | Description                                                                                                                                                          |
+|------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `0`  | Success. No violations found, or every reported violation is either non-`error` [severity](validators/README.md#severity) or [suppressed](#suppressing-a-violation). |
+| `1`  | Failure. At least one unsuppressed `error`-severity violation was detected.                                                                                          |
 
 ---
 

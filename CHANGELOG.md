@@ -12,6 +12,16 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- `--suppress FILE[:BLOCK_NAME[:VALIDATOR[:HASH]]]`, repeatable, stops reported violations failing the run without
+  editing the source it points at. Blocks with no `name` have no address of their own, so their violations can only be
+  suppressed by a file-wide address.
+
+### Changed
+
+- Diagnostics carry two new fields: `address` (absent for an unnamed block) and `suppressed` (absent unless true).
+
 ## [0.5.1] - 2026-08-28
 
 ### Added

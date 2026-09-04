@@ -303,6 +303,7 @@ fn create_violation(
         target_display(affected_block_file_path, affected_block_name),
     );
     affects_violation(
+        modified_block_file_path,
         modified_block,
         affected_block_file_path,
         affected_block_name,
@@ -326,7 +327,13 @@ fn dangling_reference_violation(
         referencing_block.start_tag_position_range.start().line,
         target_display(target_file_path, target_name),
     );
-    affects_violation(referencing_block, target_file_path, target_name, message)
+    affects_violation(
+        referencing_block_file_path,
+        referencing_block,
+        target_file_path,
+        target_name,
+        message,
+    )
 }
 
 /// Target's display string.
@@ -343,6 +350,7 @@ fn target_display(file_path: &RepoPath, name: Option<&str>) -> String {
 /// referenced target as machine-readable details. Shared by both violation kinds so they serialize
 /// the same shape and differ only in their human-readable `message`.
 fn affects_violation(
+    file_path: &RepoPath,
     block: &Block,
     affected_block_file_path: &RepoPath,
     affected_block_name: Option<&str>,
@@ -353,16 +361,22 @@ fn affects_violation(
         affected_block_name,
     })
     .context("failed to serialize AffectsViolation block")?;
-    Ok(Violation::new(
+    Violation::new(
         ViolationRange::new(
             block.start_tag_position_range.start().clone(),
             block.start_tag_position_range.end().clone(),
         ),
+        file_path,
+        block,
         "affects".to_string(),
         message,
-        block.severity()?,
+        // A block may reference several targets, so the target identifies this violation.
+        Some(&target_display(
+            affected_block_file_path,
+            affected_block_name,
+        )),
         Some(details),
-    ))
+    )
 }
 
 #[cfg(test)]

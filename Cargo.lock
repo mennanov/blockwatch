@@ -267,6 +267,7 @@ dependencies = [
  "axum",
  "bigdecimal",
  "clap",
+ "fnv",
  "globset",
  "ignore",
  "libc",

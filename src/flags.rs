@@ -1,4 +1,5 @@
 use crate::validators;
+use crate::violation_address::ViolationAddress;
 use anyhow::Context;
 use clap::{Parser, builder::ValueParser, crate_version};
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -69,6 +70,9 @@ By default it scans every file in the repository. Pass --diff to additionally re
 
     # Enable specific validators only
     blockwatch -e keep-sorted -e line-count
+
+    # Suppress a reported violation without editing the source
+    blockwatch --suppress docs/cli.md:cli-docs:keep-sorted
 
     # List all found blocks
     blockwatch list 'src/**/*.rs'
@@ -144,6 +148,21 @@ pub struct Args {
     )]
     pub verbosity: Verbosity,
 
+    /// Suppress reported violations so they no longer fail the run, e.g.
+    /// --suppress docs/cli.md:cli-docs:keep-sorted
+    ///
+    /// The address is FILE[:BLOCK_NAME[:VALIDATOR[:HASH]]]: the shorter it is, the more it covers,
+    /// from a single violation down to every violation in a file. The violations are still
+    /// reported. Repeat the flag to suppress more.
+    #[arg(
+        long = "suppress",
+        value_name = "ADDRESS",
+        action = clap::ArgAction::Append,
+        value_parser = ValueParser::new(ViolationAddress::parse),
+        global = true,
+    )]
+    suppressed_addresses: Vec<ViolationAddress>,
+
     /// Glob patterns to filter files.
     #[arg(value_name = "GLOBS")]
     pub globs: Vec<String>,
@@ -181,6 +200,11 @@ impl Args {
     /// Enabled validator names.
     pub fn enabled_validators(&self) -> HashSet<&str> {
         self.enabled_validators.iter().map(AsRef::as_ref).collect()
+    }
+
+    /// Where the violations the run was told to suppress sit.
+    pub fn suppressed_addresses(&self) -> &[ViolationAddress] {
+        &self.suppressed_addresses
     }
 
     /// Returns a compiled GlobSet from the provided glob patterns.
@@ -229,6 +253,12 @@ impl Args {
                  every block it found"
             );
         }
+        if self.command.is_some() && !self.suppressed_addresses.is_empty() {
+            anyhow::bail!(
+                "--suppress is not supported by the `list` subcommand; `list` reports blocks rather \
+                 than validating them"
+            );
+        }
 
         Ok(())
     }
@@ -241,11 +271,7 @@ fn parse_extensions(s: &str) -> anyhow::Result<(String, String)> {
 }
 
 fn parse_validator(value: &str) -> anyhow::Result<String> {
-    let validators: Vec<&str> = validators::detector_factories::<crate::fs::FileSystemImpl>()
-        .iter()
-        .map(|(validator_name, _)| *validator_name)
-        .collect();
-
+    let validators = validators::validator_names();
     validators
         .contains(&value)
         .then(|| value.trim().to_string())
@@ -318,6 +344,64 @@ mod tests {
         let error = args
             .validate(&HashSet::new())
             .expect_err("--verbosity must not be accepted alongside `list`");
+        assert!(
+            error.to_string().contains("`list` subcommand"),
+            "unexpected error: {error}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn repeated_suppress_flags_collect_every_address() -> anyhow::Result<()> {
+        let args = parse(&[
+            "blockwatch",
+            "--suppress",
+            "docs/cli.md:cli-docs:keep-sorted",
+            "--suppress",
+            "src/lib.rs:languages:line-count",
+        ])?;
+        assert_eq!(
+            args.suppressed_addresses()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec![
+                "docs/cli.md:cli-docs:keep-sorted".to_string(),
+                "src/lib.rs:languages:line-count".to_string(),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn malformed_suppression_address_fails_at_parse_time() {
+        let error = parse(&["blockwatch", "--suppress", "docs/cli.md:cli-docs:keep-tidy"])
+            .expect_err("an address naming an unknown validator must be rejected");
+        assert!(
+            error.to_string().contains("docs/cli.md:cli-docs:keep-tidy"),
+            "the error must quote the offending address: {error}"
+        );
+    }
+
+    #[test]
+    fn suppress_is_rejected_after_the_list_subcommand() -> anyhow::Result<()> {
+        let args = parse(&["blockwatch", "list", "--suppress", "a.md:n:keep-sorted"])?;
+        let error = args
+            .validate(&HashSet::new())
+            .expect_err("--suppress must not be accepted alongside `list`");
+        assert!(
+            error.to_string().contains("`list` subcommand"),
+            "unexpected error: {error}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn suppress_is_rejected_before_the_list_subcommand() -> anyhow::Result<()> {
+        let args = parse(&["blockwatch", "--suppress", "a.md:n:keep-sorted", "list"])?;
+        let error = args
+            .validate(&HashSet::new())
+            .expect_err("--suppress must not be accepted alongside `list`");
         assert!(
             error.to_string().contains("`list` subcommand"),
             "unexpected error: {error}"

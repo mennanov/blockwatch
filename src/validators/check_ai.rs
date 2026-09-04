@@ -16,7 +16,6 @@ use async_trait::async_trait;
 use secrecy::ExposeSecret;
 use serde::Serialize;
 use std::borrow::Cow;
-use std::path::Path;
 use std::sync::Arc;
 use tokio::task::JoinSet;
 
@@ -145,7 +144,7 @@ impl<Fs: FileSystem> ValidatorDetector<Fs> for CheckAiValidatorDetector {
 }
 
 fn create_violation(
-    file_path: &Path,
+    file_path: &RepoPath,
     block: &Block,
     ai_message: &str,
 ) -> anyhow::Result<Violation> {
@@ -156,6 +155,7 @@ fn create_violation(
         block.start_tag_position_range.start().line,
     );
     block_violation(
+        file_path,
         block,
         error_message,
         CheckAiViolation {
@@ -168,7 +168,7 @@ fn create_violation(
 
 /// Reports a `check-ai-pattern` that matches nothing from its block.
 fn create_pattern_no_match_violation(
-    file_path: &Path,
+    file_path: &RepoPath,
     block: &Block,
     pattern: &str,
 ) -> anyhow::Result<Violation> {
@@ -179,6 +179,7 @@ fn create_pattern_no_match_violation(
         block.start_tag_position_range.start().line,
     );
     block_violation(
+        file_path,
         block,
         error_message,
         CheckAiViolation {
@@ -201,21 +202,25 @@ fn condition_of(block: &Block) -> &str {
 /// Builds a `check-ai` violation spanning the block's start tag, shared by everything the validator
 /// reports so the range and severity are decided in one place.
 fn block_violation(
+    file_path: &RepoPath,
     block: &Block,
     error_message: String,
     details: CheckAiViolation,
 ) -> anyhow::Result<Violation> {
     let details = serde_json::to_value(details).context("failed to serialize CheckAiDetails")?;
-    Ok(Violation::new(
+    Violation::new(
         ViolationRange::new(
             block.start_tag_position_range.start().clone(),
             block.start_tag_position_range.end().clone(),
         ),
+        file_path,
+        block,
         "check-ai".to_string(),
         error_message,
-        block.severity()?,
+        // The model answers about the whole block, so there is never a sibling to tell apart.
+        None,
         Some(details),
-    ))
+    )
 }
 
 impl<C: AiClient> CheckAiValidator<C> {

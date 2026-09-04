@@ -22,6 +22,7 @@ use crate::validators::keep_unique::KeepUniqueValidatorDetector;
 use crate::validators::line_count::LineCountValidatorDetector;
 use crate::validators::line_pattern::LinePatternValidatorDetector;
 use crate::validators::same_as::SameAsValidatorDetector;
+use crate::violation_address::ViolationAddress;
 use anyhow::{Context, bail};
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
@@ -75,26 +76,54 @@ pub struct Violation {
     message: String,
     /// Decides whether this breach fails the run; see [`BlockSeverity`].
     severity: BlockSeverity,
+    /// A unique address of this violation.
+    /// `None` if the block has no name as its address may not be unique.
+    address: Option<ViolationAddress>,
+    /// Whether `--suppress` matched this violation.
+    suppressed: bool,
     /// Validator-specific details for tools, e.g. the expected and actual line count.
     data: Option<serde_json::Value>,
 }
 
 impl Violation {
-    /// Constructs a new violation record with a name, error message, and optional machine-readable details.
+    /// Constructs a new violation record with a name, error message, and optional machine-readable
+    /// details.
+    ///
+    /// Severity and address are derived here from the block and the `code` rather than being passed
+    /// in, so a validator cannot report a violation whose address disagrees with the rule that
+    /// found it.
+    ///
+    /// `violation_text` is the text the violation is about — the offending line, or the target a
+    /// reference names — and tells one violation of a block from its siblings. Validators that
+    /// report at most one violation per block pass `None`.
     pub fn new(
         range: ViolationRange,
+        file: &RepoPath,
+        block: &Block,
         code: String,
         message: String,
-        severity: BlockSeverity,
+        violation_text: Option<&str>,
         data: Option<serde_json::Value>,
-    ) -> Self {
-        Self {
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
+            address: ViolationAddress::new(file, block.name(), &code, violation_text),
+            severity: block.severity()?,
             range,
             code,
             message,
-            severity,
+            suppressed: false,
             data,
-        }
+        })
+    }
+
+    /// A unique address of this violation or `None` if its block is unnamed.
+    pub fn address(&self) -> Option<&ViolationAddress> {
+        self.address.as_ref()
+    }
+
+    /// Marks this violation as suppressed.
+    pub fn suppress(&mut self) {
+        self.suppressed = true;
     }
 
     pub fn as_simple_diagnostic(&self) -> SimpleDiagnostic<'_> {
@@ -103,6 +132,8 @@ impl Violation {
             code: self.code.as_str(),
             message: self.message.as_str(),
             severity: self.severity,
+            address: self.address.as_ref(),
+            suppressed: self.suppressed,
             data: &self.data,
         }
     }
@@ -215,10 +246,24 @@ pub struct SimpleDiagnostic<'a> {
     message: &'a str,
     severity: BlockSeverity,
     #[serde(skip_serializing_if = "Option::is_none")]
+    address: Option<&'a ViolationAddress>,
+    #[serde(skip_serializing_if = "is_false")]
+    suppressed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     data: &'a Option<serde_json::Value>,
 }
 
+/// Keeps a `false` `suppressed` field out of the serialized diagnostic.
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 impl SimpleDiagnostic<'_> {
+    /// Whether `--suppress` matched this violation, in which case it must not fail the run.
+    pub fn is_suppressed(&self) -> bool {
+        self.suppressed
+    }
+
     /// The severity, which the caller uses to decide the process exit code.
     pub fn severity(&self) -> BlockSeverity {
         self.severity
@@ -397,6 +442,16 @@ pub fn detector_factories<Fs: FileSystem + 'static>() -> Vec<(&'static str, Dete
         ("same-as", || Box::new(SameAsValidatorDetector::new())),
         // </block>
     ]
+}
+
+/// The names of every registered validator, in registry order.
+pub fn validator_names() -> Vec<&'static str> {
+    // The concrete filesystem is irrelevant here (only the names are read), so the `FileSystemImpl`
+    // is used to avoid making every caller pass a type parameter.
+    detector_factories::<crate::fs::FileSystemImpl>()
+        .iter()
+        .map(|(validator_name, _)| *validator_name)
+        .collect()
 }
 
 /// Validators that only ever fire when a diff touches the corresponding blocks, each paired with
@@ -866,13 +921,18 @@ mod tests {
                     .map(|file_name| {
                         (
                             file_name.clone(),
-                            vec![Violation::new(
-                                empty_testing_violation_range(),
-                                "check-ai".to_string(),
-                                "check-ai error message".to_string(),
-                                self.testing_block.severity().unwrap(),
-                                None,
-                            )],
+                            vec![
+                                Violation::new(
+                                    empty_testing_violation_range(),
+                                    file_name,
+                                    &self.testing_block,
+                                    "check-ai".to_string(),
+                                    "check-ai error message".to_string(),
+                                    None,
+                                    None,
+                                )
+                                .expect("the testing block has a valid severity"),
+                            ],
                         )
                     })
                     .collect(),
@@ -894,13 +954,18 @@ mod tests {
                     .map(|file_name| {
                         (
                             file_name.clone(),
-                            vec![Violation::new(
-                                empty_testing_violation_range(),
-                                "keep-sorted".to_string(),
-                                "keep-sorted error message".to_string(),
-                                self.testing_block.severity().unwrap(),
-                                None,
-                            )],
+                            vec![
+                                Violation::new(
+                                    empty_testing_violation_range(),
+                                    file_name,
+                                    &self.testing_block,
+                                    "keep-sorted".to_string(),
+                                    "keep-sorted error message".to_string(),
+                                    None,
+                                    None,
+                                )
+                                .expect("the testing block has a valid severity"),
+                            ],
                         )
                     })
                     .collect(),

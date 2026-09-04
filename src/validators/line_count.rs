@@ -1,12 +1,12 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
+use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{
     ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
 };
 use anyhow::anyhow;
 use serde::Serialize;
-use std::path::Path;
 use std::sync::Arc;
 
 /// Enforces `line-count="<N"` and friends: the number of non-empty lines in the block must satisfy
@@ -89,7 +89,7 @@ impl ValidatorSync for LineCountValidator {
 }
 
 fn create_violation(
-    block_file_path: &Path,
+    block_file_path: &RepoPath,
     block: &Block,
     operation: Op,
     expected: usize,
@@ -104,20 +104,23 @@ fn create_violation(
         operation.as_str(),
         expected
     );
-    Ok(Violation::new(
+    Violation::new(
         ViolationRange::new(
             block.start_tag_position_range.start().clone(),
             block.start_tag_position_range.end().clone(),
         ),
+        block_file_path,
+        block,
         "line-count".to_string(),
         message,
-        block.severity()?,
+        // A line count is one fact about the whole block, so there is never a sibling to tell apart.
+        None,
         Some(serde_json::to_value(LineCountViolation {
             actual,
             op: operation.as_str().to_string(),
             expected,
         })?),
-    ))
+    )
 }
 
 /// Selects [`LineCountValidator`] for blocks carrying a `line-count` attribute.
