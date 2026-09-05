@@ -123,6 +123,41 @@ the job expands onto the command line, or a record kept by whatever renders the 
 
 An address that covers nothing does nothing, so a suppression left behind by a rename cannot break the build.
 
+## GitHub Code Scanning
+
+`--format sarif` writes the violations as a [SARIF log](cli.md#sarif-output), which GitHub's code scanning reads to
+show each one as an annotation on the pull request and to keep track of it between runs:
+
+```yaml
+name: blockwatch
+on:
+  pull_request: { branches: [ main ] }
+  push: { branches: [ main ] }
+permissions: { contents: read, security-events: write }
+
+jobs:
+  blockwatch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo install blockwatch
+      - name: Check the blocks
+        run: blockwatch --format sarif 2> blockwatch.sarif
+      - name: Upload the results
+        # The check step exits non-zero on a violation, which is the point; the log still has to be
+        # uploaded, or the annotations never appear.
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: blockwatch.sarif }
+```
+
+`security-events: write` is what lets a job upload a log; without it the upload step fails with a permissions error.
+
+A clean run writes an empty log rather than no log, so the upload step always has a file, and alerts GitHub is still
+holding from an earlier run are closed. A run that stops for a reason other than a violation — an unparseable tag, a
+missing API key — writes its error to stderr and so into the same file, which the upload step then rejects as malformed;
+the job fails either way, and the reason is in the step's own log.
+
 ## Security: Sandboxing Fork Pull Requests
 
 If your repository uses [`check-lua`](validators/check-lua.md) or [`check-ai`](validators/check-ai.md), pull requests

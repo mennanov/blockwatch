@@ -168,6 +168,9 @@ See [docs/cli.md](docs/cli.md) for the run modes in full, CLI flags, path exclus
 BlockWatch exits `1` when it finds at least one `error` severity violation, and `0` otherwise. Warnings, info, and hints
 are printed but don't fail the run.
 
+`blockwatch --format sarif` writes the violations as a SARIF log instead of the JSON diagnostics, for GitHub code
+scanning and anything else that reads the format — see [SARIF Output](docs/cli.md#sarif-output).
+
 For plain git hooks, local pre-commit setups, and sandboxing untrusted Lua scripts in fork pull requests,
 see [docs/ci.md](docs/ci.md).
 

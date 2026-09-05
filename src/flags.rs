@@ -18,6 +18,16 @@ pub enum Verbosity {
     Full,
 }
 
+/// Violations output format.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OutputFormat {
+    /// One JSON object of diagnostics, grouped by file.
+    #[default]
+    Json,
+    /// A SARIF 2.1.0 log, the interchange format code-scanning services read.
+    Sarif,
+}
+
 impl std::fmt::Display for Verbosity {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         clap::ValueEnum::to_possible_value(self)
@@ -73,6 +83,9 @@ By default it scans every file in the repository. Pass --diff to additionally re
 
     # Suppress a reported violation without editing the source
     blockwatch --suppress docs/cli.md:cli-docs:keep-sorted
+
+    # Write the violations as a SARIF log for a code-scanning service
+    blockwatch --format sarif 2> blockwatch.sarif
 
     # List all found blocks
     blockwatch list 'src/**/*.rs'
@@ -148,6 +161,14 @@ pub struct Args {
     )]
     pub verbosity: Verbosity,
 
+    /// The format the violations are written in. Printed to stderr.
+    ///
+    /// `sarif` writes a SARIF 2.1.0 log in place of the JSON diagnostics, for code-scanning
+    /// services that read it. Unlike the JSON diagnostics, a SARIF log is written even when the run
+    /// found nothing, because such a service expects a log from every run.
+    #[arg(long = "format", value_name = "FORMAT", value_enum, global = true)]
+    format: Option<OutputFormat>,
+
     /// Suppress reported violations so they no longer fail the run, e.g.
     /// --suppress docs/cli.md:cli-docs:keep-sorted
     ///
@@ -202,6 +223,11 @@ impl Args {
         self.enabled_validators.iter().map(AsRef::as_ref).collect()
     }
 
+    /// The format to write the violations in.
+    pub fn output_format(&self) -> OutputFormat {
+        self.format.unwrap_or_default()
+    }
+
     /// Where the violations the run was told to suppress sit.
     pub fn suppressed_addresses(&self) -> &[ViolationAddress] {
         &self.suppressed_addresses
@@ -251,6 +277,12 @@ impl Args {
             anyhow::bail!(
                 "--verbosity is not supported by the `list` subcommand; `list` already reports \
                  every block it found"
+            );
+        }
+        if self.command.is_some() && self.format.is_some() {
+            anyhow::bail!(
+                "--format is not supported by the `list` subcommand; it chooses the shape of the \
+                 violations, which `list` does not report"
             );
         }
         if self.command.is_some() && !self.suppressed_addresses.is_empty() {
@@ -344,6 +376,39 @@ mod tests {
         let error = args
             .validate(&HashSet::new())
             .expect_err("--verbosity must not be accepted alongside `list`");
+        assert!(
+            error.to_string().contains("`list` subcommand"),
+            "unexpected error: {error}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn violations_format_is_json_by_default() -> anyhow::Result<()> {
+        assert_eq!(parse(&["blockwatch"])?.output_format(), OutputFormat::Json);
+        assert_eq!(
+            parse(&["blockwatch", "--format", "sarif"])?.output_format(),
+            OutputFormat::Sarif
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_format_value_is_rejected() {
+        let error = parse(&["blockwatch", "--format", "xml"])
+            .expect_err("only the formats the program writes are accepted");
+        assert!(
+            error.to_string().contains("xml"),
+            "the error must quote the offending value: {error}"
+        );
+    }
+
+    #[test]
+    fn format_is_rejected_with_the_list_subcommand() -> anyhow::Result<()> {
+        let args = parse(&["blockwatch", "list", "--format", "sarif"])?;
+        let error = args
+            .validate(&HashSet::new())
+            .expect_err("--format must not be accepted alongside `list`");
         assert!(
             error.to_string().contains("`list` subcommand"),
             "unexpected error: {error}"

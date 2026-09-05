@@ -233,6 +233,16 @@ impl ViolationRange {
     pub(crate) fn new(start: Position, end: Position) -> Self {
         Self { start, end }
     }
+
+    /// The first position of the range.
+    pub fn start(&self) -> &Position {
+        &self.start
+    }
+
+    /// The position just past the last one of the range: the end is exclusive.
+    pub fn end(&self) -> &Position {
+        &self.end
+    }
 }
 
 /// Represents a simplified, serializable diagnostic message.
@@ -258,7 +268,7 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
-impl SimpleDiagnostic<'_> {
+impl<'a> SimpleDiagnostic<'a> {
     /// Whether `--suppress` matched this violation, in which case it must not fail the run.
     pub fn is_suppressed(&self) -> bool {
         self.suppressed
@@ -267,6 +277,31 @@ impl SimpleDiagnostic<'_> {
     /// The severity, which the caller uses to decide the process exit code.
     pub fn severity(&self) -> BlockSeverity {
         self.severity
+    }
+
+    /// Where to underline in the file.
+    pub fn range(&self) -> &'a ViolationRange {
+        self.range
+    }
+
+    /// The name of the validator that reported it, e.g. `"keep-sorted"`.
+    pub fn code(&self) -> &'a str {
+        self.code
+    }
+
+    /// The human-readable explanation.
+    pub fn message(&self) -> &'a str {
+        self.message
+    }
+
+    /// The address `--suppress` may point at, or `None` when the block has no `name`.
+    pub fn address(&self) -> Option<&'a ViolationAddress> {
+        self.address
+    }
+
+    /// Validator-specific details for tools.
+    pub fn data(&self) -> &'a Option<serde_json::Value> {
+        self.data
     }
 }
 

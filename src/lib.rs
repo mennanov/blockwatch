@@ -15,6 +15,8 @@ pub mod language_parsers;
 pub mod repo_path;
 /// Renders the end-of-run report describing what was scanned and checked.
 pub mod report;
+/// Renders the violations of a run as a SARIF log, the format code-scanning services read.
+pub mod sarif;
 mod tag_parser;
 /// The rules enforced on blocks (`affects`, `keep-sorted`, …) and the machinery that runs them.
 pub mod validators;

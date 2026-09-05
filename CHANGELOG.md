@@ -12,6 +12,14 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- `--format sarif` writes the violations as a [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
+  log on stderr, in place of the JSON diagnostics, for GitHub code scanning and anything else that reads the format. A
+  violation's address travels with it as a `partialFingerprints` entry, so a consumer can match it against the same
+  violation in a later run, and a suppressed violation carries SARIF's own `"suppressions": [{"kind": "external"}]`.
+  Unlike the JSON diagnostics, a SARIF log is written even by a run that found nothing.
+
 ## [0.5.2] - 2026-09-04
 
 ### Added

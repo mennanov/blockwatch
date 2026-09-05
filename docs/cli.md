@@ -17,6 +17,7 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
 - **Report What Ran**: `blockwatch --verbosity summary` (or `full` for JSON on stdout)
 - **Suppress Violations**: `blockwatch --suppress FILE[:BLOCK[:VALIDATOR[:HASH]]]` reports them but stops them failing
   the run
+- **Violation Format**: `blockwatch --format sarif` writes a SARIF log instead of the JSON diagnostics
 
 [//]: # (</block>)
 
@@ -211,6 +212,90 @@ because there is nothing narrower to point at, but a `FILE` address covers the w
 
 An invalid address that covers nothing is ignored.
 
+## SARIF Output
+
+`--format sarif` writes the violations as a [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
+log instead of the JSON diagnostics. It goes to the same place they do, **stderr**, so the run report keeps stdout to
+itself:
+
+```shell
+blockwatch --format sarif 2> blockwatch.sarif
+```
+
+Nothing else about the run changes: the same violations are found, and the exit code is decided the same way.
+
+```json
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "blockwatch",
+          "version": "0.5.2",
+          "semanticVersion": "0.5.2",
+          "informationUri": "https://github.com/mennanov/blockwatch",
+          "rules": [
+            {
+              "id": "keep-sorted",
+              "name": "keep-sorted",
+              "shortDescription": { "text": "Requires the lines of a block to stay in order." },
+              "helpUri": "https://github.com/mennanov/blockwatch/blob/v0.5.2/docs/validators/keep-sorted.md"
+            }
+          ]
+        }
+      },
+      "columnKind": "unicodeCodePoints",
+      "results": [
+        {
+          "ruleId": "keep-sorted",
+          "ruleIndex": 0,
+          "level": "error",
+          "message": { "text": "Block fruits.py:fruits defined at line 2 has an out-of-order line 4 (asc)" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "fruits.py" },
+                "region": { "startLine": 4, "startColumn": 5, "endLine": 4, "endColumn": 12 }
+              }
+            }
+          ],
+          "partialFingerprints": { "blockwatchAddress/v1": "fruits.py:fruits:keep-sorted:bbd61689" },
+          "properties": {
+            "address": "fruits.py:fruits:keep-sorted:bbd61689",
+            "data": { "order_by": "asc" }
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+What to expect from the log:
+
+- **A clean run still writes one**, with an empty `results` array. A service that reads SARIF treats a missing log as a
+  run that never happened, rather than as a run that found nothing.
+- **Only the rules that fired are described.** Each carries a `helpUri` to its documentation, pinned to the version that
+  produced the log.
+- **`level` follows [severity](validators/README.md#severity)**: `error` and `warning` keep their names, and both `info`
+  and `hint` become `note`, the weakest level SARIF consumers display.
+- **A [suppressed](#suppressing-a-violation) violation is reported like any other**, with
+  `"suppressions": [{"kind": "external"}]` alongside it — SARIF's own way of saying a reviewer accepted it. The
+  justification is left out: it lives wherever the suppression itself is recorded.
+- **`partialFingerprints` carries the violation's [address](#the-address-of-a-violation)**, so a service can match a
+  violation against the same one in an earlier run. It is absent for a violation on an unnamed block, which has no
+  address. The address is repeated in `properties`, where it is easier for a person to find and copy into a `--suppress`
+  flag.
+- **Paths are repository-relative**, the same paths the JSON diagnostics are keyed by, percent-encoded where a character
+  would otherwise change how the path reads as a URI (a `#` or a space, say).
+- **Lines and columns are 1-based, with an exclusive end column.** A column counts characters, which the run declares as
+  `"columnKind": "unicodeCodePoints"` so that a consumer does not count UTF-16 code units instead.
+
+`--format` cannot be combined with the `list` subcommand, which reports blocks rather than violations. To upload a log
+to GitHub code scanning, see [CI Integration](ci.md#github-code-scanning).
+
 ## The `list` Command
 
 The `list` command outputs details on all discovered blocks in JSON format without running validation. It mirrors the
@@ -376,7 +461,8 @@ block lives in, and the message names both sides:
 ```
 
 `severity` follows the [LSP numbering](validators/README.md#severity): `1` error, `2` warning, `3`
-info, `4` hint.
+info, `4` hint. For a code-scanning service, ask for the same violations as SARIF instead — see
+[SARIF Output](#sarif-output).
 
 `address` is what a `--suppress` flag points at — see [Suppressing a Violation](#suppressing-a-violation). It is absent
 when the block has no `name`, which leaves a file-wide address as the only way to suppress the violation. A suppressed

@@ -6,6 +6,7 @@ use blockwatch::flags;
 use blockwatch::language_parsers;
 use blockwatch::repo_path::RepoPath;
 use blockwatch::report;
+use blockwatch::sarif;
 use blockwatch::validators;
 use blockwatch::violation_address::ViolationAddress;
 
@@ -54,7 +55,7 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
 
     // Violations are what the run is for; the report only describes it. Writing them first keeps a
     // failure to write the report from discarding them.
-    let has_error_severity = !log.violations.is_empty() && process_violations(&log.violations)?;
+    let has_error_severity = process_violations(&log.violations, args.output_format())?;
 
     let blocks_needing_diff = (!args.diff).then(|| {
         validators::diff_gated_block_count(
@@ -218,29 +219,54 @@ fn read_diff_from_stdin(
     diff_parser::line_changes_from_diff(&diff, file_system)
 }
 
-/// Writes the violations to stderr as JSON. Returns true if any violation has error severity.
-fn process_violations(violations: &HashMap<RepoPath, Vec<Violation>>) -> anyhow::Result<bool> {
-    let mut has_error_severity = false;
-    let mut diagnostics: HashMap<&RepoPath, Vec<serde_json::Value>> =
-        HashMap::with_capacity(violations.len());
-    for (file_path, file_violations) in violations {
-        let mut file_diagnostics = Vec::with_capacity(file_violations.len());
-        for violation in file_violations {
-            let diagnostic = violation.as_simple_diagnostic();
-            // A suppressed violation is still reported, at the severity its author declared; only
-            // its effect on the exit code goes away.
-            if diagnostic.severity() == BlockSeverity::Error && !diagnostic.is_suppressed() {
-                has_error_severity = true;
-            }
-            file_diagnostics.push(serde_json::to_value(diagnostic)?);
-        }
-        diagnostics.insert(file_path, file_diagnostics);
+/// Writes the violations to stderr in the requested format. Returns true if any violation has error
+/// severity.
+fn process_violations(
+    violations: &HashMap<RepoPath, Vec<Violation>>,
+    format: flags::OutputFormat,
+) -> anyhow::Result<bool> {
+    let has_error_severity = violations.values().flatten().any(|violation| {
+        let diagnostic = violation.as_simple_diagnostic();
+        // A suppressed violation is still reported, at the severity its author declared; only its
+        // effect on the exit code goes away.
+        diagnostic.severity() == BlockSeverity::Error && !diagnostic.is_suppressed()
+    });
+    match format {
+        // JSON is written to stderr only when there are violations.
+        flags::OutputFormat::Json if !violations.is_empty() => write_json_violations(violations)?,
+        flags::OutputFormat::Json => {}
+        // SARIF is written to stderr even when there are no violations.
+        flags::OutputFormat::Sarif => write_sarif_violations(violations)?,
     }
-
-    let mut stderr = std::io::stderr().lock();
-    serde_json::to_writer_pretty(&mut stderr, &diagnostics)?;
-    writeln!(&mut stderr)?;
     Ok(has_error_severity)
+}
+
+/// Writes the violations to stderr as one JSON object of diagnostics grouped by file.
+fn write_json_violations(violations: &HashMap<RepoPath, Vec<Violation>>) -> anyhow::Result<()> {
+    let diagnostics: HashMap<&RepoPath, Vec<_>> = violations
+        .iter()
+        .map(|(file_path, file_violations)| {
+            let file_diagnostics = file_violations
+                .iter()
+                .map(Violation::as_simple_diagnostic)
+                .collect();
+            (file_path, file_diagnostics)
+        })
+        .collect();
+    write_to_stderr(&diagnostics)
+}
+
+/// Writes the violations to stderr as a SARIF log.
+fn write_sarif_violations(violations: &HashMap<RepoPath, Vec<Violation>>) -> anyhow::Result<()> {
+    write_to_stderr(&sarif::SarifLog::new(violations))
+}
+
+/// Writes `document` to stderr as pretty-printed JSON, followed by a newline.
+fn write_to_stderr(document: &impl serde::Serialize) -> anyhow::Result<()> {
+    let mut stderr = std::io::stderr().lock();
+    serde_json::to_writer_pretty(&mut stderr, document)?;
+    writeln!(&mut stderr)?;
+    Ok(())
 }
 
 /// Finds the repository root by walking up from `current_path` to the nearest ancestor carrying a
