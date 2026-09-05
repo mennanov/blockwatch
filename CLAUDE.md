@@ -38,11 +38,20 @@ Strict adherence to the following rules is *absolutely required* when working wi
    and options to a human to make a decision.
 6. *Never* go down a rabbit hole in order to circumvent blockers. If the solution appears too complicated - escalate to
    a human immediately.
-7. *Always* use clear, easy to follow human-readable language when writing any sort of comments or prose.
-8. *Never* narrate what the code is doing when writing comments, instead explain *why* the code is written in a specific
+7. *Always* use clear, easy to follow human-readable language when writing any sort of comments or prose. Prefer simple
+   English and short sentences. A comment that has to be re-read to be understood is too dense - split it up.
+8. *Always* keep a doc comment on the symbol it belongs to, and describe that symbol's interface and contract: what it
+   is, what a function takes and returns, and what a caller has to know (ordering guarantees, when a value is absent,
+   when it panics or errors).
+9. *Never* narrate what the code is doing when writing comments, instead explain *why* the code is written in a specific
    way. If the solution is too exotic - escalate to a human.
-9. *Never* make the comments look relevant to just the current task. They should be clear in the future to any developer
-   unfamiliar with the specific current task and even with the project itself.
+10. *Always* put the explanation of an implementation detail inside the function body, next to the code it explains, not
+    in the doc comment. The doc comment is for a caller, who should not have to read about the internals to use the
+    symbol.
+11. *Never* make the comments look relevant to just the current task. They should be clear in the future to any
+    developer unfamiliar with the specific current task and even with the project itself.
+12. *Never* describe how the symbol is used by other modules, methods, etc when commenting structs, methods, constants.
+    Instead, focus the comment on this particular symbol in isolation.
 
 ## Architecture
 
