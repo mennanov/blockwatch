@@ -235,6 +235,10 @@ git diff --patch "$BASE...$HEAD" | blockwatch --diff --suppress-from msgs
 
 Repeat the flag to read from multiple files.
 
+The file may sit anywhere the run can read, inside the repository or not, because the path comes from the command line
+rather than from any scanned file. Over a pull request range the trailers are written by whoever opened it — see
+[Suppressing Violations From a Job](ci.md#suppressing-violations-from-a-job) for when to rely on that.
+
 ## SARIF Output
 
 `--format sarif` writes the violations as a [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)

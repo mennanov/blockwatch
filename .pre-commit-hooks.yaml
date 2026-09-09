@@ -5,3 +5,13 @@
   language: rust
   pass_filenames: false
   stages: [ pre-commit ]
+
+- id: blockwatch-commit-msg
+  name: blockwatch (commit-msg)
+  description: Validate <block> rules on staged changes, reading Blockwatch-suppress trailers from the commit message.
+  # The trailing `--` is necessary: pre-commit appends the message file to this argv, and
+  # `bash -c SCRIPT FILE` binds FILE to $0 rather than $1. The sentinel takes the $0 slot instead.
+  entry: bash -c 'set -o pipefail; git diff --cached --patch --unified=0 | blockwatch --diff --only-changed --suppress-from "$1"' --
+  language: rust
+  pass_filenames: true
+  stages: [ commit-msg ]

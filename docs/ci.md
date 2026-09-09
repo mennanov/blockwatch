@@ -37,6 +37,38 @@ command that fails without writing anything is already caught — `blockwatch` r
 one that dies partway through writing leaves a shorter, still well-formed diff, which would otherwise pass as a clean
 run over a change set that was never fully read.
 
+### Reading Suppressions From the Commit Message
+
+The `blockwatch` hook runs before the commit message exists, so it cannot see a `Blockwatch-suppress:` trailer. The
+`blockwatch-commit-msg` hook runs one stage later, at `commit-msg`, and hands the message Git is about to use to
+[`--suppress-from`](cli.md#suppressing-from-a-file):
+
+```yaml
+- repo: https://github.com/mennanov/blockwatch
+  rev: v0.5.4  # Use latest release
+  hooks:
+    - id: blockwatch-commit-msg
+```
+
+Use one hook or the other, not both, or every commit is checked twice.
+
+`pre-commit install` on its own installs only the `pre-commit` stage, so the hook needs the stage installed as well —
+either once by hand, or for everyone by declaring it in `.pre-commit-config.yaml`:
+
+```shell
+pre-commit install --hook-type commit-msg
+```
+
+```yaml
+default_install_hook_types: [ pre-commit, commit-msg ]
+```
+
+Miss that step and nothing says so: no hook matches the stage, and the commit succeeds unchecked.
+
+The trade-off is when the rejection lands. `blockwatch` refuses a change before a message is written;
+`blockwatch-commit-msg` refuses it after. The message is not lost — Git leaves it in `.git/COMMIT_EDITMSG`, so it can be
+reused with `git commit -e -F .git/COMMIT_EDITMSG` instead of being retyped.
+
 ## Plain Git Hook
 
 Without pre-commit, add the diff pipe directly to `.git/hooks/pre-commit` and make it executable (`chmod +x`):
@@ -48,6 +80,14 @@ git diff --patch --cached --unified=0 | blockwatch --diff --only-changed
 
 `set -o pipefail` is deliberately absent here — `/bin/sh` does not portably support it. Under `--diff` an empty stdin is
 rejected outright, so a failing diff command still fails the hook rather than passing silently.
+
+To read suppressions from the message instead, write the same pipe to `.git/hooks/commit-msg`, where Git passes the
+message file as the first argument:
+
+```bash
+#!/bin/sh
+git diff --patch --cached --unified=0 | blockwatch --diff --only-changed --suppress-from "$1"
+```
 
 ## GitHub Actions
 
@@ -131,6 +171,16 @@ without modifying the workflow:
 git log --format=%B "$BASE..$HEAD" > msgs
 git diff --patch "$BASE...$HEAD" | blockwatch --diff --suppress-from msgs
 ```
+
+**Who writes those messages decides what the range form is worth.** Over a pull request the commit messages come from
+whoever opened it, so anyone able to open one can clear a violation their own change introduced by writing the trailer.
+Use the range form where commit authors are already trusted to merge. Where they are not, keep the addresses in the
+job with `--suppress`, and let the message-driven form run in the local `commit-msg` hook instead, where the author
+and the person running the check are the same.
+
+Neither form hides anything, which caps the damage either way: a suppressed violation stays in the diagnostics as
+`"suppressed": true`, and in a [SARIF log](cli.md#sarif-output) as `"suppressions": [{"kind": "external"}]`. A reviewer
+sees a suppressed finding, not the absence of one.
 
 ## GitHub Code Scanning
 

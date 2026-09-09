@@ -1,3 +1,4 @@
+default_install_hook_types: [ pre-commit, commit-msg ]
 repos:
   - repo: local
     hooks:
@@ -8,16 +9,21 @@ repos:
         # rules being worked on here, which makes it both reject valid invocations and pass changes
         # it does not yet know how to check. `.pre-commit-hooks.yaml` is the hook other repositories
         # consume; that one deliberately stays on a built release.
-        entry: bash -c 'set -o pipefail; git diff --patch --cached --unified=0 | cargo run --quiet -- --diff --only-changed --ignore="tests/testdata/**"'
+        #
+        # It runs at commit-msg rather than pre-commit so that a `Blockwatch-suppress:` trailer in
+        # the message being written is read. The trailing `--` is necessary: pre-commit appends
+        # the message file to this argv, and `bash -c SCRIPT FILE` binds FILE to $0 rather than $1.
+        entry: bash -c 'set -o pipefail; git diff --patch --cached --unified=0 | cargo run --quiet -- --diff --only-changed --ignore="tests/testdata/**" --suppress-from "$1"' --
         language: system
-        stages: [ pre-commit ]
-        pass_filenames: false
+        stages: [ commit-msg ]
+        pass_filenames: true
       - id: cargo-fmt
         name: cargo fmt
         description: Format Rust code using cargo fmt.
         entry: cargo fmt --check
         language: system
         types: [ rust ]
+        stages: [ pre-commit ]
         pass_filenames: false
       - id: cargo-clippy
         name: cargo clippy
@@ -25,4 +31,5 @@ repos:
         entry: cargo clippy --all-targets -- -D warnings
         language: system
         types: [ rust ]
+        stages: [ pre-commit ]
         pass_filenames: false

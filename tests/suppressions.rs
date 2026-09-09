@@ -336,18 +336,19 @@ fn suppress_from_nonexistent_file_fails() {
 }
 
 #[test]
-fn suppress_from_file_outside_repository_fails_confinement() {
+fn suppress_from_reads_a_file_outside_the_repository() {
     let outside_dir = tempfile::tempdir().unwrap();
     let msg_file = outside_dir.path().join("commit_msg.txt");
-    std::fs::write(&msg_file, "Blockwatch-suppress: foo:bar\n").unwrap();
+    std::fs::write(
+        &msg_file,
+        "Blockwatch-suppress: tests/testdata/suppressions/sorted.py:fruits:keep-sorted\n",
+    )
+    .unwrap();
 
     let mut cmd = cargo_bin_cmd!();
     cmd.arg(SORTED)
         .args(["--suppress-from", msg_file.to_str().unwrap()]);
     let output = cmd.output().unwrap();
 
-    output
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("outside the repository root"));
+    output.assert().success();
 }

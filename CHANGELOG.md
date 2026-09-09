@@ -17,7 +17,12 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - `--suppress-from FILE`, repeatable, reads suppression addresses from `Blockwatch-suppress: ADDRESS` lines in a text
   file. The prefix is matched case-insensitively and every other line is ignored, so an ordinary commit message is
   valid input and a suppression can travel with the commit that needs it instead of living in the CI configuration.
-  The file has to sit inside the repository.
+  The path may point anywhere the run can read, so a `commit-msg` hook can pass the message file Git hands it even
+  from a linked worktree, where that file sits outside the tree being checked.
+- A second [pre-commit](https://pre-commit.com) hook id, `blockwatch-commit-msg`, runs the same check at the
+  `commit-msg` stage and feeds the message being written to `--suppress-from`. The original `blockwatch` hook is
+  unchanged, so an existing configuration keeps working; see [CI Integration](docs/ci.md) for which one to pick and for
+  the extra install step a `commit-msg` hook needs.
 
 ## [0.5.3] - 2026-09-05
 
