@@ -17,6 +17,7 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
 - **Report What Ran**: `blockwatch --verbosity summary` (or `full` for JSON on stdout)
 - **Suppress Violations**: `blockwatch --suppress FILE[:BLOCK[:VALIDATOR[:HASH]]]` reports them but stops them failing
   the run
+- **Suppress From File**: `blockwatch --suppress-from FILE` reads suppressions from a text file (e.g., commit message)
 - **Violation Format**: `blockwatch --format sarif` writes a SARIF log instead of the JSON diagnostics
 
 [//]: # (</block>)
@@ -211,6 +212,28 @@ flag is to copy one from the output.
 because there is nothing narrower to point at, but a `FILE` address covers the whole file and so covers them too.
 
 An invalid address that covers nothing is ignored.
+
+### Suppressing from a File
+
+`--suppress-from <FILE>` reads a text file and applies every matching line it finds as a `--suppress`:
+
+```text
+Blockwatch-suppress: api.md:handler:affects
+```
+
+Matching is case-insensitive (e.g. `blockwatch-suppress:` is accepted). Any other line is ignored, so an ordinary commit
+message is valid input:
+
+```shell
+# commit-msg hook, where $1 is the message being written
+git diff --cached --patch | blockwatch --diff --only-changed --suppress-from "$1"
+
+# CI, over the range of a pull request
+git log --format=%B "$BASE..$HEAD" > msgs
+git diff --patch "$BASE...$HEAD" | blockwatch --diff --suppress-from msgs
+```
+
+Repeat the flag to read from multiple files.
 
 ## SARIF Output
 

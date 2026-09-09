@@ -1,0 +1,1 @@
+blockwatch-suppress: tests/testdata/suppressions/sorted.py:fruits:keep-sorted

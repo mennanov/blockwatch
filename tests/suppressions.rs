@@ -234,3 +234,120 @@ fn malformed_address_fails_before_any_source_file_is_read() {
         .stderr(predicate::str::contains(address))
         .stderr(predicate::str::contains("\"code\"").not());
 }
+
+#[test]
+fn suppress_from_reads_commit_message_and_suppresses_violation() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg(SORTED).args([
+        "--suppress-from",
+        "tests/testdata/suppressions/commit_msg.txt",
+    ]);
+    let output = cmd.output().unwrap();
+
+    let violation = &diagnostics(&output.stderr)[SORTED][0];
+    output.assert().success();
+
+    assert_eq!(violation["suppressed"], true);
+    assert_eq!(violation["code"], "keep-sorted");
+    assert_eq!(violation["address"], SORTED_ADDRESS);
+}
+
+#[test]
+fn suppress_from_case_insensitive_matching() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg(SORTED).args([
+        "--suppress-from",
+        "tests/testdata/suppressions/commit_msg_lowercase_trailer.txt",
+    ]);
+    let output = cmd.output().unwrap();
+
+    output.assert().success();
+}
+
+#[test]
+fn suppress_from_ignores_non_matching_lines() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg(SORTED).args([
+        "--suppress-from",
+        "tests/testdata/suppressions/commit_msg_with_noise.txt",
+    ]);
+    let output = cmd.output().unwrap();
+
+    output.assert().success();
+}
+
+#[test]
+fn suppress_from_multiple_flags_collects_all_suppressions() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg(DANGLING)
+        .args([
+            "--suppress-from",
+            "tests/testdata/suppressions/commit_msg_gone_a.txt",
+        ])
+        .args([
+            "--suppress-from",
+            "tests/testdata/suppressions/commit_msg_gone_b.txt",
+        ]);
+    let output = cmd.output().unwrap();
+
+    output.assert().success();
+}
+
+#[test]
+fn suppress_from_combined_with_suppress_flag() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg(DANGLING)
+        .args(["--suppress", GONE_B_ADDRESS])
+        .args([
+            "--suppress-from",
+            "tests/testdata/suppressions/commit_msg_gone_a.txt",
+        ]);
+    let output = cmd.output().unwrap();
+
+    output.assert().success();
+}
+
+#[test]
+fn suppress_from_malformed_address_fails() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg(SORTED).args([
+        "--suppress-from",
+        "tests/testdata/suppressions/commit_msg_malformed.txt",
+    ]);
+    let output = cmd.output().unwrap();
+
+    output
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid suppression address"));
+}
+
+#[test]
+fn suppress_from_nonexistent_file_fails() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg(SORTED)
+        .args(["--suppress-from", "nonexistent_suppressions.txt"]);
+    let output = cmd.output().unwrap();
+
+    output
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("failed to read suppression file"));
+}
+
+#[test]
+fn suppress_from_file_outside_repository_fails_confinement() {
+    let outside_dir = tempfile::tempdir().unwrap();
+    let msg_file = outside_dir.path().join("commit_msg.txt");
+    std::fs::write(&msg_file, "Blockwatch-suppress: foo:bar\n").unwrap();
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg(SORTED)
+        .args(["--suppress-from", msg_file.to_str().unwrap()]);
+    let output = cmd.output().unwrap();
+
+    output
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("outside the repository root"));
+}

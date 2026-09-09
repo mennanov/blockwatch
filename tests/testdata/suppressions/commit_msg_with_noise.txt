@@ -1,0 +1,6 @@
+# Title
+Some explanation mentioning Blockwatch-suppress: in the body.
+Another line with random text: foo:bar:baz
+Signed-off-by: user@example.com
+Blockwatch-suppress: tests/testdata/suppressions/sorted.py:fruits:keep-sorted
+Trailing text

@@ -51,7 +51,8 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
     )?;
     let context = Arc::new(context);
     let mut log = validators::run(Arc::clone(&context), sync_validators, async_validators)?;
-    apply_suppressions(args.suppressed_addresses(), &mut log.violations);
+    let suppressed_addresses = args.suppressed_addresses(file_system.as_ref())?;
+    apply_suppressions(&suppressed_addresses, &mut log.violations);
 
     // Violations are what the run is for; the report only describes it. Writing them first keeps a
     // failure to write the report from discarding them.
@@ -171,7 +172,7 @@ fn build_context(
 ) -> anyhow::Result<(validators::ValidationContext, blocks::ScanStats)> {
     let language_parsers = language_parsers::language_parsers()?;
     let supported_extensions = language_parsers.keys().collect();
-    args.validate(&supported_extensions)?;
+    args.validate(&supported_extensions, file_system)?;
 
     let extra_file_extensions = args.extensions();
 

@@ -1,3 +1,4 @@
+use crate::fs::FileSystem;
 use crate::validators;
 use crate::violation_address::ViolationAddress;
 use anyhow::Context;
@@ -5,6 +6,7 @@ use clap::{Parser, builder::ValueParser, crate_version};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 
 /// How much a run reports about what it checked.
 #[derive(clap::ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -83,6 +85,9 @@ By default it scans every file in the repository. Pass --diff to additionally re
 
     # Suppress a reported violation without editing the source
     blockwatch --suppress docs/cli.md:cli-docs:keep-sorted
+
+    # Suppress violations from a commit message or text file
+    blockwatch --suppress-from commit_msg.txt
 
     # Write the violations as a SARIF log for a code-scanning service
     blockwatch --format sarif 2> blockwatch.sarif
@@ -184,6 +189,19 @@ pub struct Args {
     )]
     suppressed_addresses: Vec<ViolationAddress>,
 
+    /// Suppress reported violations loaded from a text file, matching lines with format:
+    /// Blockwatch-suppress: ADDRESS
+    ///
+    /// Any other line is ignored, so an ordinary commit message is a valid input.
+    /// Repeat the flag to read from multiple files.
+    #[arg(
+        long = "suppress-from",
+        value_name = "FILE",
+        action = clap::ArgAction::Append,
+        global = true,
+    )]
+    suppress_from: Vec<PathBuf>,
+
     /// Glob patterns to filter files.
     #[arg(value_name = "GLOBS")]
     pub globs: Vec<String>,
@@ -229,8 +247,18 @@ impl Args {
     }
 
     /// Where the violations the run was told to suppress sit.
-    pub fn suppressed_addresses(&self) -> &[ViolationAddress] {
-        &self.suppressed_addresses
+    ///
+    /// Combines addresses passed directly via `--suppress` and those read from files
+    /// passed via `--suppress-from`.
+    pub fn suppressed_addresses(
+        &self,
+        file_system: &impl FileSystem,
+    ) -> anyhow::Result<Vec<ViolationAddress>> {
+        let mut addresses = self.suppressed_addresses.clone();
+        for path in &self.suppress_from {
+            addresses.extend(parse_suppressions_from_file(path, file_system)?);
+        }
+        Ok(addresses)
     }
 
     /// Returns a compiled GlobSet from the provided glob patterns.
@@ -261,7 +289,11 @@ impl Args {
     }
 
     /// Validates all arguments.
-    pub fn validate(&self, supported_extensions: &HashSet<&OsString>) -> anyhow::Result<()> {
+    pub fn validate(
+        &self,
+        supported_extensions: &HashSet<&OsString>,
+        file_system: &impl FileSystem,
+    ) -> anyhow::Result<()> {
         // Check custom extensions.
         for (key, val) in &self.extensions {
             if !supported_extensions.contains(&OsString::from(val)) {
@@ -291,9 +323,50 @@ impl Args {
                  than validating them"
             );
         }
+        if self.command.is_some() && !self.suppress_from.is_empty() {
+            anyhow::bail!(
+                "--suppress-from is not supported by the `list` subcommand; `list` reports blocks rather \
+                 than validating them"
+            );
+        }
+        if self.command.is_none() {
+            self.suppressed_addresses(file_system)?;
+        }
 
         Ok(())
     }
+}
+
+const SUPPRESS_TRAILER_PREFIX: &str = "blockwatch-suppress:";
+
+fn parse_suppressions_from_file(
+    path: &Path,
+    file_system: &impl FileSystem,
+) -> anyhow::Result<Vec<ViolationAddress>> {
+    let content = file_system
+        .read_to_string(path)
+        .with_context(|| format!("failed to read suppression file \"{}\"", path.display()))?;
+    let mut addresses = Vec::new();
+    for (line_idx, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.len() <= SUPPRESS_TRAILER_PREFIX.len()
+            || !trimmed[..SUPPRESS_TRAILER_PREFIX.len()]
+                .eq_ignore_ascii_case(SUPPRESS_TRAILER_PREFIX)
+        {
+            // Non-matching line.
+            continue;
+        }
+        let address_str = trimmed[SUPPRESS_TRAILER_PREFIX.len()..].trim();
+        let address = ViolationAddress::parse(address_str).with_context(|| {
+            format!(
+                "invalid suppression address \"{address_str}\" in \"{}\" at line {}",
+                path.display(),
+                line_idx + 1
+            )
+        })?;
+        addresses.push(address);
+    }
+    Ok(addresses)
 }
 
 fn parse_extensions(s: &str) -> anyhow::Result<(String, String)> {
@@ -318,9 +391,14 @@ fn parse_validator(value: &str) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs::test_utils::FakeFileSystem;
 
     fn parse(argv: &[&str]) -> anyhow::Result<Args> {
         Ok(Args::try_parse_from(argv)?)
+    }
+
+    fn empty_fs() -> FakeFileSystem {
+        FakeFileSystem::new(HashMap::new())
     }
 
     #[test]
@@ -374,7 +452,7 @@ mod tests {
     fn verbosity_is_rejected_with_the_list_subcommand() -> anyhow::Result<()> {
         let args = parse(&["blockwatch", "list", "--verbosity", "full"])?;
         let error = args
-            .validate(&HashSet::new())
+            .validate(&HashSet::new(), &empty_fs())
             .expect_err("--verbosity must not be accepted alongside `list`");
         assert!(
             error.to_string().contains("`list` subcommand"),
@@ -407,7 +485,7 @@ mod tests {
     fn format_is_rejected_with_the_list_subcommand() -> anyhow::Result<()> {
         let args = parse(&["blockwatch", "list", "--format", "sarif"])?;
         let error = args
-            .validate(&HashSet::new())
+            .validate(&HashSet::new(), &empty_fs())
             .expect_err("--format must not be accepted alongside `list`");
         assert!(
             error.to_string().contains("`list` subcommand"),
@@ -426,7 +504,7 @@ mod tests {
             "src/lib.rs:languages:line-count",
         ])?;
         assert_eq!(
-            args.suppressed_addresses()
+            args.suppressed_addresses(&empty_fs())?
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>(),
@@ -452,7 +530,7 @@ mod tests {
     fn suppress_is_rejected_after_the_list_subcommand() -> anyhow::Result<()> {
         let args = parse(&["blockwatch", "list", "--suppress", "a.md:n:keep-sorted"])?;
         let error = args
-            .validate(&HashSet::new())
+            .validate(&HashSet::new(), &empty_fs())
             .expect_err("--suppress must not be accepted alongside `list`");
         assert!(
             error.to_string().contains("`list` subcommand"),
@@ -465,10 +543,85 @@ mod tests {
     fn suppress_is_rejected_before_the_list_subcommand() -> anyhow::Result<()> {
         let args = parse(&["blockwatch", "--suppress", "a.md:n:keep-sorted", "list"])?;
         let error = args
-            .validate(&HashSet::new())
+            .validate(&HashSet::new(), &empty_fs())
             .expect_err("--suppress must not be accepted alongside `list`");
         assert!(
             error.to_string().contains("`list` subcommand"),
+            "unexpected error: {error}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn suppress_from_reads_matching_lines_and_ignores_others() -> anyhow::Result<()> {
+        let fs = FakeFileSystem::new(HashMap::from([(
+            "commit_msg.txt".to_string(),
+            "feat: update documentation\n\
+             \n\
+             This commit updates the docs without updating code.\n\
+             \n\
+             Blockwatch-suppress: docs/cli.md:cli-docs:keep-sorted\n\
+             blockwatch-suppress:  src/lib.rs:languages:line-count  \n\
+             Other-trailer: value\n"
+                .to_string(),
+        )]));
+
+        let args = parse(&["blockwatch", "--suppress-from", "commit_msg.txt"])?;
+        args.validate(&HashSet::new(), &fs)?;
+        assert_eq!(
+            args.suppressed_addresses(&fs)?
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec![
+                "docs/cli.md:cli-docs:keep-sorted".to_string(),
+                "src/lib.rs:languages:line-count".to_string(),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn suppress_from_is_rejected_with_the_list_subcommand() -> anyhow::Result<()> {
+        let args = parse(&["blockwatch", "list", "--suppress-from", "msg.txt"])?;
+        let error = args
+            .validate(&HashSet::new(), &empty_fs())
+            .expect_err("--suppress-from must not be accepted alongside `list`");
+        assert!(
+            error.to_string().contains("`list` subcommand"),
+            "unexpected error: {error}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn suppress_from_with_nonexistent_file_fails_validation() -> anyhow::Result<()> {
+        let args = parse(&["blockwatch", "--suppress-from", "nonexistent_file.txt"])?;
+        let error = args
+            .validate(&HashSet::new(), &empty_fs())
+            .expect_err("nonexistent file must fail validation");
+        assert!(
+            error
+                .to_string()
+                .contains("failed to read suppression file"),
+            "unexpected error: {error}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn suppress_from_with_malformed_address_fails_validation() -> anyhow::Result<()> {
+        let fs = FakeFileSystem::new(HashMap::from([(
+            "bad_msg.txt".to_string(),
+            "Blockwatch-suppress: bad:::address\n".to_string(),
+        )]));
+
+        let args = parse(&["blockwatch", "--suppress-from", "bad_msg.txt"])?;
+        let error = args
+            .validate(&HashSet::new(), &fs)
+            .expect_err("malformed address must fail validation");
+        assert!(
+            error.to_string().contains("invalid suppression address"),
             "unexpected error: {error}"
         );
         Ok(())

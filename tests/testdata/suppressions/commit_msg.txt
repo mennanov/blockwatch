@@ -1,0 +1,5 @@
+feat: update fruit list
+
+We are intentionally leaving fruits out of order for now.
+
+Blockwatch-suppress: tests/testdata/suppressions/sorted.py:fruits:keep-sorted

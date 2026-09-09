@@ -12,6 +12,13 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- `--suppress-from FILE`, repeatable, reads suppression addresses from `Blockwatch-suppress: ADDRESS` lines in a text
+  file. The prefix is matched case-insensitively and every other line is ignored, so an ordinary commit message is
+  valid input and a suppression can travel with the commit that needs it instead of living in the CI configuration.
+  The file has to sit inside the repository.
+
 ## [0.5.3] - 2026-09-05
 
 ### Added

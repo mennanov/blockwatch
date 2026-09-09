@@ -123,6 +123,15 @@ the job expands onto the command line, or a record kept by whatever renders the 
 
 An address that covers nothing does nothing, so a suppression left behind by a rename cannot break the build.
 
+Alternatively, `--suppress-from <FILE>` reads suppression addresses from commit message trailers
+(`Blockwatch-suppress: ADDRESS`), which allows suppressions to be scoped to specific commits or pull request ranges
+without modifying the workflow:
+
+```shell
+git log --format=%B "$BASE..$HEAD" > msgs
+git diff --patch "$BASE...$HEAD" | blockwatch --diff --suppress-from msgs
+```
+
 ## GitHub Code Scanning
 
 `--format sarif` writes the violations as a [SARIF log](cli.md#sarif-output), which GitHub's code scanning reads to
