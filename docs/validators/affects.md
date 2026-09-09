@@ -87,8 +87,8 @@ detection, name both blocks and point each at the other:
   Reference integrity (below) is checked either way. If you want a value comparison that also works on a bare full-tree
   run, use [`same-as`](same-as.md).
 - **Co-editing, not agreement.** `affects` only checks that both sides were touched — it does not compare their
-  contents. Touching the target with an unrelated edit satisfies it. When the two blocks should hold the same *value*, [
-  `same-as`](same-as.md) is the stronger check.
+  contents. Touching the target with an unrelated edit satisfies it. When the two blocks should hold the same
+  *value*, [`same-as`](same-as.md) is the stronger check.
 - **Missing targets are violations.** A reference to a block `name` that does not exist (renamed or deleted) is reported
   as a violation, even without a diff. A reference to a target *file* that does not exist fails the run, whether the
   file was named alone or as the `file` half of `file:name`.

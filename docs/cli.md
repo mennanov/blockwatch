@@ -188,7 +188,9 @@ everywhere with `-d`. Repeat the flag to suppress several violations.
 
 ### The Address of a Violation
 
-    FILE[:BLOCK_NAME[:VALIDATOR[:HASH]]]
+```text
+FILE[:BLOCK_NAME[:VALIDATOR[:HASH]]]
+```
 
 Every violation of a named block carries its full address in the diagnostics, so the usual way to write a `--suppress`
 flag is to copy one from the output.
@@ -390,8 +392,8 @@ or an emoji advances it by one. The `range` of a violation follows the same conv
 
 A block with no `name` attribute is reported as `(unnamed)`. Within a file, blocks appear in source order and each
 block's attributes are sorted by name; the files themselves are not ordered, and two runs over an unchanged tree may
-emit them differently. Sort by key downstream if you need to diff one run against another — or use [
-`--verbosity full`](#full-reports), which does order its files.
+emit them differently. Sort by key downstream if you need to diff one run against another — or use
+[`--verbosity full`](#full-reports), which does order its files.
 
 ## Run Reports
 

@@ -168,8 +168,8 @@ Dropping segments from the end widens what an address covers, so `--suppress ven
 The violations stay in the output, marked `"suppressed": true`.
 
 **BlockWatch holds no state.** It is told which addresses to suppress for the run it is about to perform and remembers
-nothing afterwards. Where that list lives is the job's decision — a variable in the workflow, a file the repository commits and
-the job expands onto the command line, or a record kept by whatever renders the annotations.
+nothing afterwards. Where that list lives is the job's decision — a variable in the workflow, a file the repository
+commits and the job expands onto the command line, or a record kept by whatever renders the annotations.
 
 An address that covers nothing does nothing, so a suppression left behind by a rename cannot break the build.
 

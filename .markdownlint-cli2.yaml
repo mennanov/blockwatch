@@ -1,0 +1,27 @@
+# Configuration for markdownlint-cli2, which the pre-commit hook of the same name runs over
+# Markdown files. See https://github.com/DavidAnson/markdownlint-cli2.
+
+# Lint the whole tree when the tool is invoked without arguments. The pre-commit hook passes the
+# staged files instead, and those override this list.
+globs:
+  - "**/*.md"
+
+# Untracked and local-only files are not part of the published documentation, so the same rules
+# should not be held against them. Reusing .gitignore keeps that boundary in one place.
+gitignore: true
+
+ignores:
+  # Fixtures exist to be parsed, not to read well: several are malformed on purpose.
+  - "tests/testdata/**"
+
+config:
+  MD013:
+    # Prose in this repository wraps at 120 columns.
+    line_length: 120
+    # A shell command or a table row cannot be wrapped without changing what it means.
+    code_blocks: false
+    tables: false
+  MD024:
+    # CHANGELOG.md follows Keep a Changelog, where every release repeats "Added" and "Fixed".
+    # Requiring uniqueness only among headings sharing a parent still catches a real duplicate.
+    siblings_only: true

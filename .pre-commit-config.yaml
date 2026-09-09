@@ -33,3 +33,16 @@ repos:
         types: [ rust ]
         stages: [ pre-commit ]
         pass_filenames: false
+
+  # Rules and the set of files linted live in `.markdownlint-cli2.yaml`, which the tool picks up
+  # from the repository root. The hook passes only the staged Markdown files, so a commit is judged
+  # on what it changes; `markdownlint-cli2` with no arguments lints the whole tree.
+  #
+  # The GitHub Actions workflow runs the same linter.
+  # <block name="markdownlint-version" same-as=".github/workflows/markdownlint.yml:markdownlint-version" same-as-pattern="rev: v(?P<value>\d+\.\d+\.\d+)">
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.23.2
+    hooks:
+      - id: markdownlint-cli2
+        stages: [ pre-commit ]
+  # </block>

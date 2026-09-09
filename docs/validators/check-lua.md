@@ -51,18 +51,18 @@ end
 ## The `validate` arguments
 
 - `ctx` — a table with:
-    - `ctx.file` — the source file path, relative to the repository root and always separated by
-      `/`, on every platform and in every run mode. A script may compare or pattern-match it without normalizing first.
-    - `ctx.line` — the line number of the block's start tag.
-    - `ctx.attrs` — the block's own attributes, keyed by attribute name, each value exactly as it was written in the
-      tag. A block tagged `<block check-lua="…" name="limits" severity="warning">` gives the script
-      `ctx.attrs["check-lua"]`, `ctx.attrs["name"]` and `ctx.attrs["severity"]`. Only BlockWatch's own attributes can
-      appear here.
-    - `ctx.affects` — present only when the block also has an [`affects`](affects.md) attribute. A 1-based array of the
-      targets this block affects, each a table with `file`, `name`, and (trimmed)
-      `content`. `file` uses the same format as `ctx.file`. References that do not resolve are skipped. A whole-file
-      target (an `affects` entry written without a `:`) carries the file's entire text as `content` and no `name`, so
-      `affected.name == nil` is how a script tells the two kinds apart.
+  - `ctx.file` — the source file path, relative to the repository root and always separated by
+    `/`, on every platform and in every run mode. A script may compare or pattern-match it without normalizing first.
+  - `ctx.line` — the line number of the block's start tag.
+  - `ctx.attrs` — the block's own attributes, keyed by attribute name, each value exactly as it was written in the
+    tag. A block tagged `<block check-lua="…" name="limits" severity="warning">` gives the script
+    `ctx.attrs["check-lua"]`, `ctx.attrs["name"]` and `ctx.attrs["severity"]`. Only BlockWatch's own attributes can
+    appear here.
+  - `ctx.affects` — present only when the block also has an [`affects`](affects.md) attribute. A 1-based array of the
+    targets this block affects, each a table with `file`, `name`, and (trimmed)
+    `content`. `file` uses the same format as `ctx.file`. References that do not resolve are skipped. A whole-file
+    target (an `affects` entry written without a `:`) carries the file's entire text as `content` and no `name`, so
+    `affected.name == nil` is how a script tells the two kinds apart.
 - `content` — a **string** holding the trimmed text content of the block, or, when
   `check-lua-pattern` is set, a **1-based array** of the values the pattern extracted.
 

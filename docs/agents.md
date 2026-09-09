@@ -4,8 +4,8 @@ Annotating an existing repository with `<block>` tags by hand can be repetitive.
 process by scanning your codebase, adding `<block>` comments in the appropriate language syntax, and running
 `blockwatch` to verify their changes.
 
-This repository includes a skill definition ([
-`.agents/skills/blockwatch/SKILL.md`](../.agents/skills/blockwatch/SKILL.md)) that guides agents on where blocks add
+This repository includes a skill definition
+([`.agents/skills/blockwatch/SKILL.md`](../.agents/skills/blockwatch/SKILL.md)) that guides agents on where blocks add
 value, how tag parameters work, and how to test the resulting blocks.
 
 ## 1. Install the CLI

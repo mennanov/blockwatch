@@ -33,7 +33,7 @@ Observe all running fuzzers:
 cargo afl whatsup out/
 ```
 
-# Troubleshooting
+## Troubleshooting
 
 When experiencing linker issues like
 `ld: warning: ignoring file '.../afl-llvm/afl-compiler-rt.o': found architecture 'x86_64', required architecture 'arm64`

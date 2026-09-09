@@ -19,6 +19,7 @@ cargo test <pattern>                       # run tests whose name matches
 cargo test -- --nocapture                  # show stdout/stderr from tests
 cargo fmt                                  # format
 cargo clippy --all-targets -- -D warnings  # lint
+markdownlint-cli2                          # lint Markdown (config: .markdownlint-cli2.yaml)
 ```
 
 Fuzzing (nightly toolchain + `cargo-afl` required) lives in `fuzz/`; see `fuzz/README.md`.

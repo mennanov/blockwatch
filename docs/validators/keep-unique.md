@@ -4,9 +4,9 @@ Prevents duplicate entries in a list — allowlists, registered IDs, route names
 
 ## Syntax
 
-| Attribute     | Value                                                      | Default |
-|---------------|------------------------------------------------------------|---------|
-| `keep-unique` | empty, or a regex whose `(?P<value>…)` group is compared    | whole line |
+| Attribute     | Value                                                    | Default    |
+|---------------|----------------------------------------------------------|------------|
+| `keep-unique` | empty, or a regex whose `(?P<value>…)` group is compared | whole line |
 
 Unlike `keep-sorted`, the regex goes directly in the attribute value — there is no separate
 `keep-unique-pattern`.

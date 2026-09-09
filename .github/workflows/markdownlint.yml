@@ -1,0 +1,27 @@
+name: markdownlint
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  markdownlint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+      # Invoked without file arguments, the linter reads `.markdownlint-cli2.yaml` for both the
+      # rules and the set of files, so a pull request is judged by exactly the same configuration as
+      # a local commit. Unlike the hook, which sees only what is staged, this run covers every file:
+      # a rule added to the configuration is enforced on documents no recent change touched.
+      #
+      # The runner ships a Node capable of fetching the linter, so no toolchain setup step is needed.
+      - name: Lint Markdown
+        # <block name="markdownlint-version" same-as=".pre-commit-config.yaml:markdownlint-version" same-as-pattern="markdownlint-cli2@(?P<value>\d+\.\d+\.\d+)">
+        run: npx --yes markdownlint-cli2@0.23.2
+        # </block>
