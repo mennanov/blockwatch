@@ -9,12 +9,17 @@ touched. See [Run Modes](cli.md#run-modes).
 To use [pre-commit](https://pre-commit.com), add the hook to `.pre-commit-config.yaml`. Cargo will build `blockwatch`
 from source on the first run:
 
+<!-- <block name="pre-commit-rev" same-as="Cargo.toml:crate-version" same-as-mode="subset"
+     same-as-pattern='rev: v(?P<value>\d+\.\d+\.\d+)'> -->
+
 ```yaml
 - repo: https://github.com/mennanov/blockwatch
-  rev: v0.5.1  # Use latest release
+  rev: v0.5.3  # Use latest release
   hooks:
     - id: blockwatch
 ```
+
+<!-- </block> -->
 
 If `blockwatch` is already installed locally (e.g. via Homebrew or Cargo), use a local hook to skip building from
 source:
@@ -43,12 +48,17 @@ The `blockwatch` hook runs before the commit message exists, so it cannot see a 
 `blockwatch-commit-msg` hook runs one stage later, at `commit-msg`, and hands the message Git is about to use to
 [`--suppress-from`](cli.md#suppressing-from-a-file):
 
+<!-- <block name="commit-msg-rev" same-as="Cargo.toml:crate-version" same-as-mode="subset"
+     same-as-pattern='rev: v(?P<value>\d+\.\d+\.\d+)'> -->
+
 ```yaml
 - repo: https://github.com/mennanov/blockwatch
-  rev: v0.5.4  # Use latest release
+  rev: v0.5.3  # Use latest release
   hooks:
     - id: blockwatch-commit-msg
 ```
+
+<!-- </block> -->
 
 Use one hook or the other, not both, or every commit is checked twice.
 

@@ -154,12 +154,17 @@ See [docs/cli.md](docs/cli.md) for the run modes in full, CLI flags, path exclus
 
 **pre-commit** (`.pre-commit-config.yaml`):
 
+<!-- <block name="pre-commit-rev" same-as="Cargo.toml:crate-version" same-as-mode="subset"
+     same-as-pattern='rev: v(?P<value>\d+\.\d+\.\d+)'> -->
+
 ```yaml
 - repo: https://github.com/mennanov/blockwatch
-  rev: v0.5.1  # Use latest release
+  rev: v0.5.3  # Use latest release
   hooks:
     - id: blockwatch
 ```
+
+<!-- </block> -->
 
 **GitHub Actions**:
 

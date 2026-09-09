@@ -252,6 +252,8 @@ blockwatch --format sarif 2> blockwatch.sarif
 
 Nothing else about the run changes: the same violations are found, and the exit code is decided the same way.
 
+<!-- <block name="sarif-example" same-as-pattern='v?(?P<value>\d+\.\d+\.\d+)'> -->
+
 ```json
 {
   "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
@@ -261,15 +263,15 @@ Nothing else about the run changes: the same violations are found, and the exit 
       "tool": {
         "driver": {
           "name": "blockwatch",
-          "version": "0.5.2",
-          "semanticVersion": "0.5.2",
+          "version": "0.5.3",
+          "semanticVersion": "0.5.3",
           "informationUri": "https://github.com/mennanov/blockwatch",
           "rules": [
             {
               "id": "keep-sorted",
               "name": "keep-sorted",
               "shortDescription": { "text": "Requires the lines of a block to stay in order." },
-              "helpUri": "https://github.com/mennanov/blockwatch/blob/v0.5.2/docs/validators/keep-sorted.md"
+              "helpUri": "https://github.com/mennanov/blockwatch/blob/v0.5.3/docs/validators/keep-sorted.md"
             }
           ]
         }
@@ -300,6 +302,8 @@ Nothing else about the run changes: the same violations are found, and the exit 
   ]
 }
 ```
+
+<!-- </block> -->
 
 What to expect from the log:
 

@@ -24,6 +24,13 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   unchanged, so an existing configuration keeps working; see [CI Integration](docs/ci.md) for which one to pick and for
   the extra install step a `commit-msg` hook needs.
 
+### Fixed
+
+- The `rev:` of the [pre-commit](https://pre-commit.com) snippets in the README and in
+  [CI Integration](docs/ci.md) named releases that were stale or, in one case, had never been published. Both
+  now name the current release, and the release process keeps them and the SARIF sample output in step from
+  here on.
+
 ## [0.5.3] - 2026-09-05
 
 ### Added

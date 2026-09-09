@@ -33,3 +33,36 @@ file = "CHANGELOG.md"
 search = "<!-- next-header -->"
 replace = "<!-- next-header -->\n\n## [Unreleased] - ReleaseDate"
 exactly = 1
+
+# The version is spelled out in the docs as well: the `rev:` of the pre-commit
+# snippets, and the `blockwatch` version and `helpUri` of the SARIF sample
+# output. The `crate-version` block in Cargo.toml lists them all and fails
+# a run once any of them goes stale, so they are rewritten here to keep that
+# check green. `exactly` aborts the release before publishing to crates.io if a
+# snippet is ever reworded past these patterns.
+[[pre-release-replacements]]
+file = "README.md"
+search = "rev: v[0-9]+\\.[0-9]+\\.[0-9]+"
+replace = "rev: v{{version}}"
+exactly = 1
+
+[[pre-release-replacements]]
+file = "docs/ci.md"
+search = "rev: v[0-9]+\\.[0-9]+\\.[0-9]+"
+replace = "rev: v{{version}}"
+exactly = 2
+
+# Both keys carry the same number and sit on consecutive lines. They are matched
+# together because the driver's `"version"` is otherwise indistinguishable from
+# the SARIF format's own `"version": "2.1.0"` earlier in the same sample.
+[[pre-release-replacements]]
+file = "docs/cli.md"
+search = "\"version\": \"[0-9]+\\.[0-9]+\\.[0-9]+\",\\s+\"semanticVersion\": \"[0-9]+\\.[0-9]+\\.[0-9]+\""
+replace = "\"version\": \"{{version}}\",\n          \"semanticVersion\": \"{{version}}\""
+exactly = 1
+
+[[pre-release-replacements]]
+file = "docs/cli.md"
+search = "blockwatch/blob/v[0-9]+\\.[0-9]+\\.[0-9]+/"
+replace = "blockwatch/blob/v{{version}}/"
+exactly = 1
