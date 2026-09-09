@@ -70,7 +70,9 @@ Update the contents of the block in `README.md` and it will pass the check.
 and needs no diff to do it. The rest check a single block on its own, and are the things you'd otherwise nitpick in code
 review.
 
-[//]: # (<block name="available-validators">)
+<!-- <block name="available-validators"
+     same-as="src/validators/mod.rs:validator-registry, docs/validators/README.md:validators-index"
+     same-as-pattern='^\|\s*\[`(?P<value>[a-z-]+)`\]'> -->
 
 | Validator                                         | Description                                                                                  | Attributes                                                     |
 |---------------------------------------------------|----------------------------------------------------------------------------------------------|----------------------------------------------------------------|
@@ -83,7 +85,7 @@ review.
 | [`check-ai`](docs/validators/check-ai.md)         | Validates content against natural language rules using an LLM                                | `check-ai`, `check-ai-pattern`                                 |
 | [`check-lua`](docs/validators/check-lua.md)       | Runs custom validation logic written in Lua                                                  | `check-lua`, `check-lua-pattern`, `check-lua-timeout`          |
 
-[//]: # (</block>)
+<!-- </block> -->
 
 Blocks can have a `name`, so other blocks can point at it, and [`severity`](docs/validators/README.md#severity). The
 `error` severity fails with a non-zero exit code.

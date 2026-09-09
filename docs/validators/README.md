@@ -8,7 +8,9 @@ block tag at line N, column N`, rather than being silently ignored.
 
 ## Which validator do I want?
 
-[//]: # (<block name="validators-index" affects=".agents/skills/blockwatch/SKILL.md:validator-catalog">)
+<!-- <block name="validators-index" affects=".agents/skills/blockwatch/SKILL.md:validator-catalog"
+     same-as="src/validators/mod.rs:validator-registry, README.md:available-validators"
+     same-as-pattern='\[`(?P<value>[a-z-]+)`\]\('> -->
 
 | I want to...                                                  | Use                               |
 |---------------------------------------------------------------|-----------------------------------|
@@ -21,7 +23,7 @@ block tag at line N, column N`, rather than being silently ignored.
 | Enforce a rule stated in plain English                        | [`check-ai`](check-ai.md)         |
 | Run arbitrary validation logic                                | [`check-lua`](check-lua.md)       |
 
-[//]: # (</block>)
+<!-- </block> -->
 
 Prefer the deterministic validators — `affects`, `same-as`, `keep-sorted`, `keep-unique`,
 `line-pattern`, `line-count`. They are fast, offline, and need no API key. Reserve `check-ai` for rules the others
@@ -55,12 +57,16 @@ along with the rest of their file.
 Controls how a violation is reported. Mirrors
 [LSP diagnostic severities](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#diagnostic).
 
+<!-- <block name="severity-levels" affects="src/blocks.rs:block-severity"> -->
+
 | Value             | Reported | Exit code |
 |-------------------|----------|-----------|
 | `error` (default) | yes      | 1         |
 | `warning`         | yes      | 0         |
 | `info`            | yes      | 0         |
 | `hint`            | yes      | 0         |
+
+<!-- </block> -->
 
 Only `error` fails the run. This makes `severity` the way to introduce a rule without breaking CI on day one — land the
 block as a `warning`, clean up the existing violations, then promote it:

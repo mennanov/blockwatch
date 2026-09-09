@@ -8,11 +8,16 @@ string when it fails.
 
 ## Syntax
 
+<!-- <block name="check-lua-syntax" same-as="src/validators/check_lua.rs:default-check-lua-timeout"
+     same-as-mode="single" same-as-format="numeric" same-as-pattern='`(?P<value>\d+)`'> -->
+
 | Attribute           | Value                                                     | Default     |
 |---------------------|-----------------------------------------------------------|-------------|
 | `check-lua`         | path to a `.lua` script, relative to the project root     | —           |
 | `check-lua-pattern` | regex; every match's `(?P<value>…)` group, or whole match | whole block |
 | `check-lua-timeout` | whole number of seconds (≥ 1) the script may run          | `30`        |
+
+<!-- </block> -->
 
 The script path must point to a file inside the repository. Paths that escape it — absolute paths outside the project,
 `../` traversal, or symlinks pointing outward — are rejected.
@@ -150,7 +155,8 @@ function validate(ctx, content)
 end
 ```
 
-<!-- <block name="lua-safety-modes"> -->
+<!-- <block name="lua-safety-modes" same-as="src/validators/check_lua.rs:lua-safety-modes"
+     same-as-pattern='^\|\s*`(?P<value>[a-z]+)`'> -->
 
 ## Safety modes
 

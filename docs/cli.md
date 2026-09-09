@@ -4,7 +4,8 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
 
 ## Quick Options Reference
 
-[//]: # (<block name="cli-docs">)
+<!-- <block name="cli-docs" same-as="src/flags.rs:cli-flags" same-as-mode="subset"
+     same-as-pattern='blockwatch --(?P<value>[a-z-]+)'> -->
 
 - **Read a Diff**: `git diff --patch | blockwatch --diff` marks which blocks the diff changed.
 - **Only Changed Blocks**: `git diff --patch | blockwatch --diff --only-changed` narrows the run to them, instead of
@@ -20,7 +21,7 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
 - **Suppress From File**: `blockwatch --suppress-from FILE` reads suppressions from a text file (e.g., commit message)
 - **Violation Format**: `blockwatch --format sarif` writes a SARIF log instead of the JSON diagnostics
 
-[//]: # (</block>)
+<!-- </block> -->
 
 ## Selecting Files
 

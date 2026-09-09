@@ -97,7 +97,9 @@ pub fn language_parsers() -> anyhow::Result<LanguageParsers> {
     let yaml_parser = parser(yaml::parser()?);
 
     Ok(HashMap::from([
-        // <block affects="README.md:supported-grammar, src/blocks.rs:supported-extensions" keep-sorted>
+        /* <block name="language-extensions"
+        affects="README.md:supported-grammar, src/blocks.rs:supported-extensions"
+        keep-sorted keep-unique='\("(?P<value>[^"]+)"'> */
         ("BUILD".into(), Arc::clone(&starlark_parser)),
         ("CMakeLists.txt".into(), Arc::clone(&cmake_parser)),
         ("Containerfile".into(), Arc::clone(&dockerfile_parser)),

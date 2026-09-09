@@ -460,7 +460,10 @@ type DetectorFactory<Fs> = fn() -> Box<dyn ValidatorDetector<Fs>>;
 /// instantiated per `Fs` (the production `FileSystemImpl`, a `FakeFileSystem` in tests).
 pub fn detector_factories<Fs: FileSystem + 'static>() -> Vec<(&'static str, DetectorFactory<Fs>)> {
     vec![
-        // <block affects="README.md:available-validators">
+        /* <block name="validator-registry" affects="README.md:available-validators"
+        keep-unique='\("(?P<value>[^"]+)"'
+           same-as="README.md:available-validators, docs/validators/README.md:validators-index"
+           same-as-pattern='^\("(?P<value>[a-z-]+)"'> */
         ("affects", || Box::new(AffectsValidatorDetector::new())),
         ("keep-sorted", || {
             Box::new(KeepSortedValidatorDetector::new())

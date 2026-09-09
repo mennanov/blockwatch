@@ -17,8 +17,11 @@ use tokio::task::{JoinSet, spawn_blocking};
 
 const LUA_STDLIB_ENV_VAR: &str = "BLOCKWATCH_LUA_MODE";
 
+/* <block name="default-check-lua-timeout" same-as="docs/validators/check-lua.md:check-lua-syntax"
+same-as-mode="single" same-as-format="numeric" same-as-pattern="= (?P<value>\d+);"> */
 /// The wall-clock budget a `check-lua` script gets when the block does not set `check-lua-timeout`.
 const DEFAULT_CHECK_LUA_TIMEOUT_SECS: u64 = 30;
+// </block>
 
 /// How many Lua VM instructions run between two checks of the timeout deadline. Small enough that a
 /// runaway script is stopped promptly, large enough that the hook stays negligible for scripts that
@@ -37,7 +40,9 @@ const CHECK_LUA_TIMEOUT_BACKSTOP_GRACE: Duration = Duration::from_secs(1);
 /// - `safe`: Memory-safe but includes IO/OS (useful for trusted scripts).
 /// - `unsafe`: Fully unsafe, allows C module loading.
 fn lua_from_env() -> Lua {
-    // <block affects="docs/validators/check-lua.md:lua-safety-modes">
+    /* <block name="lua-safety-modes" affects="docs/validators/check-lua.md:lua-safety-modes"
+    same-as="docs/validators/check-lua.md:lua-safety-modes"
+    same-as-pattern='(?:unwrap_or\(|^)"(?P<value>[a-z]+)"'> */
     match std::env::var(LUA_STDLIB_ENV_VAR)
         .as_deref()
         .unwrap_or("sandboxed")

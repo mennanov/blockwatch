@@ -101,7 +101,8 @@ By default it scans every file in the repository. Pass --diff to additionally re
     git diff --patch | blockwatch list --diff --only-changed",
 )]
 pub struct Args {
-    // <block affects="docs/cli.md:cli-docs">
+    /* <block name="cli-flags" affects="docs/cli.md:cli-docs"
+    same-as-pattern='long = "(?P<value>[a-z-]+)"'> */
     /// Read a unified diff from stdin to mark which blocks it changed.
     ///
     /// Without this flag stdin is never read. Rules that only fire on changed content, such as

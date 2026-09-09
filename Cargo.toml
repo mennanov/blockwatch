@@ -39,6 +39,8 @@ similar = { version = "3.1" }
 strum = "0.28"
 strum_macros = "0.28"
 tokio = { version = "1.52", features = ["full"] }
+# The grammar crates the language parsers are built from.
+# <block keep-sorted keep-unique>
 tree-sitter = "0.26"
 tree-sitter-bash = "0.25"
 tree-sitter-c = "0.24"
@@ -74,6 +76,7 @@ tree-sitter-toml-ng = "0.7"
 tree-sitter-typescript = "0.23"
 tree-sitter-xml = "0.7"
 tree-sitter-yaml = "0.7"
+# </block>
 unidiff = "0.4.1"
 winnow = "1.0"
 

@@ -235,6 +235,7 @@ impl Block {
 #[derive(Clone, Copy, Serialize_repr, EnumString, Debug, PartialEq)]
 #[strum(ascii_case_insensitive)]
 #[repr(u8)]
+// <block name="block-severity" affects="docs/validators/README.md:severity-levels">
 pub enum BlockSeverity {
     /// The default. A violation at this level makes the run exit non-zero, failing a hook or CI.
     Error = 1,
@@ -245,6 +246,7 @@ pub enum BlockSeverity {
     /// The weakest level, for suggestions, does not affect the exit code.
     Hint = 4,
 }
+// </block>
 
 /// Represents a source field with its corresponding modified blocks.
 #[derive(Debug)]
