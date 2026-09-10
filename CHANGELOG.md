@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.5.4] - 2026-09-10
+
 ### Added
 
 - `--suppress-from FILE`, repeatable, reads suppression addresses from `Blockwatch-suppress: ADDRESS` lines in a text
