@@ -70,7 +70,7 @@ impl MdCommentsParser {
         let mut comments = Vec::new();
         while let Some(query_match) = matches.next() {
             let node = query_match
-                .captures
+                .captures()
                 .first()
                 .expect("Empty Tree-sitter region query match")
                 .node;
@@ -128,7 +128,7 @@ impl MdCommentsParser {
             query_cursor.matches(code_span_query, tree.root_node(), region.as_bytes());
         while let Some(query_match) = matches.next() {
             let range = query_match
-                .captures
+                .captures()
                 .first()
                 .expect("Empty Tree-sitter code_span query match")
                 .node

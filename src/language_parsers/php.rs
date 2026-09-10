@@ -75,7 +75,7 @@ impl CommentsParser for PhpCommentsParser {
         );
         while let Some(query_match) = matches.next() {
             let node = query_match
-                .captures
+                .captures()
                 .first()
                 .expect("Empty Tree-sitter region query match")
                 .node;
