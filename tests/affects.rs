@@ -212,6 +212,73 @@ index abc123..def456 100644
 }
 
 #[test]
+fn diff_with_only_tag_multiple_lines_modified_succeeds() {
+    // Modifying a start tag over several lines does not touch the block's content, so there should
+    // be no violations.
+    let diff_content = r#"
+diff --git a/tests/testdata/affects/multiline_tag_source.rs b/tests/testdata/affects/multiline_tag_source.rs
+index abc123..def456 100644
+--- a/tests/testdata/affects/multiline_tag_source.rs
++++ b/tests/testdata/affects/multiline_tag_source.rs
+@@ -1,3 +1,5 @@
+-// <block name="source" affects="tests/testdata/affects/multiline_tag_target.rs:target">
++/* <block name="source"
++   affects="tests/testdata/affects/multiline_tag_target.rs:target"
++   severity="error"> */
+ const PORT: u16 = 8080;
+ // </block>
+"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
+    let output = cmd.write_stdin(diff_content).output().unwrap();
+
+    output.assert().success();
+}
+
+#[test]
+fn diff_dependent_block_with_only_tag_multiple_lines_modified_fails() {
+    // Modifying the affected block's start tag must not satisfy the reference: the content has not
+    // been updated.
+    let diff_content = r#"
+diff --git a/tests/testdata/affects/multiline_tag_source.rs b/tests/testdata/affects/multiline_tag_source.rs
+index abc123..def456 100644
+--- a/tests/testdata/affects/multiline_tag_source.rs
++++ b/tests/testdata/affects/multiline_tag_source.rs
+@@ -1,5 +1,5 @@
+ /* <block name="source"
+    affects="tests/testdata/affects/multiline_tag_target.rs:target"
+    severity="error"> */
+-const PORT: u16 = 8000;
++const PORT: u16 = 8080;
+ // </block>
+diff --git a/tests/testdata/affects/multiline_tag_target.rs b/tests/testdata/affects/multiline_tag_target.rs
+index abc123..def456 100644
+--- a/tests/testdata/affects/multiline_tag_target.rs
++++ b/tests/testdata/affects/multiline_tag_target.rs
+@@ -1,3 +1,5 @@
+-// <block name="target" severity="error" keep-sorted>
++/* <block name="target"
++   severity="error"
++   keep-sorted> */
+ const PORT: u16 = 8080;
+ // </block>
+"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
+    let output = cmd.write_stdin(diff_content).output().unwrap();
+
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "tests/testdata/affects/multiline_tag_target.rs:target is not",
+        ));
+}
+
+#[test]
 fn diff_dependent_block_with_only_tag_modified_fails() {
     let diff_content = r#"
 diff --git a/tests/testdata/affects/sibling.md b/tests/testing_data

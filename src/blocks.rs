@@ -1,5 +1,5 @@
 use crate::Position;
-use crate::diff_parser::LineChange;
+use crate::diff_parser::{LineChange, LineChangeKind};
 use crate::fs::{FileSystem, PathChecker};
 use crate::language_parsers::{LanguageParser, LanguageParsers};
 use crate::repo_path::RepoPath;
@@ -111,34 +111,36 @@ impl Block {
             return false;
         }
 
-        if let Some(ranges) = &line_change.ranges {
-            let start_character = if line_change.line == position_range.start().line {
-                position_range.start().character - 1 // LineChange.ranges are 0-based
-            } else {
-                0
-            };
-            let end_character = if line_change.line < position_range.end().line {
-                usize::MAX
-            } else {
-                position_range.end().character - 1 // LineChange.ranges are 0-based
-            };
-
-            ranges
-                .binary_search_by(|range| {
-                    if range.end > start_character && range.start <= end_character {
-                        // Intersection between [start_character, end_character]
-                        // and half-open [range.start, range.end).
-                        Ordering::Equal
-                    } else if range.end <= start_character {
-                        Ordering::Less
-                    } else {
-                        Ordering::Greater
-                    }
-                })
-                .is_ok()
+        let LineChangeKind::Modified(ranges) = &line_change.kind else {
+            // An insertion and a deletion both move the line breaks around the line, not just the
+            // characters on it, so there is nothing to compare column by column. Every position
+            // on the line counts as changed.
+            return true;
+        };
+        let start_character = if line_change.line == position_range.start().line {
+            position_range.start().character - 1 // The ranges are 0-based
         } else {
-            true
-        }
+            0
+        };
+        let end_character = if line_change.line < position_range.end().line {
+            usize::MAX
+        } else {
+            position_range.end().character - 1 // The ranges are 0-based
+        };
+
+        ranges
+            .binary_search_by(|range| {
+                if range.end > start_character && range.start <= end_character {
+                    // Intersection between [start_character, end_character]
+                    // and half-open [range.start, range.end).
+                    Ordering::Equal
+                } else if range.end <= start_character {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            })
+            .is_ok()
     }
 
     /// Whether the `position_range` intersects with the given `line_change`.
@@ -153,34 +155,36 @@ impl Block {
             return false;
         }
 
-        if let Some(ranges) = &line_change.ranges {
-            let start_character = if line_change.line == position_range.start.line {
-                position_range.start.character - 1 // LineChange.ranges are 0-based
-            } else {
-                0
-            };
-            let end_character = if line_change.line < position_range.end.line {
-                usize::MAX
-            } else {
-                position_range.end.character - 1 // LineChange.ranges are 0-based
-            };
-
-            ranges
-                .binary_search_by(|range| {
-                    if range.end > start_character && range.start < end_character {
-                        // Intersection between closed-open [start_character, end_character)
-                        // and closed-open [range.start, range.end).
-                        Ordering::Equal
-                    } else if range.end <= start_character {
-                        Ordering::Less
-                    } else {
-                        Ordering::Greater
-                    }
-                })
-                .is_ok()
+        let LineChangeKind::Modified(ranges) = &line_change.kind else {
+            // An insertion and a deletion both move the line breaks around the line, not just the
+            // characters on it, so there is nothing to compare column by column. Every position
+            // on the line counts as changed.
+            return true;
+        };
+        let start_character = if line_change.line == position_range.start.line {
+            position_range.start.character - 1 // The ranges are 0-based
         } else {
-            true
-        }
+            0
+        };
+        let end_character = if line_change.line < position_range.end.line {
+            usize::MAX
+        } else {
+            position_range.end.character - 1 // The ranges are 0-based
+        };
+
+        ranges
+            .binary_search_by(|range| {
+                if range.end > start_character && range.start < end_character {
+                    // Intersection between closed-open [start_character, end_character)
+                    // and closed-open [range.start, range.end).
+                    Ordering::Equal
+                } else if range.end <= start_character {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            })
+            .is_ok()
     }
 
     /// Returns the optional value of the `name` attribute for this block.
@@ -723,6 +727,7 @@ mod block_severity_from_str_tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 mod parse_blocks_tests {
     use crate::blocks::*;
     use crate::fs::test_utils::{FakeFileSystem, FakePathChecker};
@@ -730,9 +735,20 @@ mod parse_blocks_tests {
     use crate::test_utils::{self};
     use std::collections::HashSet;
 
-    /// Creates a whole line change (either added or deleted line).
-    fn line_change(line: usize) -> LineChange {
-        LineChange { line, ranges: None }
+    /// A newly added line.
+    fn added(line: usize) -> LineChange {
+        LineChange {
+            line,
+            kind: LineChangeKind::Added,
+        }
+    }
+
+    /// A modified line with `length` chars modified.
+    fn modified(line: usize, length: usize) -> LineChange {
+        LineChange {
+            line,
+            kind: LineChangeKind::Modified(vec![0..length]),
+        }
     }
 
     #[test]
@@ -803,11 +819,11 @@ mod parse_blocks_tests {
             (
                 RepoPath::from_reference("a.rs")?,
                 vec![
-                    line_change(1), // No blocks on this line.
+                    added(1), // No blocks on this line.
                     LineChange {
                         // "first" block.
                         line: 2,
-                        ranges: Some(vec![
+                        kind: LineChangeKind::Modified(vec![
                             test_utils::substr_range(
                                 content_a.lines().nth(1).unwrap(),
                                 "/* <block ",
@@ -821,7 +837,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "second" block.
                         line: 3,
-                        ranges: Some(vec![
+                        kind: LineChangeKind::Modified(vec![
                             test_utils::substr_range(
                                 content_a.lines().nth(2).unwrap(),
                                 "/* <block name=\"second\"> */ let foo ",
@@ -835,7 +851,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "third" block.
                         line: 4,
-                        ranges: Some(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
                             content_a.lines().nth(3).unwrap(),
                             " third block ",
                         )]), // Only the content is modified.
@@ -843,7 +859,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "fourth" block.
                         line: 5,
-                        ranges: Some(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
                             content_a.lines().nth(4).unwrap(),
                             " fourth block // </block>",
                         )]), // The content and end tag are modified.
@@ -851,7 +867,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "fifth" block.
                         line: 6,
-                        ranges: Some(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
                             content_a.lines().nth(5).unwrap(),
                             " </block>",
                         )]), // Only the end tag is modified.
@@ -859,7 +875,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "sixth" block.
                         line: 8,
-                        ranges: Some(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
                             content_a.lines().nth(7).unwrap(),
                             "name=\"sixth\"",
                         )]), // Only the start tag is modified.
@@ -867,7 +883,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "seventh" block.
                         line: 11,
-                        ranges: Some(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
                             content_a.lines().nth(10).unwrap(),
                             "keep-sorted=\"asc\"> */",
                         )]), // Only the start tag is modified.
@@ -875,7 +891,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "eighth" block.
                         line: 14,
-                        ranges: Some(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
                             content_a.lines().nth(13).unwrap(),
                             " block eight",
                         )]), // Only the content on the same line as start tag is modified.
@@ -883,7 +899,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "ninth" block.
                         line: 17,
-                        ranges: Some(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
                             content_a.lines().nth(16).unwrap(),
                             "block nine",
                         )]), // Only the content on a line between start and end tags is modified.
@@ -891,7 +907,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "tenth" block.
                         line: 20,
-                        ranges: Some(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
                             content_a.lines().nth(19).unwrap(),
                             "block ten ",
                         )]), // Only the content on the same line as end tag is modified.
@@ -899,7 +915,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "eleventh" block.
                         line: 22,
-                        ranges: Some(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
                             content_a.lines().nth(21).unwrap(),
                             " </block>",
                         )]), // End tag is modified.
@@ -907,7 +923,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "twelfth" block.
                         line: 25,
-                        ranges: Some(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
                             content_a.lines().nth(24).unwrap(),
                             "Some comment.",
                         )]), // Multiline end tag is modified.
@@ -918,7 +934,7 @@ mod parse_blocks_tests {
                 RepoPath::from_reference("b.rs")?,
                 vec![LineChange {
                     line: 1,
-                    ranges: Some(vec![test_utils::substr_range(
+                    kind: LineChangeKind::Modified(vec![test_utils::substr_range(
                         content_b.lines().next().unwrap(),
                         "let foo = \"bar\"; ",
                     )]), // Block's content is modified in a single line file.
@@ -983,6 +999,75 @@ mod parse_blocks_tests {
         Ok(())
     }
 
+    /// Parses a single block from `content` with `changed_lines` applied.
+    fn block_with_context(
+        content: &str,
+        line_changes: Vec<LineChange>,
+    ) -> anyhow::Result<BlockWithContext> {
+        let file_system =
+            FakeFileSystem::new(HashMap::from([("a.rs".to_string(), content.to_string())]));
+        let line_changes = HashMap::from([(RepoPath::from_reference("a.rs")?, line_changes)]);
+
+        let mut blocks_by_file = parse_blocks(
+            &line_changes,
+            ScanMode::OnlyChanged,
+            &file_system,
+            &FakePathChecker::allow_all(),
+            &language_parsers()?,
+            &HashMap::new(),
+        )?
+        .blocks;
+
+        let mut file_blocks = blocks_by_file
+            .remove(&RepoPath::from_reference("a.rs")?)
+            .expect("a.rs holds a modified block");
+        assert_eq!(file_blocks.blocks_with_context.len(), 1);
+        Ok(file_blocks.blocks_with_context.remove(0))
+    }
+
+    #[test]
+    fn modified_start_tag_line_without_content_leaves_the_content_unmodified() -> anyhow::Result<()>
+    {
+        // The start tag's comment ends its line, so the content begins on the next one. Rewriting
+        // every character of the line still reaches nothing the content owns.
+        let tag_line = "// <block name=\"first\">";
+        let block = block_with_context(
+            &format!("{tag_line}\none\n// </block>\n"),
+            vec![modified(1, tag_line.chars().count())],
+        )?;
+
+        assert!(block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_start_tag_line_carrying_content_modifies_the_content() -> anyhow::Result<()> {
+        let tag_line = "/* <block name=\"first\"> */ one";
+        let block = block_with_context(
+            &format!("{tag_line}\n// </block>\n"),
+            vec![modified(1, tag_line.chars().count())],
+        )?;
+
+        assert!(block.is_start_tag_modified);
+        assert!(block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn added_start_tag_line_modifies_the_content() -> anyhow::Result<()> {
+        // An inserted line brings a new line break too, and that break is the first thing the
+        // content owns, so the block's content did change.
+        let block = block_with_context(
+            "// <block name=\"first\">\none\n// </block>\n",
+            vec![added(1)],
+        )?;
+
+        assert!(block.is_start_tag_modified);
+        assert!(block.is_content_modified);
+        Ok(())
+    }
+
     #[test]
     fn all_mode_with_line_changes_parses_modified_and_unmodified_blocks() -> anyhow::Result<()> {
         let file_system = FakeFileSystem::new(HashMap::from([
@@ -1022,14 +1107,14 @@ mod parse_blocks_tests {
                 RepoPath::from_reference("a.rs")?,
                 vec![LineChange {
                     line: 3, // Content line of the first block.
-                    ranges: None,
+                    kind: LineChangeKind::Added,
                 }],
             ),
             (
                 RepoPath::from_reference("b.rs")?,
                 vec![LineChange {
                     line: 3, // Content line of the first block.
-                    ranges: None,
+                    kind: LineChangeKind::Added,
                 }],
             ),
         ]);
@@ -1264,13 +1349,10 @@ mod parse_blocks_tests {
             ),
         ]));
         let line_changes = HashMap::from([
-            (
-                RepoPath::from_reference("src/allowed.rs")?,
-                vec![line_change(2)],
-            ),
+            (RepoPath::from_reference("src/allowed.rs")?, vec![added(2)]),
             (
                 RepoPath::from_reference("vendor/denied.rs")?,
-                vec![line_change(2)],
+                vec![added(2)],
             ),
         ]);
 
@@ -1298,11 +1380,8 @@ mod parse_blocks_tests {
             "// <block name=\"present\">\nfn present() {}\n// </block>\n".to_string(),
         )]));
         let line_changes = HashMap::from([
-            (
-                RepoPath::from_reference("present.rs")?,
-                vec![line_change(1)],
-            ),
-            (RepoPath::from_reference("absent.rs")?, vec![line_change(1)]),
+            (RepoPath::from_reference("present.rs")?, vec![added(1)]),
+            (RepoPath::from_reference("absent.rs")?, vec![added(1)]),
         ]);
 
         let parsed = parse_blocks(
@@ -1331,7 +1410,7 @@ mod parse_blocks_tests {
             RepoPath::from_reference("rules.py")?,
             vec![LineChange {
                 line: 1,
-                ranges: None,
+                kind: LineChangeKind::Added,
             }],
         )]);
         let error = parse_blocks(
@@ -1355,8 +1434,7 @@ mod parse_blocks_tests {
     fn diff_with_only_missing_files_reports_the_likely_cause_in_all_mode() -> anyhow::Result<()> {
         // A diff where no path is valid marks no block as modified, so every rule that needs a
         // diff would go quiet, and the run would report success, which is undesirable.
-        let line_changes =
-            HashMap::from([(RepoPath::from_reference("rules.py")?, vec![line_change(1)])]);
+        let line_changes = HashMap::from([(RepoPath::from_reference("rules.py")?, vec![added(1)])]);
         let error = parse_blocks(
             &line_changes,
             ScanMode::All,
@@ -1377,10 +1455,8 @@ mod parse_blocks_tests {
     #[test]
     fn diff_with_only_files_outside_the_globs_is_not_a_broken_diff() -> anyhow::Result<()> {
         // Globs narrow a run, so a diff with no path inside them is what the caller asked for.
-        let line_changes = HashMap::from([(
-            RepoPath::from_reference("docs/gone.py")?,
-            vec![line_change(1)],
-        )]);
+        let line_changes =
+            HashMap::from([(RepoPath::from_reference("docs/gone.py")?, vec![added(1)])]);
         let blocks = parse_blocks(
             &line_changes,
             ScanMode::All,
@@ -1406,7 +1482,7 @@ mod parse_blocks_tests {
             RepoPath::from_reference("vendor/gone.py")?,
             vec![LineChange {
                 line: 1,
-                ranges: None,
+                kind: LineChangeKind::Added,
             }],
         )]);
         let blocks = parse_blocks(
@@ -1430,7 +1506,7 @@ mod parse_blocks_tests {
             RepoPath::from_reference("assets/logo.png")?,
             vec![LineChange {
                 line: 1,
-                ranges: None,
+                kind: LineChangeKind::Added,
             }],
         )]);
         let blocks = parse_blocks(

@@ -509,7 +509,7 @@ impl<Fs: FileSystem + 'static> ValidatorDetector<Fs> for SameAsValidatorDetector
 #[cfg(test)]
 mod validate_tests {
     use super::*;
-    use crate::diff_parser::LineChange;
+    use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
     use crate::test_utils::validation_context;
@@ -607,7 +607,7 @@ mod validate_tests {
             source,
             vec![LineChange {
                 line: 2,
-                ranges: None,
+                kind: LineChangeKind::Added,
             }],
         );
         let v = validator(&[("config.py", source)]);

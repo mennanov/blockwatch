@@ -382,7 +382,7 @@ fn affects_violation(
 #[cfg(test)]
 mod validate_tests {
     use super::*;
-    use crate::diff_parser::LineChange;
+    use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
     use crate::test_utils::{
@@ -468,7 +468,7 @@ print("file2")
 "#,
                 vec![LineChange {
                     line: 1, // Only the start tag is changed, not the content.
-                    ranges: Some(vec![3..8, 10..15]),
+                    kind: LineChangeKind::Modified(vec![3..8, 10..15]),
                 }],
             ),
             validation_context_with_changes(
@@ -479,7 +479,7 @@ print("file3")
 "#,
                 vec![LineChange {
                     line: 1, // Only the start tag is changed, not the content.
-                    ranges: Some(vec![3..8, 10..15]),
+                    kind: LineChangeKind::Modified(vec![3..8, 10..15]),
                 }],
             ),
         ]);
@@ -565,7 +565,7 @@ print("bar")
                 file2,
                 vec![LineChange {
                     line: 4, // Line outside the block is changed.
-                    ranges: None,
+                    kind: LineChangeKind::Added,
                 }],
             ),
         ]);
@@ -631,7 +631,7 @@ print("second")
             source,
             vec![LineChange {
                 line: 2,
-                ranges: None,
+                kind: LineChangeKind::Added,
             }],
         );
 
@@ -667,11 +667,11 @@ pass
                 vec![
                     LineChange {
                         line: 1,
-                        ranges: Some(vec![0..10, 12..15]),
+                        kind: LineChangeKind::Modified(vec![0..10, 12..15]),
                     }, // First block start tag
                     LineChange {
                         line: 7,
-                        ranges: None,
+                        kind: LineChangeKind::Added,
                     }, // Second block end tag
                 ],
             ),
@@ -683,7 +683,7 @@ pass
 "#,
                 vec![LineChange {
                     line: 1,
-                    ranges: Some(vec![0..4, 6..10]),
+                    kind: LineChangeKind::Modified(vec![0..4, 6..10]),
                 }], // Only start tag modified
             ),
             validation_context_with_changes(
@@ -694,7 +694,7 @@ pass
 "#,
                 vec![LineChange {
                     line: 3,
-                    ranges: None,
+                    kind: LineChangeKind::Added,
                 }], // Only end tag modified
             ),
         ]);
@@ -714,7 +714,7 @@ pass
             RepoPath::from_reference("source.py")?,
             vec![LineChange {
                 line: 2,
-                ranges: None,
+                kind: LineChangeKind::Added,
             }],
         )]);
         let context = context_scoped_to_source(&file_system, line_changes)?;
@@ -735,14 +735,14 @@ pass
                 RepoPath::from_reference("source.py")?,
                 vec![LineChange {
                     line: 2,
-                    ranges: None,
+                    kind: LineChangeKind::Added,
                 }],
             ),
             (
                 RepoPath::from_reference("target.py")?,
                 vec![LineChange {
                     line: 2,
-                    ranges: None,
+                    kind: LineChangeKind::Added,
                 }],
             ),
         ]);
@@ -770,11 +770,11 @@ pass
         let line_changes = vec![
             LineChange {
                 line: 2,
-                ranges: None,
+                kind: LineChangeKind::Added,
             }, // First block's content line
             LineChange {
                 line: 4, // Not in any of the blocks.
-                ranges: None,
+                kind: LineChangeKind::Added,
             },
         ];
         let context = validation_context_with_changes("file1.py", contents, line_changes);
@@ -868,7 +868,7 @@ pass
             // Touch only the start tag, so the block stays in scope but its content is unmodified.
             vec![LineChange {
                 line: 1,
-                ranges: Some(vec![3..8, 10..15]),
+                kind: LineChangeKind::Modified(vec![3..8, 10..15]),
             }],
         );
         let violations = validator(&[("file.py", source)])
@@ -924,7 +924,7 @@ pass
                     .enumerate()
                     .map(|(index, _)| LineChange {
                         line: index + 1,
-                        ranges: None,
+                        kind: LineChangeKind::Added,
                     })
                     .collect(),
             );

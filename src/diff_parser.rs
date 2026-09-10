@@ -10,10 +10,24 @@ use unidiff::{Line, PatchSet, PatchedFile};
 /// Represents a line change from a diff.
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct LineChange {
-    /// 1-based line number with a change.
+    /// 1-based line number with a change, in the diff's target file.
     pub line: usize,
-    /// Modified ranges in this line. Can only be `Some` for modified lines, not added or deleted.
-    pub ranges: Option<Vec<Range<usize>>>, // TODO: consider making it 1-based to be consistent with `line`.
+    /// What the diff did to that line.
+    pub kind: LineChangeKind,
+}
+
+/// What a diff did to one line of its target file.
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum LineChangeKind {
+    /// The line replaced one the diff removed. Holds the 0-based character ranges whose text
+    /// differs from the removed line; everything outside them is unchanged, the line break that
+    /// ends the line included.
+    // TODO: consider making the ranges 1-based to be consistent with `LineChange::line`.
+    Modified(Vec<Range<usize>>),
+    /// The newly added line (including the line break it adds).
+    Added,
+    /// The deleted line.
+    Deleted,
 }
 
 /// Rejects input that cannot be a unified diff, with a message naming the likely cause.
@@ -148,19 +162,33 @@ fn flush_group(
                 line_changes,
                 LineChange {
                     line: deletion_anchor_line,
-                    ranges: None,
+                    kind: LineChangeKind::Deleted,
                 },
             )?;
         }
     } else {
         let matched_removed_idxes = align_added_to_removed(removed, added);
         for (i, added_line) in added.iter().enumerate() {
-            let matched = matched_removed_idxes.as_ref().and_then(|idxes| idxes[i]);
+            let kind = match &matched_removed_idxes {
+                // The group removed nothing, so the line is an insertion: it brings a line break
+                // that was not there before, on top of the characters it holds.
+                None => LineChangeKind::Added,
+                // The group rewrote the lines it removed into these, so it added no line break.
+                // A line the pairing found no counterpart for is still part of that rewrite, and
+                // every character it holds differs - but nothing past them does.
+                Some(idxes) => LineChangeKind::Modified(match idxes[i] {
+                    Some(j) => line_diff(&removed[j].value, &added_line.value),
+                    None => {
+                        let whole_line = 0..added_line.value.chars().count();
+                        vec![whole_line]
+                    }
+                }),
+            };
             push_line_change(
                 line_changes,
                 LineChange {
                     line: added_line.target_line_no.unwrap(),
-                    ranges: matched.map(|j| line_diff(&removed[j].value, &added_line.value)),
+                    kind,
                 },
             )?;
         }
@@ -546,9 +574,20 @@ mod tests {
         Ok(())
     }
 
-    /// Creates a whole line change (either added or deleted line).
-    fn line_change(line: usize) -> LineChange {
-        LineChange { line, ranges: None }
+    /// A newly added line.
+    fn added(line: usize) -> LineChange {
+        LineChange {
+            line,
+            kind: LineChangeKind::Added,
+        }
+    }
+
+    /// A deleted line.
+    fn deleted(line: usize) -> LineChange {
+        LineChange {
+            line,
+            kind: LineChangeKind::Deleted,
+        }
     }
 
     #[test]
@@ -630,7 +669,7 @@ index f384549..b4b0c67 100644
 +three and a half
  four"#,
         )?;
-        assert_eq!(line_changes[&key("a.txt")], vec![line_change(4)]);
+        assert_eq!(line_changes[&key("a.txt")], vec![added(4)]);
         Ok(())
     }
 
@@ -647,7 +686,7 @@ index f384549..fa220f8 100644
  two
  three"#,
         )?;
-        assert_eq!(ranges[&key("a.txt")], vec![line_change(1)]);
+        assert_eq!(ranges[&key("a.txt")], vec![added(1)]);
         Ok(())
     }
 
@@ -666,10 +705,7 @@ index f384549..3a7bc2a 100644
 +almost four
  four"#,
         )?;
-        assert_eq!(
-            line_changes[&key("a.txt")],
-            vec![line_change(4), line_change(5),]
-        );
+        assert_eq!(line_changes[&key("a.txt")], vec![added(4), added(5),]);
         Ok(())
     }
 
@@ -688,10 +724,7 @@ index f384549..3ccae75 100644
  two
  three"#,
         )?;
-        assert_eq!(
-            line_changes[&key("a.txt")],
-            vec![line_change(1), line_change(2),]
-        );
+        assert_eq!(line_changes[&key("a.txt")], vec![added(1), added(2),]);
         Ok(())
     }
 
@@ -711,10 +744,7 @@ index f384549..e797e7c 100644
 +three and a half
  four"#,
         )?;
-        assert_eq!(
-            line_changes[&key("a.txt")],
-            vec![line_change(3), line_change(5)]
-        );
+        assert_eq!(line_changes[&key("a.txt")], vec![added(3), added(5)]);
         Ok(())
     }
 
@@ -738,12 +768,7 @@ index f384549..ab47fb2 100644
         )?;
         assert_eq!(
             line_changes[&key("a.txt")],
-            vec![
-                line_change(3),
-                line_change(4),
-                line_change(6),
-                line_change(7),
-            ]
+            vec![added(3), added(4), added(6), added(7),]
         );
         Ok(())
     }
@@ -767,7 +792,7 @@ index f384549..e4c2829 100644
             vec![LineChange {
                 line: 3,
                 // "i" in "is" was modified, "o" and "a" in "thora" were modified.
-                ranges: Some(vec![6..7, 11..12, 13..14])
+                kind: LineChangeKind::Modified(vec![6..7, 11..12, 13..14])
             }]
         );
         Ok(())
@@ -798,17 +823,17 @@ index f384549..46c7533 100644
                 LineChange {
                     line: 1,
                     // "modified " was inserted.
-                    ranges: Some(vec![0..9])
+                    kind: LineChangeKind::Modified(vec![0..9])
                 },
                 LineChange {
                     line: 3,
                     // "white " was deleted. Consecutive deletions are treated as single.
-                    ranges: Some(vec![6..7])
+                    kind: LineChangeKind::Modified(vec![6..7])
                 },
                 LineChange {
                     line: 5,
                     // "br" from "brown" was deleted. "b" in "boxes" was modified.
-                    ranges: Some(vec![5..6, 9..10])
+                    kind: LineChangeKind::Modified(vec![5..6, 9..10])
                 }
             ]
         );
@@ -836,11 +861,11 @@ index f384549..676cbb7 100644
             vec![
                 LineChange {
                     line: 2,
-                    ranges: Some(vec![0..9])
+                    kind: LineChangeKind::Modified(vec![0..9])
                 },
                 LineChange {
                     line: 3,
-                    ranges: Some(vec![0..9])
+                    kind: LineChangeKind::Modified(vec![0..9])
                 }
             ]
         );
@@ -867,11 +892,11 @@ index f384549..676cbb7 100644
             vec![
                 LineChange {
                     line: 1,
-                    ranges: Some(vec![0..9])
+                    kind: LineChangeKind::Modified(vec![0..9])
                 },
                 LineChange {
                     line: 2,
-                    ranges: Some(vec![0..9])
+                    kind: LineChangeKind::Modified(vec![0..9])
                 }
             ]
         );
@@ -891,7 +916,7 @@ index f384549..87a123c 100644
 -three
  four"#,
         )?;
-        assert_eq!(line_changes[&key("a.txt")], vec![line_change(3)]);
+        assert_eq!(line_changes[&key("a.txt")], vec![deleted(3)]);
         Ok(())
     }
 
@@ -908,7 +933,7 @@ index f384549..58ac960 100644
  three
  four"#,
         )?;
-        assert_eq!(line_changes[&key("a.txt")], vec![line_change(1)]);
+        assert_eq!(line_changes[&key("a.txt")], vec![deleted(1)]);
         Ok(())
     }
 
@@ -925,7 +950,7 @@ index f384549..4cb29ea 100644
  three
 -four"#,
         )?;
-        assert_eq!(line_changes[&key("a.txt")], vec![line_change(4)]);
+        assert_eq!(line_changes[&key("a.txt")], vec![deleted(4)]);
         Ok(())
     }
 
@@ -943,10 +968,7 @@ index f384549..8c05df4 100644
 -three
  four"#,
         )?;
-        assert_eq!(
-            line_changes[&key("a.txt")],
-            vec![line_change(1), line_change(2)]
-        );
+        assert_eq!(line_changes[&key("a.txt")], vec![deleted(1), deleted(2)]);
         Ok(())
     }
 
@@ -965,7 +987,7 @@ index f384549..a9c7698 100644
         )?;
         // Consecutive deleted lines are treated as a single one-line range because they no longer
         // exist in the target file.
-        assert_eq!(line_changes[&key("a.txt")], vec![line_change(2)]);
+        assert_eq!(line_changes[&key("a.txt")], vec![deleted(2)]);
         Ok(())
     }
 
@@ -1008,17 +1030,20 @@ index f384549..58a279e 100644
             vec![
                 LineChange {
                     line: 1,
-                    ranges: Some(vec![0..9])
+                    kind: LineChangeKind::Modified(vec![0..9])
                 },
                 LineChange {
                     line: 3,
-                    ranges: Some(vec![0..9])
+                    kind: LineChangeKind::Modified(vec![0..9])
                 },
                 LineChange {
                     line: 4,
-                    ranges: Some(vec![0..9])
+                    kind: LineChangeKind::Modified(vec![0..9])
                 },
-                line_change(5)
+                LineChange {
+                    line: 5,
+                    kind: LineChangeKind::Modified(vec![0.."added five".chars().count()])
+                },
             ]
         );
         Ok(())
@@ -1048,17 +1073,26 @@ index abc123..def456 100644
         assert_eq!(changes.len(), 3);
         // Line 1 pairs with the old comment line.
         assert_eq!(changes[0].line, 1);
-        assert!(changes[0].ranges.is_some());
-        // Line 2 is the leftover pure insertion.
-        assert_eq!(changes[1], line_change(2));
+        assert!(matches!(changes[0].kind, LineChangeKind::Modified(_)));
+        // Line 2 is the added line the pairing had no counterpart for. The group removed lines
+        // too, so the line is a rewrite covering all of its characters, not an insertion.
+        assert_eq!(
+            changes[1],
+            LineChange {
+                line: 2,
+                kind: LineChangeKind::Modified(vec![0.."# and unique.".chars().count()])
+            }
+        );
         // Line 3 (the tag) pairs with the old tag line; its ranges must not reach the closing `>`
         // (the last character of the line), which is where the block's content range begins.
         assert_eq!(changes[2].line, 3);
         let tag_line = r#"# <block name="deps" affects=":deps-docs" keep-sorted="asc">"#;
-        let tag_ranges = changes[2]
-            .ranges
-            .as_ref()
-            .expect("tag line should pair with its old version");
+        let LineChangeKind::Modified(tag_ranges) = &changes[2].kind else {
+            panic!(
+                "tag line should pair with its old version: {:?}",
+                changes[2]
+            );
+        };
         assert!(
             tag_ranges.iter().all(|r| r.end < tag_line.len()),
             "ranges {tag_ranges:?} must end before the closing `>` at {}",
@@ -1066,6 +1100,51 @@ index abc123..def456 100644
         );
         Ok(())
     }
+
+    #[test]
+    fn diff_replacing_one_line_with_three_lines_marks_every_added_line_as_modified()
+    -> anyhow::Result<()> {
+        let first = r#"/* <block name="source""#;
+        let second = r#"   affects="b.md:target""#;
+        let third = r#"   severity="error"> */"#;
+        let line_changes = changes(&format!(
+            "diff --git a/a.rs b/a.rs\n\
+             index abc123..def456 100644\n\
+             --- a/a.rs\n\
+             +++ b/a.rs\n\
+             @@ -1,3 +1,5 @@\n\
+             -// <block name=\"source\" affects=\"b.md:target\">\n\
+             +{first}\n\
+             +{second}\n\
+             +{third}\n\
+             \x20const PORT: u16 = 8080;\n\
+             \x20// </block>\n"
+        ))?;
+
+        let changes = &line_changes[&key("a.rs")];
+        assert_eq!(changes.len(), 3);
+        // The middle line keeps the `affects` value, so it is the one the pairing anchors on.
+        assert_eq!(changes[1].line, 2);
+        assert!(matches!(changes[1].kind, LineChangeKind::Modified(_)));
+        // The unpaired two hold no text of the removed line, so all of their characters differ -
+        // and nothing beyond them does.
+        assert_eq!(
+            changes[0],
+            LineChange {
+                line: 1,
+                kind: LineChangeKind::Modified(vec![0..first.chars().count()])
+            }
+        );
+        assert_eq!(
+            changes[2],
+            LineChange {
+                line: 3,
+                kind: LineChangeKind::Modified(vec![0..third.chars().count()])
+            }
+        );
+        Ok(())
+    }
+
     #[test]
     fn out_of_order_hunks_returns_error() {
         let err = changes(
@@ -1108,8 +1187,17 @@ index f384549..b4b0c67 100644
         // Similarity pairing would prefer the identical added line 2; the positional fallback
         // pairs the removed line with added line 1 and leaves line 2 as a pure insertion.
         assert_eq!(changes[0].line, 1);
-        assert_eq!(changes[0].ranges, Some(vec![line_len..line_len + 1]));
-        assert_eq!(changes[1], line_change(2));
+        assert_eq!(
+            changes[0].kind,
+            LineChangeKind::Modified(vec![line_len..line_len + 1])
+        );
+        assert_eq!(
+            changes[1],
+            LineChange {
+                line: 2,
+                kind: LineChangeKind::Modified(vec![0..line_len])
+            }
+        );
         Ok(())
     }
 
@@ -1135,14 +1223,7 @@ index f384549..b4b0c67 100644
         // is between target lines 7 and 8.
         assert_eq!(
             changes,
-            &vec![
-                line_change(1),
-                line_change(2),
-                line_change(3),
-                line_change(4),
-                line_change(5),
-                line_change(8),
-            ]
+            &vec![added(1), added(2), added(3), added(4), added(5), deleted(8),]
         );
         Ok(())
     }
@@ -1163,7 +1244,7 @@ index f384549..b4b0c67 100644
         let changes = &line_changes[&key("a.txt")];
         assert_eq!(changes.len(), 1, "unexpected changes: {changes:?}");
         assert_eq!(changes[0].line, 5);
-        assert!(changes[0].ranges.is_some());
+        assert!(matches!(changes[0].kind, LineChangeKind::Modified(_)));
         Ok(())
     }
 
@@ -1183,7 +1264,7 @@ index 0000000..710d1d9
         )?;
         assert_eq!(
             line_changes[&key("example.rs")],
-            vec![line_change(1), line_change(2), line_change(3)]
+            vec![added(1), added(2), added(3)]
         );
         Ok(())
     }

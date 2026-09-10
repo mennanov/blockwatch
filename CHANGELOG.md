@@ -12,6 +12,14 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Fixed
+
+- Rewriting a block's start tag across two or more extra lines no longer counts as a change to the block's content.
+  `affects` reported the blocks such a block points at as out of date when nothing needed updating, and — the worse
+  half — treated a target whose own tag had been rewritten this way as updated, silently dropping a violation that
+  should have been reported. Reformatting a tag now leaves `is_content_modified` false, whichever language the file
+  is in.
+
 ## [0.5.4] - 2026-09-10
 
 ### Added

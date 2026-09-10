@@ -51,7 +51,7 @@ pub(crate) fn character_column_at(text: &str, byte_offset: usize) -> usize {
 #[cfg(test)]
 mod test_utils {
     use crate::blocks::{FileBlocks, ScanMode, parse_blocks};
-    use crate::diff_parser::LineChange;
+    use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::test_utils::{FakeFileSystem, FakePathChecker};
     use crate::language_parsers;
     use crate::repo_path::RepoPath;
@@ -92,7 +92,7 @@ mod test_utils {
             .enumerate()
             .map(|(line, _)| LineChange {
                 line: line + 1,
-                ranges: None,
+                kind: LineChangeKind::Added,
             })
             .collect();
         build_validation_context(file_name, contents, line_changes)
