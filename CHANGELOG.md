@@ -14,6 +14,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Fixed
 
+- Deleting the lines immediately above a block no longer counts as a change to that block. `affects` reported the
+  blocks it points at as out of date when nothing needed updating, and — the worse half — treated a target that had
+  only lost lines above it as updated, silently dropping a violation that should have been reported. With
+  `--only-changed`, a block left untouched this way is no longer pulled into the run at all, so its other rules stop
+  re-running too. Deleting every line of a block's content still counts as a change to it.
 - Rewriting a block's start tag across two or more extra lines no longer counts as a change to the block's content.
   `affects` reported the blocks such a block points at as out of date when nothing needed updating, and — the worse
   half — treated a target whose own tag had been rewritten this way as updated, silently dropping a violation that

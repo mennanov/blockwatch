@@ -237,6 +237,30 @@ index abc123..def456 100644
 }
 
 #[test]
+fn diff_deleting_the_lines_above_a_block_succeeds() {
+    // The deleted lines sat above the start tag, so the block's content is untouched and the
+    // blocks it affects need no update.
+    let diff_content = r#"
+diff --git a/tests/testdata/affects/cross_file_source.rs b/tests/testdata/affects/cross_file_source.rs
+index abc123..def456 100644
+--- a/tests/testdata/affects/cross_file_source.rs
++++ b/tests/testdata/affects/cross_file_source.rs
+@@ -1,5 +1,3 @@
+-use std::fmt;
+-
+ // <block name="limits" affects="tests/testdata/affects/cross_file_target.md:limits">
+ pub const MAX: usize = 20;
+ // </block>
+"#;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
+    let output = cmd.write_stdin(diff_content).output().unwrap();
+
+    output.assert().success();
+}
+
+#[test]
 fn diff_dependent_block_with_only_tag_multiple_lines_modified_fails() {
     // Modifying the affected block's start tag must not satisfy the reference: the content has not
     // been updated.

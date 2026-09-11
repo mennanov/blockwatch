@@ -70,9 +70,7 @@ impl Block {
             self.content_position_range.start.line,
             self.content_position_range.end.line,
         )
-        .any(|line_change| {
-            Self::intersects_with_line_change(&self.content_position_range, line_change)
-        })
+        .any(|line_change| self.content_intersects_with(line_change))
     }
 
     /// Whether the `Block`'s start tag intersects with any of the **ordered** `line_changes`.
@@ -82,9 +80,7 @@ impl Block {
             self.start_tag_position_range.start().line,
             self.start_tag_position_range.end().line,
         )
-        .any(|line_change| {
-            Self::intersects_with_line_change_inclusive(&self.start_tag_position_range, line_change)
-        })
+        .any(|line_change| self.start_tag_intersects_with(line_change))
     }
 
     /// The **ordered** `line_changes` that fall on lines `first_line..=last_line`, in order.
@@ -99,33 +95,39 @@ impl Block {
             .take_while(move |line_change| line_change.line <= last_line)
     }
 
-    /// Whether the `position_range` intersects with the given `line_change`.
-    fn intersects_with_line_change_inclusive(
-        position_range: &RangeInclusive<Position>,
-        line_change: &LineChange,
-    ) -> bool {
-        if line_change.line < position_range.start().line {
+    /// Whether the block's start tag intersects with the given `line_change`.
+    fn start_tag_intersects_with(&self, line_change: &LineChange) -> bool {
+        if line_change.line < self.start_tag_position_range.start().line {
             return false;
         }
-        if line_change.line > position_range.end().line {
+        if line_change.line > self.start_tag_position_range.end().line {
             return false;
         }
 
-        let LineChangeKind::Modified(ranges) = &line_change.kind else {
-            // An insertion and a deletion both move the line breaks around the line, not just the
-            // characters on it, so there is nothing to compare column by column. Every position
-            // on the line counts as changed.
-            return true;
+        let ranges = match &line_change.kind {
+            LineChangeKind::Deleted => {
+                let point = deletion_point(line_change.line);
+                // The start is excluded even though the range includes it: text removed from just
+                // before the range's start was never part of the range, and removing it leaves the
+                // gap exactly at that start.
+                return self.start_tag_position_range.start() < &point
+                    && &point <= self.start_tag_position_range.end();
+            }
+            // An insertion moves the line breaks around the line, not just the characters on it,
+            // so there is nothing to compare column by column. Every position on the line counts
+            // as changed.
+            LineChangeKind::Added => return true,
+            LineChangeKind::Modified(ranges) => ranges,
         };
-        let start_character = if line_change.line == position_range.start().line {
-            position_range.start().character - 1 // The ranges are 0-based
+        let start_character = if line_change.line == self.start_tag_position_range.start().line {
+            self.start_tag_position_range.start().character - 1 // The ranges are 0-based
         } else {
             0
         };
-        let end_character = if line_change.line < position_range.end().line {
+        let end_character = if line_change.line < self.start_tag_position_range.end().line {
             usize::MAX
         } else {
-            position_range.end().character - 1 // The ranges are 0-based
+            self.start_tag_position_range.end().character - 1 // The ranges are 0-based
         };
 
         ranges
@@ -143,33 +145,39 @@ impl Block {
             .is_ok()
     }
 
-    /// Whether the `position_range` intersects with the given `line_change`.
-    fn intersects_with_line_change(
-        position_range: &Range<Position>,
-        line_change: &LineChange,
-    ) -> bool {
-        if line_change.line < position_range.start.line {
+    /// Whether the block's content intersects with the given `line_change`.
+    fn content_intersects_with(&self, line_change: &LineChange) -> bool {
+        if line_change.line < self.content_position_range.start.line {
             return false;
         }
-        if line_change.line > position_range.end.line {
+        if line_change.line > self.content_position_range.end.line {
             return false;
         }
 
-        let LineChangeKind::Modified(ranges) = &line_change.kind else {
-            // An insertion and a deletion both move the line breaks around the line, not just the
-            // characters on it, so there is nothing to compare column by column. Every position
-            // on the line counts as changed.
-            return true;
+        let ranges = match &line_change.kind {
+            LineChangeKind::Deleted => {
+                let point = deletion_point(line_change.line);
+                // The end is included even though the range excludes it: the text that used to sit
+                // just before the range's end was part of the range, and removing it leaves the gap
+                // exactly at that end.
+                return self.content_position_range.start <= point
+                    && point <= self.content_position_range.end;
+            }
+            // An insertion moves the line breaks around the line, not just the characters on it,
+            // so there is nothing to compare column by column. Every position on the line counts
+            // as changed.
+            LineChangeKind::Added => return true,
+            LineChangeKind::Modified(ranges) => ranges,
         };
-        let start_character = if line_change.line == position_range.start.line {
-            position_range.start.character - 1 // The ranges are 0-based
+        let start_character = if line_change.line == self.content_position_range.start.line {
+            self.content_position_range.start.character - 1 // The ranges are 0-based
         } else {
             0
         };
-        let end_character = if line_change.line < position_range.end.line {
+        let end_character = if line_change.line < self.content_position_range.end.line {
             usize::MAX
         } else {
-            position_range.end.character - 1 // The ranges are 0-based
+            self.content_position_range.end.character - 1 // The ranges are 0-based
         };
 
         ranges
@@ -231,6 +239,15 @@ impl Block {
                     .context(format!("Invalid \"severity\" attribute value \"{}\"", s))
             })
     }
+}
+
+/// The place in the target file where a deletion anchored at `line` removed its text.
+///
+/// A deletion leaves no characters behind, only a gap, so it names a point rather than a line. The
+/// removed text ended with a line break, which puts the gap at the start of the line that now
+/// occupies it.
+fn deletion_point(line: usize) -> Position {
+    Position::new(line, 1)
 }
 
 /// Block's severity.
@@ -751,6 +768,14 @@ mod parse_blocks_tests {
         }
     }
 
+    /// A deletion anchored at `line`, the line that now occupies the gap the removed lines left.
+    fn deleted(line: usize) -> LineChange {
+        LineChange {
+            line,
+            kind: LineChangeKind::Deleted,
+        }
+    }
+
     #[test]
     fn parse_blocks_counts_scanned_and_skipped_files() -> anyhow::Result<()> {
         let file_system = FakeFileSystem::new(HashMap::from([
@@ -999,7 +1024,10 @@ mod parse_blocks_tests {
         Ok(())
     }
 
-    /// Parses a single block from `content` with `changed_lines` applied.
+    /// Parses a single block from `content` with `line_changes` applied.
+    ///
+    /// Scans in [`ScanMode::All`] so that a block the changes did not touch is returned too,
+    /// rather than filtered out before its flags can be read.
     fn block_with_context(
         content: &str,
         line_changes: Vec<LineChange>,
@@ -1010,7 +1038,7 @@ mod parse_blocks_tests {
 
         let mut blocks_by_file = parse_blocks(
             &line_changes,
-            ScanMode::OnlyChanged,
+            ScanMode::All,
             &file_system,
             &FakePathChecker::allow_all(),
             &language_parsers()?,
@@ -1020,7 +1048,7 @@ mod parse_blocks_tests {
 
         let mut file_blocks = blocks_by_file
             .remove(&RepoPath::from_reference("a.rs")?)
-            .expect("a.rs holds a modified block");
+            .expect("a.rs holds a block");
         assert_eq!(file_blocks.blocks_with_context.len(), 1);
         Ok(file_blocks.blocks_with_context.remove(0))
     }
@@ -1064,6 +1092,63 @@ mod parse_blocks_tests {
         )?;
 
         assert!(block.is_start_tag_modified);
+        assert!(block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn deleted_lines_above_the_start_tag_leave_the_block_unmodified() -> anyhow::Result<()> {
+        // A deletion is anchored at the line that took the removed lines' place, so it lands on
+        // column 1 of the start tag's line. The removed text sat above the block, and the block
+        // starts further right on that line, so neither the tag nor the content lost anything.
+        let block = block_with_context(
+            "// <block name=\"first\">\none\n// </block>\n",
+            vec![deleted(1)],
+        )?;
+
+        assert!(!block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn deleted_lines_above_a_start_tag_at_column_one_leave_the_block_unmodified()
+    -> anyhow::Result<()> {
+        // The tag opens a continuation line of a block comment, so it starts at column 1 and the
+        // deletion's gap lands exactly on the tag's first character. The gap still sits before
+        // that character, so the tag kept every character it had.
+        let block = block_with_context(
+            "/*\n<block name=\"first\">\n*/\none\n// </block>\n",
+            vec![deleted(2)],
+        )?;
+
+        assert!(!block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn deleted_line_inside_a_multi_line_start_tag_modifies_the_start_tag() -> anyhow::Result<()> {
+        // The gap sits between two lines the tag spans, so the tag itself lost a line. The content
+        // begins after the tag's comment ends, which the gap never reaches.
+        let block = block_with_context(
+            "/* <block\n   name=\"first\"> */\none\n/* </block> */\n",
+            vec![deleted(2)],
+        )?;
+
+        assert!(block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn deleting_every_content_line_modifies_the_content() -> anyhow::Result<()> {
+        // Nothing is left between the tags, so the deletion is anchored at the end tag's line,
+        // which is where the content range ends. The content lost every line it had.
+        let block =
+            block_with_context("// <block name=\"first\">\n// </block>\n", vec![deleted(2)])?;
+
+        assert!(!block.is_start_tag_modified);
         assert!(block.is_content_modified);
         Ok(())
     }
