@@ -20,6 +20,7 @@ cargo test                                 # run all unit + integration tests
 cargo test --test keep_sorted              # run one integration test file (tests/<name>.rs)
 cargo test <pattern>                       # run tests whose name matches
 cargo test -- --nocapture                  # show stdout/stderr from tests
+cargo llvm-cov                             # run the tests and report coverage
 cargo fmt                                  # format
 cargo clippy --all-targets -- -D warnings  # lint
 markdownlint-cli2                          # lint Markdown (config: .markdownlint-cli2.yaml)
@@ -42,6 +43,9 @@ Strict adherence to the following rules is *absolutely required* when working wi
 - *Never* rename or restructure Rust symbols with text substitution (`sed`, `perl`, bulk find-and-replace). Either use a
   semantic rename, or list every reference first and then edit them one at a time.
 - *Prefer* the editing tools the harness provides over one-off scripts.
+- *Always* dispatch on an enum with an exhaustive `match`. A `let ... else`, or an `if` that peels off one variant and
+  funnels the rest into a single branch, silently gives a variant added later whatever the catch-all happened to do. A
+  `match` makes the compiler demand a decision at every place that has to make one.
 
 ### Escalating to a human
 
@@ -66,6 +70,25 @@ These rules apply to doc comments, inline comments and prose alike.
 - *Always* put the explanation of an implementation detail inside the function body, next to the code it explains. A
   caller should not have to read about internals to use the symbol.
 - *Never* describe how other modules or callers use a symbol. Describe the symbol on its own terms.
+- *Always* analyze all the tests in the module and make sure that they are structurally consistent: the most important
+  tests come first. All tests should have a consistent naming pattern: "state_action_expected_result", the "action" can
+  be omitted if it is obvious from the context.
+- *Always* escalate to a human when the tests need to be refactored to keep them well-structured and consistent.
+
+### Writing and running tests
+
+The goal is a suite that fails when behavior changes, not one that touches every line.
+
+- *Always* start from a test that fails, and fails for the reason you expect.
+- *Always* re-derive the reasoning for each code path a change touches, and give each path its own test.
+- *Always* work out which inputs the change newly changes the answer for, and test the edges of that set. A change that
+  is right for the obvious input and wrong just outside it can be overlooked at review.
+- *Always* mutation-check a new test before calling the work done. E.g. flip each comparison or boundary the change
+  touched, run the suite, confirm a test fails, then restore. A suite that stays green either way is weak.
+- *Always* run tests with coverage as a final check before calling the work done.
+- *Prefer* reading a coverage report (`cargo llvm-cov`) as a list of questions rather than a number to raise. An
+  uncovered branch asks what nobody needed it for, and the answer is either a case worth testing or code worth deleting.
+  *Never* add a test whose only purpose is to turn a coverage report line green.
 
 ### Committing
 
