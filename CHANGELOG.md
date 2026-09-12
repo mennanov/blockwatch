@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.5.5] - 2026-09-12
+
 ### Fixed
 
 - Deleting the lines immediately above a block no longer counts as a change to that block. `affects` reported the
