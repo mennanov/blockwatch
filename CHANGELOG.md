@@ -12,6 +12,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Fixed
+
+- Unexpected closed block parser errors now report the 1-based character column (`column {}`)
+  instead of a 0-based byte offset (`position {}`), matching malformed tag errors.
+
 ## [0.5.5] - 2026-09-12
 
 ### Fixed

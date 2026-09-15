@@ -98,10 +98,12 @@ impl<I: Iterator<Item = Comment>> BlocksIterator<I> {
     /// Pairs an end tag with the innermost tag still open, completing one block.
     fn close_block(&mut self, block_end: BlockEnd) {
         let Some(block_start) = self.open_blocks.pop() else {
+            let position =
+                BlockStart::source_position_at(block_end.start_position, &block_end.comment);
             self.error = Some(anyhow::anyhow!(
-                "Unexpected closed block at line {}, position {}",
-                block_end.comment.position_range.start.line,
-                block_end.comment.source_range.start + block_end.start_position
+                "Unexpected closed block at line {}, column {}",
+                position.line,
+                position.character
             ));
             return;
         };
@@ -738,7 +740,10 @@ println!("hello2");
         // </block>
         "#;
         let result = parse_all(&mut parser, contents);
-        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Unexpected closed block at line 5, column 12"
+        );
         Ok(())
     }
 
