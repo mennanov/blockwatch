@@ -9,7 +9,7 @@ use crate::{Position, validators};
 use anyhow::{Context, anyhow};
 use serde::Serialize;
 use std::cmp::Ordering;
-use std::ops::RangeInclusive;
+use std::ops::Range;
 use std::str::FromStr;
 use std::sync::Arc;
 use strum_macros::EnumString;
@@ -123,7 +123,7 @@ impl ValidatorSync for KeepSortedValidator {
                     };
                     let mut block_violations = Vec::new();
                     // Keep previous value and its range for violation location purposes
-                    let mut prev_value: Option<(&str, RangeInclusive<usize>)> = None;
+                    let mut prev_value: Option<(&str, Range<usize>)> = None;
                     for (line_number, line) in block_with_context
                         .block
                         .content(&file_blocks.file_content)
@@ -163,9 +163,9 @@ impl ValidatorSync for KeepSortedValidator {
                                 if cmp == violating_ord {
                                     let violation_start = block_with_context
                                         .block
-                                        .content_position(line_number, *curr_range.start() - 1);
-                                    let line_character_end = violation_start.character
-                                        + (*curr_range.end() - *curr_range.start() + 1);
+                                        .content_position(line_number, curr_range.start);
+                                    let line_character_end =
+                                        violation_start.character + curr_range.len();
                                     block_violations.push(create_violation(
                                         file_path,
                                         &block_with_context.block,

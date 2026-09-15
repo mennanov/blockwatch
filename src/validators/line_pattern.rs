@@ -1,5 +1,4 @@
 use crate::blocks::{Block, BlockWithContext};
-use crate::character_column_at;
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
@@ -64,7 +63,7 @@ impl ValidatorSync for LinePatternValidator {
                     }
                     if !re.is_match(trimmed_line) {
                         let byte_offset = trimmed_line.as_ptr() as usize - line.as_ptr() as usize;
-                        let column_offset = character_column_at(line, byte_offset) - 1;
+                        let column_offset = line[..byte_offset].chars().count();
                         let violation_start = block_with_context
                             .block
                             .content_position(line_idx, column_offset);

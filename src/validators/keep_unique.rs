@@ -73,14 +73,13 @@ impl ValidatorSync for KeepUniqueValidator {
                     if let Some((matched_line, line_range)) = line_match
                         && !seen.insert(matched_line)
                     {
-                        // `line_range` is a 1-based column range within the content line, which is
+                        // `line_range` is a 0-based column range within the content line, which is
                         // not where that line starts in the source: content begins where the start
                         // tag's comment ends.
                         let violation_start = block_with_context
                             .block
-                            .content_position(line_number, *line_range.start() - 1);
-                        let line_character_end = violation_start.character
-                            + (*line_range.end() - *line_range.start() + 1);
+                            .content_position(line_number, line_range.start);
+                        let line_character_end = violation_start.character + line_range.len();
                         block_violations.push(create_violation(
                             file_path,
                             &block_with_context.block,
