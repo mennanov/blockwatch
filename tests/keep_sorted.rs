@@ -62,7 +62,7 @@ index 366590e..82c1f16 100644
                     },
                     "end": {
                         "line": 13,
-                        "character": 13
+                        "character": 14
                     }
                   },
                   "code": "keep-sorted",
@@ -135,7 +135,7 @@ index 1111111..2222222 100644
                     },
                     "end": {
                         "line": 29,
-                        "character": 11
+                        "character": 12
                     }
                   },
                   "code": "keep-sorted",
@@ -210,7 +210,7 @@ index 1111111..2222222 100644
                     },
                     "end": {
                         "line": 53,
-                        "character": 12
+                        "character": 13
                     }
                   },
                   "code": "keep-sorted",
@@ -261,7 +261,7 @@ index 1111111..2222222 100644
                     },
                     "end": {
                         "line": 36,
-                        "character": 8
+                        "character": 9
                     }
                   },
                   "code": "keep-sorted",

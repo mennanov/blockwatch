@@ -53,7 +53,7 @@ $ git diff --patch | blockwatch --diff
       },
       "message": "Block src/lib.rs:languages at line 1 is modified, but README.md:supported-languages is not",
       "range": {
-        "end": {"character": 63, "line": 1},
+        "end": {"character": 68, "line": 1},
         "start": {"character": 4, "line": 1}
       },
       "severity": 1

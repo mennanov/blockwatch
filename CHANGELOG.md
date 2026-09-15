@@ -12,8 +12,16 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Changed
+
+- **Breaking:** the JSON diagnostic contract now defines `range.end.character` as exclusive (`[start, end)`,
+  advancing it by one past the last highlighted character) to align with SARIF and LSP conventions.
+
 ### Fixed
 
+- SARIF violation ranges are now half-open `[start, end)` (1-based, exclusive end character),
+  fixing single-character highlights appearing as zero-width cursors and off-by-one under-highlighting in SARIF
+  viewers.
 - Unexpected closed block parser errors now report the 1-based character column (`column {}`)
   instead of a 0-based byte offset (`position {}`), matching malformed tag errors.
 

@@ -165,7 +165,7 @@ impl ValidatorSync for KeepSortedValidator {
                                         .block
                                         .content_position(line_number, *curr_range.start() - 1);
                                     let line_character_end = violation_start.character
-                                        + (*curr_range.end() - *curr_range.start()); // End position is inclusive.
+                                        + (*curr_range.end() - *curr_range.start() + 1);
                                     block_violations.push(create_violation(
                                         file_path,
                                         &block_with_context.block,
@@ -280,7 +280,7 @@ mod validate_tests {
         // `café` is four characters long even though it takes five bytes.
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(3, 1), Position::new(3, 4))
+            ViolationRange::new(Position::new(3, 1), Position::new(3, 5))
         );
         Ok(())
     }
@@ -304,7 +304,7 @@ mod validate_tests {
         // `apple` starts at the 6th character of the line and ends at the 10th.
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(3, 6), Position::new(3, 10))
+            ViolationRange::new(Position::new(3, 6), Position::new(3, 11))
         );
         Ok(())
     }
@@ -327,7 +327,7 @@ mod validate_tests {
         // The range still points into the original line, indentation included.
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(3, 6), Position::new(3, 6))
+            ViolationRange::new(Position::new(3, 6), Position::new(3, 7))
         );
         Ok(())
     }
@@ -389,7 +389,7 @@ mod validate_tests {
         assert_eq!(file_violations[0].code, "keep-sorted");
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(5, 9), Position::new(5, 10))
+            ViolationRange::new(Position::new(5, 9), Position::new(5, 11))
         );
         assert_eq!(
             file_violations[0].data,
@@ -427,7 +427,7 @@ mod validate_tests {
         assert_eq!(file_violations[0].code, "keep-sorted");
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(4, 9), Position::new(4, 9))
+            ViolationRange::new(Position::new(4, 9), Position::new(4, 10))
         );
         assert_eq!(
             file_violations[0].data,
@@ -455,7 +455,7 @@ mod validate_tests {
         // Anchoring to the start tag instead would name line 3, where `B` is.
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(4, 1), Position::new(4, 1))
+            ViolationRange::new(Position::new(4, 1), Position::new(4, 2))
         );
         Ok(())
     }
@@ -631,7 +631,7 @@ mod validate_tests {
         assert_eq!(file_violations[0].code, "keep-sorted");
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(4, 23), Position::new(4, 23))
+            ViolationRange::new(Position::new(4, 23), Position::new(4, 24))
         );
         Ok(())
     }
@@ -658,7 +658,7 @@ mod validate_tests {
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(4, 9), Position::new(4, 11))
+            ViolationRange::new(Position::new(4, 9), Position::new(4, 12))
         );
         Ok(())
     }

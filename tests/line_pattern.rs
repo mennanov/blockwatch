@@ -76,7 +76,7 @@ index ca94c7e..8a99694 100644
                     },
                     "end": {
                         "line": 13,
-                        "character": 11
+                        "character": 12
                     }
                   },
                   "code": "line-pattern",

@@ -74,7 +74,7 @@ index d69398d..9b29f11 100644
                     },
                     "end": {
                         "line": 13,
-                        "character": 9
+                        "character": 10
                     }
                   },
                   "code": "keep-unique",

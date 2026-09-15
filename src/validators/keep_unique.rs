@@ -79,8 +79,8 @@ impl ValidatorSync for KeepUniqueValidator {
                         let violation_start = block_with_context
                             .block
                             .content_position(line_number, *line_range.start() - 1);
-                        let line_character_end =
-                            violation_start.character + (*line_range.end() - *line_range.start()); // End position is inclusive.
+                        let line_character_end = violation_start.character
+                            + (*line_range.end() - *line_range.start() + 1);
                         block_violations.push(create_violation(
                             file_path,
                             &block_with_context.block,
@@ -197,7 +197,7 @@ BB
         // Entire line is in the range.
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(5, 1), Position::new(5, 2))
+            ViolationRange::new(Position::new(5, 1), Position::new(5, 3))
         );
         Ok(())
     }
@@ -219,7 +219,7 @@ BB
         // `café` is four characters long even though it takes five bytes.
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(3, 1), Position::new(3, 4))
+            ViolationRange::new(Position::new(3, 1), Position::new(3, 5))
         );
         Ok(())
     }
@@ -259,7 +259,7 @@ C
         // line 4. Anchoring to the start tag instead would name line 3, the first occurrence.
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(4, 1), Position::new(4, 1))
+            ViolationRange::new(Position::new(4, 1), Position::new(4, 2))
         );
         Ok(())
     }
@@ -286,7 +286,7 @@ ID:1 C
         // Only the matched value group is in the range.
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(4, 4), Position::new(4, 4))
+            ViolationRange::new(Position::new(4, 4), Position::new(4, 5))
         );
         Ok(())
     }
@@ -309,7 +309,7 @@ ID:1 C
         // The range still points into the original line, indentation included.
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(3, 6), Position::new(3, 6))
+            ViolationRange::new(Position::new(3, 6), Position::new(3, 7))
         );
         Ok(())
     }
@@ -366,7 +366,7 @@ ID:1 C
         // Full regex match is in the range.
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(4, 1), Position::new(4, 4))
+            ViolationRange::new(Position::new(4, 1), Position::new(4, 5))
         );
         Ok(())
     }
@@ -409,7 +409,7 @@ ID:2
         // `ID:2` lacks the space the pattern requires, so line 4 is the first repeat of `1`.
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(4, 5), Position::new(4, 5))
+            ViolationRange::new(Position::new(4, 5), Position::new(4, 6))
         );
         Ok(())
     }

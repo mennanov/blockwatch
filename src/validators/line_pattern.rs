@@ -69,7 +69,7 @@ impl ValidatorSync for LinePatternValidator {
                             .block
                             .content_position(line_idx, column_offset);
                         let line_character_end =
-                            violation_start.character + trimmed_line.chars().count() - 1; // End position is inclusive.
+                            violation_start.character + trimmed_line.chars().count();
                         block_violations.push(create_violation(
                             file_path,
                             &block_with_context.block,
@@ -188,7 +188,7 @@ mod validate_tests {
         assert_eq!(file_violations[0].code, "line-pattern");
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(3, 9), Position::new(3, 12))
+            ViolationRange::new(Position::new(3, 9), Position::new(3, 13))
         );
         assert_eq!(
             file_violations[0].data,
@@ -215,7 +215,7 @@ mod validate_tests {
         // `caféx` is five characters long even though it takes six bytes.
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(2, 1), Position::new(2, 5))
+            ViolationRange::new(Position::new(2, 1), Position::new(2, 6))
         );
         Ok(())
     }
@@ -253,7 +253,7 @@ mod validate_tests {
         // column 52, so a range measured from the content alone points at `const` instead.
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(1, 53), Position::new(1, 57))
+            ViolationRange::new(Position::new(1, 53), Position::new(1, 58))
         );
         Ok(())
     }
@@ -275,7 +275,7 @@ mod validate_tests {
         // comment closes.
         assert_eq!(
             file_violations[0].range,
-            ViolationRange::new(Position::new(2, 27), Position::new(2, 31))
+            ViolationRange::new(Position::new(2, 27), Position::new(2, 32))
         );
         Ok(())
     }

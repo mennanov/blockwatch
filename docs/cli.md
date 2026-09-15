@@ -289,7 +289,7 @@ Nothing else about the run changes: the same violations are found, and the exit 
             {
               "physicalLocation": {
                 "artifactLocation": { "uri": "fruits.py" },
-                "region": { "startLine": 4, "startColumn": 5, "endLine": 4, "endColumn": 12 }
+                "region": { "startLine": 4, "startColumn": 5, "endLine": 4, "endColumn": 13 }
               }
             }
           ],
@@ -355,8 +355,9 @@ during non-interactive scripts or pipeline commands (e.g. `blockwatch list "src/
 Each block entry carries an `is_content_modified` boolean field. Without a diff nothing marks a block as changed, so it
 is `false` throughout; under `--diff` it identifies the blocks the diff touched.
 
-Lines and columns are 1-based, and a column counts characters rather than bytes, so a multi-byte character such as `é`
-or an emoji advances it by one. The `range` of a violation follows the same convention.
+Lines and columns are 1-based, with an exclusive end column. A column counts characters rather than bytes, so a
+multi-byte character such as `é` or an emoji advances it by one. The `range` of a violation follows the same
+convention: the start is inclusive and the end is exclusive (`[start, end)`).
 
 ### Output Example
 
@@ -480,7 +481,7 @@ block lives in, and the message names both sides:
       "message": "Block fileA.py:a at line 1 is modified, but fileB.py:b is not",
       "range": {
         "end": {
-          "character": 39,
+          "character": 40,
           "line": 1
         },
         "start": {

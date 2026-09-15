@@ -221,7 +221,8 @@ impl ValidationLog {
     }
 }
 
-/// The span an editor should highlight for a violation. Both ends are 1-based and inclusive.
+/// The span an editor should highlight for a violation. 1-based and half-open: the start is
+/// inclusive, the end is exclusive.
 #[derive(Serialize, Debug, PartialEq)]
 pub struct ViolationRange {
     start: Position,
