@@ -38,7 +38,7 @@ index abc123..def456 100644
                     },
                     "end": {
                         "line": 3,
-                        "character": 31
+                        "character": 32
                     }
                   },
                   "code": "affects",
@@ -345,7 +345,7 @@ index abc123..def456 100644
                     },
                     "end": {
                         "line": 3,
-                        "character": 31
+                        "character": 32
                     }
                   },
                   "code": "affects",

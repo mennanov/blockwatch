@@ -179,7 +179,7 @@ spanning two lines -->
         let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(
-            *blocks[0].start_tag_position_range.start(),
+            blocks[0].start_tag_position_range.start,
             Position::new(1, 27)
         );
         Ok(())

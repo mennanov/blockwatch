@@ -90,11 +90,7 @@ impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
                             "check-lua requires a non-empty script path in {}:{} at line {}",
                             file_path.display(),
                             block_with_context.block.name_display(),
-                            block_with_context
-                                .block
-                                .start_tag_position_range
-                                .start()
-                                .line
+                            block_with_context.block.start_tag_position_range.start.line
                         ));
                     };
                 } else {
@@ -143,11 +139,7 @@ impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
                         "check-lua script error in {}:{} at line {}",
                         file_path.display(),
                         block_with_context.block.name_display(),
-                        block_with_context
-                            .block
-                            .start_tag_position_range
-                            .start()
-                            .line
+                        block_with_context.block.start_tag_position_range.start.line
                     ))? {
                         None => Vec::new(),
                         Some(msg) => vec![create_violation(
@@ -262,7 +254,7 @@ impl LuaScriptInputs {
             script_content,
             timeout,
             file: file_path.as_str().to_string(),
-            line: block.start_tag_position_range.start().line,
+            line: block.start_tag_position_range.start.line,
             attributes: block
                 .attributes
                 .iter()
@@ -441,12 +433,12 @@ fn create_violation(
         "Block {}:{} defined at line {} failed Lua check: {error_message}",
         file_path.display(),
         block.name_display(),
-        block.start_tag_position_range.start().line,
+        block.start_tag_position_range.start.line,
     );
     Violation::new(
         ViolationRange::new(
-            block.start_tag_position_range.start().clone(),
-            block.start_tag_position_range.end().clone(),
+            block.start_tag_position_range.start.clone(),
+            block.start_tag_position_range.end.clone(),
         ),
         file_path,
         block,
@@ -486,7 +478,7 @@ fn resolve_affected_blocks<Fs: FileSystem>(
             "invalid affects reference on block {}:{} at line {}",
             current_file_path,
             block.name_display(),
-            block.start_tag_position_range.start().line,
+            block.start_tag_position_range.start.line,
         )
     })?;
     for reference in references {

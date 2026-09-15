@@ -46,7 +46,7 @@ impl ValidatorSync for LineCountValidator {
                     expr,
                     file_path.display(),
                     block_with_context.block.name_display(),
-                    block_with_context.block.start_tag_position_range.start().line,
+                    block_with_context.block.start_tag_position_range.start.line,
                     e
                 ))?;
                 let actual = if block_with_context
@@ -99,15 +99,15 @@ fn create_violation(
         "Block {}:{} defined at line {} has {} lines, which does not satisfy {}{}",
         block_file_path.display(),
         block.name_display(),
-        block.start_tag_position_range.start().line,
+        block.start_tag_position_range.start.line,
         actual,
         operation.as_str(),
         expected
     );
     Violation::new(
         ViolationRange::new(
-            block.start_tag_position_range.start().clone(),
-            block.start_tag_position_range.end().clone(),
+            block.start_tag_position_range.start.clone(),
+            block.start_tag_position_range.end.clone(),
         ),
         block_file_path,
         block,

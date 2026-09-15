@@ -9,7 +9,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::ffi::OsString;
-use std::ops::{Range, RangeInclusive};
+use std::ops::Range;
 use std::path::Path;
 use std::str::FromStr;
 use strum_macros::EnumString;
@@ -22,9 +22,10 @@ pub struct Block {
     /// Optional attributes in the `block` tag. Their names are what selects the validators that
     /// will check this block (`affects`, `keep-sorted`, …).
     pub(crate) attributes: HashMap<String, String>,
-    /// Block's start tag position range ("<" symbol to ">" symbol). Doubles as the block's identity
-    /// in reports, since a block need not have a `name`.
-    pub(crate) start_tag_position_range: RangeInclusive<Position>,
+    /// Block's start tag position range, half-open: it starts at the `<` symbol and ends one column
+    /// past the `>` symbol. Doubles as the block's identity in reports, since a block need not have
+    /// a `name`.
+    pub(crate) start_tag_position_range: Range<Position>,
     /// Block's content substring range in the original source code.
     pub(crate) content_bytes_range: Range<usize>,
     /// Block's content position range in the original source code (from the end of the comment with
@@ -42,27 +43,12 @@ impl PartialOrd for Block {
 impl Ord for Block {
     fn cmp(&self, other: &Self) -> Ordering {
         self.start_tag_position_range
-            .start()
-            .cmp(other.start_tag_position_range.start())
+            .start
+            .cmp(&other.start_tag_position_range.start)
     }
 }
 
 impl Block {
-    /// Creates a new `Block` with the given attributes and content indexes.
-    pub(crate) fn new(
-        attributes: HashMap<String, String>,
-        start_tag_position_range: RangeInclusive<Position>,
-        content_range: Range<usize>,
-        content_position_range: Range<Position>,
-    ) -> Self {
-        Self {
-            attributes,
-            start_tag_position_range,
-            content_bytes_range: content_range,
-            content_position_range,
-        }
-    }
-
     /// Whether the `Block`'s content intersects with any of the **ordered** `line_changes`.
     fn content_intersects_with_any(&self, line_changes: &[LineChange]) -> bool {
         Self::changes_on_lines(
@@ -77,8 +63,8 @@ impl Block {
     fn start_tag_intersects_with_any(&self, line_changes: &[LineChange]) -> bool {
         Self::changes_on_lines(
             line_changes,
-            self.start_tag_position_range.start().line,
-            self.start_tag_position_range.end().line,
+            self.start_tag_position_range.start.line,
+            self.start_tag_position_range.end.line,
         )
         .any(|line_change| self.start_tag_intersects_with(line_change))
     }
@@ -97,10 +83,10 @@ impl Block {
 
     /// Whether the block's start tag intersects with the given `line_change`.
     fn start_tag_intersects_with(&self, line_change: &LineChange) -> bool {
-        if line_change.line < self.start_tag_position_range.start().line {
+        if line_change.line < self.start_tag_position_range.start.line {
             return false;
         }
-        if line_change.line > self.start_tag_position_range.end().line {
+        if line_change.line > self.start_tag_position_range.end.line {
             return false;
         }
 
@@ -110,8 +96,8 @@ impl Block {
                 // The start is excluded even though the range includes it: text removed from just
                 // before the range's start was never part of the range, and removing it leaves the
                 // gap exactly at that start.
-                return self.start_tag_position_range.start() < &point
-                    && &point <= self.start_tag_position_range.end();
+                return self.start_tag_position_range.start < point
+                    && point <= self.start_tag_position_range.end;
             }
             // An insertion moves the line breaks around the line, not just the characters on it,
             // so there is nothing to compare column by column. Every position on the line counts
@@ -119,15 +105,15 @@ impl Block {
             LineChangeKind::Added => return true,
             LineChangeKind::Modified(ranges) => ranges,
         };
-        let start_character = if line_change.line == self.start_tag_position_range.start().line {
-            self.start_tag_position_range.start().character - 1 // The ranges are 0-based
+        let start_character = if line_change.line == self.start_tag_position_range.start.line {
+            self.start_tag_position_range.start.character - 1 // The ranges are 0-based
         } else {
             0
         };
-        let end_character = if line_change.line < self.start_tag_position_range.end().line {
+        let end_character = if line_change.line < self.start_tag_position_range.end.line {
             usize::MAX
         } else {
-            self.start_tag_position_range.end().character - 1 // The ranges are 0-based
+            self.start_tag_position_range.end.character - 1 // The ranges are 0-based
         };
 
         ranges
@@ -294,8 +280,8 @@ impl FileBlocks {
                 serde_json::json!({
                     // <block affects="docs/cli.md:list-output-example">
                     "name": block.block.name_display(),
-                    "line": block.block.start_tag_position_range.start().line,
-                    "column": block.block.start_tag_position_range.start().character,
+                    "line": block.block.start_tag_position_range.start.line,
+                    "column": block.block.start_tag_position_range.start.character,
                     "is_content_modified": block.is_content_modified,
                     "attributes": block.block.attributes,
                     // </block>
@@ -611,8 +597,8 @@ fn validate_block_syntax(block: &Block, file_path: &Path) -> anyhow::Result<()> 
                 "Block {}:{} at line {}, column {} contains unrecognized attribute `{}`",
                 file_path.display(),
                 block.name_display(),
-                block.start_tag_position_range.start().line,
-                block.start_tag_position_range.start().character,
+                block.start_tag_position_range.start.line,
+                block.start_tag_position_range.start.character,
                 attr,
             );
         }
@@ -622,8 +608,8 @@ fn validate_block_syntax(block: &Block, file_path: &Path) -> anyhow::Result<()> 
         "Block {}:{} at line {}, column {} contains unrecognized severity value",
         file_path.display(),
         block.name_display(),
-        block.start_tag_position_range.start().line,
-        block.start_tag_position_range.start().character,
+        block.start_tag_position_range.start.line,
+        block.start_tag_position_range.start.character,
     ))
 }
 
@@ -640,7 +626,7 @@ fn reject_duplicate_name(
     let Some(name) = block.name() else {
         return Ok(());
     };
-    let position = block.start_tag_position_range.start();
+    let position = &block.start_tag_position_range.start;
     match names_seen.entry(name.to_string()) {
         Entry::Occupied(entry) => {
             bail!(
@@ -701,12 +687,12 @@ mod block_severity_from_str_tests {
     /// Builds a contentless block carrying only a `severity` attribute to test how that attribute
     /// is parsed.
     pub(crate) fn new_empty_block_with_severity(severity: &str) -> Block {
-        Block::new(
-            HashMap::from([("severity".into(), severity.into())]),
-            Position::new(0, 0)..=Position::new(0, 0),
-            0..0,
-            Position::new(0, 0)..Position::new(0, 0),
-        )
+        Block {
+            attributes: HashMap::from([("severity".into(), severity.into())]),
+            start_tag_position_range: Position::new(0, 0)..Position::new(0, 0),
+            content_bytes_range: 0..0,
+            content_position_range: Position::new(0, 0)..Position::new(0, 0),
+        }
     }
 
     #[test]
@@ -725,12 +711,12 @@ mod block_severity_from_str_tests {
 
     #[test]
     fn block_without_severity_attribute_returns_error_severity() {
-        let block = Block::new(
-            HashMap::new(),
-            Position::new(0, 0)..=Position::new(0, 0),
-            0..0,
-            Position::new(0, 0)..Position::new(0, 0),
-        );
+        let block = Block {
+            attributes: HashMap::new(),
+            start_tag_position_range: Position::new(0, 0)..Position::new(0, 0),
+            content_bytes_range: 0..0,
+            content_position_range: Position::new(0, 0)..Position::new(0, 0),
+        };
 
         assert_eq!(block.severity().unwrap(), BlockSeverity::Error);
     }

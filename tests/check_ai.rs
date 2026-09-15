@@ -135,7 +135,7 @@ index 1111111..2222222 100644
                     },
                     "end": {
                         "line": 7,
-                        "character": 40
+                        "character": 41
                     }
                   },
                   "code": "check-ai",

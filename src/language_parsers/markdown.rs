@@ -222,27 +222,27 @@ Some text here 3
         assert_eq!(
             blocks,
             vec![
-                Block::new(
-                    HashMap::from([("name".to_string(), "md_block".to_string())]),
-                    Position::new(5, 10)..=Position::new(5, 32),
-                    test_utils::substr_range(content, "Some text here\n\n"),
-                    Position::new(6, 1)..Position::new(8, 1),
-                ),
-                Block::new(
-                    HashMap::from([("name".to_string(), "md_block_2".to_string())]),
-                    Position::new(10, 10)..=Position::new(10, 34),
-                    test_utils::substr_range(
+                Block {
+                    attributes: HashMap::from([("name".to_string(), "md_block".to_string())]),
+                    start_tag_position_range: Position::new(5, 10)..Position::new(5, 33),
+                    content_bytes_range: test_utils::substr_range(content, "Some text here\n\n"),
+                    content_position_range: Position::new(6, 1)..Position::new(8, 1),
+                },
+                Block {
+                    attributes: HashMap::from([("name".to_string(), "md_block_2".to_string())]),
+                    start_tag_position_range: Position::new(10, 10)..Position::new(10, 35),
+                    content_bytes_range: test_utils::substr_range(
                         content,
                         "Some text here 2\n\n[//]: # (<block name=\"md_block_3\">)\nSome text here 3\n\n[//]: # (</block>)\n"
                     ),
-                    Position::new(11, 1)..Position::new(17, 1),
-                ),
-                Block::new(
-                    HashMap::from([("name".to_string(), "md_block_3".to_string())]),
-                    Position::new(13, 10)..=Position::new(13, 34),
-                    test_utils::substr_range(content, "Some text here 3\n\n"),
-                    Position::new(14, 1)..Position::new(16, 1),
-                )
+                    content_position_range: Position::new(11, 1)..Position::new(17, 1),
+                },
+                Block {
+                    attributes: HashMap::from([("name".to_string(), "md_block_3".to_string())]),
+                    start_tag_position_range: Position::new(13, 10)..Position::new(13, 35),
+                    content_bytes_range: test_utils::substr_range(content, "Some text here 3\n\n"),
+                    content_position_range: Position::new(14, 1)..Position::new(16, 1),
+                }
             ]
         );
 
@@ -278,7 +278,7 @@ Text
         let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(
-            *blocks[0].start_tag_position_range.start(),
+            blocks[0].start_tag_position_range.start,
             Position::new(1, 13)
         );
         Ok(())
@@ -303,12 +303,15 @@ Inline code `<!-- <block name="ignored"> -->` is not a comment.
 
         assert_eq!(
             blocks,
-            vec![Block::new(
-                HashMap::from([("name".to_string(), "inline_block".to_string())]),
-                Position::new(4, 16)..=Position::new(4, 42),
-                test_utils::substr_range(content, " and\nmore content here\nending text "),
-                Position::new(4, 47)..Position::new(6, 13),
-            )]
+            vec![Block {
+                attributes: HashMap::from([("name".to_string(), "inline_block".to_string())]),
+                start_tag_position_range: Position::new(4, 16)..Position::new(4, 43),
+                content_bytes_range: test_utils::substr_range(
+                    content,
+                    " and\nmore content here\nending text "
+                ),
+                content_position_range: Position::new(4, 47)..Position::new(6, 13),
+            }]
         );
 
         Ok(())
@@ -349,7 +352,7 @@ Closing text <!-- </block> --> tail.
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].attributes["name"], "table_rows");
         assert_eq!(
-            *blocks[0].start_tag_position_range.start(),
+            blocks[0].start_tag_position_range.start,
             Position::new(3, 8)
         );
 
@@ -415,33 +418,39 @@ Not wrapped in HTML tags on multiple lines
         assert_eq!(
             blocks,
             vec![
-                Block::new(
-                    HashMap::from([("name".to_string(), "html_block".to_string())]),
-                    Position::new(5, 6)..=Position::new(5, 30),
-                    test_utils::substr_range(content, "\nSome html content\n"),
-                    Position::new(5, 35)..Position::new(7, 1),
-                ),
-                Block::new(
-                    HashMap::from([("name".to_string(), "md_block".to_string())]),
-                    Position::new(10, 10)..=Position::new(10, 32),
-                    test_utils::substr_range(content, "Some markdown content\n\n"),
-                    Position::new(11, 1)..Position::new(13, 1),
-                ),
-                Block::new(
-                    HashMap::from([("name".to_string(), "html_block2".to_string())]),
-                    Position::new(15, 6)..=Position::new(15, 31),
-                    test_utils::substr_range(content, "Not wrapped in HTML tags"),
-                    Position::new(15, 36)..Position::new(15, 60),
-                ),
-                Block::new(
-                    HashMap::from([("name".to_string(), "html_block3".to_string())]),
-                    Position::new(17, 6)..=Position::new(17, 31),
-                    test_utils::substr_range(
+                Block {
+                    attributes: HashMap::from([("name".to_string(), "html_block".to_string())]),
+                    start_tag_position_range: Position::new(5, 6)..Position::new(5, 31),
+                    content_bytes_range: test_utils::substr_range(content, "\nSome html content\n"),
+                    content_position_range: Position::new(5, 35)..Position::new(7, 1),
+                },
+                Block {
+                    attributes: HashMap::from([("name".to_string(), "md_block".to_string())]),
+                    start_tag_position_range: Position::new(10, 10)..Position::new(10, 33),
+                    content_bytes_range: test_utils::substr_range(
                         content,
-                        "\nNot wrapped in HTML tags on multiple lines\n"
+                        "Some markdown content\n\n"
                     ),
-                    Position::new(17, 36)..Position::new(19, 1),
-                ),
+                    content_position_range: Position::new(11, 1)..Position::new(13, 1),
+                },
+                Block {
+                    attributes: HashMap::from([("name".to_string(), "html_block2".to_string())]),
+                    start_tag_position_range: Position::new(15, 6)..Position::new(15, 32),
+                    content_bytes_range: test_utils::substr_range(
+                        content,
+                        "Not wrapped in HTML tags"
+                    ),
+                    content_position_range: Position::new(15, 36)..Position::new(15, 60),
+                },
+                Block {
+                    attributes: HashMap::from([("name".to_string(), "html_block3".to_string())]),
+                    start_tag_position_range: Position::new(17, 6)..Position::new(17, 32),
+                    content_bytes_range: test_utils::substr_range(
+                        content,
+                        "\nNot wrapped in HTML tags on multiple lines\n",
+                    ),
+                    content_position_range: Position::new(17, 36)..Position::new(19, 1),
+                },
             ]
         );
 

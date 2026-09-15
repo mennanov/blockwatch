@@ -77,7 +77,7 @@ index 6781fec..4ce6a3b 100644
                     },
                     "end": {
                         "line": 12,
-                        "character": 29
+                        "character": 30
                     }
                   },
                   "code": "line-count",

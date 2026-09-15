@@ -186,7 +186,7 @@ fn parse_references(
             "invalid affects reference on block {}:{} at line {}",
             file_path,
             block.name_display(),
-            block.start_tag_position_range.start().line,
+            block.start_tag_position_range.start.line,
         )
     })
 }
@@ -299,7 +299,7 @@ fn create_violation(
         "Block {}:{} at line {} is modified, but {} is not",
         modified_block_file_path.display(),
         modified_block.name_display(),
-        modified_block.start_tag_position_range.start().line,
+        modified_block.start_tag_position_range.start.line,
         target_display(affected_block_file_path, affected_block_name),
     );
     affects_violation(
@@ -324,7 +324,7 @@ fn dangling_reference_violation(
         "Block {}:{} at line {} references {}, which does not exist",
         referencing_block_file_path.display(),
         referencing_block.name_display(),
-        referencing_block.start_tag_position_range.start().line,
+        referencing_block.start_tag_position_range.start.line,
         target_display(target_file_path, target_name),
     );
     affects_violation(
@@ -363,8 +363,8 @@ fn affects_violation(
     .context("failed to serialize AffectsViolation block")?;
     Violation::new(
         ViolationRange::new(
-            block.start_tag_position_range.start().clone(),
-            block.start_tag_position_range.end().clone(),
+            block.start_tag_position_range.start.clone(),
+            block.start_tag_position_range.end.clone(),
         ),
         file_path,
         block,

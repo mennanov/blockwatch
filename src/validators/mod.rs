@@ -161,7 +161,7 @@ impl ValidationReport {
     /// Adds `block` in `file` to the blocks this validator checked.
     pub fn add_checked_block(&mut self, file: &RepoPath, block: &Block) {
         self.checked_blocks
-            .push((file.clone(), block.start_tag_position_range.start().clone()));
+            .push((file.clone(), block.start_tag_position_range.start.clone()));
     }
 
     /// Stores violations found in `file`.
@@ -930,12 +930,12 @@ mod tests {
     use std::sync::Arc;
 
     fn empty_testing_block() -> Block {
-        Block::new(
-            HashMap::new(),
-            Position::new(0, 0)..=Position::new(0, 0),
-            0..0,
-            Position::new(0, 0)..Position::new(0, 0),
-        )
+        Block {
+            attributes: HashMap::new(),
+            start_tag_position_range: Position::new(0, 0)..Position::new(0, 0),
+            content_bytes_range: 0..0,
+            content_position_range: Position::new(0, 0)..Position::new(0, 0),
+        }
     }
 
     fn empty_testing_violation_range() -> ViolationRange {

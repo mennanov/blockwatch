@@ -430,12 +430,12 @@ mod tests {
         if let Some(name) = name {
             attributes.insert("name".to_string(), name.to_string());
         }
-        Block::new(
+        Block {
             attributes,
-            Position::new(1, 1)..=Position::new(1, 1),
-            0..0,
-            Position::new(1, 1)..Position::new(1, 1),
-        )
+            start_tag_position_range: Position::new(1, 1)..Position::new(1, 1),
+            content_bytes_range: 0..0,
+            content_position_range: Position::new(1, 1)..Position::new(1, 1),
+        }
     }
 
     /// One violation of `code` on a block named `name`, underlining line 3.

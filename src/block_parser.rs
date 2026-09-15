@@ -3,7 +3,7 @@ use crate::blocks::Block;
 use crate::language_parsers::{Comment, CommentsParser};
 use crate::tag_parser::{BlockTag, BlockTagParser, MalformedBlockTagError, WinnowBlockTagParser};
 use std::collections::{HashMap, VecDeque};
-use std::ops::{Range, RangeInclusive};
+use std::ops::Range;
 use std::rc::Rc;
 
 /// Parses [`Blocks`] from a source code.
@@ -242,7 +242,7 @@ pub(crate) struct BlockStart {
     /// Attributes parsed from the tag; these decide which validators apply.
     pub(crate) attributes: HashMap<String, String>,
     /// Where the tag sits in the source file, translated from its offset within the comment.
-    pub(crate) start_tag_position_range: RangeInclusive<Position>,
+    pub(crate) start_tag_position_range: Range<Position>,
 }
 
 impl BlockStart {
@@ -253,7 +253,7 @@ impl BlockStart {
     ) -> Self {
         let start_tag_position_range =
             Self::source_position_at(position_in_comment_range.start, &comment)
-                ..=Self::source_position_at(position_in_comment_range.end - 1, &comment);
+                ..Self::source_position_at(position_in_comment_range.end, &comment);
         Self {
             comment,
             attributes,
@@ -312,12 +312,12 @@ impl BlockEnd {
         };
         let content_start_position = block_start.comment.position_range.end.clone();
         let content_end_position = self.comment.position_range.start.clone();
-        Block::new(
-            block_start.attributes,
-            block_start.start_tag_position_range,
-            content_range,
-            content_start_position..content_end_position,
-        )
+        Block {
+            attributes: block_start.attributes,
+            start_tag_position_range: block_start.start_tag_position_range,
+            content_bytes_range: content_range,
+            content_position_range: content_start_position..content_end_position,
+        }
     }
 }
 
@@ -358,12 +358,12 @@ mod tests {
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
-            vec![Block::new(
-                HashMap::new(),
-                Position::new(1, 4)..=Position::new(1, 10),
-                test_utils::substr_range(contents, " let say = \"hi\"; "),
-                Position::new(1, 14)..Position::new(1, 31),
-            ),]
+            vec![Block {
+                attributes: HashMap::new(),
+                start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
+                content_bytes_range: test_utils::substr_range(contents, " let say = \"hi\"; "),
+                content_position_range: Position::new(1, 14)..Position::new(1, 31),
+            },]
         );
         Ok(())
     }
@@ -375,12 +375,12 @@ mod tests {
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
-            vec![Block::new(
-                HashMap::new(),
-                Position::new(1, 4)..=Position::new(1, 10),
-                test_utils::substr_range(contents, "\nlet say = \"hi\";\n"),
-                Position::new(1, 11)..Position::new(3, 1)
-            ),]
+            vec![Block {
+                attributes: HashMap::new(),
+                start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
+                content_bytes_range: test_utils::substr_range(contents, "\nlet say = \"hi\";\n"),
+                content_position_range: Position::new(1, 11)..Position::new(3, 1)
+            },]
         );
         Ok(())
     }
@@ -398,18 +398,24 @@ println!("hello2");
         assert_eq!(
             blocks,
             vec![
-                Block::new(
-                    HashMap::new(),
-                    Position::new(1, 4)..=Position::new(1, 10),
-                    test_utils::substr_range(contents, "\nprintln!(\"hello1\");\n"),
-                    Position::new(1, 11)..Position::new(3, 1),
-                ),
-                Block::new(
-                    HashMap::new(),
-                    Position::new(4, 4)..=Position::new(4, 10),
-                    test_utils::substr_range(contents, "\nprintln!(\"hello2\");\n"),
-                    Position::new(4, 11)..Position::new(6, 1),
-                )
+                Block {
+                    attributes: HashMap::new(),
+                    start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
+                    content_bytes_range: test_utils::substr_range(
+                        contents,
+                        "\nprintln!(\"hello1\");\n"
+                    ),
+                    content_position_range: Position::new(1, 11)..Position::new(3, 1),
+                },
+                Block {
+                    attributes: HashMap::new(),
+                    start_tag_position_range: Position::new(4, 4)..Position::new(4, 11),
+                    content_bytes_range: test_utils::substr_range(
+                        contents,
+                        "\nprintln!(\"hello2\");\n"
+                    ),
+                    content_position_range: Position::new(4, 11)..Position::new(6, 1),
+                }
             ]
         );
         Ok(())
@@ -423,18 +429,24 @@ println!("hello2");
         assert_eq!(
             blocks,
             vec![
-                Block::new(
-                    HashMap::new(),
-                    Position::new(1, 4)..=Position::new(1, 10),
-                    test_utils::substr_range(contents, "println!(\"hello1\");"),
-                    Position::new(1, 14)..Position::new(1, 33),
-                ),
-                Block::new(
-                    HashMap::new(),
-                    Position::new(1, 44)..=Position::new(1, 50),
-                    test_utils::substr_range(contents, "println!(\"hello2\");"),
-                    Position::new(1, 54)..Position::new(1, 73),
-                )
+                Block {
+                    attributes: HashMap::new(),
+                    start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
+                    content_bytes_range: test_utils::substr_range(
+                        contents,
+                        "println!(\"hello1\");"
+                    ),
+                    content_position_range: Position::new(1, 14)..Position::new(1, 33),
+                },
+                Block {
+                    attributes: HashMap::new(),
+                    start_tag_position_range: Position::new(1, 44)..Position::new(1, 51),
+                    content_bytes_range: test_utils::substr_range(
+                        contents,
+                        "println!(\"hello2\");"
+                    ),
+                    content_position_range: Position::new(1, 54)..Position::new(1, 73),
+                }
             ]
         );
         Ok(())
@@ -448,18 +460,24 @@ println!("hello2");
         assert_eq!(
             blocks,
             vec![
-                Block::new(
-                    HashMap::new(),
-                    Position::new(1, 4)..=Position::new(1, 10),
-                    test_utils::substr_range(contents, "\nprintln!(\"hello1\");\n"),
-                    Position::new(1, 11)..Position::new(3, 1),
-                ),
-                Block::new(
-                    HashMap::new(),
-                    Position::new(3, 12)..=Position::new(3, 18),
-                    test_utils::substr_range(contents, "\nprintln!(\"hello2\");\n"),
-                    Position::new(3, 22)..Position::new(5, 1),
-                )
+                Block {
+                    attributes: HashMap::new(),
+                    start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
+                    content_bytes_range: test_utils::substr_range(
+                        contents,
+                        "\nprintln!(\"hello1\");\n"
+                    ),
+                    content_position_range: Position::new(1, 11)..Position::new(3, 1),
+                },
+                Block {
+                    attributes: HashMap::new(),
+                    start_tag_position_range: Position::new(3, 12)..Position::new(3, 19),
+                    content_bytes_range: test_utils::substr_range(
+                        contents,
+                        "\nprintln!(\"hello2\");\n"
+                    ),
+                    content_position_range: Position::new(3, 22)..Position::new(5, 1),
+                }
             ]
         );
         Ok(())
@@ -500,36 +518,36 @@ println!("hello2");
         assert_eq!(
             blocks,
             vec![
-                Block::new(
-                    HashMap::from([("name".to_string(), "foo".to_string())]),
-                    Position::new(2, 12)..=Position::new(2, 29),
-                    30..620,
-                    Position::new(2, 30)..Position::new(25, 9),
-                ),
-                Block::new(
-                    HashMap::from([("name".to_string(), "bar".to_string())]),
-                    Position::new(7, 16)..=Position::new(7, 33),
-                    142..440,
-                    Position::new(7, 34)..Position::new(17, 13),
-                ),
-                Block::new(
-                    HashMap::from([("name".to_string(), "bar-bar".to_string())]),
-                    Position::new(11, 20)..=Position::new(11, 41),
-                    281..415,
-                    Position::new(11, 42)..Position::new(15, 17),
-                ),
-                Block::new(
-                    HashMap::from([("name".to_string(), "buzz".to_string())]),
-                    Position::new(19, 16)..=Position::new(19, 34),
-                    487..599,
-                    Position::new(19, 35)..Position::new(23, 13),
-                ),
-                Block::new(
-                    HashMap::from([("name".to_string(), "fizz".to_string())]),
-                    Position::new(26, 12)..=Position::new(26, 30),
-                    662..671,
-                    Position::new(26, 31)..Position::new(27, 9),
-                ),
+                Block {
+                    attributes: HashMap::from([("name".to_string(), "foo".to_string())]),
+                    start_tag_position_range: Position::new(2, 12)..Position::new(2, 30),
+                    content_bytes_range: 30..620,
+                    content_position_range: Position::new(2, 30)..Position::new(25, 9),
+                },
+                Block {
+                    attributes: HashMap::from([("name".to_string(), "bar".to_string())]),
+                    start_tag_position_range: Position::new(7, 16)..Position::new(7, 34),
+                    content_bytes_range: 142..440,
+                    content_position_range: Position::new(7, 34)..Position::new(17, 13),
+                },
+                Block {
+                    attributes: HashMap::from([("name".to_string(), "bar-bar".to_string())]),
+                    start_tag_position_range: Position::new(11, 20)..Position::new(11, 42),
+                    content_bytes_range: 281..415,
+                    content_position_range: Position::new(11, 42)..Position::new(15, 17),
+                },
+                Block {
+                    attributes: HashMap::from([("name".to_string(), "buzz".to_string())]),
+                    start_tag_position_range: Position::new(19, 16)..Position::new(19, 35),
+                    content_bytes_range: 487..599,
+                    content_position_range: Position::new(19, 35)..Position::new(23, 13),
+                },
+                Block {
+                    attributes: HashMap::from([("name".to_string(), "fizz".to_string())]),
+                    start_tag_position_range: Position::new(26, 12)..Position::new(26, 31),
+                    content_bytes_range: 662..671,
+                    content_position_range: Position::new(26, 31)..Position::new(27, 9),
+                },
             ]
         );
         Ok(())
@@ -569,12 +587,15 @@ println!("hello2");
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
-            vec![Block::new(
-                HashMap::from([("name".to_string(), "foo".to_string())]),
-                Position::new(1, 4)..=Position::new(1, 21),
-                test_utils::substr_range(contents, "\n        let word = \"hello\";\n        "),
-                Position::new(1, 42)..Position::new(3, 9),
-            ),]
+            vec![Block {
+                attributes: HashMap::from([("name".to_string(), "foo".to_string())]),
+                start_tag_position_range: Position::new(1, 4)..Position::new(1, 22),
+                content_bytes_range: test_utils::substr_range(
+                    contents,
+                    "\n        let word = \"hello\";\n        "
+                ),
+                content_position_range: Position::new(1, 42)..Position::new(3, 9),
+            },]
         );
         Ok(())
     }
@@ -597,12 +618,12 @@ println!("hello2");
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
-            vec![Block::new(
-                HashMap::new(),
-                Position::new(1, 4)..=Position::new(2, 1),
-                test_utils::substr_range(contents, " let say = \"hi\"; "),
-                Position::new(2, 5)..Position::new(2, 22),
-            ),]
+            vec![Block {
+                attributes: HashMap::new(),
+                start_tag_position_range: Position::new(1, 4)..Position::new(2, 2),
+                content_bytes_range: test_utils::substr_range(contents, " let say = \"hi\"; "),
+                content_position_range: Position::new(2, 5)..Position::new(2, 22),
+            },]
         );
         Ok(())
     }
@@ -614,12 +635,12 @@ println!("hello2");
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
-            vec![Block::new(
-                HashMap::new(),
-                Position::new(1, 4)..=Position::new(1, 10),
-                test_utils::substr_range(contents, " let say = \"hi\"; "),
-                Position::new(1, 14)..Position::new(1, 31),
-            ),]
+            vec![Block {
+                attributes: HashMap::new(),
+                start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
+                content_bytes_range: test_utils::substr_range(contents, " let say = \"hi\"; "),
+                content_position_range: Position::new(1, 14)..Position::new(1, 31),
+            },]
         );
         Ok(())
     }
@@ -631,12 +652,12 @@ println!("hello2");
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
-            vec![Block::new(
-                HashMap::new(),
-                Position::new(2, 1)..=Position::new(2, 7),
-                test_utils::substr_range(contents, "println!(\"hello1\");"),
-                Position::new(2, 11)..Position::new(2, 30),
-            ),]
+            vec![Block {
+                attributes: HashMap::new(),
+                start_tag_position_range: Position::new(2, 1)..Position::new(2, 8),
+                content_bytes_range: test_utils::substr_range(contents, "println!(\"hello1\");"),
+                content_position_range: Position::new(2, 11)..Position::new(2, 30),
+            },]
         );
         Ok(())
     }
@@ -648,12 +669,12 @@ println!("hello2");
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
-            vec![Block::new(
-                HashMap::new(),
-                Position::new(1, 4)..=Position::new(1, 10),
-                test_utils::substr_range(contents, "println!(\"hello1\");"),
-                Position::new(1, 14)..Position::new(1, 33),
-            ),]
+            vec![Block {
+                attributes: HashMap::new(),
+                start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
+                content_bytes_range: test_utils::substr_range(contents, "println!(\"hello1\");"),
+                content_position_range: Position::new(1, 14)..Position::new(1, 33),
+            },]
         );
         Ok(())
     }
@@ -667,12 +688,12 @@ println!("hello2");
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
-            vec![Block::new(
-                HashMap::new(),
-                Position::new(1, 9)..=Position::new(1, 15),
-                test_utils::substr_range(contents, "\nlet say = \"hi\";\n"),
-                Position::new(1, 16)..Position::new(3, 1)
-            ),]
+            vec![Block {
+                attributes: HashMap::new(),
+                start_tag_position_range: Position::new(1, 9)..Position::new(1, 16),
+                content_bytes_range: test_utils::substr_range(contents, "\nlet say = \"hi\";\n"),
+                content_position_range: Position::new(1, 16)..Position::new(3, 1)
+            },]
         );
         Ok(())
     }
@@ -687,12 +708,12 @@ println!("hello2");
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks,
-            vec![Block::new(
-                HashMap::new(),
-                Position::new(2, 9)..=Position::new(2, 15),
-                test_utils::substr_range(contents, "\nlet say = \"hi\";\n"),
-                Position::new(2, 19)..Position::new(4, 1)
-            ),]
+            vec![Block {
+                attributes: HashMap::new(),
+                start_tag_position_range: Position::new(2, 9)..Position::new(2, 16),
+                content_bytes_range: test_utils::substr_range(contents, "\nlet say = \"hi\";\n"),
+                content_position_range: Position::new(2, 19)..Position::new(4, 1)
+            },]
         );
         Ok(())
     }

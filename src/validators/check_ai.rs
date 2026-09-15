@@ -60,11 +60,7 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
                             "check-ai requires a non-empty condition in {}:{} at line {}",
                             file_path.display(),
                             block_with_context.block.name_display(),
-                            block_with_context
-                                .block
-                                .start_tag_position_range
-                                .start()
-                                .line
+                            block_with_context.block.start_tag_position_range.start.line
                         ));
                     };
                 } else {
@@ -152,7 +148,7 @@ fn create_violation(
         "Block {}:{} defined at line {} failed AI check: {ai_message}",
         file_path.display(),
         block.name_display(),
-        block.start_tag_position_range.start().line,
+        block.start_tag_position_range.start.line,
     );
     block_violation(
         file_path,
@@ -176,7 +172,7 @@ fn create_pattern_no_match_violation(
         "Block {}:{} defined at line {} was not checked: check-ai-pattern \"{pattern}\" matched nothing in the block",
         file_path.display(),
         block.name_display(),
-        block.start_tag_position_range.start().line,
+        block.start_tag_position_range.start.line,
     );
     block_violation(
         file_path,
@@ -210,8 +206,8 @@ fn block_violation(
     let details = serde_json::to_value(details).context("failed to serialize CheckAiDetails")?;
     Violation::new(
         ViolationRange::new(
-            block.start_tag_position_range.start().clone(),
-            block.start_tag_position_range.end().clone(),
+            block.start_tag_position_range.start.clone(),
+            block.start_tag_position_range.end.clone(),
         ),
         file_path,
         block,
@@ -242,11 +238,7 @@ impl<C: AiClient> CheckAiValidator<C> {
             "check-ai API error in {}:{} at line {}",
             file_path.display(),
             block_with_context.block.name_display(),
-            block_with_context
-                .block
-                .start_tag_position_range
-                .start()
-                .line
+            block_with_context.block.start_tag_position_range.start.line
         ))? {
             None => Ok(None),
             Some(msg) => Ok(Some(create_violation(

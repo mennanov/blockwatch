@@ -128,7 +128,7 @@ fn parse_references(
             "invalid same-as reference on block {}:{} at line {}",
             file_path,
             block.name_display(),
-            block.start_tag_position_range.start().line,
+            block.start_tag_position_range.start.line,
         )
     })
 }
@@ -450,7 +450,7 @@ fn create_violation(
     target_name: Option<&str>,
     reason: &str,
 ) -> anyhow::Result<Violation> {
-    let line = block.start_tag_position_range.start().line;
+    let line = block.start_tag_position_range.start.line;
     let target = match target_name {
         Some(target_name) => format!("{}:{}", target_file.display(), target_name),
         None => format!("file {}", target_file.display()),
@@ -463,8 +463,8 @@ fn create_violation(
     );
     Violation::new(
         ViolationRange::new(
-            block.start_tag_position_range.start().clone(),
-            block.start_tag_position_range.end().clone(),
+            block.start_tag_position_range.start.clone(),
+            block.start_tag_position_range.end.clone(),
         ),
         file_path,
         block,

@@ -72,7 +72,7 @@ index 1111111..2222222 100644
                     },
                     "end": {
                         "line": 10,
-                        "character": 59
+                        "character": 60
                     }
                   },
                   "code": "check-lua",
