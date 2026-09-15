@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.6.0] - 2026-09-15
+
 ### Changed
 
 - **Breaking:** the JSON diagnostic contract now defines `range.end.character` as exclusive (`[start, end)`,
