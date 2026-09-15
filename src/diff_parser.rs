@@ -305,7 +305,7 @@ fn line_diff(old: &str, new: &str) -> Vec<Range<usize>> {
         match op {
             DiffOp::Delete { new_index, .. } => {
                 if prev_op.is_none_or(|c: &DiffOp| !matches!(c, DiffOp::Delete { .. })) {
-                    let idx = new.len().saturating_sub(1).min(*new_index);
+                    let idx = new.chars().count().saturating_sub(1).min(*new_index);
                     push_or_merge_range(&mut result, idx..idx + 1);
                 }
             }
@@ -400,6 +400,14 @@ mod modified_line_ranges_tests {
     #[test]
     fn deleted_consecutive_characters_in_the_end_are_treated_as_single() {
         let ranges = line_diff("abracadabra", "abra");
+
+        assert_eq!(ranges, vec![3..4]);
+    }
+
+    #[test]
+    fn deleted_consecutive_characters_in_the_end_of_multibyte_string_bounds_to_char_count() {
+        // "абвг" has 4 characters and 8 UTF-8 bytes. The deletion occurs at character index 4.
+        let ranges = line_diff("абвгдеж", "абвг");
 
         assert_eq!(ranges, vec![3..4]);
     }
