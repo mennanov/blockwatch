@@ -1,5 +1,5 @@
 use crate::Position;
-use crate::diff_parser::{LineChange, LineChangeKind};
+use crate::diff_parser::{self, LineChange, LineChangeKind};
 use crate::fs::{FileSystem, PathChecker};
 use crate::language_parsers::{LanguageParser, LanguageParsers};
 use crate::repo_path::RepoPath;
@@ -90,45 +90,38 @@ impl Block {
             return false;
         }
 
-        let ranges = match &line_change.kind {
+        match &line_change.kind {
             LineChangeKind::Deleted => {
                 let point = deletion_point(line_change.line);
                 // The start is excluded even though the range includes it: text removed from just
                 // before the range's start was never part of the range, and removing it leaves the
                 // gap exactly at that start.
-                return self.start_tag_position_range.start < point
-                    && point <= self.start_tag_position_range.end;
+                // The end is included for the mirror reason: a gap sitting exactly at the range's
+                // exclusive end is where the range's last character used to be. A whole-line
+                // deletion never lands there, since its gap is always at column 1, so this bound
+                // only bites if deletion points ever get finer-grained than a line.
+                self.start_tag_position_range.start < point
+                    && point <= self.start_tag_position_range.end
             }
             // An insertion moves the line breaks around the line, not just the characters on it,
             // so there is nothing to compare column by column. Every position on the line counts
             // as changed.
-            LineChangeKind::Added => return true,
-            LineChangeKind::Modified(ranges) => ranges,
-        };
-        let start_character = if line_change.line == self.start_tag_position_range.start.line {
-            self.start_tag_position_range.start.character - 1 // The ranges are 0-based
-        } else {
-            0
-        };
-        let end_character = if line_change.line < self.start_tag_position_range.end.line {
-            usize::MAX
-        } else {
-            self.start_tag_position_range.end.character - 1 // The ranges are 0-based
-        };
-
-        ranges
-            .binary_search_by(|range| {
-                if range.end > start_character && range.start <= end_character {
-                    // Intersection between [start_character, end_character]
-                    // and half-open [range.start, range.end).
-                    Ordering::Equal
-                } else if range.end <= start_character {
-                    Ordering::Less
+            LineChangeKind::Added => true,
+            LineChangeKind::Modified(ranges) => {
+                let start_col = if line_change.line == self.start_tag_position_range.start.line {
+                    self.start_tag_position_range.start.character
                 } else {
-                    Ordering::Greater
-                }
-            })
-            .is_ok()
+                    1
+                };
+                let end_col = if line_change.line < self.start_tag_position_range.end.line {
+                    usize::MAX
+                } else {
+                    self.start_tag_position_range.end.character
+                };
+
+                diff_parser::intersects_columns(ranges, start_col, end_col)
+            }
+        }
     }
 
     /// Whether the block's content intersects with the given `line_change`.
@@ -140,45 +133,35 @@ impl Block {
             return false;
         }
 
-        let ranges = match &line_change.kind {
+        match &line_change.kind {
             LineChangeKind::Deleted => {
                 let point = deletion_point(line_change.line);
-                // The end is included even though the range excludes it: the text that used to sit
-                // just before the range's end was part of the range, and removing it leaves the gap
-                // exactly at that end.
-                return self.content_position_range.start <= point
-                    && point <= self.content_position_range.end;
+                // The end is included even though the range excludes it: a gap sitting exactly at
+                // the range's exclusive end is where the range's last character used to be. A
+                // whole-line deletion never lands there, since its gap is always at column 1, so
+                // this bound only bites if deletion points ever get finer-grained than a line.
+                self.content_position_range.start <= point
+                    && point <= self.content_position_range.end
             }
             // An insertion moves the line breaks around the line, not just the characters on it,
             // so there is nothing to compare column by column. Every position on the line counts
             // as changed.
-            LineChangeKind::Added => return true,
-            LineChangeKind::Modified(ranges) => ranges,
-        };
-        let start_character = if line_change.line == self.content_position_range.start.line {
-            self.content_position_range.start.character - 1 // The ranges are 0-based
-        } else {
-            0
-        };
-        let end_character = if line_change.line < self.content_position_range.end.line {
-            usize::MAX
-        } else {
-            self.content_position_range.end.character - 1 // The ranges are 0-based
-        };
-
-        ranges
-            .binary_search_by(|range| {
-                if range.end > start_character && range.start < end_character {
-                    // Intersection between closed-open [start_character, end_character)
-                    // and closed-open [range.start, range.end).
-                    Ordering::Equal
-                } else if range.end <= start_character {
-                    Ordering::Less
+            LineChangeKind::Added => true,
+            LineChangeKind::Modified(ranges) => {
+                let start_col = if line_change.line == self.content_position_range.start.line {
+                    self.content_position_range.start.character
                 } else {
-                    Ordering::Greater
-                }
-            })
-            .is_ok()
+                    1
+                };
+                let end_col = if line_change.line < self.content_position_range.end.line {
+                    usize::MAX
+                } else {
+                    self.content_position_range.end.character
+                };
+
+                diff_parser::intersects_columns(ranges, start_col, end_col)
+            }
+        }
     }
 
     /// Returns the optional value of the `name` attribute for this block.
@@ -754,6 +737,14 @@ mod parse_blocks_tests {
         }
     }
 
+    /// A modified line with character range `range` (0-based) modified.
+    fn modified_range(line: usize, range: Range<usize>) -> LineChange {
+        LineChange {
+            line,
+            kind: LineChangeKind::Modified(vec![range]),
+        }
+    }
+
     /// A deletion anchored at `line`, the line that now occupies the gap the removed lines left.
     fn deleted(line: usize) -> LineChange {
         LineChange {
@@ -1133,6 +1124,131 @@ mod parse_blocks_tests {
         // which is where the content range ends. The content lost every line it had.
         let block =
             block_with_context("// <block name=\"first\">\n// </block>\n", vec![deleted(2)])?;
+
+        assert!(!block.is_start_tag_modified);
+        assert!(block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_column_before_start_tag_leaves_the_start_tag_unmodified() -> anyhow::Result<()> {
+        // The start tag begins at 0-based index 7 (column 8). Index 6 (column 7) is the space
+        // before the tag, which sits outside the start tag range.
+        let code = "    // <block name=\"first\">\none\n// </block>\n";
+        let block = block_with_context(code, vec![modified_range(1, 6..7)])?;
+
+        assert!(!block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_first_column_of_start_tag_modifies_the_start_tag() -> anyhow::Result<()> {
+        // The start tag begins at 0-based index 7 (column 8). Index 7 is the '<' character,
+        // which sits at the inclusive start of the start tag range.
+        let code = "    // <block name=\"first\">\none\n// </block>\n";
+        let block = block_with_context(code, vec![modified_range(1, 7..8)])?;
+
+        assert!(block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_column_after_multiline_start_tag_leaves_the_start_tag_unmodified()
+    -> anyhow::Result<()> {
+        // The start tag's closing delimiter '>' is at 0-based index 15 (column 16), making column 17
+        // the exclusive end. Index 16 (column 17) is the space after '>', which sits outside the tag.
+        let code = "/* <block\n   name=\"first\"> */\none\n/* </block> */\n";
+        let block = block_with_context(code, vec![modified_range(2, 16..17)])?;
+
+        assert!(!block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_last_column_of_multiline_start_tag_modifies_the_start_tag() -> anyhow::Result<()> {
+        // The start tag's closing delimiter '>' is at 0-based index 15 (column 16). That character
+        // sits immediately before the exclusive end, inside the tag.
+        let code = "/* <block\n   name=\"first\"> */\none\n/* </block> */\n";
+        let block = block_with_context(code, vec![modified_range(2, 15..16)])?;
+
+        assert!(block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_start_tag_comment_before_inline_content_leaves_the_content_unmodified()
+    -> anyhow::Result<()> {
+        // The start tag comment '/* ... */' ends at index 26 (column 27), where content begins.
+        // Index 25 (column 26) is the closing '/' of '*/', outside the content range.
+        let code = "/* <block name=\"first\"> */ one\n// </block>\n";
+        let block = block_with_context(code, vec![modified_range(1, 25..26)])?;
+
+        assert!(!block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_first_column_of_inline_content_modifies_the_content() -> anyhow::Result<()> {
+        // Content begins at 0-based index 26 (column 27). That character sits at the inclusive
+        // start of the content range.
+        let code = "/* <block name=\"first\"> */ one\n// </block>\n";
+        let block = block_with_context(code, vec![modified_range(1, 26..27)])?;
+
+        assert!(!block.is_start_tag_modified);
+        assert!(block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_end_tag_comment_after_inline_content_leaves_the_content_unmodified()
+    -> anyhow::Result<()> {
+        // Content ends at 0-based index 4 (column 5), where the closing comment begins.
+        // Index 4 is the opening '/' of '/*', outside the content range.
+        let code = "/* <block name=\"first\"> */\none /* </block> */\n";
+        let block = block_with_context(code, vec![modified_range(2, 4..5)])?;
+
+        assert!(!block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_last_column_of_inline_content_modifies_the_content() -> anyhow::Result<()> {
+        // Content ends at 0-based index 4 (column 5). Index 3 (column 4) is the space after 'one',
+        // which sits immediately before the exclusive end, inside content.
+        let code = "/* <block name=\"first\"> */\none /* </block> */\n";
+        let block = block_with_context(code, vec![modified_range(2, 3..4)])?;
+
+        assert!(!block.is_start_tag_modified);
+        assert!(block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_column_one_on_continuation_line_of_start_tag_modifies_the_start_tag()
+    -> anyhow::Result<()> {
+        // Line 2 is a continuation line of a multi-line start tag. A modification at column 1
+        // of line 2 touches the start tag since continuation lines start at column 1.
+        let code = "/* <block\nname=\"first\"> */\none\n/* </block> */\n";
+        let block = block_with_context(code, vec![modified_range(2, 0..1)])?;
+
+        assert!(block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_column_one_on_continuation_line_of_content_modifies_the_content()
+    -> anyhow::Result<()> {
+        // The content starts on line 1 after an inline tag. A modification at column 1 of line 2
+        // touches the content since continuation lines start at column 1.
+        let code = "/* <block name=\"first\"> */ first\nsecond\n/* </block> */\n";
+        let block = block_with_context(code, vec![modified_range(2, 0..1)])?;
 
         assert!(!block.is_start_tag_modified);
         assert!(block.is_content_modified);

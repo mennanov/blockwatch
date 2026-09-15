@@ -2,6 +2,7 @@ use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use anyhow::Context;
 use similar::DiffOp;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::str::FromStr;
@@ -16,13 +17,46 @@ pub struct LineChange {
     pub kind: LineChangeKind,
 }
 
+/// Checks whether the 0-based character ranges of a modified line intersect a 1-based half-open
+/// column span `[start_col, end_col)`.
+///
+/// Column numbers count from 1: `start_col` is 1-based inclusive, and `end_col` is 1-based
+/// exclusive. Pass `usize::MAX` for `end_col` when the span covers the rest of the line.
+///
+/// The `ranges` must be sorted in ascending order and non-overlapping, as this function
+/// binary-searches them.
+pub(crate) fn intersects_columns(
+    ranges: &[Range<usize>],
+    start_col: usize,
+    end_col: usize,
+) -> bool {
+    let start_idx = start_col.saturating_sub(1);
+    let end_idx = if end_col == usize::MAX {
+        usize::MAX
+    } else {
+        end_col.saturating_sub(1)
+    };
+    ranges
+        .binary_search_by(|range| {
+            if range.end > start_idx && range.start < end_idx {
+                Ordering::Equal
+            } else if range.end <= start_idx {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            }
+        })
+        .is_ok()
+}
+
 /// What a diff did to one line of its target file.
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum LineChangeKind {
     /// The line replaced one the diff removed. Holds the 0-based character ranges whose text
     /// differs from the removed line; everything outside them is unchanged, the line break that
     /// ends the line included.
-    // TODO: consider making the ranges 1-based to be consistent with `LineChange::line`.
+    ///
+    /// Ranges must be sorted in ascending order and non-overlapping.
     Modified(Vec<Range<usize>>),
     /// The newly added line (including the line break it adds).
     Added,
@@ -1332,5 +1366,45 @@ index 0000000..710d1d9
             err.to_string().contains("no recognized path prefix"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn modified_ranges_with_overlapping_column_span_returns_true() {
+        // 0-based range 4..10 covers characters at 1-based columns 5..11
+        let ranges = vec![4..10];
+        // Span 1-based 8..15 overlaps with 5..11
+        assert!(intersects_columns(&ranges, 8, 15));
+    }
+
+    #[test]
+    fn modified_ranges_with_non_overlapping_column_span_returns_false() {
+        // 0-based range 4..10 covers characters at 1-based columns 5..11
+        let ranges = vec![4..10];
+        // Span 1-based 1..5 ends before column 5
+        assert!(!intersects_columns(&ranges, 1, 5));
+        // Span 1-based 11..20 starts at column 11
+        assert!(!intersects_columns(&ranges, 11, 20));
+    }
+
+    #[test]
+    fn modified_ranges_with_unbounded_end_column_returns_true() {
+        let ranges = vec![10..20];
+        assert!(intersects_columns(&ranges, 5, usize::MAX));
+    }
+
+    #[test]
+    fn modified_ranges_touching_first_column_intersects_one_based_span() {
+        // 0-based range 0..1 covers the first character (1-based column 1).
+        let ranges = vec![0..1];
+        // Span covers 1-based column 1 ([1, 2)).
+        assert!(intersects_columns(&ranges, 1, 2));
+    }
+
+    #[test]
+    fn modified_ranges_at_column_boundary_intersects_span_starting_at_same_column() {
+        // 0-based range 4..5 covers the character at 1-based column 5.
+        let ranges = vec![4..5];
+        // Span [5, 6) starts at 1-based column 5.
+        assert!(intersects_columns(&ranges, 5, 6));
     }
 }
