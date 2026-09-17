@@ -11,6 +11,8 @@ pub mod flags;
 pub mod fs;
 /// One tree-sitter-backed comment parser per supported language, keyed by file extension.
 pub mod language_parsers;
+/// `NamePath`: parsed and validated RFC 6901 name-path selector.
+pub mod name_path;
 /// `RepoPath`: the single spelling of a repository-relative file path used as a map key.
 pub mod repo_path;
 /// Renders the end-of-run report describing what was scanned and checked.
