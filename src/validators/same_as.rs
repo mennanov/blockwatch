@@ -155,6 +155,9 @@ fn reference_violation<Fs: FileSystem>(
             let items = targets.whole_file_items(&target_file, comparison.pattern.as_ref())?;
             (target_file, None, Some(items))
         }
+        BlockReference::Path { .. } => {
+            anyhow::bail!("path selectors are not yet supported in same-as");
+        }
     };
     let target_name = target_name.as_deref();
     let Some(target_items) = target_items else {

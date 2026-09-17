@@ -168,6 +168,9 @@ fn reference_violations<Fs: FileSystem>(
             BlockReference::File(target_file) => {
                 file_reference_violation(targets, file_path, block_with_context, &target_file)?
             }
+            BlockReference::Path { .. } => {
+                anyhow::bail!("path selectors are not yet supported in affects");
+            }
         };
         violations.extend(violation);
     }

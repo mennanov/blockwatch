@@ -15,6 +15,13 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 ### Added
 
 - Support for JSON (`.json`, `.jsonc`) files.
+- Name-path selector reference syntax (`file#/path` and `#/path`) in target references.
+
+### Changed
+
+- **Breaking:** `#` is now reserved in target references to introduce name-path selectors (`file#/path` or `#/path`).
+  Consequently, block names containing `#` (`file:block#name`) are rejected as invalid, and files with `#` in their
+  path can no longer be addressed. Combining `#` and `:` in the same reference is prohibited.
 
 ## [0.6.0] - 2026-09-15
 

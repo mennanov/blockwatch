@@ -516,6 +516,9 @@ fn resolve_affected_blocks<Fs: FileSystem>(
                     content: content.trim().to_string(),
                 });
             }
+            BlockReference::Path { .. } => {
+                anyhow::bail!("path selectors are not supported in check-lua affects attribute");
+            }
         }
     }
     Ok(result)
