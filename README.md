@@ -9,7 +9,7 @@
 Some parts of your codebase must change together: a function and its docs, a value across config files, etc. Blockwatch
 makes these relationships explicit and fails a CI run or a pre-commit hook if they drift.
 
-Supports 33 languages. No config files are needed.
+Supports 34 languages. No config files are needed.
 
 [//]: # (</block>)
 
@@ -198,6 +198,7 @@ see [docs/ci.md](docs/ci.md).
 - Groovy (with `.gradle` and `Jenkinsfile` support)
 - HCL (Terraform: `.tf`, `.tfvars`, `.hcl`)
 - HTML
+- JSON (`.json`, `.jsonc`)
 - Java
 - JavaScript
 - Kotlin

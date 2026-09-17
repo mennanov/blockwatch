@@ -2005,6 +2005,14 @@ mod supported_languages_tests {
                 "// <block>\nconst x = 1;\n// </block>".to_string(),
             ),
             (
+                "json.json".to_string(),
+                "// <block>\n{\"key\": 1}\n// </block>".to_string(),
+            ),
+            (
+                "jsonc.jsonc".to_string(),
+                "// <block>\n{\"key\": 1}\n// </block>".to_string(),
+            ),
+            (
                 "jsx.jsx".to_string(),
                 "// <block>\nconst Comp = () => <div/>;\n// </block>".to_string(),
             ),

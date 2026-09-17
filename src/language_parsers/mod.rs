@@ -14,6 +14,7 @@ mod hcl;
 mod html;
 mod java;
 mod javascript;
+mod json;
 mod kotlin;
 mod lua;
 mod makefile;
@@ -76,6 +77,7 @@ pub fn language_parsers() -> anyhow::Result<LanguageParsers> {
     let html_parser = parser(html::parser()?);
     let java_parser = parser(java::parser()?);
     let js_parser = parser(javascript::parser()?);
+    let json_parser = parser(json::parser()?);
     let kotlin_parser = parser(kotlin::parser()?);
     let lua_parser = parser(lua::parser()?);
     let makefile_parser = parser(makefile::parser()?);
@@ -138,6 +140,8 @@ pub fn language_parsers() -> anyhow::Result<LanguageParsers> {
         ("java".into(), java_parser),
         ("jenkinsfile".into(), groovy_parser),
         ("js".into(), Arc::clone(&js_parser)),
+        ("json".into(), Arc::clone(&json_parser)),
+        ("jsonc".into(), json_parser),
         ("jsx".into(), js_parser),
         ("kt".into(), Arc::clone(&kotlin_parser)),
         ("kts".into(), kotlin_parser),
