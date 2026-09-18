@@ -1,12 +1,11 @@
-use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{
-    Comment, CommentsParser, TreeSitterCommentsParser, Visit,
+    Comment, CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser, Visit,
     c_style_and_doc_line_and_block_comment_text,
 };
 
-/// Returns a [`BlocksParser`] for Java.
-pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
-    Ok(BlocksFromCommentsParser::new(comments_parser()?))
+/// Returns a [`LanguageParser`] for Java.
+pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
+    Ok(LanguageParserImpl::new(comments_parser()?))
 }
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
@@ -52,7 +51,7 @@ mod tests {
 }
 "#;
         let blocks = parser()?
-            .parse(contents)
+            .parse_blocks(contents)
             .collect::<anyhow::Result<Vec<_>>>()?;
         let names: Vec<&str> = blocks
             .iter()

@@ -1,9 +1,10 @@
-use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
-use crate::language_parsers::{CommentsParser, python_style_comments_parser};
+use crate::language_parsers::{
+    CommentsParser, LanguageParser, LanguageParserImpl, python_style_comments_parser,
+};
 
-/// Returns a [`BlocksParser`] for Python.
-pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
-    Ok(BlocksFromCommentsParser::new(comments_parser()?))
+/// Returns a [`LanguageParser`] for Python.
+pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
+    Ok(LanguageParserImpl::new(comments_parser()?))
 }
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {

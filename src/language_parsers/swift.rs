@@ -1,9 +1,11 @@
-use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
-use crate::language_parsers::{CommentsParser, c_style_and_doc_line_and_block_comments_parser};
+use crate::language_parsers::{
+    CommentsParser, LanguageParser, LanguageParserImpl,
+    c_style_and_doc_line_and_block_comments_parser,
+};
 
-/// Returns a [`BlocksParser`] for Swift.
-pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
-    Ok(BlocksFromCommentsParser::new(comments_parser()?))
+/// Returns a [`LanguageParser`] for Swift.
+pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
+    Ok(LanguageParserImpl::new(comments_parser()?))
 }
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {

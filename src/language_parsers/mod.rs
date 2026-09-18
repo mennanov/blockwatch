@@ -37,7 +37,9 @@ mod typescript;
 mod xml;
 mod yaml;
 
-use crate::block_parser::BlocksParser;
+use crate::block_parser::BlocksFromCommentsParser;
+use crate::blocks::Block;
+use crate::symbols::{Symbol, SymbolsParser};
 use crate::{Position, character_column_at};
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -45,20 +47,87 @@ use std::ops::Range;
 use std::sync::{Arc, Mutex};
 use tree_sitter::{Language, Node, Parser, Tree, TreeCursor};
 
+/// Parses the source files of one language.
+pub trait LanguageParser: Send + Sync {
+    /// Returns an iterator over the [`Block`]s found in the given `contents` string.
+    ///
+    /// The blocks are required to be yielded sorted by the `starts_at` field in ascending order.
+    ///
+    /// The iteration stops at the first error: whatever follows a malformed or unbalanced tag
+    /// cannot be trusted to belong to the block the source intended.
+    ///
+    /// Returned boxed rather than as an `impl Iterator` because the trait is used as
+    /// `dyn LanguageParser`, which a return-position `impl Trait` would rule out.
+    fn parse_blocks<'a>(
+        &'a mut self,
+        contents: &'a str,
+    ) -> Box<dyn Iterator<Item = anyhow::Result<Block>> + 'a>;
+
+    /// Returns the addressable symbols defined in `contents`, in document order. Two symbols can
+    /// share a path, when the source defines the same name twice.
+    ///
+    /// # Errors
+    /// Returns an error if the language has no symbols, or if they cannot be derived from
+    /// `contents`.
+    fn parse_symbols(&mut self, contents: &str) -> anyhow::Result<Vec<Symbol>>;
+}
+
+/// A [`LanguageParser`] that finds blocks in the comments `C` extracts, and symbols if the language
+/// has a [`SymbolsParser`].
+pub(crate) struct LanguageParserImpl<C: CommentsParser> {
+    blocks_parser: BlocksFromCommentsParser<C>,
+    symbols_parser: Option<SymbolsParser>,
+}
+
+impl<C: CommentsParser> LanguageParserImpl<C> {
+    /// Creates a parser for a language whose comments `comments_parser` extracts, and which has
+    /// no symbols.
+    fn new(comments_parser: C) -> Self {
+        Self {
+            blocks_parser: BlocksFromCommentsParser::new(comments_parser),
+            symbols_parser: None,
+        }
+    }
+
+    /// Gives the language the symbols that `symbols_parser` derives.
+    fn with_symbols(self, symbols_parser: SymbolsParser) -> Self {
+        Self {
+            symbols_parser: Some(symbols_parser),
+            ..self
+        }
+    }
+}
+
+impl<C: CommentsParser> LanguageParser for LanguageParserImpl<C> {
+    fn parse_blocks<'a>(
+        &'a mut self,
+        contents: &'a str,
+    ) -> Box<dyn Iterator<Item = anyhow::Result<Block>> + 'a> {
+        Box::new(self.blocks_parser.parse_blocks(contents))
+    }
+
+    fn parse_symbols(&mut self, contents: &str) -> anyhow::Result<Vec<Symbol>> {
+        match &mut self.symbols_parser {
+            Some(symbols_parser) => symbols_parser.parse(contents),
+            None => anyhow::bail!("symbols are not supported for this language"),
+        }
+    }
+}
+
 /// A parser for one language, shared between files and threads.
 ///
 /// Each parser owns a mutable tree-sitter `Parser` and is therefore behind a `Mutex`; the `Arc`
 /// lets languages that share a grammar (`.cc` and `.cpp`, `.yaml` and `.yml`) share one instance.
-pub(crate) type LanguageParser = Arc<Mutex<Box<dyn BlocksParser>>>;
+pub(crate) type SharedLanguageParser = Arc<Mutex<Box<dyn LanguageParser>>>;
 
 /// Parsers keyed by file extension (or by the whole filename for extensionless files such as
 /// `Dockerfile`). Also serves as the list of extensions the CLI recognizes.
-pub type LanguageParsers = HashMap<OsString, LanguageParser>;
+pub type LanguageParsers = HashMap<OsString, SharedLanguageParser>;
 
 /// Returns a map of all available language parsers by their file extensions.
 pub fn language_parsers() -> anyhow::Result<LanguageParsers> {
-    fn parser<P: BlocksParser + 'static>(p: P) -> LanguageParser {
-        Arc::new(Mutex::new(Box::new(p) as Box<dyn BlocksParser>))
+    fn parser<P: LanguageParser + 'static>(p: P) -> SharedLanguageParser {
+        Arc::new(Mutex::new(Box::new(p) as Box<dyn LanguageParser>))
     }
 
     let bash_parser = parser(bash::parser()?);
@@ -698,4 +767,23 @@ fn c_style_multiline_comment_processor(comment: &str) -> String {
     result.push_str(&comment[close_idx + 2..]);
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn language_without_symbols_parse_symbols_returns_error() -> anyhow::Result<()> {
+        let mut parser = rust::parser()?;
+
+        let err = parser.parse_symbols("fn main() {}").unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("symbols are not supported for this language"),
+            "unexpected error message: {err}"
+        );
+        Ok(())
+    }
 }

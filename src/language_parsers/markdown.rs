@@ -1,13 +1,12 @@
-use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{
-    Comment, CommentsParser, TreeSitterCommentsParser, blank_preserving_line_breaks,
-    xml_style_comments_parser,
+    Comment, CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
+    blank_preserving_line_breaks, xml_style_comments_parser,
 };
 use tree_sitter::StreamingIterator;
 
-/// Returns a [`BlocksParser`] for Markdown.
-pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
-    Ok(BlocksFromCommentsParser::new(MdCommentsParser::new()))
+/// Returns a [`LanguageParser`] for Markdown.
+pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
+    Ok(LanguageParserImpl::new(MdCommentsParser::new()))
 }
 
 /// Parses Markdown `[//]:` comments and the HTML comments embedded in Markdown.
@@ -217,7 +216,9 @@ Some text here 3
 [//]: # (</block>)
 [//]: # (</block>)
 "#;
-        let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parser
+            .parse_blocks(content)
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(
             blocks,
@@ -258,7 +259,9 @@ Text
 
 [//]: /café (</block>)
 ";
-        let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parser
+            .parse_blocks(content)
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].attributes["name"], "unicode_title");
@@ -275,7 +278,9 @@ Text
         // character into several spaces; the column must still count the source's characters.
         let content = "`café` <!-- <block name=\"x\"> -->\nText\n\n<!-- </block> -->\n";
 
-        let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parser
+            .parse_blocks(content)
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(
             blocks[0].start_tag_position_range.start,
@@ -299,7 +304,9 @@ ending text <!-- </block> --> tail.
 
 Inline code `<!-- <block name="ignored"> -->` is not a comment.
 "#;
-        let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parser
+            .parse_blocks(content)
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(
             blocks,
@@ -326,7 +333,9 @@ Inline code `<!-- <block name="ignored"> -->` is not a comment.
 Some content.
 Closing text <!-- </block> --> tail.
 "#;
-        let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parser
+            .parse_blocks(content)
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].attributes["name"], "mixed");
@@ -347,7 +356,9 @@ Closing text <!-- </block> --> tail.
 | second |
 | <!-- </block> --> third |
 "#;
-        let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parser
+            .parse_blocks(content)
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].attributes["name"], "table_rows");
@@ -378,7 +389,9 @@ Second block content.
 
 [//]: # (</block>)
 "#;
-        let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parser
+            .parse_blocks(content)
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 2);
         assert_eq!(blocks[0].attributes["name"], "a");
@@ -413,7 +426,9 @@ Some markdown content
 Not wrapped in HTML tags on multiple lines
 <!-- </block> -->
 "#;
-        let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parser
+            .parse_blocks(content)
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(
             blocks,

@@ -143,10 +143,17 @@ Key module boundaries:
 - `src/repo_path.rs` — `RepoPath`, the one spelling of a repository-relative path. A diff header (`b/src/main.rs`), a
   walk entry and a `file:name` attribute all normalize here, so the same file is always the same map key.
 - `src/tag_parser.rs` — winnow-based parser for the `<block ...>` / `</block>` tag syntax.
-- `src/block_parser.rs` + `src/language_parsers/` — one tree-sitter grammar per language, each with a `parser()`
-  returning a `BlocksParser` that knows which tree-sitter node kinds are comments.
-  `language_parsers/mod.rs::language_parsers()` returns the extension→parser map; **adding a new language means adding a
-  module here and registering it in that function**.
+- `src/language_parsers/` — one tree-sitter grammar per language, each with a `parser()` returning a
+  `LanguageParser`. Every language knows which node kinds are its comments, and `src/block_parser.rs` turns those
+  comments into blocks. `language_parsers/mod.rs::language_parsers()` returns the extension→parser map; **adding a new
+  language means adding a module here and registering it in that function**. A language that supports path selectors
+  also has a tree-sitter query (`.scm`) and a `NodeDecoder`, which its `parser()` passes to `.with_symbols(...)`.
+- `src/symbols.rs` — the language-agnostic engine behind path selectors. `SymbolsParser` runs a language's query and
+  derives every addressable `Symbol` (its path, definition range and decoded value) in one walk of the tree. It refuses
+  a file with a syntax error rather than resolve a path through tree-sitter's error recovery. It does not check the
+  query itself: each language's own tests pin the complete list of symbols its query derives.
+- `src/name_path.rs` — `NamePath`, the RFC 6901 path after the `#` in a `file#/a/b` reference, and the path each
+  `Symbol` carries. A reference and a derived symbol are compared as `NamePath` values.
 - `src/validators/` — one file per validator (`affects`, `check_ai`, `check_lua`, `keep_sorted`, `keep_unique`,
   `line_count`, `line_pattern`, `same_as`), each exporting a `*ValidatorDetector`. All detectors are wired up in
   `validators/mod.rs`.

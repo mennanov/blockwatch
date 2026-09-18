@@ -1,10 +1,9 @@
-use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers;
-use crate::language_parsers::CommentsParser;
+use crate::language_parsers::{CommentsParser, LanguageParser, LanguageParserImpl};
 
-/// Returns a [`BlocksParser`] for Dockerfile (Containerfile).
-pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
-    Ok(BlocksFromCommentsParser::new(comments_parser()?))
+/// Returns a [`LanguageParser`] for Dockerfile (Containerfile).
+pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
+    Ok(LanguageParserImpl::new(comments_parser()?))
 }
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
@@ -144,7 +143,7 @@ COPY . /app
 # </block>
 "##;
         let blocks = parser()?
-            .parse(contents)
+            .parse_blocks(contents)
             .collect::<anyhow::Result<Vec<_>>>()?;
         let names: Vec<&str> = blocks
             .iter()

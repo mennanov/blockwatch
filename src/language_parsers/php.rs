@@ -1,11 +1,12 @@
-use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers;
-use crate::language_parsers::{Comment, CommentsParser, TreeSitterCommentsParser};
+use crate::language_parsers::{
+    Comment, CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
+};
 use tree_sitter::StreamingIterator;
 
-/// Returns a [`BlocksParser`] for PHP.
-pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
-    Ok(BlocksFromCommentsParser::new(comments_parser()?))
+/// Returns a [`LanguageParser`] for PHP.
+pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
+    Ok(LanguageParserImpl::new(comments_parser()?))
 }
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
@@ -176,7 +177,9 @@ spanning two lines -->
         let content =
             "<?php $x = \"café\"; ?><!-- <block name=\"x\"> -->\n<li>a</li>\n<!-- </block> -->\n";
 
-        let blocks = parser.parse(content).collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parser
+            .parse_blocks(content)
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(
             blocks[0].start_tag_position_range.start,

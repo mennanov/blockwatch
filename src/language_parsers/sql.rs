@@ -1,11 +1,11 @@
-use crate::block_parser::{BlocksFromCommentsParser, BlocksParser};
 use crate::language_parsers::{
-    CommentsParser, TreeSitterCommentsParser, c_style_multiline_comment_processor, comment_visitor,
+    CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
+    c_style_multiline_comment_processor, comment_visitor,
 };
 
-/// Returns a [`BlocksParser`] for SQL.
-pub(super) fn parser() -> anyhow::Result<impl BlocksParser> {
-    Ok(BlocksFromCommentsParser::new(comments_parser()?))
+/// Returns a [`LanguageParser`] for SQL.
+pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
+    Ok(LanguageParserImpl::new(comments_parser()?))
 }
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {

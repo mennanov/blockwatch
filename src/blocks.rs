@@ -1,7 +1,7 @@
 use crate::Position;
 use crate::diff_parser::{self, LineChange, LineChangeKind};
 use crate::fs::{FileSystem, PathChecker};
-use crate::language_parsers::{LanguageParser, LanguageParsers};
+use crate::language_parsers::{LanguageParsers, SharedLanguageParser};
 use crate::repo_path::RepoPath;
 use anyhow::{Context, anyhow, bail};
 use serde_repr::Serialize_repr;
@@ -520,7 +520,7 @@ pub fn parse_file(
     let blocks_with_context = parser
         .lock()
         .expect("no active locks")
-        .parse(&source_code)
+        .parse_blocks(&source_code)
         .filter_map(|block| {
             let block = match block {
                 Ok(block) => block,
@@ -629,11 +629,14 @@ fn reject_duplicate_name(
     }
 }
 
+/// Resolves the language parser for `file_path` considering configured extension remappings.
+///
+/// Returns `None` if the file extension or filename is not supported by any registered parser.
 fn parser_for_file_path<'p>(
     file_path: &Path,
     parsers: &'p LanguageParsers,
     extra_file_extensions: &HashMap<OsString, OsString>,
-) -> Option<&'p LanguageParser> {
+) -> Option<&'p SharedLanguageParser> {
     let file_name = file_path.file_name()?.to_str()?;
 
     for (i, _) in file_name.match_indices('.').rev() {
@@ -652,7 +655,7 @@ fn try_parser_for_extension<'p>(
     extension: &OsString,
     parsers: &'p LanguageParsers,
     extra_file_extensions: &HashMap<OsString, OsString>,
-) -> Option<&'p LanguageParser> {
+) -> Option<&'p SharedLanguageParser> {
     let ext = if let Some(ext) = extra_file_extensions.get(extension) {
         ext
     } else {

@@ -43,7 +43,7 @@ fn parse_rust_blocks(source: &str) -> anyhow::Result<Vec<Block>> {
     parsers[&OsString::from("rs")]
         .lock()
         .expect("no active locks")
-        .parse(source)
+        .parse_blocks(source)
         .collect()
 }
 

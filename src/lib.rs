@@ -19,6 +19,8 @@ pub mod repo_path;
 pub mod report;
 /// Renders the violations of a run as a SARIF log, the format code-scanning services read.
 pub mod sarif;
+/// AST symbol query engine for name-path selector resolution.
+pub mod symbols;
 mod tag_parser;
 /// The rules enforced on blocks (`affects`, `keep-sorted`, …) and the machinery that runs them.
 pub mod validators;

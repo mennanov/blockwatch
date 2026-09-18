@@ -55,6 +55,19 @@ impl NamePath {
     pub fn segments(&self) -> &[String] {
         &self.segments
     }
+
+    /// Creates a rooted [`NamePath`] from unescaped segments.
+    ///
+    /// # Panics
+    /// Panics if `segments` is empty. A rooted path has at least one segment: `/` is the path of
+    /// the empty name.
+    pub(crate) fn from_segments(segments: Vec<String>) -> Self {
+        assert!(
+            !segments.is_empty(),
+            "a name path needs at least one segment"
+        );
+        Self { segments }
+    }
 }
 
 /// Characters that must be percent-encoded when formatting a name path segment.
@@ -325,5 +338,18 @@ mod tests {
         let reparsed = NamePath::parse(&path.to_string())?;
         assert_eq!(reparsed, path);
         Ok(())
+    }
+
+    #[test]
+    fn valid_segments_provided_from_segments_constructs_rooted_path() {
+        let path = NamePath::from_segments(vec!["dependencies".to_string(), "inngest".to_string()]);
+        assert_eq!(path.to_string(), "/dependencies/inngest");
+        assert_eq!(path.segments(), &["dependencies", "inngest"]);
+    }
+
+    #[test]
+    #[should_panic(expected = "a name path needs at least one segment")]
+    fn empty_segments_provided_from_segments_panics() {
+        NamePath::from_segments(vec![]);
     }
 }
