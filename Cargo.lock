@@ -297,6 +297,7 @@ dependencies = [
  "serde_json",
  "serde_repr",
  "similar",
+ "strsim",
  "strum",
  "strum_macros",
  "tempfile",

@@ -12,7 +12,7 @@ use tree_sitter::StreamingIterator;
 /// unquoted scalar value if the symbol represents a scalar.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Symbol {
-    /// The rooted name path identifying this symbol (e.g. `/dependencies/inngest`).
+    /// The symbol path of this symbol (e.g. `/dependencies/inngest`).
     pub path: NamePath,
     /// Byte range of the definition node (`@def` or `@item`) in the source.
     pub def_byte_range: Range<usize>,
@@ -42,6 +42,71 @@ impl Symbol {
     pub fn position_range(&self, source: &str) -> Range<Position> {
         position_at(source, self.def_byte_range.start)..position_at(source, self.def_byte_range.end)
     }
+}
+
+/// Why a symbol path did not resolve to exactly one symbol.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ResolveError<'a> {
+    /// No symbol has the path. `hints` holds the paths that resemble it, the most alike first.
+    NotFound { hints: Vec<&'a NamePath> },
+    /// Several symbols have the path. `candidates` holds every one of them, in document order.
+    Ambiguous { candidates: Vec<&'a Symbol> },
+}
+
+/// The most hints a path that does not resolve gets.
+const MAX_HINTS: usize = 3;
+
+/// How alike a path has to be to the one that does not resolve to be a hint, as a normalized edit
+/// distance from 0 (nothing in common) to 1 (identical).
+const MIN_HINT_SIMILARITY: f64 = 0.6;
+
+/// Finds a matching `Symbol` in `symbols` for the given `path`.
+///
+/// When no symbol has `path`, the hints are the paths that resemble it: those at least 60% alike
+/// by edit distance, and those that end in the same segment.
+///
+/// # Errors
+/// Returns [`ResolveError::NotFound`] when no symbol matches `path`, and
+/// [`ResolveError::Ambiguous`] when several do.
+pub(crate) fn resolve<'a>(
+    symbols: &'a [Symbol],
+    path: &NamePath,
+) -> Result<&'a Symbol, ResolveError<'a>> {
+    let candidates: Vec<&Symbol> = symbols
+        .iter()
+        .filter(|symbol| symbol.path == *path)
+        .collect();
+    match candidates.len() {
+        0 => Err(ResolveError::NotFound {
+            hints: hints(symbols, path),
+        }),
+        1 => Ok(candidates[0]),
+        _ => Err(ResolveError::Ambiguous { candidates }),
+    }
+}
+
+/// The paths in `symbols` that resemble `path`.
+fn hints<'a>(symbols: &'a [Symbol], path: &NamePath) -> Vec<&'a NamePath> {
+    // The paths are compared as written, escapes included, so that a `/` left unescaped in a key
+    // reads as a small difference.
+    let written = path.to_string();
+    let mut alike: Vec<(f64, &NamePath)> = symbols
+        .iter()
+        .map(|symbol| {
+            let similarity = strsim::normalized_levenshtein(&written, &symbol.path.to_string());
+            (similarity, &symbol.path)
+        })
+        .filter(|(similarity, candidate)| {
+            *similarity >= MIN_HINT_SIMILARITY
+                || candidate.segments().last() == path.segments().last()
+        })
+        .collect();
+    alike.sort_by(|(a, _), (b, _)| b.total_cmp(a));
+    alike
+        .into_iter()
+        .take(MAX_HINTS)
+        .map(|(_, candidate)| candidate)
+        .collect()
 }
 
 /// The semantic role a query capture plays in deriving a symbol path or value.
@@ -501,7 +566,9 @@ mod tests {
             (pair key: (string (string_content) @name) value: (array)) @def
             (array (number) @value @item)
         "#;
-        let source = "{\n  \"é\": [1, 22]\n}";
+        let source = r#"{
+  "é": [1, 22]
+}"#;
 
         let symbols = json_symbols_parser(range_query)?.parse(source)?;
 
@@ -579,7 +646,10 @@ mod tests {
 
     #[test]
     fn source_with_several_syntax_errors_parse_reports_the_first() {
-        let source = "{\n  \"a\": 1 \"b\": 2,\n  \"c\": ,\n}";
+        let source = r#"{
+  "a": 1 "b": 2,
+  "c": ,
+}"#;
         let err = parser_with_any_query().parse(source).unwrap_err();
         assert!(
             err.to_string()
@@ -633,6 +703,120 @@ mod tests {
             err.to_string()
                 .contains("failed to compile tree-sitter symbol query"),
             "unexpected error message: {err}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod resolve_tests {
+    use super::*;
+
+    fn path(path: &str) -> NamePath {
+        NamePath::parse(path).expect("the path is valid")
+    }
+
+    /// A symbol at `path` whose definition starts at `start`, which tells apart symbols that
+    /// share a path.
+    fn symbol(path_text: &str, start: usize) -> Symbol {
+        Symbol {
+            path: path(path_text),
+            def_byte_range: start..start + 1,
+            value: None,
+        }
+    }
+
+    #[test]
+    fn path_of_one_symbol_returns_that_symbol() {
+        let symbols = [symbol("/a/b", 0), symbol("/b", 1)];
+
+        assert_eq!(resolve(&symbols, &path("/b")), Ok(&symbols[1]));
+    }
+
+    #[test]
+    fn path_of_several_symbols_returns_every_one_as_ambiguous() {
+        let symbols = [symbol("/v", 0), symbol("/w", 1), symbol("/v", 2)];
+
+        assert_eq!(
+            resolve(&symbols, &path("/v")),
+            Err(ResolveError::Ambiguous {
+                candidates: vec![&symbols[0], &symbols[2]]
+            })
+        );
+    }
+
+    #[test]
+    fn misspelled_path_returns_the_alike_paths_as_hints() {
+        // `/description` is 50% alike, below the floor.
+        let symbols = [
+            symbol("/description", 0),
+            symbol("/version", 1),
+            symbol("/name", 2),
+        ];
+
+        assert_eq!(
+            resolve(&symbols, &path("/verison")),
+            Err(ResolveError::NotFound {
+                hints: vec![&symbols[1].path]
+            })
+        );
+    }
+
+    #[test]
+    fn path_with_an_unescaped_slash_returns_the_escaped_path_as_a_hint() {
+        let symbols = [symbol("/dependencies/@types~1node", 0), symbol("/name", 1)];
+
+        assert_eq!(
+            resolve(&symbols, &path("/dependencies/@types/node")),
+            Err(ResolveError::NotFound {
+                hints: vec![&symbols[0].path]
+            })
+        );
+    }
+
+    #[test]
+    fn path_moved_deeper_returns_it_as_a_hint() {
+        // Both candidates are well below the floor, and only the first ends in the same segment.
+        let symbols = [
+            symbol("/network/services/RetryConfig", 0),
+            symbol("/network/services/timeout", 1),
+        ];
+
+        assert_eq!(
+            resolve(&symbols, &path("/RetryConfig")),
+            Err(ResolveError::NotFound {
+                hints: vec![&symbols[0].path]
+            })
+        );
+    }
+
+    #[test]
+    fn many_alike_paths_returns_the_three_most_alike_first() {
+        // 62%, 73%, 89% and 80% alike.
+        let symbols = [
+            symbol("/time", 0),
+            symbol("/timeout_ms", 1),
+            symbol("/timeouts", 2),
+            symbol("/timeout_s", 3),
+        ];
+
+        assert_eq!(
+            resolve(&symbols, &path("/timeout")),
+            Err(ResolveError::NotFound {
+                hints: vec![&symbols[2].path, &symbols[3].path, &symbols[1].path]
+            })
+        );
+    }
+
+    #[test]
+    fn path_exactly_at_the_similarity_floor_returns_it_as_a_hint() {
+        // Two of five characters differ in the first, which is 60% alike, and three in the second.
+        let symbols = [symbol("/abXY", 0), symbol("/aXYZ", 1)];
+
+        assert_eq!(
+            resolve(&symbols, &path("/abcd")),
+            Err(ResolveError::NotFound {
+                hints: vec![&symbols[0].path]
+            })
         );
     }
 }

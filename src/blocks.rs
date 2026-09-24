@@ -632,7 +632,7 @@ fn reject_duplicate_name(
 /// Resolves the language parser for `file_path` considering configured extension remappings.
 ///
 /// Returns `None` if the file extension or filename is not supported by any registered parser.
-fn parser_for_file_path<'p>(
+pub(crate) fn parser_for_file_path<'p>(
     file_path: &Path,
     parsers: &'p LanguageParsers,
     extra_file_extensions: &HashMap<OsString, OsString>,

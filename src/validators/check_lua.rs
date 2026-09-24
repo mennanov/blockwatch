@@ -1,9 +1,9 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
-use crate::validators::parse_block_references;
+use crate::validators::parse_target_references;
 use crate::validators::{
-    BlockReference, PatternContent, ValidationContext, ValidationReport, ValidatorAsync,
+    PatternContent, TargetReference, ValidationContext, ValidationReport, ValidatorAsync,
     ValidatorDetector, ValidatorType, Violation, ViolationRange, block_content_for_pattern,
 };
 use anyhow::{Context, anyhow};
@@ -453,7 +453,7 @@ fn create_violation(
 /// A target referenced by the validated block's `affects` attribute, exposed to Lua scripts.
 struct AffectedBlock {
     file: RepoPath,
-    /// `None` for a whole-file reference, which names no block.
+    /// `None` for a whole-file reference, which has no block name.
     name: Option<String>,
     content: String,
 }
@@ -473,7 +473,7 @@ fn resolve_affected_blocks<Fs: FileSystem>(
     let Some(affects) = block.attributes.get("affects") else {
         return Ok(result);
     };
-    let references = parse_block_references(affects).with_context(|| {
+    let references = parse_target_references(affects).with_context(|| {
         format!(
             "invalid affects reference on block {}:{} at line {}",
             current_file_path,
@@ -483,7 +483,7 @@ fn resolve_affected_blocks<Fs: FileSystem>(
     })?;
     for reference in references {
         match reference {
-            BlockReference::Block { file, name } => {
+            TargetReference::Block { file, name } => {
                 let file = file.unwrap_or_else(|| current_file_path.clone());
                 let Some(file_blocks) = context.blocks.get(&file) else {
                     continue;
@@ -502,7 +502,7 @@ fn resolve_affected_blocks<Fs: FileSystem>(
                     }
                 }
             }
-            BlockReference::File(file) => {
+            TargetReference::File(file) => {
                 let content = match context.blocks.get(&file) {
                     Some(file_blocks) => file_blocks.file_content.clone(),
                     None => match file_system.read_to_string(file.as_path()) {
@@ -516,8 +516,8 @@ fn resolve_affected_blocks<Fs: FileSystem>(
                     content: content.trim().to_string(),
                 });
             }
-            BlockReference::Path { .. } => {
-                anyhow::bail!("path selectors are not supported in check-lua affects attribute");
+            TargetReference::Symbol { .. } => {
+                anyhow::bail!("symbol references are not supported in check-lua affects attribute");
             }
         }
     }

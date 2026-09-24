@@ -3,7 +3,7 @@ use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{
-    BlockReference, ValidationReport, ValidatorType, Violation, ViolationRange,
+    TargetReference, ValidationReport, ValidatorType, Violation, ViolationRange,
 };
 use anyhow::{Context, anyhow};
 use serde::Serialize;
@@ -157,7 +157,7 @@ fn reference_violations<Fs: FileSystem>(
     let mut violations = Vec::new();
     for reference in parse_references(file_path, &block_with_context.block, affects)? {
         let violation = match reference {
-            BlockReference::Block { file, name } => block_reference_violation(
+            TargetReference::Block { file, name } => block_reference_violation(
                 targets,
                 file_path,
                 block_with_context,
@@ -165,11 +165,11 @@ fn reference_violations<Fs: FileSystem>(
                 &file.unwrap_or_else(|| file_path.clone()),
                 &name,
             )?,
-            BlockReference::File(target_file) => {
+            TargetReference::File(target_file) => {
                 file_reference_violation(targets, file_path, block_with_context, &target_file)?
             }
-            BlockReference::Path { .. } => {
-                anyhow::bail!("path selectors are not yet supported in affects");
+            TargetReference::Symbol { .. } => {
+                anyhow::bail!("symbol references are not yet supported in affects");
             }
         };
         violations.extend(violation);
@@ -183,8 +183,8 @@ fn parse_references(
     file_path: &RepoPath,
     block: &Block,
     affects: &str,
-) -> anyhow::Result<Vec<BlockReference>> {
-    validators::parse_block_references(affects).with_context(|| {
+) -> anyhow::Result<Vec<TargetReference>> {
+    validators::parse_target_references(affects).with_context(|| {
         format!(
             "invalid affects reference on block {}:{} at line {}",
             file_path,

@@ -2,7 +2,8 @@ use anyhow::{Context, bail};
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 use std::fmt;
 
-/// A rooted name path selector addressing a syntax element within a file.
+/// A symbol path: the rooted path after the `#` of a symbol reference, which addresses a symbol
+/// within a file.
 ///
 /// Follows RFC 6901 JSON Pointer syntax:
 /// - Always begins with a leading `/`.
@@ -16,7 +17,7 @@ pub struct NamePath {
 }
 
 impl NamePath {
-    /// Parses and validates a name path fragment.
+    /// Parses and validates a symbol path.
     ///
     /// The input may optionally include a leading `#`. The path must be rooted with a leading `/`.
     /// `%2F` acts as a `/` separator as well.
@@ -24,7 +25,7 @@ impl NamePath {
         let trimmed = fragment.trim();
         let path_str = trimmed.strip_prefix('#').unwrap_or(trimmed);
         if path_str.is_empty() {
-            bail!("path cannot be empty; must start with '/' (e.g. \"/\")");
+            bail!("symbol path cannot be empty; it must start with '/' (e.g. \"/\")");
         }
 
         validate_percent_encoding(path_str)?;
@@ -33,13 +34,13 @@ impl NamePath {
         // consistently acts as a separator in all positions, as required by RFC 6901 §6.
         let decoded = percent_encoding::percent_decode_str(path_str)
             .decode_utf8()
-            .with_context(|| format!("path \"{fragment}\" contains invalid UTF-8 bytes"))?;
+            .with_context(|| format!("symbol path \"{fragment}\" contains invalid UTF-8 bytes"))?;
 
         if trimmed.starts_with('#') && decoded.starts_with(|c: char| c.is_whitespace()) {
-            bail!("unexpected whitespace after '#'; path must start with '/'");
+            bail!("unexpected whitespace after '#'; symbol path must start with '/'");
         }
         if !decoded.starts_with('/') {
-            bail!("path must start with '/' (e.g. \"/{decoded}\")");
+            bail!("symbol path must start with '/' (e.g. \"/{decoded}\")");
         }
 
         // A rooted path always has a leading `/`, so the segment slice starts after index 1.
@@ -64,20 +65,20 @@ impl NamePath {
     pub(crate) fn from_segments(segments: Vec<String>) -> Self {
         assert!(
             !segments.is_empty(),
-            "a name path needs at least one segment"
+            "a symbol path needs at least one segment"
         );
         Self { segments }
     }
 }
 
-/// Characters that must be percent-encoded when formatting a name path segment.
+/// Characters that must be percent-encoded when formatting a symbol path segment.
 ///
 /// In addition to ASCII control characters and non-ASCII bytes, encodes characters that have
 /// special meaning in BlockWatch attributes and URI fragments:
 /// - `%`: prefix for percent-encoded bytes; raw `%` must be `%25` to avoid ambiguity.
 /// - `,`: separates multiple references in block attributes.
 /// - `:`: separates file and block names in references.
-/// - `#`: separates file path and selector fragment.
+/// - `#`: separates the file path from the symbol path.
 /// - `"`: delimits double-quoted attribute values in block comments.
 /// - `'`: delimits single-quoted attribute values in block comments.
 /// - `' '`: space, because block references are trimmed.
@@ -112,7 +113,7 @@ fn validate_percent_encoding(s: &str) -> anyhow::Result<()> {
     for remainder in s.split('%').skip(1) {
         match remainder.as_bytes() {
             [h, l, ..] if h.is_ascii_hexdigit() && l.is_ascii_hexdigit() => {}
-            _ => bail!("invalid percent escape in path \"{s}\""),
+            _ => bail!("invalid percent escape in symbol path \"{s}\""),
         }
     }
     Ok(())
@@ -198,13 +199,15 @@ mod tests {
     fn unrooted_path_fails_with_hint() {
         let err = NamePath::parse("dependencies/inngest").unwrap_err();
         assert!(
-            err.to_string().contains("path must start with '/'"),
+            err.to_string().contains("symbol path must start with '/'"),
             "unexpected error message: {err}"
         );
 
         let err_percent = NamePath::parse("%20dependencies/inngest").unwrap_err();
         assert!(
-            err_percent.to_string().contains("path must start with '/'"),
+            err_percent
+                .to_string()
+                .contains("symbol path must start with '/'"),
             "unexpected error message: {err_percent}"
         );
     }
@@ -348,7 +351,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "a name path needs at least one segment")]
+    #[should_panic(expected = "a symbol path needs at least one segment")]
     fn empty_segments_provided_from_segments_panics() {
         NamePath::from_segments(vec![]);
     }

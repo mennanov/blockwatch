@@ -1,9 +1,13 @@
-use crate::blocks::{Block, BlockWithContext, FileBlocks, every_block, parse_file};
+use crate::blocks::{
+    Block, BlockWithContext, FileBlocks, every_block, parse_file, parser_for_file_path,
+};
 use crate::fs::FileSystem;
+use crate::name_path::NamePath;
 use crate::repo_path::RepoPath;
+use crate::symbols::{Symbol, resolve};
 use crate::validators::{
-    self, BlockReference, ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType,
-    Violation, ViolationRange, parse_number, value_match,
+    self, TargetReference, ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType,
+    Violation, ViolationRange, parse_number, resolve_error_reason, value_match,
 };
 use anyhow::{Context, anyhow};
 use regex::Regex;
@@ -122,8 +126,8 @@ fn parse_references(
     file_path: &RepoPath,
     block: &Block,
     same_as: &str,
-) -> anyhow::Result<Vec<BlockReference>> {
-    validators::parse_block_references(same_as).with_context(|| {
+) -> anyhow::Result<Vec<TargetReference>> {
+    validators::parse_target_references(same_as).with_context(|| {
         format!(
             "invalid same-as reference on block {}:{} at line {}",
             file_path,
@@ -142,35 +146,32 @@ fn reference_violation<Fs: FileSystem>(
     comparison: &Comparison,
     file_path: &RepoPath,
     block: &Block,
-    reference: BlockReference,
+    reference: TargetReference,
 ) -> anyhow::Result<Option<Violation>> {
-    let (target_file, target_name, target_items) = match reference {
-        BlockReference::Block { file, name } => {
-            // A reference like ":foo" is resolved relative to the file the block is in.
+    // A reference without a file, like ":foo" or "#/foo", points into the file the block is in.
+    let (target_file, target_name, resolution) = match reference {
+        TargetReference::Block { file, name } => {
             let target_file = file.unwrap_or_else(|| file_path.clone());
-            let items = targets.named_block_items(&target_file, &name)?;
-            (target_file, Some(name), items)
+            let resolution = targets.named_block_items(&target_file, &name)?;
+            (target_file, Some(name), resolution)
         }
-        BlockReference::File(target_file) => {
+        TargetReference::File(target_file) => {
             let items = targets.whole_file_items(&target_file, comparison.pattern.as_ref())?;
-            (target_file, None, Some(items))
+            (target_file, None, Ok(items))
         }
-        BlockReference::Path { .. } => {
-            anyhow::bail!("path selectors are not yet supported in same-as");
+        TargetReference::Symbol { file, path } => {
+            let target_file = file.unwrap_or_else(|| file_path.clone());
+            let resolution =
+                targets.symbol_items(&target_file, &path, comparison.pattern.as_ref())?;
+            (target_file, Some(format!("#{path}")), resolution)
         }
     };
     let target_name = target_name.as_deref();
-    let Some(target_items) = target_items else {
-        return Ok(Some(create_violation(
-            file_path,
-            block,
-            &target_file,
-            target_name,
-            "target block not found",
-        )?));
+    let reason = match resolution {
+        Ok(target_items) => comparison.disagreement_with(target_items),
+        Err(reason) => Some(reason),
     };
-    comparison
-        .disagreement_with(target_items)
+    reason
         .map(|reason| create_violation(file_path, block, &target_file, target_name, &reason))
         .transpose()
 }
@@ -242,6 +243,10 @@ fn extract_named(file_blocks: &FileBlocks, name: &str) -> anyhow::Result<Option<
     Ok(None)
 }
 
+/// A target's comparable items, or the reason it has none. The reason is reported as the
+/// reference's violation (not a hard error).
+type Resolution = Result<Vec<String>, String>;
+
 /// Resolves the targets a `same-as` reference names to their comparable items.
 struct TargetItems<'a, Fs: FileSystem> {
     context: &'a validators::ValidationContext,
@@ -249,8 +254,10 @@ struct TargetItems<'a, Fs: FileSystem> {
     file_system: &'a Fs,
     /// Files parsed from the disk while looking for a named target block.
     parsed: HashMap<RepoPath, FileBlocks>,
-    /// Whole-file targets, which are read but never parsed.
+    /// The text of whole-file and symbol targets that are not in the validation context.
     contents: HashMap<RepoPath, String>,
+    /// The symbols of every file a symbol target points into, derived once per file.
+    symbols: HashMap<RepoPath, Vec<Symbol>>,
 }
 
 impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
@@ -260,6 +267,7 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
             file_system,
             parsed: HashMap::new(),
             contents: HashMap::new(),
+            symbols: HashMap::new(),
         }
     }
 
@@ -267,15 +275,17 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
     /// 1. blocks already parsed into the validation context (no I/O),
     /// 2. the files read earlier during this run,
     /// 3. reading and parsing the file, keeping the result.
+    ///
+    /// Resolves to a reason instead when the file has no block with that name.
     fn named_block_items(
         &mut self,
         target_file: &RepoPath,
         target_name: &str,
-    ) -> anyhow::Result<Option<Vec<String>>> {
+    ) -> anyhow::Result<Resolution> {
         if let Some(file_blocks) = self.context.blocks.get(target_file)
             && let Some(items) = extract_named(file_blocks, target_name)?
         {
-            return Ok(Some(items));
+            return Ok(Ok(items));
         }
         let file_blocks = match self.parsed.entry(target_file.clone()) {
             Entry::Occupied(entry) => entry.into_mut(),
@@ -297,7 +307,8 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
                 entry.insert(parsed)
             }
         };
-        extract_named(file_blocks, target_name)
+        Ok(extract_named(file_blocks, target_name)?
+            .ok_or_else(|| "target block not found".to_string()))
     }
 
     /// Resolves a whole-file target's comparable items from the file's entire text.
@@ -311,23 +322,99 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
         target_file: &RepoPath,
         pattern: Option<&String>,
     ) -> anyhow::Result<Vec<String>> {
-        if let Some(file_blocks) = self.context.blocks.get(target_file) {
-            return extract_items_from(&file_blocks.file_content, pattern);
-        }
-        let content = match self.contents.entry(target_file.clone()) {
+        let content = target_content(
+            self.context,
+            self.file_system,
+            &mut self.contents,
+            target_file,
+        )?;
+        extract_items_from(content, pattern)
+    }
+
+    /// Resolves a symbol target's comparable items from the symbol's value, or from the text of
+    /// its definition when it has no value.
+    ///
+    /// Resolves to a reason instead when no symbol, or more than one, has `path`. A file that
+    /// cannot be read, has no grammar or no symbols, or does not parse, is an `Err`.
+    fn symbol_items(
+        &mut self,
+        target_file: &RepoPath,
+        path: &NamePath,
+        pattern: Option<&String>,
+    ) -> anyhow::Result<Resolution> {
+        let content = target_content(
+            self.context,
+            self.file_system,
+            &mut self.contents,
+            target_file,
+        )?;
+        let file_symbols = match self.symbols.entry(target_file.clone()) {
             Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => entry.insert(
-                self.file_system
-                    .read_to_string(target_file.as_path())
+            Entry::Vacant(entry) => {
+                let parser = parser_for_file_path(
+                    target_file.as_path(),
+                    self.context.parsers(),
+                    self.context.extra_file_extensions(),
+                )
+                .ok_or_else(|| {
+                    anyhow!(
+                        "same-as target file format is unsupported: {}",
+                        target_file.display()
+                    )
+                })?;
+                let symbols = parser
+                    .lock()
+                    .expect("no active locks")
+                    .parse_symbols(content)
                     .with_context(|| {
                         format!(
-                            "failed to read same-as target file: {}",
+                            "failed to resolve same-as target {}#{path}",
                             target_file.display()
                         )
-                    })?,
-            ),
+                    })?;
+                entry.insert(symbols)
+            }
         };
-        extract_items_from(content, pattern)
+        match resolve(file_symbols, path) {
+            Ok(symbol) => {
+                let text = match &symbol.value {
+                    Some(value) => value.as_str(),
+                    None => &content[symbol.def_byte_range.clone()],
+                };
+                Ok(Ok(extract_items_from(text, pattern)?))
+            }
+            Err(error) => Ok(Err(resolve_error_reason(&error, content))),
+        }
+    }
+}
+
+/// The text of `target_file`: from the validation context when the file is in it, and otherwise
+/// read through `file_system` once and kept in `contents`.
+///
+/// # Errors
+/// Returns an error if the file is not in the context and cannot be read.
+fn target_content<'c, Fs: FileSystem>(
+    context: &'c validators::ValidationContext,
+    file_system: &Fs,
+    contents: &'c mut HashMap<RepoPath, String>,
+    target_file: &RepoPath,
+) -> anyhow::Result<&'c str> {
+    if let Some(file_blocks) = context.blocks.get(target_file) {
+        return Ok(&file_blocks.file_content);
+    }
+    match contents.entry(target_file.clone()) {
+        Entry::Occupied(entry) => Ok(entry.into_mut()),
+        Entry::Vacant(entry) => {
+            let content = file_system
+                .read_to_string(target_file.as_path())
+                .with_context(|| {
+                    format!(
+                        "failed to read same-as target file: {}",
+                        target_file.display()
+                    )
+                })?;
+            Ok(entry.insert(content))
+        }
     }
 }
 
@@ -440,7 +527,7 @@ fn disagreement(source: &[String], target: &[String], mode: &Mode) -> Option<Str
 #[derive(Serialize)]
 struct SameAsViolation<'a> {
     target_file: &'a RepoPath,
-    /// Absent for a whole-file reference, which has no block name.
+    /// A block name, or a symbol path with its leading `#`. Absent for a whole-file reference.
     #[serde(skip_serializing_if = "Option::is_none")]
     target_name: Option<&'a str>,
     reason: &'a str,
@@ -455,6 +542,9 @@ fn create_violation(
 ) -> anyhow::Result<Violation> {
     let line = block.start_tag_position_range.start.line;
     let target = match target_name {
+        Some(target_name) if target_name.starts_with('#') => {
+            format!("{}{target_name}", target_file.display())
+        }
         Some(target_name) => format!("{}:{}", target_file.display(), target_name),
         None => format!("file {}", target_file.display()),
     };
@@ -577,12 +667,17 @@ mod validate_tests {
         let violations = validator(&[("config.py", source)])
             .validate(context)?
             .violations;
-        assert_eq!(
-            violations
-                .get(&RepoPath::from_reference("config.py")?)
-                .unwrap()
-                .len(),
-            1
+        let violations = violations
+            .get(&RepoPath::from_reference("config.py")?)
+            .unwrap();
+        assert_eq!(violations.len(), 1);
+        assert!(
+            violations[0]
+                .as_simple_diagnostic()
+                .message
+                .ends_with("disagrees with config.py:nope: target block not found"),
+            "unexpected message: {}",
+            violations[0].as_simple_diagnostic().message
         );
         Ok(())
     }
@@ -978,7 +1073,7 @@ mod validate_tests {
         );
         assert!(
             file[0].data.as_ref().unwrap().get("target_name").is_none(),
-            "a whole-file target names no block"
+            "a whole-file target has no block name"
         );
         Ok(())
     }
@@ -1009,6 +1104,175 @@ mod validate_tests {
         );
 
         assert!(validator(&[]).validate(context).is_err());
+        Ok(())
+    }
+
+    /// The target file of the symbol reference tests.
+    const PACKAGE_JSON: &str = r#"{"dependencies": {"inngest": "4.18.1"}}"#;
+
+    #[test]
+    fn symbol_with_an_equal_value_returns_no_violations() -> anyhow::Result<()> {
+        let context = validation_context(
+            "deps.py",
+            r#"# <block same-as="package.json#/dependencies/inngest">
+4.18.1
+# </block>"#,
+        );
+
+        let report = validator(&[("package.json", PACKAGE_JSON)]).validate(context)?;
+
+        assert_eq!(violation_count(&report), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn symbol_with_a_different_value_returns_a_violation() -> anyhow::Result<()> {
+        let context = validation_context(
+            "deps.py",
+            r#"# <block same-as="package.json#/dependencies/inngest">
+4.18.0
+# </block>"#,
+        );
+
+        let violations = validator(&[("package.json", PACKAGE_JSON)])
+            .validate(context)?
+            .violations;
+
+        let file = violations
+            .get(&RepoPath::from_reference("deps.py")?)
+            .unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0]
+                .message
+                .contains("disagrees with package.json#/dependencies/inngest:"),
+            "unexpected message: {}",
+            file[0].message
+        );
+        let data = file[0].data.as_ref().unwrap();
+        assert_eq!(data["target_file"], serde_json::json!("package.json"));
+        assert_eq!(
+            data["target_name"],
+            serde_json::json!("#/dependencies/inngest")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn symbol_without_a_value_compares_the_text_of_its_definition() -> anyhow::Result<()> {
+        // An object has no value, so the pattern reads the version out of the object's text.
+        let context = validation_context(
+            "deps.py",
+            r#"# <block same-as="package.json#/dependencies" same-as-pattern="\d+\.\d+\.\d+">
+4.18.1
+# </block>"#,
+        );
+
+        let report = validator(&[("package.json", PACKAGE_JSON)]).validate(context)?;
+
+        assert_eq!(violation_count(&report), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn missing_symbol_returns_a_violation_with_hints() -> anyhow::Result<()> {
+        let context = validation_context(
+            "deps.py",
+            r#"# <block same-as="package.json#/dependencies/ingest">
+4.18.1
+# </block>"#,
+        );
+
+        let violations = validator(&[("package.json", PACKAGE_JSON)])
+            .validate(context)?
+            .violations;
+
+        let message = &violations[&RepoPath::from_reference("deps.py")?][0].message;
+        assert!(
+            message
+                .ends_with("symbol not found; did you mean: /dependencies/inngest, /dependencies"),
+            "unexpected message: {message}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn ambiguous_symbol_returns_a_violation_with_its_positions() -> anyhow::Result<()> {
+        let context = validation_context(
+            "deps.py",
+            r#"# <block same-as="config.json#/v">
+1
+# </block>"#,
+        );
+
+        let violations = validator(&[("config.json", r#"{"v": 1, "v": 2}"#)])
+            .validate(context)?
+            .violations;
+
+        let message = &violations[&RepoPath::from_reference("deps.py")?][0].message;
+        assert!(
+            message.ends_with("ambiguous symbol, defined at 1:2, 1:10"),
+            "unexpected message: {message}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn symbol_without_a_file_resolves_in_the_referencing_file() -> anyhow::Result<()> {
+        let context = validation_context(
+            "config.json",
+            r##"{
+  // <block same-as="#/version" same-as-pattern="\d+\.\d+\.\d+">
+  "docs_version": "1.0.0",
+  // </block>
+  "version": "1.0.0"
+}"##,
+        );
+
+        let report = validator(&[]).validate(context)?;
+
+        assert_eq!(violation_count(&report), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn symbol_in_a_language_without_symbols_returns_an_error() -> anyhow::Result<()> {
+        let context = validation_context(
+            "deps.py",
+            r#"# <block same-as="config.py#/x">
+1
+# </block>"#,
+        );
+
+        let err = validator(&[("config.py", "x = 1\n")])
+            .validate(context)
+            .unwrap_err();
+
+        let message = format!("{err:#}");
+        assert!(
+            message.starts_with("failed to resolve same-as target config.py#/x: "),
+            "unexpected message: {message}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn symbol_in_a_file_without_a_grammar_returns_an_error() -> anyhow::Result<()> {
+        let context = validation_context(
+            "deps.py",
+            r#"# <block same-as="VERSION#/x">
+1
+# </block>"#,
+        );
+
+        let err = validator(&[("VERSION", "1.2.3\n")])
+            .validate(context)
+            .unwrap_err();
+
+        assert_eq!(
+            format!("{err:#}"),
+            "same-as target file format is unsupported: VERSION"
+        );
         Ok(())
     }
 

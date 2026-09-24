@@ -127,9 +127,11 @@ Pipeline, end-to-end, lives in `src/main.rs`:
 6. `validators::detect_validators` dispatches each block through `ValidatorDetector`s (one per validator type). A
    detector returns either `ValidatorType::Sync` or `ValidatorType::Async`. Async validators (e.g. `check-ai`) run on
    Tokio; the runtime is only started if at least one async validator is detected.
-7. Validators produce `Violation`s with `ViolationRange` + `BlockSeverity` (error/warning). Addresses passed to
-   `--suppress` / `--suppress-from` mark the violations they cover as suppressed: those are still reported, but no
-   longer fail the run.
+7. Validators produce `Violation`s with `ViolationRange` + `BlockSeverity` (error/warning). A symbol reference
+   (`file#/path`) is looked up with `symbols::resolve` among the symbols that `LanguageParser::parse_symbols` derives
+   from the target file, once per file. A missing or ambiguous symbol is a violation, and a target file that does not
+   parse ends the run. Addresses passed to `--suppress` / `--suppress-from` mark the violations they cover as
+   suppressed: those are still reported, but no longer fail the run.
 8. Violations go to stderr, as JSON diagnostics or as a SARIF 2.1.0 log depending on `--format`. The `--verbosity` run
    report goes to stdout. The exit code comes from the error-severity violations that remain.
 
@@ -146,9 +148,9 @@ Key module boundaries:
 - `src/language_parsers/` — one tree-sitter grammar per language, each with a `parser()` returning a
   `LanguageParser`. Every language knows which node kinds are its comments, and `src/block_parser.rs` turns those
   comments into blocks. `language_parsers/mod.rs::language_parsers()` returns the extension→parser map; **adding a new
-  language means adding a module here and registering it in that function**. A language that supports path selectors
-  also has a tree-sitter query (`.scm`) and a `NodeDecoder`, which its `parser()` passes to `.with_symbols(...)`.
-- `src/symbols.rs` — the language-agnostic engine behind path selectors. `SymbolsParser` runs a language's query and
+  language means adding a module here and registering it in that function**. A language that has symbols also
+  has a tree-sitter query (`.scm`) and a `NodeDecoder`, which its `parser()` passes to `.with_symbols(...)`.
+- `src/symbols.rs` — the language-agnostic engine behind symbol references. `SymbolsParser` runs a language's query and
   derives every addressable `Symbol` (its path, definition range and decoded value) in one walk of the tree. It refuses
   a file with a syntax error rather than resolve a path through tree-sitter's error recovery. It does not check the
   query itself: each language's own tests pin the complete list of symbols its query derives.

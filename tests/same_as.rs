@@ -62,8 +62,7 @@ index 1111111..2222222 100644
 
 #[test]
 fn whole_file_target_agreeing_with_the_block_passes() {
-    // The target is a JSON file, a format with no grammar, so it can only be referenced whole. The
-    // block's own `same-as-pattern` selects what to compare on each side.
+    // The block's own `same-as-pattern` selects what to compare on each side.
     let diff = r#"
 diff --git a/tests/testdata/same_as/whole_file_source.rs b/tests/testdata/same_as/whole_file_source.rs
 index 1111111..2222222 100644
@@ -101,5 +100,26 @@ index 1111111..2222222 100644
         .code(1)
         .stderr(predicate::str::contains(
             "disagrees with file tests/testdata/same_as/whole_file_target.json",
+        ));
+}
+
+#[test]
+fn symbol_targets_agreeing_with_the_blocks_pass() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/same_as/symbol_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
+fn symbol_target_disagreeing_with_the_block_fails() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/same_as/symbol_mismatch_source.rs");
+    cmd.output()
+        .unwrap()
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "disagrees with tests/testdata/same_as/package.json#/dependencies/inngest:",
         ));
 }

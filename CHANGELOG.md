@@ -15,11 +15,14 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 ### Added
 
 - Support for JSON (`.json`, `.jsonc`) files.
-- Name-path selector reference syntax (`file#/path` and `#/path`) in target references.
+- Symbol references in `same-as`. `same-as="package.json#/dependencies/inngest"` compares the block with the value at
+  that path in a JSON file, and `same-as="#/version"` with one in the block's own file. An object or an array is
+  compared as its source text. A missing or ambiguous symbol is reported as a violation. A target file with a syntax
+  error fails the run, and a trailing comma counts as one.
 
 ### Changed
 
-- **Breaking:** `#` is now reserved in target references to introduce name-path selectors (`file#/path` or `#/path`).
+- **Breaking:** `#` is now reserved in target references to introduce symbol references (`file#/path` or `#/path`).
   Consequently, block names containing `#` (`file:block#name`) are rejected as invalid, and files with `#` in their
   path can no longer be addressed. Combining `#` and `:` in the same reference is prohibited.
 

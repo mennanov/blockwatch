@@ -11,7 +11,7 @@ pub mod flags;
 pub mod fs;
 /// One tree-sitter-backed comment parser per supported language, keyed by file extension.
 pub mod language_parsers;
-/// `NamePath`: parsed and validated RFC 6901 name-path selector.
+/// `NamePath`: a parsed and validated RFC 6901 symbol path.
 pub mod name_path;
 /// `RepoPath`: the single spelling of a repository-relative file path used as a map key.
 pub mod repo_path;
@@ -19,7 +19,7 @@ pub mod repo_path;
 pub mod report;
 /// Renders the violations of a run as a SARIF log, the format code-scanning services read.
 pub mod sarif;
-/// AST symbol query engine for name-path selector resolution.
+/// Derives the symbols of a file: the elements a symbol reference can address.
 pub mod symbols;
 mod tag_parser;
 /// The rules enforced on blocks (`affects`, `keep-sorted`, …) and the machinery that runs them.
