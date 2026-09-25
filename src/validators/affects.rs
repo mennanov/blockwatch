@@ -1,9 +1,12 @@
 use crate::blocks::{Block, BlockWithContext, FileBlocks, every_block, parse_file};
+use crate::diff_parser::range_intersects_any;
 use crate::fs::FileSystem;
+use crate::name_path::NamePath;
 use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{
-    TargetReference, ValidationReport, ValidatorType, Violation, ViolationRange,
+    TargetFiles, TargetReference, TargetResult, ValidationReport, ValidatorType, Violation,
+    ViolationRange, target_display,
 };
 use anyhow::{Context, anyhow};
 use serde::Serialize;
@@ -31,7 +34,7 @@ impl<Fs: FileSystem + 'static> AffectsValidator<Fs> {
 #[derive(Serialize)]
 struct AffectsViolation<'a> {
     affected_block_file_path: &'a RepoPath,
-    /// Present only when a block referenced by name (as opposed to a whole file).
+    /// A block name, or a symbol path with its leading `#`. Absent for a whole-file reference.
     #[serde(skip_serializing_if = "Option::is_none")]
     affected_block_name: Option<&'a str>,
 }
@@ -72,6 +75,8 @@ struct TargetIndex<'a, Fs: FileSystem> {
     in_scope: HashMap<&'a RepoPath, HashMap<String, bool>>,
     /// The same, for the files read from the filesystem so far.
     read: HashMap<RepoPath, HashMap<String, bool>>,
+    /// The text and the symbols of the files that symbol references point into.
+    files: TargetFiles<'a, Fs>,
 }
 
 impl<'a, Fs: FileSystem> TargetIndex<'a, Fs> {
@@ -85,6 +90,7 @@ impl<'a, Fs: FileSystem> TargetIndex<'a, Fs> {
                 .map(|(file_path, file_blocks)| (file_path, name_index(file_blocks)))
                 .collect(),
             read: HashMap::new(),
+            files: TargetFiles::new(context, file_system),
         }
     }
 
@@ -131,6 +137,22 @@ impl<'a, Fs: FileSystem> TargetIndex<'a, Fs> {
         Ok(index.get(target_name).copied())
     }
 
+    /// Whether the diff touches the definition of the symbol at `path` in `target_file`.
+    ///
+    /// Resolves to a reason instead when no symbol, or more than one, has `path`. A file that
+    /// cannot be read, has no grammar or no symbols, or does not parse is an `Err`.
+    fn modifies_symbol(
+        &mut self,
+        target_file: &RepoPath,
+        path: &NamePath,
+    ) -> anyhow::Result<TargetResult<bool>> {
+        // A file the diff never mentions has no line changes, so nothing in it counts as modified.
+        let line_changes = self.context.line_changes_for(target_file).unwrap_or(&[]);
+        let (content, resolution) = self.files.resolve_symbol(target_file, path)?;
+        Ok(resolution
+            .map(|symbol| range_intersects_any(&symbol.position_range(content), line_changes)))
+    }
+
     /// Whether the diff mentions `target_file`.
     fn file_modified(&self, target_file: &RepoPath) -> bool {
         self.context.line_changes_for(target_file).is_some()
@@ -168,9 +190,14 @@ fn reference_violations<Fs: FileSystem>(
             TargetReference::File(target_file) => {
                 file_reference_violation(targets, file_path, block_with_context, &target_file)?
             }
-            TargetReference::Symbol { .. } => {
-                anyhow::bail!("symbol references are not yet supported in affects");
-            }
+            TargetReference::Symbol { file, path } => symbol_reference_violation(
+                targets,
+                file_path,
+                block_with_context,
+                // A reference like "#/foo" is resolved in the file the block is in.
+                &file.unwrap_or_else(|| file_path.clone()),
+                &path,
+            )?,
         };
         violations.extend(violation);
     }
@@ -218,6 +245,47 @@ fn block_reference_violation<Fs: FileSystem>(
             &block_with_context.block,
             target_file,
             Some(target_name),
+        )?));
+    }
+    Ok(None)
+}
+
+/// The violation a symbol reference produces, if any.
+fn symbol_reference_violation<Fs: FileSystem>(
+    targets: &mut TargetIndex<'_, Fs>,
+    file_path: &RepoPath,
+    block_with_context: &BlockWithContext,
+    target_file: &RepoPath,
+    path: &NamePath,
+) -> anyhow::Result<Option<Violation>> {
+    let block = &block_with_context.block;
+    let target_name = format!("#{path}");
+    let target_modified = match targets.modifies_symbol(target_file, path)? {
+        Ok(target_modified) => target_modified,
+        Err(reason) => {
+            let message = format!(
+                "Block {}:{} at line {} references {}: {reason}",
+                file_path.display(),
+                block.name_display(),
+                block.start_tag_position_range.start.line,
+                target_display(target_file, Some(&target_name)),
+            );
+            return Ok(Some(affects_violation(
+                file_path,
+                block,
+                target_file,
+                Some(&target_name),
+                message,
+            )?));
+        }
+    };
+    // As for a named block, only a change to this block's content obliges the target to change.
+    if block_with_context.is_content_modified && !target_modified {
+        return Ok(Some(create_violation(
+            file_path,
+            block,
+            target_file,
+            Some(&target_name),
         )?));
     }
     Ok(None)
@@ -337,16 +405,6 @@ fn dangling_reference_violation(
         target_name,
         message,
     )
-}
-
-/// Target's display string.
-///
-/// Returns either a `file:name` for a named block or `file <path>` for a whole-file reference.
-fn target_display(file_path: &RepoPath, name: Option<&str>) -> String {
-    match name {
-        Some(name) => format!("{}:{}", file_path.display(), name),
-        None => format!("file {}", file_path.display()),
-    }
 }
 
 /// Builds an `affects` violation anchored on the referencing block's start tag, carrying the
@@ -949,7 +1007,7 @@ pass
         )))
     }
 
-    /// A source file whose only block points at a whole file that no grammar can parse.
+    /// A source file whose only block points at a whole file.
     const WHOLE_FILE_REFERENCE_FILES: [(&str, &str); 2] = [
         (
             "source.py",
@@ -1021,6 +1079,185 @@ pass
         assert_eq!(
             error.to_string(),
             "affects target file does not exist: gone.json"
+        );
+        Ok(())
+    }
+
+    /// The target file of the symbol reference tests.
+    const PACKAGE_JSON: &str = r#"{
+  "version": "1.0",
+  "description": "x",
+  "dependencies": {
+    "inngest": "4.18.1"
+  }
+}"#;
+
+    #[test]
+    fn modified_block_with_a_modified_symbol_target_returns_no_violations() -> anyhow::Result<()> {
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "source.py",
+                r#"# <block affects="package.json#/version">
+version = "1.1"
+# </block>"#,
+            ),
+            validation_context_with_changes(
+                "package.json",
+                PACKAGE_JSON,
+                vec![LineChange {
+                    line: 2,
+                    kind: LineChangeKind::Added,
+                }],
+            ),
+        ]);
+
+        let report = validator(&[("package.json", PACKAGE_JSON)]).validate(context)?;
+
+        assert_eq!(violation_count(&report), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_block_with_a_symbol_target_unmodified_returns_a_violation() -> anyhow::Result<()> {
+        // The diff touches `/description` only, which leaves `/version` as it was.
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "source.py",
+                r#"# <block affects="package.json#/version">
+version = "1.1"
+# </block>"#,
+            ),
+            validation_context_with_changes(
+                "package.json",
+                PACKAGE_JSON,
+                vec![LineChange {
+                    line: 3,
+                    kind: LineChangeKind::Added,
+                }],
+            ),
+        ]);
+
+        let violations = validator(&[("package.json", PACKAGE_JSON)])
+            .validate(context)?
+            .violations;
+
+        let source_violations = &violations[&RepoPath::from_reference("source.py")?];
+        assert_eq!(source_violations.len(), 1);
+        assert_eq!(
+            source_violations[0].message,
+            "Block source.py:(unnamed) at line 1 is modified, but package.json#/version is not"
+        );
+        assert_eq!(
+            source_violations[0].data,
+            Some(serde_json::json!({
+                "affected_block_file_path": "package.json",
+                "affected_block_name": "#/version",
+            }))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn modified_block_with_a_symbol_target_changed_below_its_first_line_returns_no_violations()
+    -> anyhow::Result<()> {
+        // A definition can span several lines, as the object `/dependencies` does here. A change on
+        // any of them changes the symbol, not only a change on the line the definition starts on.
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "source.py",
+                r#"# <block affects="package.json#/dependencies">
+inngest = "4.18.2"
+# </block>"#,
+            ),
+            validation_context_with_changes(
+                "package.json",
+                PACKAGE_JSON,
+                vec![LineChange {
+                    line: 5,
+                    kind: LineChangeKind::Added,
+                }],
+            ),
+        ]);
+
+        let report = validator(&[("package.json", PACKAGE_JSON)]).validate(context)?;
+
+        assert_eq!(violation_count(&report), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_block_with_a_symbol_target_after_a_deleted_line_returns_a_violation()
+    -> anyhow::Result<()> {
+        // The key starts at column 1, exactly where the deletion leaves its gap. The deleted line
+        // sat before the key and was never part of its definition, so the key did not change.
+        let target = r#"{
+"version": "1.0"
+}"#;
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "source.py",
+                r#"# <block affects="package.json#/version">
+version = "1.1"
+# </block>"#,
+            ),
+            validation_context_with_changes(
+                "package.json",
+                target,
+                vec![LineChange {
+                    line: 2,
+                    kind: LineChangeKind::Deleted,
+                }],
+            ),
+        ]);
+
+        let report = validator(&[("package.json", target)]).validate(context)?;
+
+        assert_eq!(violation_count(&report), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn unmodified_block_with_an_unmodified_symbol_target_returns_no_violations()
+    -> anyhow::Result<()> {
+        let files = [
+            (
+                "source.py",
+                r#"# <block affects="package.json#/version">
+version = "1.0"
+# </block>"#,
+            ),
+            ("package.json", PACKAGE_JSON),
+        ];
+        let context = context_with_changed_files(&files, &[])?;
+
+        let report = validator(&files).validate(context)?;
+
+        assert_eq!(violation_count(&report), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn unmodified_block_with_a_missing_symbol_target_returns_a_violation() -> anyhow::Result<()> {
+        // Reference integrity is checked whether or not the referencing block changed.
+        let files = [
+            (
+                "source.py",
+                r#"# <block affects="package.json#/versoin">
+version = "1.0"
+# </block>"#,
+            ),
+            ("package.json", PACKAGE_JSON),
+        ];
+        let context = context_with_changed_files(&files, &[])?;
+
+        let violations = validator(&files).validate(context)?.violations;
+
+        let source_violations = &violations[&RepoPath::from_reference("source.py")?];
+        assert_eq!(source_violations.len(), 1);
+        assert_eq!(
+            source_violations[0].message,
+            "Block source.py:(unnamed) at line 1 references package.json#/versoin: \
+             symbol not found; did you mean: /version"
         );
         Ok(())
     }

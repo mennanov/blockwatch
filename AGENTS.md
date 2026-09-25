@@ -161,14 +161,18 @@ Key module boundaries:
   `validators/mod.rs`.
 - `src/violation_address.rs` — `ViolationAddress`, the `FILE[:BLOCK_NAME[:VALIDATOR[:HASH]]]` address a suppression
   names. The shorter the address, the more it covers.
-- `src/diff_parser.rs` — unidiff wrapper producing `LineChange`s used to decide whether a block's content (or start tag)
-  was modified. `is_content_modified` / `intersects_with_any` on `Block` drive the "only check touched blocks" behavior.
+- `src/diff_parser.rs` — unidiff wrapper producing `LineChange`s, and `range_intersects_any`, which decides whether
+  they touch a range of the file, such as a block's start tag or a symbol's definition. A block's content has its own
+  test in `blocks.rs`, because a deletion right where the content begins removed content. The resulting
+  `is_content_modified` and `is_start_tag_modified` on `BlockWithContext` drive the "only check touched blocks"
+  behavior.
 - `src/report.rs` — the run report `--verbosity` prints: files scanned, blocks found, validators that checked them.
 - `src/sarif.rs` — the SARIF 2.1.0 log `--format sarif` writes.
 
 Only blocks whose content or start-tag range intersects a `LineChange` are validated when a diff is provided; this is
 the primary source of subtlety — when debugging "why didn't my rule fire," check whether the diff actually hit the
-block's line range.
+block's line range. The same holds for an `affects` symbol target: it counts as changed only when the diff touches the
+definition of the symbol it resolves to, not anywhere else in its file.
 
 The `check-ai` validator calls an OpenAI-compatible API configured via `BLOCKWATCH_AI_API_KEY` / `BLOCKWATCH_AI_MODEL` /
 `BLOCKWATCH_AI_API_URL`. The `check-lua` validator embeds `mlua` (Lua 5.4); the `BLOCKWATCH_LUA_MODE` env var

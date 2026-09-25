@@ -51,7 +51,7 @@ impl Ord for Block {
 impl Block {
     /// Whether the `Block`'s content intersects with any of the **ordered** `line_changes`.
     fn content_intersects_with_any(&self, line_changes: &[LineChange]) -> bool {
-        Self::changes_on_lines(
+        diff_parser::changes_on_lines(
             line_changes,
             self.content_position_range.start.line,
             self.content_position_range.end.line,
@@ -59,83 +59,12 @@ impl Block {
         .any(|line_change| self.content_intersects_with(line_change))
     }
 
-    /// Whether the `Block`'s start tag intersects with any of the **ordered** `line_changes`.
-    fn start_tag_intersects_with_any(&self, line_changes: &[LineChange]) -> bool {
-        Self::changes_on_lines(
-            line_changes,
-            self.start_tag_position_range.start.line,
-            self.start_tag_position_range.end.line,
-        )
-        .any(|line_change| self.start_tag_intersects_with(line_change))
-    }
-
-    /// The **ordered** `line_changes` that fall on lines `first_line..=last_line`, in order.
-    fn changes_on_lines(
-        line_changes: &[LineChange],
-        first_line: usize,
-        last_line: usize,
-    ) -> impl Iterator<Item = &LineChange> {
-        let first = line_changes.partition_point(|line_change| line_change.line < first_line);
-        line_changes[first..]
-            .iter()
-            .take_while(move |line_change| line_change.line <= last_line)
-    }
-
-    /// Whether the block's start tag intersects with the given `line_change`.
-    fn start_tag_intersects_with(&self, line_change: &LineChange) -> bool {
-        if line_change.line < self.start_tag_position_range.start.line {
-            return false;
-        }
-        if line_change.line > self.start_tag_position_range.end.line {
-            return false;
-        }
-
-        match &line_change.kind {
-            LineChangeKind::Deleted => {
-                let point = deletion_point(line_change.line);
-                // The start is excluded even though the range includes it: text removed from just
-                // before the range's start was never part of the range, and removing it leaves the
-                // gap exactly at that start.
-                // The end is included for the mirror reason: a gap sitting exactly at the range's
-                // exclusive end is where the range's last character used to be. A whole-line
-                // deletion never lands there, since its gap is always at column 1, so this bound
-                // only bites if deletion points ever get finer-grained than a line.
-                self.start_tag_position_range.start < point
-                    && point <= self.start_tag_position_range.end
-            }
-            // An insertion moves the line breaks around the line, not just the characters on it,
-            // so there is nothing to compare column by column. Every position on the line counts
-            // as changed.
-            LineChangeKind::Added => true,
-            LineChangeKind::Modified(ranges) => {
-                let start_col = if line_change.line == self.start_tag_position_range.start.line {
-                    self.start_tag_position_range.start.character
-                } else {
-                    1
-                };
-                let end_col = if line_change.line < self.start_tag_position_range.end.line {
-                    usize::MAX
-                } else {
-                    self.start_tag_position_range.end.character
-                };
-
-                diff_parser::intersects_columns(ranges, start_col, end_col)
-            }
-        }
-    }
-
-    /// Whether the block's content intersects with the given `line_change`.
+    /// Whether the block's content intersects with the given `line_change`, which has to fall on
+    /// one of the lines the content spans.
     fn content_intersects_with(&self, line_change: &LineChange) -> bool {
-        if line_change.line < self.content_position_range.start.line {
-            return false;
-        }
-        if line_change.line > self.content_position_range.end.line {
-            return false;
-        }
-
         match &line_change.kind {
             LineChangeKind::Deleted => {
-                let point = deletion_point(line_change.line);
+                let point = diff_parser::deletion_point(line_change.line);
                 // The end is included even though the range excludes it: a gap sitting exactly at
                 // the range's exclusive end is where the range's last character used to be. A
                 // whole-line deletion never lands there, since its gap is always at column 1, so
@@ -208,15 +137,6 @@ impl Block {
                     .context(format!("Invalid \"severity\" attribute value \"{}\"", s))
             })
     }
-}
-
-/// The place in the target file where a deletion anchored at `line` removed its text.
-///
-/// A deletion leaves no characters behind, only a gap, so it names a point rather than a line. The
-/// removed text ended with a line break, which puts the gap at the start of the line that now
-/// occupies it.
-fn deletion_point(line: usize) -> Position {
-    Position::new(line, 1)
 }
 
 /// Block's severity.
@@ -534,7 +454,10 @@ pub fn parse_file(
             }
             let block_with_context = BlockWithContext {
                 is_content_modified: block.content_intersects_with_any(line_changes),
-                is_start_tag_modified: block.start_tag_intersects_with_any(line_changes),
+                is_start_tag_modified: diff_parser::range_intersects_any(
+                    &block.start_tag_position_range,
+                    line_changes,
+                ),
                 block,
             };
             block_predicate(&block_with_context).then_some(Ok(block_with_context))

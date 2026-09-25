@@ -8,13 +8,13 @@ mod line_pattern;
 mod same_as;
 
 use crate::Position;
-use crate::blocks::{Block, BlockSeverity, BlockWithContext, FileBlocks};
+use crate::blocks::{Block, BlockSeverity, BlockWithContext, FileBlocks, parser_for_file_path};
 use crate::diff_parser::LineChange;
 use crate::fs::FileSystem;
 use crate::language_parsers::LanguageParsers;
 use crate::name_path::NamePath;
 use crate::repo_path::RepoPath;
-use crate::symbols::ResolveError;
+use crate::symbols::{ResolveError, Symbol, resolve};
 use crate::validators::affects::AffectsValidatorDetector;
 use crate::validators::check_ai::CheckAiValidatorDetector;
 use crate::validators::check_lua::CheckLuaValidatorDetector;
@@ -28,6 +28,7 @@ use anyhow::{Context, bail};
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
 use serde::Serialize;
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
 use std::ops::Range;
@@ -699,12 +700,25 @@ fn parse_optional_repo_path(file_part: &str) -> anyhow::Result<Option<RepoPath>>
     }
 }
 
+/// How a message shows a reference's target: `file:name` for a block, `file#/path` for a symbol,
+/// and `file <path>` for a whole file.
+///
+/// `name` is a block name, or a symbol path with its leading `#`. It is `None` for a whole file.
+pub(in crate::validators) fn target_display(file: &RepoPath, name: Option<&str>) -> String {
+    match name {
+        // A symbol path keeps its `#`, which already separates it from the file.
+        Some(name) if name.starts_with('#') => format!("{}{name}", file.display()),
+        Some(name) => format!("{}:{name}", file.display()),
+        None => format!("file {}", file.display()),
+    }
+}
+
 /// Why a symbol reference does not resolve to exactly one symbol, as a short phrase such as
 /// "symbol not found; did you mean: /version". The phrase does not include the reference itself.
 ///
 /// `source` is the text of the file the symbols were derived from. It places each ambiguous
 /// candidate at its line and column.
-pub(in crate::validators) fn resolve_error_reason(error: &ResolveError, source: &str) -> String {
+fn resolve_error_reason(error: &ResolveError, source: &str) -> String {
     match error {
         ResolveError::NotFound { hints } if hints.is_empty() => "symbol not found".to_string(),
         ResolveError::NotFound { hints } => {
@@ -723,6 +737,107 @@ pub(in crate::validators) fn resolve_error_reason(error: &ResolveError, source: 
                 .collect();
             format!("ambiguous symbol, defined at {}", positions.join(", "))
         }
+    }
+}
+
+/// What a reference's target resolves to, or the reason it does not resolve, such as a missing
+/// block or a missing symbol. The reason is reported as the reference's violation. A failure that
+/// ends the run is the `Err` of an enclosing `anyhow::Result` instead.
+pub(in crate::validators) type TargetResult<T> = Result<T, String>;
+
+/// The text and the symbols of the files that references point into, each read and derived at most
+/// once.
+pub(in crate::validators) struct TargetFiles<'a, Fs: FileSystem> {
+    context: &'a ValidationContext,
+    /// Reads the target files that are not in `context`.
+    file_system: &'a Fs,
+    /// The text of the target files that are not in `context`.
+    contents: HashMap<RepoPath, String>,
+    /// The symbols of every file a symbol reference points into.
+    symbols: HashMap<RepoPath, Vec<Symbol>>,
+}
+
+impl<'a, Fs: FileSystem> TargetFiles<'a, Fs> {
+    pub(in crate::validators) fn new(context: &'a ValidationContext, file_system: &'a Fs) -> Self {
+        Self {
+            context,
+            file_system,
+            contents: HashMap::new(),
+            symbols: HashMap::new(),
+        }
+    }
+
+    /// The text of `file`: from the validation context when the file is in it, and otherwise read
+    /// through the file system.
+    ///
+    /// # Errors
+    /// Returns an error if the file is not in the context and cannot be read.
+    pub(in crate::validators) fn content(&mut self, file: &RepoPath) -> anyhow::Result<&str> {
+        file_content(self.context, self.file_system, &mut self.contents, file)
+    }
+
+    /// Resolves `path` among the symbols of `file`. Returns the text of `file`, together with the
+    /// symbol or with the reason why no single symbol has `path`.
+    ///
+    /// # Errors
+    /// Returns an error that shows the reference if `file` cannot be read, has no grammar, is in a
+    /// language without symbols, or does not parse.
+    pub(in crate::validators) fn resolve_symbol(
+        &mut self,
+        file: &RepoPath,
+        path: &NamePath,
+    ) -> anyhow::Result<(&str, TargetResult<&Symbol>)> {
+        let (content, symbols) = self.content_and_symbols(file).with_context(|| {
+            format!(
+                "failed to resolve symbol reference {}#{path}",
+                file.display()
+            )
+        })?;
+        let resolution =
+            resolve(symbols, path).map_err(|error| resolve_error_reason(&error, content));
+        Ok((content, resolution))
+    }
+
+    /// The text of `file` and the symbols derived from it.
+    fn content_and_symbols(&mut self, file: &RepoPath) -> anyhow::Result<(&str, &[Symbol])> {
+        let content = file_content(self.context, self.file_system, &mut self.contents, file)?;
+        let symbols = match self.symbols.entry(file.clone()) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let parser = parser_for_file_path(
+                    file.as_path(),
+                    self.context.parsers(),
+                    self.context.extra_file_extensions(),
+                )
+                .context("file format is unsupported")?;
+                let symbols = parser
+                    .lock()
+                    .expect("no active locks")
+                    .parse_symbols(content)?;
+                entry.insert(symbols)
+            }
+        };
+        Ok((content, symbols))
+    }
+}
+
+/// The text of `file`: from `context` when the file is in it, and otherwise read through
+/// `file_system` once and kept in `contents`.
+///
+/// # Errors
+/// Returns an error if the file is not in `context` and cannot be read.
+fn file_content<'c, Fs: FileSystem>(
+    context: &'c ValidationContext,
+    file_system: &Fs,
+    contents: &'c mut HashMap<RepoPath, String>,
+    file: &RepoPath,
+) -> anyhow::Result<&'c str> {
+    if let Some(file_blocks) = context.blocks.get(file) {
+        return Ok(&file_blocks.file_content);
+    }
+    match contents.entry(file.clone()) {
+        Entry::Occupied(entry) => Ok(entry.into_mut()),
+        Entry::Vacant(entry) => Ok(entry.insert(file_system.read_to_string(file.as_path())?)),
     }
 }
 
@@ -1136,6 +1251,46 @@ mod resolve_error_reason_tests {
         let error = ResolveError::NotFound { hints: vec![] };
 
         assert_eq!(resolve_error_reason(&error, ""), "symbol not found");
+    }
+}
+
+#[cfg(test)]
+mod target_files_tests {
+    use super::*;
+    use crate::fs::test_utils::FakeFileSystem;
+    use crate::test_utils::validation_context;
+
+    /// The error of resolving `path` in `file`, a file on the disk that holds `content`.
+    fn resolve_symbol_error(file: &str, content: &str, path: &str) -> anyhow::Result<String> {
+        let context = validation_context("referencing.py", "");
+        let file_system =
+            FakeFileSystem::new(HashMap::from([(file.to_string(), content.to_string())]));
+        let mut files = TargetFiles::new(&context, &file_system);
+        let err = files
+            .resolve_symbol(&RepoPath::from_reference(file)?, &NamePath::parse(path)?)
+            .unwrap_err();
+        Ok(format!("{err:#}"))
+    }
+
+    #[test]
+    fn file_without_a_grammar_resolve_symbol_returns_an_error_with_the_reference()
+    -> anyhow::Result<()> {
+        assert_eq!(
+            resolve_symbol_error("VERSION", "1.2.3\n", "/x")?,
+            "failed to resolve symbol reference VERSION#/x: file format is unsupported"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn language_without_symbols_resolve_symbol_returns_an_error_with_the_reference()
+    -> anyhow::Result<()> {
+        let message = resolve_symbol_error("config.py", "x = 1\n", "/x")?;
+        assert!(
+            message.starts_with("failed to resolve symbol reference config.py#/x: "),
+            "unexpected message: {message}"
+        );
+        Ok(())
     }
 }
 

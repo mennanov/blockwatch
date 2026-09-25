@@ -15,10 +15,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 ### Added
 
 - Support for JSON (`.json`, `.jsonc`) files.
-- Symbol references in `same-as`. `same-as="package.json#/dependencies/inngest"` compares the block with the value at
-  that path in a JSON file, and `same-as="#/version"` with one in the block's own file. An object or an array is
-  compared as its source text. A missing or ambiguous symbol is reported as a violation. A target file with a syntax
-  error fails the run, and a trailing comma counts as one.
+- Symbol references in `same-as` and `affects`. `same-as="package.json#/dependencies/inngest"` compares the block
+  with the value at that path in a JSON file, and `same-as="#/version"` with one in the block's own file. An object or
+  an array is compared as its source text. `affects="package.json#/version"` is satisfied only when the diff touches
+  that key, not when anything else in the file changes. A missing or ambiguous symbol is reported as a violation. A
+  target file with a syntax error fails the run, and a trailing comma counts as one.
 
 ### Changed
 

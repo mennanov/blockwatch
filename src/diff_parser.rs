@@ -1,3 +1,4 @@
+use crate::Position;
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use anyhow::Context;
@@ -47,6 +48,71 @@ pub(crate) fn intersects_columns(
             }
         })
         .is_ok()
+}
+
+/// Whether any of the **ordered** `line_changes` touches a character in `range`.
+///
+/// Text deleted right before `range.start` does not count, since it was never part of the range.
+pub(crate) fn range_intersects_any(range: &Range<Position>, line_changes: &[LineChange]) -> bool {
+    changes_on_lines(line_changes, range.start.line, range.end.line)
+        .any(|line_change| range_intersects(range, line_change))
+}
+
+/// Whether `line_change`, which has to fall on one of the lines `range` spans, touches a character
+/// in `range`.
+fn range_intersects(range: &Range<Position>, line_change: &LineChange) -> bool {
+    match &line_change.kind {
+        LineChangeKind::Deleted => {
+            let point = deletion_point(line_change.line);
+            // The start is excluded even though the range includes it: text removed from just
+            // before the range's start was never part of the range, and removing it leaves the
+            // gap exactly at that start.
+            // The end is included for the mirror reason: a gap sitting exactly at the range's
+            // exclusive end is where the range's last character used to be. A whole-line
+            // deletion never lands there, since its gap is always at column 1, so this bound
+            // only bites if deletion points ever get finer-grained than a line.
+            range.start < point && point <= range.end
+        }
+        // An insertion moves the line breaks around the line, not just the characters on it,
+        // so there is nothing to compare column by column. Every position on the line counts
+        // as changed.
+        LineChangeKind::Added => true,
+        LineChangeKind::Modified(ranges) => {
+            let start_col = if line_change.line == range.start.line {
+                range.start.character
+            } else {
+                1
+            };
+            let end_col = if line_change.line < range.end.line {
+                usize::MAX
+            } else {
+                range.end.character
+            };
+
+            intersects_columns(ranges, start_col, end_col)
+        }
+    }
+}
+
+/// The **ordered** `line_changes` that fall on lines `first_line..=last_line`, in order.
+pub(crate) fn changes_on_lines(
+    line_changes: &[LineChange],
+    first_line: usize,
+    last_line: usize,
+) -> impl Iterator<Item = &LineChange> {
+    let first = line_changes.partition_point(|line_change| line_change.line < first_line);
+    line_changes[first..]
+        .iter()
+        .take_while(move |line_change| line_change.line <= last_line)
+}
+
+/// The place in the target file where a deletion anchored at `line` removed its text.
+///
+/// A deletion leaves no characters behind, only a gap, so it names a point rather than a line. The
+/// removed text ended with a line break, which puts the gap at the start of the line that now
+/// occupies it.
+pub(crate) fn deletion_point(line: usize) -> Position {
+    Position::new(line, 1)
 }
 
 /// What a diff did to one line of its target file.

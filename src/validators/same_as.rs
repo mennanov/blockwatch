@@ -1,13 +1,11 @@
-use crate::blocks::{
-    Block, BlockWithContext, FileBlocks, every_block, parse_file, parser_for_file_path,
-};
+use crate::blocks::{Block, BlockWithContext, FileBlocks, every_block, parse_file};
 use crate::fs::FileSystem;
 use crate::name_path::NamePath;
 use crate::repo_path::RepoPath;
-use crate::symbols::{Symbol, resolve};
 use crate::validators::{
-    self, TargetReference, ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType,
-    Violation, ViolationRange, parse_number, resolve_error_reason, value_match,
+    self, TargetFiles, TargetReference, TargetResult, ValidationReport, ValidatorDetector,
+    ValidatorSync, ValidatorType, Violation, ViolationRange, parse_number, target_display,
+    value_match,
 };
 use anyhow::{Context, anyhow};
 use regex::Regex;
@@ -243,10 +241,6 @@ fn extract_named(file_blocks: &FileBlocks, name: &str) -> anyhow::Result<Option<
     Ok(None)
 }
 
-/// A target's comparable items, or the reason it has none. The reason is reported as the
-/// reference's violation (not a hard error).
-type Resolution = Result<Vec<String>, String>;
-
 /// Resolves the targets a `same-as` reference names to their comparable items.
 struct TargetItems<'a, Fs: FileSystem> {
     context: &'a validators::ValidationContext,
@@ -254,10 +248,8 @@ struct TargetItems<'a, Fs: FileSystem> {
     file_system: &'a Fs,
     /// Files parsed from the disk while looking for a named target block.
     parsed: HashMap<RepoPath, FileBlocks>,
-    /// The text of whole-file and symbol targets that are not in the validation context.
-    contents: HashMap<RepoPath, String>,
-    /// The symbols of every file a symbol target points into, derived once per file.
-    symbols: HashMap<RepoPath, Vec<Symbol>>,
+    /// The text and the symbols of whole-file and symbol targets.
+    files: TargetFiles<'a, Fs>,
 }
 
 impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
@@ -266,8 +258,7 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
             context,
             file_system,
             parsed: HashMap::new(),
-            contents: HashMap::new(),
-            symbols: HashMap::new(),
+            files: TargetFiles::new(context, file_system),
         }
     }
 
@@ -281,7 +272,7 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
         &mut self,
         target_file: &RepoPath,
         target_name: &str,
-    ) -> anyhow::Result<Resolution> {
+    ) -> anyhow::Result<TargetResult<Vec<String>>> {
         if let Some(file_blocks) = self.context.blocks.get(target_file)
             && let Some(items) = extract_named(file_blocks, target_name)?
         {
@@ -322,12 +313,12 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
         target_file: &RepoPath,
         pattern: Option<&String>,
     ) -> anyhow::Result<Vec<String>> {
-        let content = target_content(
-            self.context,
-            self.file_system,
-            &mut self.contents,
-            target_file,
-        )?;
+        let content = self.files.content(target_file).with_context(|| {
+            format!(
+                "failed to read same-as target file: {}",
+                target_file.display()
+            )
+        })?;
         extract_items_from(content, pattern)
     }
 
@@ -341,41 +332,9 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
         target_file: &RepoPath,
         path: &NamePath,
         pattern: Option<&String>,
-    ) -> anyhow::Result<Resolution> {
-        let content = target_content(
-            self.context,
-            self.file_system,
-            &mut self.contents,
-            target_file,
-        )?;
-        let file_symbols = match self.symbols.entry(target_file.clone()) {
-            Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => {
-                let parser = parser_for_file_path(
-                    target_file.as_path(),
-                    self.context.parsers(),
-                    self.context.extra_file_extensions(),
-                )
-                .ok_or_else(|| {
-                    anyhow!(
-                        "same-as target file format is unsupported: {}",
-                        target_file.display()
-                    )
-                })?;
-                let symbols = parser
-                    .lock()
-                    .expect("no active locks")
-                    .parse_symbols(content)
-                    .with_context(|| {
-                        format!(
-                            "failed to resolve same-as target {}#{path}",
-                            target_file.display()
-                        )
-                    })?;
-                entry.insert(symbols)
-            }
-        };
-        match resolve(file_symbols, path) {
+    ) -> anyhow::Result<TargetResult<Vec<String>>> {
+        let (content, resolution) = self.files.resolve_symbol(target_file, path)?;
+        match resolution {
             Ok(symbol) => {
                 let text = match &symbol.value {
                     Some(value) => value.as_str(),
@@ -383,37 +342,7 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
                 };
                 Ok(Ok(extract_items_from(text, pattern)?))
             }
-            Err(error) => Ok(Err(resolve_error_reason(&error, content))),
-        }
-    }
-}
-
-/// The text of `target_file`: from the validation context when the file is in it, and otherwise
-/// read through `file_system` once and kept in `contents`.
-///
-/// # Errors
-/// Returns an error if the file is not in the context and cannot be read.
-fn target_content<'c, Fs: FileSystem>(
-    context: &'c validators::ValidationContext,
-    file_system: &Fs,
-    contents: &'c mut HashMap<RepoPath, String>,
-    target_file: &RepoPath,
-) -> anyhow::Result<&'c str> {
-    if let Some(file_blocks) = context.blocks.get(target_file) {
-        return Ok(&file_blocks.file_content);
-    }
-    match contents.entry(target_file.clone()) {
-        Entry::Occupied(entry) => Ok(entry.into_mut()),
-        Entry::Vacant(entry) => {
-            let content = file_system
-                .read_to_string(target_file.as_path())
-                .with_context(|| {
-                    format!(
-                        "failed to read same-as target file: {}",
-                        target_file.display()
-                    )
-                })?;
-            Ok(entry.insert(content))
+            Err(reason) => Ok(Err(reason)),
         }
     }
 }
@@ -541,13 +470,7 @@ fn create_violation(
     reason: &str,
 ) -> anyhow::Result<Violation> {
     let line = block.start_tag_position_range.start.line;
-    let target = match target_name {
-        Some(target_name) if target_name.starts_with('#') => {
-            format!("{}{target_name}", target_file.display())
-        }
-        Some(target_name) => format!("{}:{}", target_file.display(), target_name),
-        None => format!("file {}", target_file.display()),
-    };
+    let target = target_display(target_file, target_name);
     let message = format!(
         "Block {}:{} at line {} disagrees with {target}: {reason}",
         file_path.display(),
@@ -1232,47 +1155,6 @@ mod validate_tests {
         let report = validator(&[]).validate(context)?;
 
         assert_eq!(violation_count(&report), 0);
-        Ok(())
-    }
-
-    #[test]
-    fn symbol_in_a_language_without_symbols_returns_an_error() -> anyhow::Result<()> {
-        let context = validation_context(
-            "deps.py",
-            r#"# <block same-as="config.py#/x">
-1
-# </block>"#,
-        );
-
-        let err = validator(&[("config.py", "x = 1\n")])
-            .validate(context)
-            .unwrap_err();
-
-        let message = format!("{err:#}");
-        assert!(
-            message.starts_with("failed to resolve same-as target config.py#/x: "),
-            "unexpected message: {message}"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn symbol_in_a_file_without_a_grammar_returns_an_error() -> anyhow::Result<()> {
-        let context = validation_context(
-            "deps.py",
-            r#"# <block same-as="VERSION#/x">
-1
-# </block>"#,
-        );
-
-        let err = validator(&[("VERSION", "1.2.3\n")])
-            .validate(context)
-            .unwrap_err();
-
-        assert_eq!(
-            format!("{err:#}"),
-            "same-as target file format is unsupported: VERSION"
-        );
         Ok(())
     }
 

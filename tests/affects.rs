@@ -654,3 +654,88 @@ index 0000000..e69de29
         .assert()
         .success();
 }
+
+/// The source half of the symbol reference diffs: the block that affects `/version`, modified.
+const SYMBOL_SOURCE_DIFF: &str = r#"
+diff --git a/tests/testdata/affects/symbol_source.rs b/tests/testdata/affects/symbol_source.rs
+index abc123..def456 100644
+--- a/tests/testdata/affects/symbol_source.rs
++++ b/tests/testdata/affects/symbol_source.rs
+@@ -1,3 +1,3 @@
+ // <block affects="tests/testdata/affects/symbol_target.json#/version">
+-const VERSION: &str = "1.0";
++const VERSION: &str = "1.1";
+ // </block>
+"#;
+
+#[test]
+fn diff_touching_a_symbol_reference_target_succeeds() {
+    let diff_content = format!(
+        "{SYMBOL_SOURCE_DIFF}{}",
+        r#"diff --git a/tests/testdata/affects/symbol_target.json b/tests/testdata/affects/symbol_target.json
+index abc123..def456 100644
+--- a/tests/testdata/affects/symbol_target.json
++++ b/tests/testdata/affects/symbol_target.json
+@@ -1,4 +1,4 @@
+ {
+-  "version": "1.0",
++  "version": "1.1",
+   "description": "An example package"
+ }
+"#
+    );
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
+    cmd.write_stdin(diff_content)
+        .output()
+        .unwrap()
+        .assert()
+        .success();
+}
+
+#[test]
+fn diff_touching_another_symbol_in_the_target_file_fails() {
+    // The target file changed, but only on the line of `/description`.
+    let diff_content = format!(
+        "{SYMBOL_SOURCE_DIFF}{}",
+        r#"diff --git a/tests/testdata/affects/symbol_target.json b/tests/testdata/affects/symbol_target.json
+index abc123..def456 100644
+--- a/tests/testdata/affects/symbol_target.json
++++ b/tests/testdata/affects/symbol_target.json
+@@ -1,4 +1,4 @@
+ {
+   "version": "1.1",
+-  "description": "An old package"
++  "description": "An example package"
+ }
+"#
+    );
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
+    cmd.write_stdin(diff_content)
+        .output()
+        .unwrap()
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "is modified, but tests/testdata/affects/symbol_target.json#/version is not",
+        ));
+}
+
+#[test]
+fn missing_symbol_in_affects_fails() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/affects/missing_symbol.rs");
+    cmd.output()
+        .unwrap()
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "references tests/testdata/affects/symbol_target.json#/versoin: \
+             symbol not found; did you mean: /version",
+        ));
+}
