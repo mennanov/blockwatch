@@ -13,15 +13,8 @@ lines of a piped unified diff.
 ## Common commands
 
 ```shell
-cargo build                                # build CLI
-cargo run -- [args]                        # run locally
 cargo run -- list '<glob>'                 # print the blocks parsed from matching files, as JSON
-cargo test                                 # run all unit + integration tests
-cargo test --test keep_sorted              # run one integration test file (tests/<name>.rs)
-cargo test <pattern>                       # run tests whose name matches
-cargo test -- --nocapture                  # show stdout/stderr from tests
 cargo llvm-cov                             # run the tests and report coverage
-cargo fmt                                  # format
 cargo clippy --all-targets -- -D warnings  # lint
 markdownlint-cli2                          # lint Markdown (config: .markdownlint-cli2.yaml)
 pre-commit run --all-files                 # run every hook the repository installs
@@ -139,35 +132,30 @@ The `list` subcommand stops after step 5 and writes the parsed blocks to stdout 
 
 Key module boundaries:
 
-- `src/blocks.rs` — `Block`, `FileBlocks`, and the parse that produces them.
 - `src/fs.rs` — `FileSystem` / `PathChecker` traits plus the real implementations. These traits are the seam that tests
   use to inject fakes (see `FakeFileSystem`, `FakePathChecker` in `fs::test_utils`).
 - `src/repo_path.rs` — `RepoPath`, the one spelling of a repository-relative path. A diff header (`b/src/main.rs`), a
   walk entry and a `file:name` attribute all normalize here, so the same file is always the same map key.
-- `src/tag_parser.rs` — winnow-based parser for the `<block ...>` / `</block>` tag syntax.
 - `src/language_parsers/` — one tree-sitter grammar per language, each with a `parser()` returning a
   `LanguageParser`. Every language knows which node kinds are its comments, and `src/block_parser.rs` turns those
   comments into blocks. `language_parsers/mod.rs::language_parsers()` returns the extension→parser map; **adding a new
   language means adding a module here and registering it in that function**. A language that has symbols also
-  has a tree-sitter query (`.scm`) and a `NodeDecoder`, which its `parser()` passes to `.with_symbols(...)`.
-- `src/symbols.rs` — the language-agnostic engine behind symbol references. `SymbolsParser` runs a language's query and
-  derives every addressable `Symbol` (its path, definition range and decoded value) in one walk of the tree. It refuses
-  a file with a syntax error rather than resolve a path through tree-sitter's error recovery. It does not check the
-  query itself: each language's own tests pin the complete list of symbols its query derives.
-- `src/symbol_path.rs` — `SymbolPath`, the RFC 6901 path after the `#` in a `file#/a/b` reference, and the path each
-  `Symbol` carries. A reference and a derived symbol are compared as `SymbolPath` values.
+  has a `SymbolsParser`, which its `parser()` passes to `.with_symbols(...)`. Most use a `QuerySymbolsParser`, built
+  from a tree-sitter query (`.scm`) and a `NodeDecoder`. Each language's own tests pin the complete list of symbols
+  it derives.
+- `src/symbols.rs` — `Symbol`, the `SymbolsParser` trait, and `resolve`, which finds the symbol a path refers to.
+  `QuerySymbolsParser` runs a language's query and derives every addressable `Symbol` (its path, definition range and
+  decoded value) in one walk of the tree. It suits a language whose structure is its syntax tree. It refuses a file
+  with a syntax error rather than resolve a path through tree-sitter's error recovery. It does not check the query
+  itself.
 - `src/validators/` — one file per validator (`affects`, `check_ai`, `check_lua`, `keep_sorted`, `keep_unique`,
   `line_count`, `line_pattern`, `same_as`), each exporting a `*ValidatorDetector`. All detectors are wired up in
   `validators/mod.rs`.
-- `src/violation_address.rs` — `ViolationAddress`, the `FILE[:BLOCK_NAME[:VALIDATOR[:HASH]]]` address a suppression
-  names. The shorter the address, the more it covers.
 - `src/diff_parser.rs` — unidiff wrapper producing `LineChange`s, and `range_intersects_any`, which decides whether
   they touch a range of the file, such as a block's start tag or a symbol's definition. A block's content has its own
   test in `blocks.rs`, because a deletion right where the content begins removed content. The resulting
   `is_content_modified` and `is_start_tag_modified` on `BlockWithContext` drive the "only check touched blocks"
   behavior.
-- `src/report.rs` — the run report `--verbosity` prints: files scanned, blocks found, validators that checked them.
-- `src/sarif.rs` — the SARIF 2.1.0 log `--format sarif` writes.
 
 Only blocks whose content or start-tag range intersects a `LineChange` are validated when a diff is provided; this is
 the primary source of subtlety — when debugging "why didn't my rule fire," check whether the diff actually hit the
