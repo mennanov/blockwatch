@@ -11,14 +11,14 @@ pub mod flags;
 pub mod fs;
 /// One tree-sitter-backed comment parser per supported language, keyed by file extension.
 pub mod language_parsers;
-/// `NamePath`: a parsed and validated RFC 6901 symbol path.
-pub mod name_path;
 /// `RepoPath`: the single spelling of a repository-relative file path used as a map key.
 pub mod repo_path;
 /// Renders the end-of-run report describing what was scanned and checked.
 pub mod report;
 /// Renders the violations of a run as a SARIF log, the format code-scanning services read.
 pub mod sarif;
+/// `SymbolPath`: a parsed and validated RFC 6901 symbol path.
+pub mod symbol_path;
 /// Derives the symbols of a file: the elements a symbol reference can address.
 pub mod symbols;
 mod tag_parser;

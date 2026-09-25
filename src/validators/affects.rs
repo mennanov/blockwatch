@@ -1,8 +1,8 @@
 use crate::blocks::{Block, BlockWithContext, FileBlocks, every_block, parse_file};
 use crate::diff_parser::range_intersects_any;
 use crate::fs::FileSystem;
-use crate::name_path::NamePath;
 use crate::repo_path::RepoPath;
+use crate::symbol_path::SymbolPath;
 use crate::validators;
 use crate::validators::{
     TargetFiles, TargetReference, TargetResult, ValidationReport, ValidatorType, Violation,
@@ -144,7 +144,7 @@ impl<'a, Fs: FileSystem> TargetIndex<'a, Fs> {
     fn modifies_symbol(
         &mut self,
         target_file: &RepoPath,
-        path: &NamePath,
+        path: &SymbolPath,
     ) -> anyhow::Result<TargetResult<bool>> {
         // A file the diff never mentions has no line changes, so nothing in it counts as modified.
         let line_changes = self.context.line_changes_for(target_file).unwrap_or(&[]);
@@ -256,7 +256,7 @@ fn symbol_reference_violation<Fs: FileSystem>(
     file_path: &RepoPath,
     block_with_context: &BlockWithContext,
     target_file: &RepoPath,
-    path: &NamePath,
+    path: &SymbolPath,
 ) -> anyhow::Result<Option<Violation>> {
     let block = &block_with_context.block;
     let target_name = format!("#{path}");

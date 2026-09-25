@@ -1,7 +1,7 @@
 use crate::blocks::{Block, BlockWithContext, FileBlocks, every_block, parse_file};
 use crate::fs::FileSystem;
-use crate::name_path::NamePath;
 use crate::repo_path::RepoPath;
+use crate::symbol_path::SymbolPath;
 use crate::validators::{
     self, TargetFiles, TargetReference, TargetResult, ValidationReport, ValidatorDetector,
     ValidatorSync, ValidatorType, Violation, ViolationRange, parse_number, target_display,
@@ -330,7 +330,7 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
     fn symbol_items(
         &mut self,
         target_file: &RepoPath,
-        path: &NamePath,
+        path: &SymbolPath,
         pattern: Option<&String>,
     ) -> anyhow::Result<TargetResult<Vec<String>>> {
         let (content, resolution) = self.files.resolve_symbol(target_file, path)?;

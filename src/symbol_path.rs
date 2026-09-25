@@ -12,11 +12,11 @@ use std::fmt;
 /// - Segments are separated by `/`.
 /// - RFC 6901 escape sequences in each segment are unescaped: `~1` becomes `/` and `~0` becomes `~`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct NamePath {
+pub struct SymbolPath {
     segments: Vec<String>,
 }
 
-impl NamePath {
+impl SymbolPath {
     /// Parses and validates a symbol path.
     ///
     /// The input may optionally include a leading `#`. The path must be rooted with a leading `/`.
@@ -57,7 +57,7 @@ impl NamePath {
         &self.segments
     }
 
-    /// Creates a rooted [`NamePath`] from unescaped segments.
+    /// Creates a rooted [`SymbolPath`] from unescaped segments.
     ///
     /// # Panics
     /// Panics if `segments` is empty. A rooted path has at least one segment: `/` is the path of
@@ -91,7 +91,7 @@ const FRAGMENT_ENCODE_SET: &AsciiSet = &CONTROLS
     .add(b'"')
     .add(b'\'');
 
-impl fmt::Display for NamePath {
+impl fmt::Display for SymbolPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for segment in &self.segments {
             let escaped = escape_rfc6901(segment);
@@ -151,7 +151,7 @@ mod tests {
 
     #[test]
     fn rooted_path_parses_successfully() -> anyhow::Result<()> {
-        let path = NamePath::parse("/dependencies/inngest")?;
+        let path = SymbolPath::parse("/dependencies/inngest")?;
         assert_eq!(path.to_string(), "/dependencies/inngest");
         assert_eq!(path.segments(), &["dependencies", "inngest"]);
         Ok(())
@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn leading_hash_path_parses_identical_to_unprefixed() -> anyhow::Result<()> {
-        let path = NamePath::parse("#/project/version")?;
+        let path = SymbolPath::parse("#/project/version")?;
         assert_eq!(path.to_string(), "/project/version");
         assert_eq!(path.segments(), &["project", "version"]);
         Ok(())
@@ -167,11 +167,11 @@ mod tests {
 
     #[test]
     fn leading_and_trailing_whitespace_trimmed_successfully() -> anyhow::Result<()> {
-        let path = NamePath::parse("  #/project/version  ")?;
+        let path = SymbolPath::parse("  #/project/version  ")?;
         assert_eq!(path.to_string(), "/project/version");
         assert_eq!(path.segments(), &["project", "version"]);
 
-        let path2 = NamePath::parse("  /project/version  ")?;
+        let path2 = SymbolPath::parse("  /project/version  ")?;
         assert_eq!(path2.to_string(), "/project/version");
         Ok(())
     }
@@ -187,7 +187,7 @@ mod tests {
             "#%C2%A0/project/version",
         ];
         for raw in test_cases {
-            let err = NamePath::parse(raw).unwrap_err();
+            let err = SymbolPath::parse(raw).unwrap_err();
             assert!(
                 err.to_string().contains("unexpected whitespace after '#'"),
                 "unexpected error message for {raw}: {err}"
@@ -197,13 +197,13 @@ mod tests {
 
     #[test]
     fn unrooted_path_fails_with_hint() {
-        let err = NamePath::parse("dependencies/inngest").unwrap_err();
+        let err = SymbolPath::parse("dependencies/inngest").unwrap_err();
         assert!(
             err.to_string().contains("symbol path must start with '/'"),
             "unexpected error message: {err}"
         );
 
-        let err_percent = NamePath::parse("%20dependencies/inngest").unwrap_err();
+        let err_percent = SymbolPath::parse("%20dependencies/inngest").unwrap_err();
         assert!(
             err_percent
                 .to_string()
@@ -214,16 +214,16 @@ mod tests {
 
     #[test]
     fn empty_or_hash_only_path_fails() {
-        assert!(NamePath::parse("").is_err());
-        assert!(NamePath::parse("#").is_err());
-        assert!(NamePath::parse("   ").is_err());
-        assert!(NamePath::parse("  #  ").is_err());
+        assert!(SymbolPath::parse("").is_err());
+        assert!(SymbolPath::parse("#").is_err());
+        assert!(SymbolPath::parse("   ").is_err());
+        assert!(SymbolPath::parse("  #  ").is_err());
     }
 
     #[test]
     fn percent_encoded_characters_decode_before_splitting() -> anyhow::Result<()> {
         // %2C is comma, %3A is colon, %20 is space, %25 is percent
-        let path = NamePath::parse("/keys/%2C/%3A/%20/%25")?;
+        let path = SymbolPath::parse("/keys/%2C/%3A/%20/%25")?;
         assert_eq!(path.segments(), &["keys", ",", ":", " ", "%"]);
         Ok(())
     }
@@ -231,39 +231,39 @@ mod tests {
     #[test]
     fn percent_encoded_slash_acts_as_separator() -> anyhow::Result<()> {
         // Because decoding comes first, %2F is a separator everywhere, including the leading position
-        let path = NamePath::parse("/a%2Fb")?;
+        let path = SymbolPath::parse("/a%2Fb")?;
         assert_eq!(path.segments(), &["a", "b"]);
 
-        let leading = NamePath::parse("%2Fa%2Fb")?;
+        let leading = SymbolPath::parse("%2Fa%2Fb")?;
         assert_eq!(leading.segments(), &["a", "b"]);
         assert_eq!(path, leading);
 
-        let hash_leading = NamePath::parse("#%2Fa%2Fb")?;
+        let hash_leading = SymbolPath::parse("#%2Fa%2Fb")?;
         assert_eq!(hash_leading, leading);
 
-        let root_only = NamePath::parse("%2F")?;
-        assert_eq!(root_only, NamePath::parse("/")?);
+        let root_only = SymbolPath::parse("%2F")?;
+        assert_eq!(root_only, SymbolPath::parse("/")?);
         Ok(())
     }
 
     #[test]
     fn malformed_percent_escape_fails() {
-        assert!(NamePath::parse("/invalid/%2").is_err());
-        assert!(NamePath::parse("/invalid/%").is_err());
-        assert!(NamePath::parse("/invalid/%zz").is_err());
-        assert!(NamePath::parse("/invalid/%2g").is_err());
+        assert!(SymbolPath::parse("/invalid/%2").is_err());
+        assert!(SymbolPath::parse("/invalid/%").is_err());
+        assert!(SymbolPath::parse("/invalid/%zz").is_err());
+        assert!(SymbolPath::parse("/invalid/%2g").is_err());
     }
 
     #[test]
     fn invalid_utf8_percent_sequence_fails() {
         // %FF%FF is not valid UTF-8
-        assert!(NamePath::parse("/invalid/%FF%FF").is_err());
+        assert!(SymbolPath::parse("/invalid/%FF%FF").is_err());
     }
 
     #[test]
     fn rfc6901_escape_sequences_decode_correctly() -> anyhow::Result<()> {
         // ~1 becomes /, ~0 becomes ~
-        let path = NamePath::parse("/deps/@types~1node/v~01")?;
+        let path = SymbolPath::parse("/deps/@types~1node/v~01")?;
         assert_eq!(path.segments(), &["deps", "@types/node", "v~1"]);
         assert_eq!(path.to_string(), "/deps/@types~1node/v~01");
         Ok(())
@@ -271,15 +271,15 @@ mod tests {
 
     #[test]
     fn invalid_rfc6901_escape_sequence_fails() {
-        assert!(NamePath::parse("/invalid/~2").is_err());
-        assert!(NamePath::parse("/invalid/~").is_err());
-        assert!(NamePath::parse("/invalid/foo~bar").is_err());
-        assert!(NamePath::parse("/invalid/foo~~").is_err());
+        assert!(SymbolPath::parse("/invalid/~2").is_err());
+        assert!(SymbolPath::parse("/invalid/~").is_err());
+        assert!(SymbolPath::parse("/invalid/foo~bar").is_err());
+        assert!(SymbolPath::parse("/invalid/foo~~").is_err());
     }
 
     #[test]
     fn empty_segments_are_preserved() -> anyhow::Result<()> {
-        let path = NamePath::parse("/a//b")?;
+        let path = SymbolPath::parse("/a//b")?;
         assert_eq!(path.segments(), &["a", "", "b"]);
         assert_eq!(path.to_string(), "/a//b");
         Ok(())
@@ -287,7 +287,7 @@ mod tests {
 
     #[test]
     fn root_only_path_yields_single_empty_segment() -> anyhow::Result<()> {
-        let path = NamePath::parse("/")?;
+        let path = SymbolPath::parse("/")?;
         assert_eq!(path.segments(), &[""]);
         assert_eq!(path.to_string(), "/");
         Ok(())
@@ -295,17 +295,17 @@ mod tests {
 
     #[test]
     fn different_raw_encodings_compare_equal() -> anyhow::Result<()> {
-        let p1 = NamePath::parse("/deps/%41")?;
-        let p2 = NamePath::parse("/deps/A")?;
+        let p1 = SymbolPath::parse("/deps/%41")?;
+        let p2 = SymbolPath::parse("/deps/A")?;
         assert_eq!(p1, p2);
         assert_eq!(p1.to_string(), "/deps/A");
 
-        let p_hex_upper = NamePath::parse("/keys/%2C")?;
-        let p_hex_lower = NamePath::parse("/keys/%2c")?;
+        let p_hex_upper = SymbolPath::parse("/keys/%2C")?;
+        let p_hex_lower = SymbolPath::parse("/keys/%2c")?;
         assert_eq!(p_hex_upper, p_hex_lower);
 
-        let p_hash = NamePath::parse("#/a/b")?;
-        let p_no_hash = NamePath::parse("/a/b")?;
+        let p_hash = SymbolPath::parse("#/a/b")?;
+        let p_no_hash = SymbolPath::parse("/a/b")?;
         assert_eq!(p_hash, p_no_hash);
         Ok(())
     }
@@ -324,9 +324,9 @@ mod tests {
             "/special/%23/%22/%27",
         ];
         for raw in test_cases {
-            let parsed = NamePath::parse(raw)?;
+            let parsed = SymbolPath::parse(raw)?;
             let formatted = parsed.to_string();
-            let reparsed = NamePath::parse(&formatted)?;
+            let reparsed = SymbolPath::parse(&formatted)?;
             assert_eq!(parsed, reparsed, "failed round-trip for {raw}");
         }
         Ok(())
@@ -334,18 +334,19 @@ mod tests {
 
     #[test]
     fn path_with_single_and_double_quotes_display_percent_encoded() -> anyhow::Result<()> {
-        let path = NamePath::parse("/items/\"double\"/'single'")?;
+        let path = SymbolPath::parse("/items/\"double\"/'single'")?;
         assert_eq!(path.segments(), &["items", "\"double\"", "'single'"]);
         assert_eq!(path.to_string(), "/items/%22double%22/%27single%27");
 
-        let reparsed = NamePath::parse(&path.to_string())?;
+        let reparsed = SymbolPath::parse(&path.to_string())?;
         assert_eq!(reparsed, path);
         Ok(())
     }
 
     #[test]
     fn valid_segments_provided_from_segments_constructs_rooted_path() {
-        let path = NamePath::from_segments(vec!["dependencies".to_string(), "inngest".to_string()]);
+        let path =
+            SymbolPath::from_segments(vec!["dependencies".to_string(), "inngest".to_string()]);
         assert_eq!(path.to_string(), "/dependencies/inngest");
         assert_eq!(path.segments(), &["dependencies", "inngest"]);
     }
@@ -353,6 +354,6 @@ mod tests {
     #[test]
     #[should_panic(expected = "a symbol path needs at least one segment")]
     fn empty_segments_provided_from_segments_panics() {
-        NamePath::from_segments(vec![]);
+        SymbolPath::from_segments(vec![]);
     }
 }

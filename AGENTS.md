@@ -154,8 +154,8 @@ Key module boundaries:
   derives every addressable `Symbol` (its path, definition range and decoded value) in one walk of the tree. It refuses
   a file with a syntax error rather than resolve a path through tree-sitter's error recovery. It does not check the
   query itself: each language's own tests pin the complete list of symbols its query derives.
-- `src/name_path.rs` — `NamePath`, the RFC 6901 path after the `#` in a `file#/a/b` reference, and the path each
-  `Symbol` carries. A reference and a derived symbol are compared as `NamePath` values.
+- `src/symbol_path.rs` — `SymbolPath`, the RFC 6901 path after the `#` in a `file#/a/b` reference, and the path each
+  `Symbol` carries. A reference and a derived symbol are compared as `SymbolPath` values.
 - `src/validators/` — one file per validator (`affects`, `check_ai`, `check_lua`, `keep_sorted`, `keep_unique`,
   `line_count`, `line_pattern`, `same_as`), each exporting a `*ValidatorDetector`. All detectors are wired up in
   `validators/mod.rs`.

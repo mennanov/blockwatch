@@ -12,8 +12,8 @@ use crate::blocks::{Block, BlockSeverity, BlockWithContext, FileBlocks, parser_f
 use crate::diff_parser::LineChange;
 use crate::fs::FileSystem;
 use crate::language_parsers::LanguageParsers;
-use crate::name_path::NamePath;
 use crate::repo_path::RepoPath;
+use crate::symbol_path::SymbolPath;
 use crate::symbols::{ResolveError, Symbol, resolve};
 use crate::validators::affects::AffectsValidatorDetector;
 use crate::validators::check_ai::CheckAiValidatorDetector;
@@ -602,7 +602,7 @@ pub(in crate::validators) enum TargetReference {
     /// A symbol, found by `path` in `file`, or in the referencing file itself when `file` is `None`.
     Symbol {
         file: Option<RepoPath>,
-        path: NamePath,
+        path: SymbolPath,
     },
 }
 
@@ -665,7 +665,7 @@ fn parse_symbol_reference(
         );
     }
     let file = parse_optional_repo_path(file_part)?;
-    let path = NamePath::parse(fragment)?;
+    let path = SymbolPath::parse(fragment)?;
     Ok(TargetReference::Symbol { file, path })
 }
 
@@ -785,7 +785,7 @@ impl<'a, Fs: FileSystem> TargetFiles<'a, Fs> {
     pub(in crate::validators) fn resolve_symbol(
         &mut self,
         file: &RepoPath,
-        path: &NamePath,
+        path: &SymbolPath,
     ) -> anyhow::Result<(&str, TargetResult<&Symbol>)> {
         let (content, symbols) = self.content_and_symbols(file).with_context(|| {
             format!(
@@ -1004,8 +1004,8 @@ mod parse_number_tests {
 
 #[cfg(test)]
 mod parse_target_references_tests {
-    use crate::name_path::NamePath;
     use crate::repo_path::RepoPath;
+    use crate::symbol_path::SymbolPath;
     use crate::validators::{TargetReference, parse_target_references};
 
     /// A `file:name` reference, for the expected values below.
@@ -1020,7 +1020,7 @@ mod parse_target_references_tests {
     fn path(file: Option<&str>, fragment: &str) -> anyhow::Result<TargetReference> {
         Ok(TargetReference::Symbol {
             file: file.map(RepoPath::from_reference).transpose()?,
-            path: NamePath::parse(fragment)?,
+            path: SymbolPath::parse(fragment)?,
         })
     }
 
@@ -1203,8 +1203,8 @@ mod resolve_error_reason_tests {
     use super::*;
     use crate::symbols::Symbol;
 
-    fn path(text: &str) -> NamePath {
-        NamePath::parse(text).expect("the path is valid")
+    fn path(text: &str) -> SymbolPath {
+        SymbolPath::parse(text).expect("the path is valid")
     }
 
     /// A symbol at `path_text` whose definition spans `def_byte_range` of its source.
@@ -1267,7 +1267,7 @@ mod target_files_tests {
             FakeFileSystem::new(HashMap::from([(file.to_string(), content.to_string())]));
         let mut files = TargetFiles::new(&context, &file_system);
         let err = files
-            .resolve_symbol(&RepoPath::from_reference(file)?, &NamePath::parse(path)?)
+            .resolve_symbol(&RepoPath::from_reference(file)?, &SymbolPath::parse(path)?)
             .unwrap_err();
         Ok(format!("{err:#}"))
     }

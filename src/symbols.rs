@@ -1,6 +1,6 @@
 use crate::Position;
 use crate::character_column_at;
-use crate::name_path::NamePath;
+use crate::symbol_path::SymbolPath;
 use anyhow::{Context, bail, ensure};
 use std::collections::HashMap;
 use std::ops::Range;
@@ -8,12 +8,12 @@ use tree_sitter::StreamingIterator;
 
 /// An addressable symbol definition derived from a syntax tree using a language query.
 ///
-/// Contains the derived rooted [`NamePath`], the byte range of the definition node, and the
+/// Contains the derived rooted [`SymbolPath`], the byte range of the definition node, and the
 /// unquoted scalar value if the symbol represents a scalar.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Symbol {
     /// The symbol path of this symbol (e.g. `/dependencies/inngest`).
-    pub path: NamePath,
+    pub path: SymbolPath,
     /// Byte range of the definition node (`@def` or `@item`) in the source.
     pub def_byte_range: Range<usize>,
     /// The unquoted scalar value, or `None` if the symbol represents a container or composite node.
@@ -25,7 +25,7 @@ impl Symbol {
         // A path is empty only when the query gives a `@def` no `@name`, and `from_segments`
         // panics on that. An `@item` always gets its index, so it cannot be the cause.
         Self {
-            path: NamePath::from_segments(path.to_vec()),
+            path: SymbolPath::from_segments(path.to_vec()),
             def_byte_range: node.byte_range(),
             value,
         }
@@ -48,7 +48,7 @@ impl Symbol {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ResolveError<'a> {
     /// No symbol has the path. `hints` holds the paths that resemble it, the most alike first.
-    NotFound { hints: Vec<&'a NamePath> },
+    NotFound { hints: Vec<&'a SymbolPath> },
     /// Several symbols have the path. `candidates` holds every one of them, in document order.
     Ambiguous { candidates: Vec<&'a Symbol> },
 }
@@ -70,7 +70,7 @@ const MIN_HINT_SIMILARITY: f64 = 0.6;
 /// [`ResolveError::Ambiguous`] when several do.
 pub(crate) fn resolve<'a>(
     symbols: &'a [Symbol],
-    path: &NamePath,
+    path: &SymbolPath,
 ) -> Result<&'a Symbol, ResolveError<'a>> {
     let candidates: Vec<&Symbol> = symbols
         .iter()
@@ -86,11 +86,11 @@ pub(crate) fn resolve<'a>(
 }
 
 /// The paths in `symbols` that resemble `path`.
-fn hints<'a>(symbols: &'a [Symbol], path: &NamePath) -> Vec<&'a NamePath> {
+fn hints<'a>(symbols: &'a [Symbol], path: &SymbolPath) -> Vec<&'a SymbolPath> {
     // The paths are compared as written, escapes included, so that a `/` left unescaped in a key
     // reads as a small difference.
     let written = path.to_string();
-    let mut alike: Vec<(f64, &NamePath)> = symbols
+    let mut alike: Vec<(f64, &SymbolPath)> = symbols
         .iter()
         .map(|symbol| {
             let similarity = strsim::normalized_levenshtein(&written, &symbol.path.to_string());
@@ -552,7 +552,7 @@ mod tests {
         assert_eq!(
             symbols,
             vec![Symbol {
-                path: NamePath::from_segments(vec![r#""K""#.to_string()]),
+                path: SymbolPath::from_segments(vec![r#""K""#.to_string()]),
                 def_byte_range: 1..9,
                 value: Some(r#""V""#.to_string()),
             }]
@@ -711,8 +711,8 @@ mod tests {
 mod resolve_tests {
     use super::*;
 
-    fn path(path: &str) -> NamePath {
-        NamePath::parse(path).expect("the path is valid")
+    fn path(path: &str) -> SymbolPath {
+        SymbolPath::parse(path).expect("the path is valid")
     }
 
     /// A symbol at `path` whose definition starts at `start`, which tells apart symbols that
