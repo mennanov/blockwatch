@@ -58,11 +58,13 @@ end
     tag. A block tagged `<block check-lua="…" name="limits" severity="warning">` gives the script
     `ctx.attrs["check-lua"]`, `ctx.attrs["name"]` and `ctx.attrs["severity"]`. Only BlockWatch's own attributes can
     appear here.
-  - `ctx.affects` — present only when the block also has an [`affects`](affects.md) attribute. A 1-based array of the
-    targets this block affects, each a table with `file`, `name`, and (trimmed)
-    `content`. `file` uses the same format as `ctx.file`. References that do not resolve are skipped. A whole-file
-    target (an `affects` entry written without a `:`) carries the file's entire text as `content` and no `name`, so
-    `affected.name == nil` is how a script tells the two kinds apart.
+  - `ctx.affects` — present only when the block also has an [`affects`](affects.md) attribute. A 1-based array with
+    one table per target, holding `file`, `name` and `content` (trimmed). `file` uses the same format as `ctx.file`.
+    Targets that don't resolve are left out.
+    - For a block, `name` is the block's name and `content` is its content.
+    - For a whole file, `name` is `nil` and `content` is the whole file.
+    - For a [symbol](affects.md#symbols) (`file#/path`), `name` is the path with its `#`, such as `#/version`.
+      `content` is the symbol's value, or its text in the file for an object or array.
 - `content` — a **string** holding the trimmed text content of the block, or, when
   `check-lua-pattern` is set, a **1-based array** of the values the pattern extracted.
 

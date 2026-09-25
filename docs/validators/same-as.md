@@ -1,24 +1,34 @@
 # `same-as`
 
-Asserts that two or more blocks hold the **same value**. Where [`affects`](affects.md) only checks that linked blocks
-were co-edited, `same-as` compares their contents — catching duplicated constants, lists, and versions that silently
-drift apart.
+Checks that two or more places hold the **same value**. [`affects`](affects.md) only checks that linked blocks were
+edited together. `same-as` compares what they contain. Use it for constants, lists and versions that are copied in
+several places.
 
-Unlike `affects`, it also runs on a full-tree scan, not only on a diff.
+It runs on every scan, with or without a diff.
 
 ## Syntax
 
-| Attribute         | Value                                                                                            | Default    |
-|-------------------|--------------------------------------------------------------------------------------------------|------------|
-| `same-as`         | `file:name`, `:name` for the same file, or `file` for a whole file; comma-separated for multiple | —          |
-| `same-as-pattern` | regex; every match's `(?P<value>…)` group, or the whole match                                    | whole line |
-| `same-as-mode`    | `set`, `sequence`, `single`, `subset`                                                            | `set`      |
-| `same-as-format`  | `numeric`                                                                                        | text       |
+| Attribute         | Value                                               | Default           |
+|-------------------|-----------------------------------------------------|-------------------|
+| `same-as`         | One or more [targets](#targets), comma-separated    | —                 |
+| `same-as-pattern` | A regex that picks the values to compare            | the whole content |
+| `same-as-mode`    | `set`, `sequence`, `single` or `subset`             | `set`             |
+| `same-as-format`  | `numeric`                                           | text              |
+
+## Targets
+
+| Target       | Compares against                                                                 |
+|--------------|----------------------------------------------------------------------------------|
+| `file:name`  | the block called `name` in `file`                                                |
+| `:name`      | the block called `name` in the same file                                         |
+| `file`       | all of `file` (see [Whole files](#whole-files-as-targets))                       |
+| `file#/path` | one value inside `file`, such as a JSON key (see [Symbols](#symbols-as-targets)) |
+| `#/path`     | one value inside the same file                                                   |
 
 ## Example
 
-With no extra attributes the whole trimmed content is compared as text, so both blocks must be **identical**. This fits
-content you cannot factor into a shared symbol — here, a command documented in two places:
+With no other attributes, both blocks must hold **identical** text. Blank lines and indentation don't count. This suits
+text you can't share any other way, such as a command shown in two docs:
 
 **README.md**:
 
@@ -40,14 +50,13 @@ content you cannot factor into a shared symbol — here, a command documented in
 [//]: # (</block>)
 ```
 
-Most couplings, though, do not share verbatim text. For those, each block describes **how to read itself**.
+Usually, though, the two places don't hold the same text. Then each block says **which parts to compare**.
 
-## Extract values with `same-as-pattern`
+## Pick values with `same-as-pattern`
 
-Each side extracts tokens via its own regex — the `(?P<value>…)` capture group, or the whole match if there is none.
-Every match on a line counts, so a line listing several values contributes all of them; lines that do not match are
-skipped, as are matches whose value is empty. Because each block self-describes, blocks in different formats can still
-be compared:
+Each block has its own regex. Every match is a value: the `(?P<value>…)` group if there is one, otherwise the whole
+match. A line can hold several values. Lines without a match are skipped, and so are empty matches. This lets you
+compare blocks written in different formats:
 
 ```rust
 // <block same-as="README.md:supported-env-vars" same-as-pattern="BLOCKWATCH_AI_[A-Z_]+">
@@ -67,9 +76,8 @@ const API_URL: &str = "BLOCKWATCH_AI_API_URL";
 
 ### Lines are not part of the comparison
 
-A pattern compares the **values** a block yields, not the lines they are written on: every line's matches flow into one
-flat list. That is what makes the example above work, and it means regrouping the same values across lines is not a
-disagreement; these two blocks agree, in `sequence` mode as much as in `set`:
+With a pattern, only the values count, not how they are split into lines. These two blocks agree, even in `sequence`
+mode:
 
 ```rust
 // <block same-as="b.md:letters" same-as-pattern="[A-Z]+" same-as-mode="sequence">
@@ -86,35 +94,60 @@ A, B, C D
 [//]: # (</block>)
 ```
 
-If a block's line structure is itself meaningful, leave the pattern off. Without one, the whole content is compared
-newline by newline, so the layout has to match too.
+If the layout matters, leave the pattern off. Without one, the content is compared line by line.
 
 ## Whole files as targets
 
-A target written without a `:` names a file rather than a block, and the file's **entire** content is what the block is
-compared against. Nothing is parsed out of it, so a format that cannot declare a block — JSON, `.env`, a lockfile — can
-still be a target:
+A target without `:` or `#` is a whole file. The block is compared against the file's full text, and nothing in the
+file is parsed. So any file can be a target, even one that can't hold a block, such as `.env` or a lockfile:
 
 ```rust
-// <block same-as="package.json" same-as-pattern="\d+\.\d+\.\d+">
-pub const VERSION: &str = "1.4.2";
+// <block same-as=".nvmrc" same-as-pattern="\d+\.\d+\.\d+">
+pub const NODE_VERSION: &str = "20.11.1";
 // </block>
 ```
 
-The file has no block of its own to carry a `same-as-pattern`, so the referencing block's pattern reads both sides. On a
-file of any size a pattern is usually what you want: without one, the block's content has to equal the whole file.
+The file has no block of its own, so the referencing block's pattern reads both sides. For anything longer than one
+line, you will want a pattern: without one, the block must equal the entire file.
+
+## Symbols as targets
+
+`file#/path` points at one value inside a file. That value is called a **symbol**. `#/path` points into the block's own
+file. JSON files (`.json` and `.jsonc`) have symbols: every key and every array item.
+
+```rust
+// <block same-as="package.json#/dependencies/inngest" same-as-pattern="\d+\.\d+\.\d+">
+pub const INNGEST_VERSION: &str = "4.18.1";
+// </block>
+```
+
+This compares only `/dependencies/inngest`. With `same-as="package.json"`, the pattern would pick up every version in
+the file.
+
+- **What gets compared.** A string, number, `true`, `false` or `null` gives its value. A string loses its quotes. An
+  object or array gives its text as written in the file. The referencing block's pattern applies, as for a whole file.
+- **How to write a path.** Paths follow [RFC 6901](https://www.rfc-editor.org/rfc/rfc6901) (JSON Pointer):
+  - `/` separates keys: `#/dependencies/inngest`.
+  - An array item is its position, counted from 0: `#/files/0`.
+  - Inside a key, write `/` as `~1` and `~` as `~0`: `#/dependencies/@types~1node`.
+  - Inside a key, write `,` as `%2C`, `:` as `%3A` and `%` as `%25`.
+- **A missing or repeated key is a violation.** For a missing key, the message suggests similar paths:
+  `symbol not found; did you mean: /version`. For a key that appears twice, it shows where each copy is:
+  `ambiguous symbol, defined at 2:3, 5:3`.
+- **A file with a syntax error stops the run.** BlockWatch does not guess what a broken file meant. A trailing comma
+  counts as an error, even in `.jsonc`.
 
 ## Comparison modes
 
-| `same-as-mode`  | Meaning                                                            |
-|-----------------|--------------------------------------------------------------------|
-| `set` (default) | Order- and duplicate-insensitive; the two token sets must be equal |
-| `sequence`      | Order-sensitive list equality                                      |
-| `single`        | Exactly one token per side — "there is exactly one version"        |
-| `subset`        | Directional: every token here must also appear in the target       |
+| `same-as-mode`  | Passes when                                                       |
+|-----------------|-------------------------------------------------------------------|
+| `set` (default) | both sides hold the same values, in any order, ignoring repeats   |
+| `sequence`      | both sides hold the same values in the same order                 |
+| `single`        | each side holds exactly one value, and the two are equal          |
+| `subset`        | every value in this block also appears in the target              |
 
-`subset` is the one directional mode. It fits cases where one side is a legitimate subset of the other — a test fixture
-exercising only some of the declared environment variables, say:
+`subset` checks one direction only. Use it when one side should hold part of the other, like a test that uses only
+some of the environment variables:
 
 ```rust
 // <block same-as="src/config.rs:env-vars" same-as-mode="subset" same-as-pattern="BLOCKWATCH_AI_[A-Z_]+">
@@ -124,13 +157,10 @@ const API_KEY: &str = "BLOCKWATCH_AI_API_KEY";
 
 ## Numeric comparison
 
-`same-as-format="numeric"` parses each token as a number before comparing, so the same quantity written in different
-numeric forms still agrees.
+`same-as-format="numeric"` reads each value as a number, so `60` and `60.0` are equal.
 
-A timeout shared between a Rust backend and a TypeScript frontend is a good case: the value cannot be imported across
-the language boundary, and the two sides spell it differently. Wrapping the tag *inline* around just the literal keeps
-the block content down to the number itself, so no
-`same-as-pattern` is needed:
+This helps when one value lives in two languages that write it differently. Here a timeout lives in Rust and in
+TypeScript. The tags sit right around the number, so each block holds only the number and needs no pattern:
 
 **src/backend.rs**:
 
@@ -144,37 +174,29 @@ const TIMEOUT: Duration = Duration::from_secs_f64(/* <block same-as="app/config.
 export const timeout = /* <block name="timeout"> */ 60 /* </block> */; // seconds
 ```
 
-Rust's `from_secs_f64` takes a float (`60.0`) while TypeScript uses a plain `60`; `numeric` parses both and they compare
-equal. Under text comparison, `"60.0" != "60"` would fail.
+Rust writes `60.0` and TypeScript writes `60`. As numbers they are equal. As text they would not be.
 
-Values are compared as exact decimals of any length, so two identifiers far beyond the range of a 64-bit float never
-compare equal by accident. A value may carry a sign, a fractional part and an exponent (`-1`, `.5`, `1e9`); `inf` and
-`NaN` are not numbers a source file can hold and are reported like any other non-numeric token.
-
-`_` is accepted as a digit separator, so each side keeps the spelling its language gives it — a Rust `1_000_000` and a
-JSON `1000000` are the same value. A separator must sit between two digits: `_1`, `1_`, `1__0` and `1_.0` are typos, not
-numbers.
+- Numbers are compared exactly, however long they are. Two large IDs never match because of rounding.
+- A number can have a sign, a fraction and an exponent: `-1`, `.5`, `1e9`. `inf` and `NaN` are not numbers here.
+- `_` can separate digits, so Rust's `1_000_000` equals JSON's `1000000`. It must sit between two digits: `_1`, `1_`,
+  `1__0` and `1_.0` are not numbers.
 
 ## Notes
 
-- **Which block governs what.** The source block's `same-as-mode` and `same-as-format` govern the comparison. Each
-  block's own `same-as-pattern` governs only how *that* block is read — except for a whole-file target, which has no
-  block of its own and is read under the referencing block's pattern.
-- **Not a violation:** the same values regrouped across lines, when a `same-as-pattern` is set. See
-  [Lines are not part of the comparison](#lines-are-not-part-of-the-comparison).
-- **Violations:** a missing target block, a non-numeric token under `numeric`, a `single` /
-  `subset` side with the wrong number of tokens, or a `same-as-pattern` that matches nothing on
-  both sides — an empty match on both blocks is not treated as trivially equal.
-- **Hard errors** (not violations): an unrecognized `same-as-mode` or `same-as-format` value, an invalid regex, or a
-  target file that does not exist.
-- Because `same-as` fires without a diff, a periodic bare `blockwatch` run — which scans the whole tree — catches drift
-  that an `--only-changed` check would miss. See [CI integration](../ci.md).
-- **A pure rename is invisible to diff input.** Renaming a `same-as` target with no content change (a plain `git mv`)
-  produces no content hunk, so `--only-changed` has nothing to check and exits `0`. A full-tree run does catch it,
-  because the old path no longer resolves — another reason to schedule the periodic run above.
-- **Targets are read, not reported.** Under `--only-changed`, a target the diff did not touch is still resolved and
-  compared, but it does not appear in a `--verbosity` run report. See
-  [Reports Under a Diff](../cli.md#reports-under-a-diff).
+- **Which block's attributes count.** The referencing block's `same-as-mode` and `same-as-format` decide how to compare.
+  Each block's `same-as-pattern` reads only that block. A whole file or a symbol has no block, so the referencing
+  block's pattern reads it too.
+- **Violations:** a missing block, a missing or repeated key, a value that is not a number under `numeric`, a `single`
+  side without exactly one value, and a pattern that matches nothing on either side. Two empty sides do not count as
+  equal.
+- **Errors that stop the run:** an unknown `same-as-mode` or `same-as-format`, an invalid regex, a missing target file,
+  and a symbol in a file with a syntax error or without symbols.
+- **Run it on the whole tree now and then.** `same-as` needs no diff, so a plain `blockwatch` run catches drift that
+  `--only-changed` misses. See [CI integration](../ci.md).
+- **A rename alone goes unnoticed in a diff.** Renaming a target file without changing it (a plain `git mv`) gives
+  `--only-changed` nothing to check. A full run catches it, because the old path no longer exists.
+- **Targets are checked but not listed.** Under `--only-changed`, a target the diff did not touch is still compared, but
+  it does not appear in the `--verbosity` report. See [Reports Under a Diff](../cli.md#reports-under-a-diff).
 
 ---
 

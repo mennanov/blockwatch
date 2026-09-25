@@ -11,11 +11,15 @@ const TWO_RULES: &str = "tests/testdata/suppressions/two_rules.py";
 const DANGLING: &str = "tests/testdata/suppressions/dangling.py";
 /// The same out-of-order block as `SORTED`, but without a `name`.
 const UNNAMED: &str = "tests/testdata/suppressions/unnamed.py";
+/// One named block whose `affects` points at a missing symbol, its path spelled with a percent
+/// escape.
+const SYMBOL: &str = "tests/testdata/suppressions/symbol.py";
 /// The addresses a run prints, quoted here so a change to how they are derived, show up as a
 /// failing test rather than as a suppression that silently stops matching.
 const SORTED_ADDRESS: &str = "tests/testdata/suppressions/sorted.py:fruits:keep-sorted:bbd61689";
 const GONE_A_ADDRESS: &str = "tests/testdata/suppressions/dangling.py:source:affects:80c47447";
 const GONE_B_ADDRESS: &str = "tests/testdata/suppressions/dangling.py:source:affects:80c475fa";
+const SYMBOL_ADDRESS: &str = "tests/testdata/suppressions/symbol.py:deps:affects:73a660a5";
 
 /// The diagnostics a run wrote to stderr, keyed by file exactly as they were printed.
 fn diagnostics(stderr: &[u8]) -> Value {
@@ -86,6 +90,21 @@ fn four_segment_address_suppresses_one_violation_and_leaves_its_siblings() {
         })
         .collect();
     assert_eq!(suppressed, vec![GONE_A_ADDRESS]);
+}
+
+#[test]
+fn four_segment_address_suppresses_a_symbol_violation() {
+    // The hash comes from the canonical `#/versoin`, not from the `#/vers%6Fin` the block wrote,
+    // so respelling a path does not orphan its suppression.
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg(SYMBOL).args(["--suppress", SYMBOL_ADDRESS]);
+    let output = cmd.output().unwrap();
+
+    let violation = &diagnostics(&output.stderr)[SYMBOL][0];
+    output.assert().success();
+
+    assert_eq!(violation["suppressed"], true);
+    assert_eq!(violation["address"], SYMBOL_ADDRESS);
 }
 
 #[test]

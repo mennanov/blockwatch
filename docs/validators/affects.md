@@ -1,19 +1,26 @@
 # `affects`
 
-Forces linked blocks to be edited together. If you change this block and leave the block it points at untouched, the run
-fails.
+Makes sure linked blocks are edited together. If you change this block but not the target it points at, the run fails.
 
 ## Syntax
 
-| Attribute | Value                                                              | Default |
-|-----------|--------------------------------------------------------------------|---------|
-| `affects` | `file:name`, `:name` for the same file, or `file` for a whole file | —       |
-
-Separate multiple targets with commas, mixing the two forms freely:
+| Attribute | Value                                            | Default |
+|-----------|--------------------------------------------------|---------|
+| `affects` | One or more [targets](#targets), comma-separated | —       |
 
 ```rust
 // <block affects="README.md:supported-langs, docs/api.md:languages, locales/en.json">
 ```
+
+## Targets
+
+| Target       | Counts as changed when the diff touches                               |
+|--------------|-----------------------------------------------------------------------|
+| `file:name`  | the block called `name` in `file`                                     |
+| `:name`      | the block called `name` in the same file                              |
+| `file`       | any part of `file` (see [Whole files](#whole-files))                  |
+| `file#/path` | one value inside `file`, such as a JSON key (see [Symbols](#symbols)) |
+| `#/path`     | one value inside the same file                                        |
 
 ## Example
 
@@ -39,35 +46,53 @@ pub enum Language {
 <!-- </block> -->
 ```
 
-Modify the enum and BlockWatch fails until you also touch `supported-langs` in `README.md`.
+Change the enum, and the run fails until you also change `supported-langs` in `README.md`.
 
 ## Whole Files
 
-A target written without a `:` names a file rather than a block:
+A target without `:` or `#` is a whole file:
 
 ```rust
 // <block affects="config/schema.json">
 ```
 
-Declaring a block needs a comment, and some formats have none: e.g., JSON, `.env`, lockfiles, CSV, plain-text fixtures.
-A whole-file target has nothing parsed out of it, so any of those can be linked to: change the block, and the run fails
-until that file changes too.
+A block has to live in a comment, and some files can't have comments: plain JSON, `.env`, lockfiles, CSV, text
+fixtures. A whole-file target works for all of them. Change the block, and the run fails until that file changes too.
 
-The trade-offs that come with it:
+Things to know:
 
-- **It is coarse.** *Any* edit to the file satisfies the reference, a reformatting or a comment included. That is fine
-  for a small `en.json` and noisy for a large one; a named block better serves a file with comments.
-- **Moving the file is not an edit.** A rename that changes no content leaves the reference unsatisfied, so a commit
-  that only relocates the target still fails. Creating the file, even empty, satisfies it.
-- **It is one-way.** A file with no comments cannot carry an `affects` of its own, so "the JSON changed but the code
-  didn't" stays undetected. Point a block at a whole file, not the reverse.
-- **Deleting the target fails the run**, the same way a named target's missing file does.
-- **A file path containing a `:` cannot be addressed**, since the colon is what tells the two forms apart.
+- **Any edit counts.** Reformatting or a new comment satisfies the target. That is fine for a small file, but noisy for
+  a big one. In a JSON file, point at one key instead: see [Symbols](#symbols).
+- **Moving the file is not an edit.** A rename that changes no content still fails. Creating the file, even empty,
+  counts.
+- **It works one way only.** A file without comments can't hold an `affects` of its own, so "the JSON changed but the
+  code didn't" goes unnoticed.
+- **Deleting the target fails the run**, like a missing file behind a block target.
+- **A file path with a `:` or `#` can't be used**, because those characters separate the file from the rest of the
+  target.
+
+## Symbols
+
+`file#/path` points at one value inside a file. That value is called a **symbol**. JSON files (`.json` and `.jsonc`)
+have symbols: every key and every array item. [`same-as`](same-as.md#symbols-as-targets) explains how to write the path.
+
+```rust
+// <block affects="package.json#/version">
+pub const VERSION: &str = "1.4.2";
+// </block>
+```
+
+The target counts as changed only when the diff touches the key or its value. For an object or array, that means any
+line inside it. Edits elsewhere in `package.json` don't count.
+
+- **A missing or repeated key is a violation**, even without a diff. For a missing key, the message suggests similar
+  paths.
+- **A file with a syntax error stops the run.** A trailing comma counts as an error, even in `.jsonc`.
 
 ## Direction
 
-`affects` is one-way. The example above catches "code changed, docs didn't" — but not the reverse. For two-way drift
-detection, name both blocks and point each at the other:
+`affects` works one way. The example above catches "code changed, docs didn't", but not the reverse. To catch both,
+give both blocks a name and point each one at the other:
 
 ```rust
 // <block name="languages-code" affects="README.md:supported-langs">
@@ -79,27 +104,22 @@ detection, name both blocks and point each at the other:
 
 ## Notes
 
-- **The co-editing check needs a diff.** Without one every block counts as unmodified, so the "were both edited
-  together" check reports nothing at all — not a pass, but no check. `blockwatch` on its own is therefore blind to it;
-  run `git diff --patch | blockwatch --diff` to audit the whole tree with `affects` enforced, or add `--only-changed` to
-  check just the changed blocks. On a run without a diff, `blockwatch --verbosity summary` prints a `needs --diff` count
-  naming how many blocks were skipped for this reason; under a diff those rules can fire, so the count is not reported.
-  Reference integrity (below) is checked either way. If you want a value comparison that also works on a bare full-tree
-  run, use [`same-as`](same-as.md).
-- **Co-editing, not agreement.** `affects` only checks that both sides were touched — it does not compare their
-  contents. Touching the target with an unrelated edit satisfies it. When the two blocks should hold the same
-  *value*, [`same-as`](same-as.md) is the stronger check.
-- **Missing targets are violations.** A reference to a block `name` that does not exist (renamed or deleted) is reported
-  as a violation, even without a diff. A reference to a target *file* that does not exist fails the run, whether the
-  file was named alone or as the `file` half of `file:name`.
-- **Targets are read, not reported.** Under `--only-changed`, a target the diff did not touch is still resolved and
-  compared, but it does not appear in a `--verbosity` run report. See
-  [Reports Under a Diff](../cli.md#reports-under-a-diff).
-- **Globs do not narrow target resolution.** `blockwatch --diff --only-changed "src/**/*.rs"` still resolves a target
-  living under `docs/`, so narrowing a run to one language does not report every rule that spans two of them as
-  unsatisfied. An excluded target file is read to answer the reference and is never validated.
-- Combining `affects` with [`check-lua`](check-lua.md) gives a script access to the affected blocks' contents through
-  `ctx.affects`, which is a way to compare them without file IO.
+- **The edited-together check needs a diff.** Without one, no block counts as changed, so the check never runs. It
+  does not pass; it just finds nothing. Run `git diff --patch | blockwatch --diff` to check the whole tree, or add
+  `--only-changed` to check only the changed blocks. Without a diff, `blockwatch --verbosity summary` shows a
+  `needs --diff` count of the blocks it skipped. Missing targets (below) are checked either way. To compare values
+  without a diff, use [`same-as`](same-as.md).
+- **It checks edits, not values.** Any edit to the target satisfies it, even an unrelated one. When both places must
+  hold the same value, [`same-as`](same-as.md) is the stronger check.
+- **Missing targets are violations**, even without a diff. That covers a block that was renamed or deleted, and a
+  missing or repeated key. A target *file* that doesn't exist stops the run.
+- **Targets are checked but not listed.** Under `--only-changed`, a target the diff did not touch is still checked, but
+  it does not appear in the `--verbosity` report. See [Reports Under a Diff](../cli.md#reports-under-a-diff).
+- **Globs don't limit targets.** `blockwatch --diff --only-changed "src/**/*.rs"` still finds a target under `docs/`,
+  so narrowing a run to one language doesn't break links to other files. A target outside the globs is read to check
+  the link, but it is never validated itself.
+- With [`check-lua`](check-lua.md), a script can read its targets' contents through `ctx.affects`, without opening
+  files.
 
 ---
 

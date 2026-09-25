@@ -1,0 +1,4 @@
+{
+  // The version every package pins.
+  "version": "1.0" /* bumped by the release script */
+}
