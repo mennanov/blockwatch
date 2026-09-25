@@ -335,13 +335,10 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
     ) -> anyhow::Result<TargetResult<Vec<String>>> {
         let (content, resolution) = self.files.resolve_symbol(target_file, path)?;
         match resolution {
-            Ok(symbol) => {
-                let text = match &symbol.value {
-                    Some(value) => value.as_str(),
-                    None => &content[symbol.def_byte_range.clone()],
-                };
-                Ok(Ok(extract_items_from(text, pattern)?))
-            }
+            Ok(symbol) => Ok(Ok(extract_items_from(
+                symbol.value_or_definition(content),
+                pattern,
+            )?)),
             Err(reason) => Ok(Err(reason)),
         }
     }

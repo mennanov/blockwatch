@@ -42,6 +42,18 @@ impl Symbol {
     pub fn position_range(&self, source: &str) -> Range<Position> {
         position_at(source, self.def_byte_range.start)..position_at(source, self.def_byte_range.end)
     }
+
+    /// The symbol's value, or the text of its definition in `source` when it has none, as an
+    /// object does. `source` must be the text the symbol was derived from.
+    ///
+    /// # Panics
+    /// Panics if the definition's byte range does not fit `source`.
+    pub fn value_or_definition<'s>(&'s self, source: &'s str) -> &'s str {
+        match &self.value {
+            Some(value) => value,
+            None => &source[self.def_byte_range.clone()],
+        }
+    }
 }
 
 /// Why a symbol path did not resolve to exactly one symbol.

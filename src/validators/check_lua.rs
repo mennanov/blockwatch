@@ -3,8 +3,9 @@ use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::parse_target_references;
 use crate::validators::{
-    PatternContent, TargetReference, ValidationContext, ValidationReport, ValidatorAsync,
-    ValidatorDetector, ValidatorType, Violation, ViolationRange, block_content_for_pattern,
+    PatternContent, TargetFiles, TargetReference, ValidationContext, ValidationReport,
+    ValidatorAsync, ValidatorDetector, ValidatorType, Violation, ViolationRange,
+    block_content_for_pattern,
 };
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -118,7 +119,7 @@ impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
                             LuaContent::Matches(matches.into_iter().map(str::to_string).collect())
                         }
                     };
-                    let affected_blocks = resolve_affected_blocks(
+                    let affected_targets = resolve_affected_targets(
                         &context,
                         file_system.as_ref(),
                         &file_path,
@@ -131,7 +132,7 @@ impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
                         &file_path,
                         block_with_context,
                         content,
-                        &affected_blocks,
+                        &affected_targets,
                     )
                     .await;
 
@@ -167,7 +168,7 @@ async fn run_lua_script<Fs: FileSystem>(
     file_path: &RepoPath,
     block_with_context: &BlockWithContext,
     content: LuaContent,
-    affected_blocks: &[AffectedBlock],
+    affected_targets: &[AffectedTarget],
 ) -> anyhow::Result<Option<String>> {
     let timeout = parse_check_lua_timeout(&block_with_context.block)?;
     let script_content = file_system
@@ -181,7 +182,7 @@ async fn run_lua_script<Fs: FileSystem>(
         file_path,
         block_with_context,
         content,
-        affected_blocks,
+        affected_targets,
     );
 
     // Run the Lua script in a blocking thread for CPU-heavy scripts that never yield control back.
@@ -236,11 +237,11 @@ impl LuaScriptInputs {
         file_path: &RepoPath,
         block_with_context: &BlockWithContext,
         content: LuaContent,
-        affected_blocks: &[AffectedBlock],
+        affected_targets: &[AffectedTarget],
     ) -> Self {
         let block = &block_with_context.block;
         let affects = block.attributes.contains_key("affects").then(|| {
-            affected_blocks
+            affected_targets
                 .iter()
                 .map(|affected| LuaAffected {
                     file: affected.file.as_str().to_string(),
@@ -301,13 +302,13 @@ fn run_lua_script_sync(inputs: LuaScriptInputs) -> anyhow::Result<Option<String>
         .set("attrs", attrs_table)
         .context("failed to set ctx.attrs")?;
 
-    // When the block carries an `affects` attribute, expose the affected blocks as
+    // When the block carries an `affects` attribute, expose the affected targets as
     // `ctx.affects = [{ file, name, content }, …]` so scripts can inspect them in sandboxed mode.
-    if let Some(affected_blocks) = &inputs.affects {
+    if let Some(affected_targets) = &inputs.affects {
         let affects_table = lua
             .create_table()
             .context("failed to create affects table")?;
-        for (i, affected) in affected_blocks.iter().enumerate() {
+        for (i, affected) in affected_targets.iter().enumerate() {
             let entry = lua
                 .create_table()
                 .context("failed to create affects entry table")?;
@@ -451,9 +452,9 @@ fn create_violation(
 }
 
 /// A target referenced by the validated block's `affects` attribute, exposed to Lua scripts.
-struct AffectedBlock {
+struct AffectedTarget {
     file: RepoPath,
-    /// `None` for a whole-file reference, which has no block name.
+    /// A block name, or a symbol path with its leading `#`. `None` for a whole-file reference.
     name: Option<String>,
     content: String,
 }
@@ -463,12 +464,17 @@ struct AffectedBlock {
 ///
 /// References that don't resolve are skipped (the `affects` validator is responsible for reporting
 /// those). The content is trimmed to mirror how the validated block's own content is presented.
-fn resolve_affected_blocks<Fs: FileSystem>(
+/// A symbol's content is its value, or its definition's text when it has none.
+///
+/// # Errors
+/// Returns an error if a symbol reference points into a file that cannot be read, has no symbols,
+/// or does not parse. The `affects` validator ends the run for the same reference.
+fn resolve_affected_targets<Fs: FileSystem>(
     context: &ValidationContext,
     file_system: &Fs,
     current_file_path: &RepoPath,
     block: &Block,
-) -> anyhow::Result<Vec<AffectedBlock>> {
+) -> anyhow::Result<Vec<AffectedTarget>> {
     let mut result = Vec::new();
     let Some(affects) = block.attributes.get("affects") else {
         return Ok(result);
@@ -481,6 +487,7 @@ fn resolve_affected_blocks<Fs: FileSystem>(
             block.start_tag_position_range.start.line,
         )
     })?;
+    let mut files = TargetFiles::new(context, file_system);
     for reference in references {
         match reference {
             TargetReference::Block { file, name } => {
@@ -490,7 +497,7 @@ fn resolve_affected_blocks<Fs: FileSystem>(
                 };
                 for block_with_context in &file_blocks.blocks_with_context {
                     if block_with_context.block.name() == Some(name.as_str()) {
-                        result.push(AffectedBlock {
+                        result.push(AffectedTarget {
                             file: file.clone(),
                             name: Some(name.clone()),
                             content: block_with_context
@@ -510,14 +517,26 @@ fn resolve_affected_blocks<Fs: FileSystem>(
                         Err(_) => continue,
                     },
                 };
-                result.push(AffectedBlock {
+                result.push(AffectedTarget {
                     file,
                     name: None,
                     content: content.trim().to_string(),
                 });
             }
-            TargetReference::Symbol { .. } => {
-                anyhow::bail!("symbol references are not supported in check-lua affects attribute");
+            TargetReference::Symbol { file, path } => {
+                // A reference like "#/foo" is resolved in the file the block is in.
+                let file = file.unwrap_or_else(|| current_file_path.clone());
+                let (content, resolution) = files.resolve_symbol(&file, &path)?;
+                let symbol = match resolution {
+                    Ok(symbol) => symbol,
+                    // A missing or ambiguous symbol is skipped: the `affects` validator reports it.
+                    Err(_) => continue,
+                };
+                result.push(AffectedTarget {
+                    content: symbol.value_or_definition(content).trim().to_string(),
+                    name: Some(format!("#{path}")),
+                    file,
+                });
             }
         }
     }
@@ -1010,6 +1029,77 @@ some content
             .validate(context)
             .await?
             .violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn lua_context_includes_symbol_from_affects() -> anyhow::Result<()> {
+        // A symbol target carries its path, `#` included, as its name, and its value as its
+        // content: what `same-as` would compare.
+        let script = r##"
+function validate(ctx, content)
+    if #ctx.affects ~= 1 then
+        return "expected 1 affected target, got " .. tostring(#ctx.affects)
+    end
+    if ctx.affects[1].file ~= "package.json" then
+        return "ctx.affects[1].file is '" .. tostring(ctx.affects[1].file) .. "'"
+    end
+    if ctx.affects[1].name ~= "#/version" then
+        return "ctx.affects[1].name is '" .. tostring(ctx.affects[1].name) .. "'"
+    end
+    if ctx.affects[1].content ~= "1.0" then
+        return "ctx.affects[1].content is '" .. tostring(ctx.affects[1].content) .. "'"
+    end
+    return nil
+end
+"##;
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" affects="package.json#/version">
+some content
+# </block>"#,
+        );
+
+        let violations = validator(&[
+            ("check.lua", script),
+            ("package.json", r#"{"version": "1.0"}"#),
+        ])
+        .validate(context)
+        .await?
+        .violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn lua_context_missing_symbol_in_affects_is_skipped() -> anyhow::Result<()> {
+        // Reporting a symbol that does not resolve is the `affects` validator's job, not the
+        // script's.
+        let script = r#"
+function validate(ctx, content)
+    if #ctx.affects ~= 0 then
+        return "expected 0 affected targets, got " .. tostring(#ctx.affects)
+    end
+    return nil
+end
+"#;
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="check.lua" affects="package.json#/versoin">
+some content
+# </block>"#,
+        );
+
+        let violations = validator(&[
+            ("check.lua", script),
+            ("package.json", r#"{"version": "1.0"}"#),
+        ])
+        .validate(context)
+        .await?
+        .violations;
 
         assert!(violations.is_empty());
         Ok(())

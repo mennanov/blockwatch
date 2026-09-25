@@ -18,8 +18,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - Symbol references in `same-as` and `affects`. `same-as="package.json#/dependencies/inngest"` compares the block
   with the value at that path in a JSON file, and `same-as="#/version"` with one in the block's own file. An object or
   an array is compared as its source text. `affects="package.json#/version"` is satisfied only when the diff touches
-  that key, not when anything else in the file changes. A missing or ambiguous symbol is reported as a violation. A
-  target file with a syntax error fails the run, and a trailing comma counts as one.
+  that key, not when anything else in the file changes, and a `check-lua` script sees that target in `ctx.affects`,
+  named `#/version`, with its value as its content. A missing or ambiguous symbol is reported as a violation. A target
+  file with a syntax error fails the run, and a trailing comma counts as one.
 
 ### Changed
 
