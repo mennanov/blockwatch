@@ -63,7 +63,7 @@ end
     Targets that don't resolve are left out.
     - For a block, `name` is the block's name and `content` is its content.
     - For a whole file, `name` is `nil` and `content` is the whole file.
-    - For a [symbol](affects.md#symbols) (`file#/path`), `name` is the path with its `#`, such as `#/version`.
+    - For a [symbol](../symbols.md) (`file#/path`), `name` is the path with its `#`, such as `#/version`.
       `content` is the symbol's value, or its text in the file for an object or array.
 - `content` — a **string** holding the trimmed text content of the block, or, when
   `check-lua-pattern` is set, a **1-based array** of the values the pattern extracted.

@@ -67,9 +67,9 @@ Update the contents of the block in `README.md` and it will pass the check.
 ## Validators
 
 `affects` and `same-as` are the two that work across files: one forces a co-edit, the other compares the actual values
-and needs no diff to do it. Both can point at a block, a whole file, or a single key in a JSON or TOML file, such as
-`package.json#/version`. The rest check a single block on its own, and are the things you'd otherwise nitpick in code
-review.
+and needs no diff to do it. Both can point at a block, a whole file, or one value inside a file, such as
+`package.json#/version` (see [Symbols](docs/symbols.md)). The rest check a single block on its own, and are the things
+you'd otherwise nitpick in code review.
 
 <!-- <block name="available-validators"
      same-as="src/validators/mod.rs:validator-registry, docs/validators/README.md:validators-index"
@@ -236,8 +236,8 @@ blockwatch -E cxx=cpp -E hpp=cpp
   declared are gone. The run passes and nothing tells you a rule disappeared. Blocks still *pointing* at the deleted one
   do fail, as a missing reference.
 - **A file needs comments to hold a block.** Plain JSON, CSV and `.env` files have nowhere to put a tag. Link to such a
-  file as a [whole file](docs/validators/affects.md#whole-files) instead, or, in JSON, to a
-  [single key](docs/validators/affects.md#symbols).
+  file as a [whole file](docs/validators/affects.md#whole-files) instead, or, if the file has
+  [symbols](docs/symbols.md), to a single key.
 - **Unsupported extensions are skipped silently.** A run that read nothing looks exactly like a run that found no
   problems. `blockwatch --verbosity summary` prints how many files were actually read.
 

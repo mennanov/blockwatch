@@ -17,13 +17,13 @@ It runs on every scan, with or without a diff.
 
 ## Targets
 
-| Target       | Compares against                                                                         |
-|--------------|------------------------------------------------------------------------------------------|
-| `file:name`  | the block called `name` in `file`                                                        |
-| `:name`      | the block called `name` in the same file                                                 |
-| `file`       | all of `file` (see [Whole files](#whole-files-as-targets))                               |
-| `file#/path` | one value inside `file`, such as a JSON or TOML key (see [Symbols](#symbols-as-targets)) |
-| `#/path`     | one value inside the same file                                                           |
+| Target       | Compares against                                             |
+|--------------|--------------------------------------------------------------|
+| `file:name`  | the block called `name` in `file`                            |
+| `:name`      | the block called `name` in the same file                     |
+| `file`       | all of `file` (see [Whole files](#whole-files-as-targets))   |
+| `file#/path` | one value inside `file` (see [Symbols](#symbols-as-targets)) |
+| `#/path`     | one value inside the same file                               |
 
 ## Example
 
@@ -113,12 +113,7 @@ line, you will want a pattern: without one, the block must equal the entire file
 ## Symbols as targets
 
 `file#/path` points at one value inside a file. That value is called a **symbol**. `#/path` points into the block's own
-file. These files have symbols:
-
-| Files                    | Symbols                                    |
-|--------------------------|--------------------------------------------|
-| JSON (`.json`, `.jsonc`) | every key and every array item             |
-| TOML (`.toml`)           | every key, every table, every array item   |
+file. [Symbols](../symbols.md) lists the files that have symbols and explains how to write a path.
 
 ```rust
 // <block same-as="package.json#/dependencies/inngest" same-as-pattern="\d+\.\d+\.\d+">
@@ -129,42 +124,15 @@ pub const INNGEST_VERSION: &str = "4.18.1";
 This compares only `/dependencies/inngest`. With `same-as="package.json"`, the pattern would pick up every version in
 the file.
 
-- **What gets compared.** A string gives the text it holds, without its quotes. Any other value gives its text as
-  written, so `1_000` stays `1_000`. An object, a table or an array gives its text as written in the file. The
-  referencing block's pattern applies, as for a whole file.
-- **How to write a path.** Paths follow [RFC 6901](https://www.rfc-editor.org/rfc/rfc6901) (JSON Pointer):
-  - `/` separates keys: `#/dependencies/inngest`.
-  - An array item is its position, counted from 0: `#/files/0`.
-  - Inside a key, write `/` as `~1` and `~` as `~0`: `#/dependencies/@types~1node`.
-  - Inside a key, write `,` as `%2C`, `:` as `%3A` and `%` as `%25`.
-- **A missing key is a violation.** The message suggests similar paths: `symbol not found; did you mean: /version`. A
-  JSON key that appears twice is a violation too. The message shows where each copy is:
-  `ambiguous symbol, defined at 2:3, 5:3`.
-- **A broken file stops the run.** BlockWatch does not guess what a broken file meant. A trailing comma counts as an
-  error, even in `.jsonc`. In TOML, so does a key defined twice.
+What a symbol compares as:
 
-### TOML paths
+- **A string** compares as the text it holds, without its quotes.
+- **Any other plain value** compares as written, so `1_000` stays `1_000`.
+- **An object, a table or an array** compares as its text in the file.
+- **A TOML table written in several places** compares as the text of each place, headers included, in the order they
+  appear.
 
-A TOML path follows the keys, however the file writes them:
-
-```python
-# <block same-as="pyproject.toml#/project/version" same-as-pattern="\d+\.\d+\.\d+">
-__version__ = "0.8.4"
-# </block>
-```
-
-This works whether `pyproject.toml` has `version = "0.8.4"` under `[project]`, or `project.version = "0.8.4"` at the
-top.
-
-- **Headers and dotted keys make one path.** `[tool.ruff]` with `line-length = 88` below it is
-  `#/tool/ruff/line-length`, and so is `tool.ruff.line-length = 88`.
-- **A quoted key is one part of the path**, dots and all. Under `[a]`, `"b.c" = 1` is `#/a/b.c`.
-- **Each `[[bin]]` entry has a position**, counted from 0: `#/bin/0/name`. Entries of other arrays, written in between,
-  don't count.
-- **A sub-table belongs to the entry above it.** `[fruits.physical]` after the first `[[fruits]]` is
-  `#/fruits/0/physical`.
-- **A table covers every place it is written.** `#/package` includes `[package.metadata.docs]`, even with other tables
-  in between. It compares as the text of each place, headers included, in the order they appear.
+The referencing block's pattern reads the symbol, as it does a whole file.
 
 ## Comparison modes
 
