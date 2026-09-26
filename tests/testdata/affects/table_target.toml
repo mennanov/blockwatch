@@ -1,0 +1,9 @@
+[package]
+name = "example"
+version = "1.1"
+
+[dependencies]
+serde = "1"
+
+[package.metadata.docs]
+all-features = true

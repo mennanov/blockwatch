@@ -1,5 +1,4 @@
 use crate::Position;
-use crate::character_column_at;
 use crate::symbol_path::SymbolPath;
 use anyhow::{Context, bail, ensure};
 use std::borrow::Cow;
@@ -44,7 +43,10 @@ impl Symbol {
     pub fn position_ranges(&self, source: &str) -> Vec<Range<Position>> {
         self.def_byte_ranges
             .iter()
-            .map(|range| position_at(source, range.start)..position_at(source, range.end))
+            .map(|range| {
+                Position::from_byte_offset(source, range.start)
+                    ..Position::from_byte_offset(source, range.end)
+            })
             .collect()
     }
 
@@ -272,7 +274,7 @@ impl SymbolsParser for QuerySymbolsParser {
         // resolved through a guess can land on a wrong value. A missing value, for one, is
         // recovered as an empty one.
         if let Some(error) = first_syntax_error(&tree) {
-            let position = position_at(source, error.start_byte());
+            let position = Position::from_byte_offset(source, error.start_byte());
             bail!(
                 "file has a syntax error at line {}, column {}, and a path into it could resolve to the wrong value",
                 position.line,
@@ -505,12 +507,6 @@ struct Frame {
     path_len: usize,
     /// How many of the node's children have been captured as `@item` so far.
     items: usize,
-}
-
-/// The 1-based line and character position of `byte_offset` in `source`.
-fn position_at(source: &str, byte_offset: usize) -> Position {
-    let line = source[..byte_offset].matches('\n').count() + 1;
-    Position::new(line, character_column_at(source, byte_offset))
 }
 
 #[cfg(test)]

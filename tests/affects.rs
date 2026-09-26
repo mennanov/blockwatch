@@ -739,3 +739,97 @@ fn missing_symbol_in_affects_fails() {
              symbol not found; did you mean: /version",
         ));
 }
+
+/// The source half of the table reference diffs: the block that affects `/package`, modified.
+const TABLE_SOURCE_DIFF: &str = r#"
+diff --git a/tests/testdata/affects/table_source.rs b/tests/testdata/affects/table_source.rs
+index abc123..def456 100644
+--- a/tests/testdata/affects/table_source.rs
++++ b/tests/testdata/affects/table_source.rs
+@@ -1,3 +1,3 @@
+ // <block affects="tests/testdata/affects/table_target.toml#/package">
+-const NAME: &str = "old";
++const NAME: &str = "example";
+ // </block>
+"#;
+
+#[test]
+fn diff_touching_the_second_place_a_table_is_written_succeeds() {
+    // `[package.metadata.docs]` is written apart from `[package]`, but is part of it.
+    let diff_content = format!(
+        "{TABLE_SOURCE_DIFF}{}",
+        r#"diff --git a/tests/testdata/affects/table_target.toml b/tests/testdata/affects/table_target.toml
+index abc123..def456 100644
+--- a/tests/testdata/affects/table_target.toml
++++ b/tests/testdata/affects/table_target.toml
+@@ -8,2 +8,2 @@
+ [package.metadata.docs]
+-all-features = false
++all-features = true
+"#
+    );
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
+    cmd.write_stdin(diff_content)
+        .output()
+        .unwrap()
+        .assert()
+        .success();
+}
+
+#[test]
+fn diff_deleting_the_last_pair_of_a_table_section_succeeds() {
+    let diff_content = format!(
+        "{TABLE_SOURCE_DIFF}{}",
+        r#"diff --git a/tests/testdata/affects/table_target.toml b/tests/testdata/affects/table_target.toml
+index abc123..def456 100644
+--- a/tests/testdata/affects/table_target.toml
++++ b/tests/testdata/affects/table_target.toml
+@@ -1,6 +1,5 @@
+ [package]
+ name = "example"
+ version = "1.1"
+-edition = "2021"
+
+ [dependencies]
+"#
+    );
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
+    cmd.write_stdin(diff_content)
+        .output()
+        .unwrap()
+        .assert()
+        .success();
+}
+
+#[test]
+fn diff_touching_another_table_than_the_referenced_one_fails() {
+    // `[dependencies]` is written between the two places `[package]` is written.
+    let diff_content = format!(
+        "{TABLE_SOURCE_DIFF}{}",
+        r#"diff --git a/tests/testdata/affects/table_target.toml b/tests/testdata/affects/table_target.toml
+index abc123..def456 100644
+--- a/tests/testdata/affects/table_target.toml
++++ b/tests/testdata/affects/table_target.toml
+@@ -5,2 +5,2 @@
+ [dependencies]
+-serde = "0.9"
++serde = "1"
+"#
+    );
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
+    cmd.write_stdin(diff_content)
+        .output()
+        .unwrap()
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "is modified, but tests/testdata/affects/table_target.toml#/package is not",
+        ));
+}

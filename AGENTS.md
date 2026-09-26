@@ -141,8 +141,9 @@ Key module boundaries:
   comments into blocks. `language_parsers/mod.rs::language_parsers()` returns the extension→parser map; **adding a new
   language means adding a module here and registering it in that function**. A language that has symbols also
   has a `SymbolsParser`, which its `parser()` passes to `.with_symbols(...)`. Most use a `QuerySymbolsParser`, built
-  from a tree-sitter query (`.scm`) and a `NodeDecoder`. Each language's own tests pin the complete list of symbols
-  it derives.
+  from a tree-sitter query (`.scm`) and a `NodeDecoder`. TOML derives its symbols with `toml_edit` instead, because
+  what a TOML key means depends on the order of its headers rather than on how the syntax tree nests. Each
+  language's own tests pin the complete list of symbols it derives.
 - `src/symbols.rs` — `Symbol`, the `SymbolsParser` trait, and `resolve`, which finds the symbol a path refers to.
   `QuerySymbolsParser` runs a language's query and derives every addressable `Symbol` (its path, definition range and
   decoded value) in one walk of the tree. It suits a language whose structure is its syntax tree. It refuses a file

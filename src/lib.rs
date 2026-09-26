@@ -44,6 +44,18 @@ impl Position {
     pub fn new(line: usize, character: usize) -> Self {
         Self { line, character }
     }
+
+    /// The position of `byte_offset` in `text`.
+    ///
+    /// Takes time proportional to `byte_offset`, since it counts every line break before it. It
+    /// suits the few positions a message needs, not a position for every node of a file.
+    ///
+    /// # Panics
+    /// Panics if `byte_offset` is past the end of `text` or not on a character boundary.
+    pub(crate) fn from_byte_offset(text: &str, byte_offset: usize) -> Self {
+        let line = text[..byte_offset].matches('\n').count() + 1;
+        Self::new(line, character_column_at(text, byte_offset))
+    }
 }
 
 /// The 1-based character column of `byte_offset` within its line in `text`.

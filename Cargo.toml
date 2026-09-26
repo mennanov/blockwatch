@@ -42,6 +42,7 @@ strsim = "0.11"
 strum = "0.28"
 strum_macros = "0.28"
 tokio = { version = "1.52", features = ["full"] }
+toml_edit = { version = "0.25", default-features = false, features = ["parse"] }
 # The grammar crates the language parsers are built from.
 # <block keep-sorted keep-unique>
 tree-sitter = "0.27.0"
