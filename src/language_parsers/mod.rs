@@ -76,7 +76,7 @@ pub trait LanguageParser: Send + Sync {
 /// has a [`SymbolsParser`].
 pub(crate) struct LanguageParserImpl<C: CommentsParser> {
     blocks_parser: BlocksFromCommentsParser<C>,
-    symbols_parser: Option<SymbolsParser>,
+    symbols_parser: Option<Box<dyn SymbolsParser>>,
 }
 
 impl<C: CommentsParser> LanguageParserImpl<C> {
@@ -90,9 +90,9 @@ impl<C: CommentsParser> LanguageParserImpl<C> {
     }
 
     /// Gives the language the symbols that `symbols_parser` derives.
-    fn with_symbols(self, symbols_parser: SymbolsParser) -> Self {
+    fn with_symbols(self, symbols_parser: impl SymbolsParser + 'static) -> Self {
         Self {
-            symbols_parser: Some(symbols_parser),
+            symbols_parser: Some(Box::new(symbols_parser)),
             ..self
         }
     }

@@ -121,6 +121,17 @@ fn hints<'a>(symbols: &'a [Symbol], path: &SymbolPath) -> Vec<&'a SymbolPath> {
         .collect()
 }
 
+/// Derives the addressable symbols of one language's source files.
+pub(crate) trait SymbolsParser: Send + Sync {
+    /// Derives all the addressable symbols in `source`, in document order. Two symbols can share a
+    /// path, when the source defines the same name twice.
+    ///
+    /// # Errors
+    /// Returns an error if the symbols of `source` cannot be derived reliably, such as when it has
+    /// a syntax error. The error mentions the position of the problem when there is one.
+    fn parse(&mut self, source: &str) -> anyhow::Result<Vec<Symbol>>;
+}
+
 /// The semantic role a query capture plays in deriving a symbol path or value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CaptureRole {
@@ -145,16 +156,19 @@ enum CaptureRole {
 /// Returns an error if the node's text is not a valid spelling in the language.
 pub(crate) type NodeDecoder = fn(&tree_sitter::Node, &str) -> anyhow::Result<String>;
 
-/// Derives the addressable symbols of one language's source files, using a tree-sitter query that
-/// declares what is addressable in that language.
-pub(crate) struct SymbolsParser {
+/// A [`SymbolsParser`] driven by a tree-sitter query that declares what is addressable in one
+/// language.
+///
+/// A symbol's path is made of the names along its node's ancestors in the syntax tree, so it suits
+/// a language whose structure is its syntax tree.
+pub(crate) struct QuerySymbolsParser {
     parser: tree_sitter::Parser,
     query: tree_sitter::Query,
     capture_roles: Vec<CaptureRole>,
     node_decoder: NodeDecoder,
 }
 
-impl SymbolsParser {
+impl QuerySymbolsParser {
     /// Compiles `query_source` for `language` and maps its capture names to semantic roles. Each
     /// `@name` and `@value` a match captures is turned into text by `node_decoder`.
     ///
@@ -193,38 +207,6 @@ impl SymbolsParser {
         })
     }
 
-    /// Parses `source` and derives all its addressable symbols, in document order. Two symbols can
-    /// share a path, when the source defines the same name twice.
-    ///
-    /// # Errors
-    /// Returns an error if:
-    /// - The source has a syntax error. The error mentions the position of the first one.
-    /// - The source contains more than one document.
-    /// - The decoder rejects a captured name or value.
-    ///
-    /// # Panics
-    /// Panics if the query gives a `@def` no `@name`, which leaves its node without a path. Each
-    /// language's own tests cover the query it ships.
-    pub(crate) fn parse(&mut self, source: &str) -> anyhow::Result<Vec<Symbol>> {
-        let tree = self
-            .parser
-            .parse(source, None)
-            .context("failed to parse syntax tree")?;
-        // tree-sitter recovers from a syntax error by guessing what the source meant, and a path
-        // resolved through a guess can land on a wrong value. A missing value, for one, is
-        // recovered as an empty one.
-        if let Some(error) = first_syntax_error(&tree) {
-            let position = position_at(source, error.start_byte());
-            bail!(
-                "file has a syntax error at line {}, column {}, and a path into it could resolve to the wrong value",
-                position.line,
-                position.character,
-            );
-        }
-        let contributions = self.collect_contributions(&tree, source)?;
-        Ok(symbols_from_contributions(&tree, &contributions))
-    }
-
     /// Runs the query and returns what each match contributes, keyed by the id of the node the
     /// match attaches it to. A match with no `@def`, `@item` or `@container` contributes nothing.
     ///
@@ -256,6 +238,40 @@ impl SymbolsParser {
         }
 
         Ok(contributions)
+    }
+}
+
+impl SymbolsParser for QuerySymbolsParser {
+    /// Parses `source` and derives all its addressable symbols, in document order. Two symbols can
+    /// share a path, when the source defines the same name twice.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - The source has a syntax error. The error mentions the position of the first one.
+    /// - The source contains more than one document.
+    /// - The decoder rejects a captured name or value.
+    ///
+    /// # Panics
+    /// Panics if the query gives a `@def` no `@name`, which leaves its node without a path. Each
+    /// language's own tests cover the query it ships.
+    fn parse(&mut self, source: &str) -> anyhow::Result<Vec<Symbol>> {
+        let tree = self
+            .parser
+            .parse(source, None)
+            .context("failed to parse syntax tree")?;
+        // tree-sitter recovers from a syntax error by guessing what the source meant, and a path
+        // resolved through a guess can land on a wrong value. A missing value, for one, is
+        // recovered as an empty one.
+        if let Some(error) = first_syntax_error(&tree) {
+            let position = position_at(source, error.start_byte());
+            bail!(
+                "file has a syntax error at line {}, column {}, and a path into it could resolve to the wrong value",
+                position.line,
+                position.character,
+            );
+        }
+        let contributions = self.collect_contributions(&tree, source)?;
+        Ok(symbols_from_contributions(&tree, &contributions))
     }
 }
 
@@ -495,8 +511,8 @@ mod tests {
     /// A parser for JSON that takes a captured node's text as it stands. Unescaping is each
     /// language's own concern, so the queries here capture the `string_content` inside a string
     /// to get its text without the quotes.
-    fn json_symbols_parser(query_source: &str) -> anyhow::Result<SymbolsParser> {
-        SymbolsParser::new(
+    fn json_symbols_parser(query_source: &str) -> anyhow::Result<QuerySymbolsParser> {
+        QuerySymbolsParser::new(
             &tree_sitter_json::LANGUAGE.into(),
             query_source,
             |node, source| Ok(source[node.byte_range()].to_string()),
@@ -505,7 +521,7 @@ mod tests {
 
     /// A parser for the tests whose subject is not the query: `parse` refuses a source with a
     /// syntax error before it runs the query at all.
-    fn parser_with_any_query() -> SymbolsParser {
+    fn parser_with_any_query() -> QuerySymbolsParser {
         json_symbols_parser("(pair key: (string) @name) @def").expect("the query compiles")
     }
 
@@ -553,7 +569,7 @@ mod tests {
 
     #[test]
     fn language_decoder_parse_decodes_names_and_values_with_it() -> anyhow::Result<()> {
-        let mut parser = SymbolsParser::new(
+        let mut parser = QuerySymbolsParser::new(
             &tree_sitter_json::LANGUAGE.into(),
             r#"(pair key: (string) @name value: (string) @value) @def"#,
             |node, source| Ok(source[node.byte_range()].to_uppercase()),
