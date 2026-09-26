@@ -2,20 +2,22 @@ use crate::Position;
 use crate::character_column_at;
 use crate::symbol_path::SymbolPath;
 use anyhow::{Context, bail, ensure};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
 use tree_sitter::StreamingIterator;
 
-/// An addressable symbol definition derived from a syntax tree using a language query.
+/// An addressable element of a source file, such as a JSON key or an array item.
 ///
-/// Contains the derived rooted [`SymbolPath`], the byte range of the definition node, and the
+/// Contains the rooted [`SymbolPath`], the byte ranges where the symbol is written, and the
 /// unquoted scalar value if the symbol represents a scalar.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Symbol {
     /// The symbol path of this symbol (e.g. `/dependencies/inngest`).
     pub path: SymbolPath,
-    /// Byte range of the definition node (`@def` or `@item`) in the source.
-    pub def_byte_range: Range<usize>,
+    /// The byte ranges of the source where the symbol is written, in document order and not
+    /// overlapping. Never empty. A symbol written in several places has one range for each.
+    pub def_byte_ranges: Vec<Range<usize>>,
     /// The unquoted scalar value, or `None` if the symbol represents a container or composite node.
     pub value: Option<String>,
 }
@@ -26,32 +28,39 @@ impl Symbol {
         // panics on that. An `@item` always gets its index, so it cannot be the cause.
         Self {
             path: SymbolPath::from_segments(path.to_vec()),
-            def_byte_range: node.byte_range(),
+            def_byte_ranges: vec![node.byte_range()],
             value,
         }
     }
 
-    /// The 1-based line and character range of the definition in `source`, which must be the
-    /// text the symbol was derived from.
+    /// The 1-based line and character range of each of the symbol's byte ranges in `source`,
+    /// which must be the text the symbol was derived from.
     ///
     /// Takes time proportional to the definition's offset in `source`, so it suits the symbol a
     /// reference resolves to rather than every symbol a file derives.
     ///
     /// # Panics
-    /// Panics if the definition's byte range does not fit `source`.
-    pub fn position_range(&self, source: &str) -> Range<Position> {
-        position_at(source, self.def_byte_range.start)..position_at(source, self.def_byte_range.end)
+    /// Panics if a byte range does not fit `source`.
+    pub fn position_ranges(&self, source: &str) -> Vec<Range<Position>> {
+        self.def_byte_ranges
+            .iter()
+            .map(|range| position_at(source, range.start)..position_at(source, range.end))
+            .collect()
     }
 
-    /// The symbol's value, or the text of its definition in `source` when it has none, as an
-    /// object does. `source` must be the text the symbol was derived from.
+    /// The symbol's value, or else the text of its definition in `source`, as an object has. A
+    /// symbol written in several places gives the text of each, one after another, in document
+    /// order. `source` must be the text the symbol was derived from.
     ///
     /// # Panics
-    /// Panics if the definition's byte range does not fit `source`.
-    pub fn value_or_definition<'s>(&'s self, source: &'s str) -> &'s str {
-        match &self.value {
-            Some(value) => value,
-            None => &source[self.def_byte_range.clone()],
+    /// Panics if a byte range does not fit `source`.
+    pub fn value_or_definition<'s>(&'s self, source: &'s str) -> Cow<'s, str> {
+        match (&self.value, self.def_byte_ranges.as_slice()) {
+            (Some(value), _) => Cow::Borrowed(value),
+            (None, [range]) => Cow::Borrowed(&source[range.clone()]),
+            (None, ranges) => {
+                Cow::Owned(ranges.iter().map(|range| &source[range.clone()]).collect())
+            }
         }
     }
 }
@@ -505,6 +514,7 @@ fn position_at(source: &str, byte_offset: usize) -> Position {
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use super::*;
 
@@ -581,7 +591,7 @@ mod tests {
             symbols,
             vec![Symbol {
                 path: SymbolPath::from_segments(vec![r#""K""#.to_string()]),
-                def_byte_range: 1..9,
+                def_byte_ranges: vec![1..9],
                 value: Some(r#""V""#.to_string()),
             }]
         );
@@ -600,13 +610,14 @@ mod tests {
 
         let symbols = json_symbols_parser(range_query)?.parse(source)?;
 
-        let ranges: Vec<(String, Range<usize>, Range<Position>)> = symbols
+        type PathAndRanges = (String, Vec<Range<usize>>, Vec<Range<Position>>);
+        let ranges: Vec<PathAndRanges> = symbols
             .iter()
             .map(|symbol| {
                 (
                     symbol.path.to_string(),
-                    symbol.def_byte_range.clone(),
-                    symbol.position_range(source),
+                    symbol.def_byte_ranges.clone(),
+                    symbol.position_ranges(source),
                 )
             })
             .collect();
@@ -615,18 +626,18 @@ mod tests {
             vec![
                 (
                     "/%C3%A9".to_string(),
-                    4..17,
-                    Position::new(2, 3)..Position::new(2, 15)
+                    vec![4..17],
+                    vec![Position::new(2, 3)..Position::new(2, 15)]
                 ),
                 (
                     "/%C3%A9/0".to_string(),
-                    11..12,
-                    Position::new(2, 9)..Position::new(2, 10)
+                    vec![11..12],
+                    vec![Position::new(2, 9)..Position::new(2, 10)]
                 ),
                 (
                     "/%C3%A9/1".to_string(),
-                    14..16,
-                    Position::new(2, 12)..Position::new(2, 14)
+                    vec![14..16],
+                    vec![Position::new(2, 12)..Position::new(2, 14)]
                 ),
             ]
         );
@@ -736,6 +747,7 @@ mod tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 mod resolve_tests {
     use super::*;
 
@@ -748,7 +760,7 @@ mod resolve_tests {
     fn symbol(path_text: &str, start: usize) -> Symbol {
         Symbol {
             path: path(path_text),
-            def_byte_range: start..start + 1,
+            def_byte_ranges: vec![start..start + 1],
             value: None,
         }
     }
@@ -845,6 +857,42 @@ mod resolve_tests {
             Err(ResolveError::NotFound {
                 hints: vec![&symbols[0].path]
             })
+        );
+    }
+}
+
+#[cfg(test)]
+mod symbol_tests {
+    use super::*;
+
+    /// A source whose first and third lines hold a symbol written in two places, and the symbol.
+    fn symbol_written_twice() -> (&'static str, Symbol) {
+        let source = "first\nunrelated\nsecond\n";
+        let symbol = Symbol {
+            path: SymbolPath::parse("/a").expect("the path is valid"),
+            def_byte_ranges: vec![0..6, 16..23],
+            value: None,
+        };
+        (source, symbol)
+    }
+
+    #[test]
+    fn symbol_with_several_ranges_value_or_definition_joins_their_text_in_order() {
+        let (source, symbol) = symbol_written_twice();
+
+        assert_eq!(symbol.value_or_definition(source), "first\nsecond\n");
+    }
+
+    #[test]
+    fn symbol_with_several_ranges_position_ranges_returns_one_per_range() {
+        let (source, symbol) = symbol_written_twice();
+
+        assert_eq!(
+            symbol.position_ranges(source),
+            vec![
+                Position::new(1, 1)..Position::new(2, 1),
+                Position::new(3, 1)..Position::new(4, 1),
+            ]
         );
     }
 }

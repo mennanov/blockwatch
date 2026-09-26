@@ -727,11 +727,12 @@ fn resolve_error_reason(error: &ResolveError, source: &str) -> String {
         }
         ResolveError::Ambiguous { candidates } => {
             // The candidates share one path, and can share a line too, so only a line and a
-            // column tell them apart.
+            // column tell them apart. Where a candidate is written first is enough for that.
             let positions: Vec<String> = candidates
                 .iter()
                 .map(|candidate| {
-                    let start = candidate.position_range(source).start;
+                    let ranges = candidate.position_ranges(source);
+                    let start = &ranges[0].start;
                     format!("{}:{}", start.line, start.character)
                 })
                 .collect();
@@ -1207,11 +1208,11 @@ mod resolve_error_reason_tests {
         SymbolPath::parse(text).expect("the path is valid")
     }
 
-    /// A symbol at `path_text` whose definition spans `def_byte_range` of its source.
+    /// A symbol at `path_text` written once, at `def_byte_range` of its source.
     fn symbol(path_text: &str, def_byte_range: Range<usize>) -> Symbol {
         Symbol {
             path: path(path_text),
-            def_byte_range,
+            def_byte_ranges: vec![def_byte_range],
             value: None,
         }
     }

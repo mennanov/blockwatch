@@ -336,7 +336,7 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
         let (content, resolution) = self.files.resolve_symbol(target_file, path)?;
         match resolution {
             Ok(symbol) => Ok(Ok(extract_items_from(
-                symbol.value_or_definition(content),
+                &symbol.value_or_definition(content),
                 pattern,
             )?)),
             Err(reason) => Ok(Err(reason)),

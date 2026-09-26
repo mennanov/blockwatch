@@ -137,7 +137,8 @@ impl<'a, Fs: FileSystem> TargetIndex<'a, Fs> {
         Ok(index.get(target_name).copied())
     }
 
-    /// Whether the diff touches the definition of the symbol at `path` in `target_file`.
+    /// Whether the diff touches the definition of the symbol at `path` in `target_file`, in any
+    /// of the places it is written.
     ///
     /// Resolves to a reason instead when no symbol, or more than one, has `path`. A file that
     /// cannot be read, has no grammar or no symbols, or does not parse is an `Err`.
@@ -149,8 +150,12 @@ impl<'a, Fs: FileSystem> TargetIndex<'a, Fs> {
         // A file the diff never mentions has no line changes, so nothing in it counts as modified.
         let line_changes = self.context.line_changes_for(target_file).unwrap_or(&[]);
         let (content, resolution) = self.files.resolve_symbol(target_file, path)?;
-        Ok(resolution
-            .map(|symbol| range_intersects_any(&symbol.position_range(content), line_changes)))
+        Ok(resolution.map(|symbol| {
+            symbol
+                .position_ranges(content)
+                .iter()
+                .any(|range| range_intersects_any(range, line_changes))
+        }))
     }
 
     /// Whether the diff mentions `target_file`.
