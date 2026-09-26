@@ -137,7 +137,12 @@ A symbol is one value inside a file, such as the `version` key in `package.json`
 with `file#/path`, or with `#/path` for the block's own file. Use a symbol when only one key in a file matters, or when
 the file cannot hold a comment.
 
+<!-- <block name="extensions-with-symbols" same-as="src/language_parsers/mod.rs:extensions-with-symbols"
+     same-as-pattern="`\.(?P<value>[a-z]+)`"> -->
+
 Only these files have symbols: JSON (`.json`, `.jsonc`) and TOML (`.toml`). A path into any other file fails the run.
+
+<!-- </block> -->
 
 - **Paths follow RFC 6901.** `/` separates keys. An array item is its position, counted from 0: `#/files/0`.
 - **Some characters in a key must be escaped:** `/` as `~1`, `~` as `~0`, `,` as `%2C`, `:` as `%3A` and `%` as
@@ -145,11 +150,17 @@ Only these files have symbols: JSON (`.json`, `.jsonc`) and TOML (`.toml`). A pa
 - **A missing key is a violation.** The message suggests similar paths.
 - **A missing or broken file fails the run.** BlockWatch does not guess what a broken file meant.
 
+<!-- <block name="json-paths"> -->
+
 **JSON.** Every key and every array item is a symbol.
 
 - A comment is not an array item, so it does not shift the positions after it.
 - A trailing comma breaks the file, even in `.jsonc`.
 - A key written twice is a violation, because BlockWatch can't tell which copy you mean.
+
+<!-- </block> -->
+
+<!-- <block name="toml-paths"> -->
 
 **TOML.** Every key, every table and every array item is a symbol.
 
@@ -160,6 +171,8 @@ Only these files have symbols: JSON (`.json`, `.jsonc`) and TOML (`.toml`). A pa
 - A table covers every place it is written. `affects` counts a change to any of them. `same-as` compares the text of
   each place, in order.
 - A key written twice breaks the file.
+
+<!-- </block> -->
 
 ## Maintaining blocks (editing annotated files)
 

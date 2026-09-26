@@ -774,6 +774,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn extensions_with_symbols_match_the_documented_list() -> anyhow::Result<()> {
+        let mut extensions_with_symbols = Vec::new();
+        for (extension, parser) in language_parsers()? {
+            // A parser without symbols refuses every source with the same error, so an empty
+            // source is enough to tell. A parser with symbols may accept it or report it as broken.
+            let has_symbols = match parser.lock().expect("no active locks").parse_symbols("") {
+                Ok(_) => true,
+                Err(err) => err.to_string() != "symbols are not supported for this language",
+            };
+            if has_symbols {
+                extensions_with_symbols.push(extension.to_string_lossy().into_owned());
+            }
+        }
+        extensions_with_symbols.sort();
+
+        /* <block name="extensions-with-symbols"
+        same-as="docs/symbols.md:extensions-with-symbols, .agents/skills/blockwatch/SKILL.md:extensions-with-symbols"
+        same-as-pattern='"(?P<value>[^"]+)"'> */
+        let documented = ["json", "jsonc", "toml"];
+        // </block>
+        assert_eq!(extensions_with_symbols, documented);
+        Ok(())
+    }
+
+    #[test]
     fn language_without_symbols_parse_symbols_returns_error() -> anyhow::Result<()> {
         let mut parser = rust::parser()?;
 

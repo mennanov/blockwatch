@@ -18,10 +18,15 @@ Three validators use symbols:
 
 ## Files with symbols
 
+<!-- <block name="extensions-with-symbols" same-as="src/language_parsers/mod.rs:extensions-with-symbols"
+     same-as-pattern="`\.(?P<value>[a-z]+)`"> -->
+
 | Language | Files             | Paths         |
 |----------|-------------------|---------------|
 | JSON     | `.json`, `.jsonc` | [JSON](#json) |
 | TOML     | `.toml`           | [TOML](#toml) |
+
+<!-- </block> -->
 
 Other files have no symbols yet. BlockWatch still reads their blocks: see
 [Supported Languages](../README.md#supported-languages). A path into one of them stops the run.
@@ -56,6 +61,8 @@ For example, the key `@types/node` is `#/dependencies/@types~1node`.
 
 ## JSON
 
+<!-- <block name="json-paths"> -->
+
 Every key and every array item is a symbol:
 
 ```json
@@ -79,7 +86,11 @@ Every key and every array item is a symbol:
 - **A key written twice is a violation**, because BlockWatch can't tell which copy you mean. The message shows where
   each copy is: `ambiguous symbol, defined at 2:3, 5:3`.
 
+<!-- </block> -->
+
 ## TOML
+
+<!-- <block name="toml-paths"> -->
 
 Every key, every table and every array item is a symbol. A path follows the keys, however the file writes them:
 
@@ -102,6 +113,8 @@ top.
 - **A table covers every place it is written.** `#/package` covers `[package]` and `[package.metadata.docs]`, even
   with other tables in between.
 - **A key written twice breaks the file.** TOML does not allow it, so it stops the run.
+
+<!-- </block> -->
 
 ---
 

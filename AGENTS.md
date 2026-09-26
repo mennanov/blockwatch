@@ -143,7 +143,10 @@ Key module boundaries:
   has a `SymbolsParser`, which its `parser()` passes to `.with_symbols(...)`. Most use a `QuerySymbolsParser`, built
   from a tree-sitter query (`.scm`) and a `NodeDecoder`. TOML derives its symbols with `toml_edit` instead, because
   what a TOML key means depends on the order of its headers rather than on how the syntax tree nests. Each
-  language's own tests pin the complete list of symbols it derives.
+  language's own tests pin the complete list of symbols it derives. Giving a language symbols also means documenting
+  its paths in `docs/symbols.md` and in the skill's "Symbols" section. A test in `language_parsers/mod.rs` and the
+  repository's own blocks then keep the list of files with symbols, and each language's section, in step with the
+  code.
 - `src/symbols.rs` — `Symbol`, the `SymbolsParser` trait, and `resolve`, which finds the symbol a path refers to.
   `QuerySymbolsParser` runs a language's query and derives every addressable `Symbol` (its path, definition range and
   decoded value) in one walk of the tree. It suits a language whose structure is its syntax tree. It refuses a file

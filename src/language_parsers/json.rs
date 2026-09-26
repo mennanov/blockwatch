@@ -88,6 +88,7 @@ mod tests {
             "containers": [{"key": "value"}, ["item"]]
         }"#;
 
+        // <block affects="docs/symbols.md:json-paths, .agents/skills/blockwatch/SKILL.md:json-paths">
         assert_eq!(
             derived_symbols(source)?,
             expected_symbols([
@@ -109,6 +110,7 @@ mod tests {
                 ("/containers/1/0", Some("item")),
             ])
         );
+        // </block>
         Ok(())
     }
 
