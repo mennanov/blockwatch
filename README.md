@@ -67,7 +67,7 @@ Update the contents of the block in `README.md` and it will pass the check.
 ## Validators
 
 `affects` and `same-as` are the two that work across files: one forces a co-edit, the other compares the actual values
-and needs no diff to do it. Both can point at a block, a whole file, or a single key in a JSON file, such as
+and needs no diff to do it. Both can point at a block, a whole file, or a single key in a JSON or TOML file, such as
 `package.json#/version`. The rest check a single block on its own, and are the things you'd otherwise nitpick in code
 review.
 

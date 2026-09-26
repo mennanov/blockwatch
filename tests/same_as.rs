@@ -123,3 +123,10 @@ fn symbol_target_disagreeing_with_the_block_fails() {
             "disagrees with tests/testdata/same_as/package.json#/dependencies/inngest:",
         ));
 }
+
+#[test]
+fn symbol_target_written_in_two_places_compares_both() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/same_as/split_table_source.rs");
+    cmd.output().unwrap().assert().success();
+}

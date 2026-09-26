@@ -14,13 +14,13 @@ Makes sure linked blocks are edited together. If you change this block but not t
 
 ## Targets
 
-| Target       | Counts as changed when the diff touches                               |
-|--------------|-----------------------------------------------------------------------|
-| `file:name`  | the block called `name` in `file`                                     |
-| `:name`      | the block called `name` in the same file                              |
-| `file`       | any part of `file` (see [Whole files](#whole-files))                  |
-| `file#/path` | one value inside `file`, such as a JSON key (see [Symbols](#symbols)) |
-| `#/path`     | one value inside the same file                                        |
+| Target       | Counts as changed when the diff touches                                       |
+|--------------|-------------------------------------------------------------------------------|
+| `file:name`  | the block called `name` in `file`                                             |
+| `:name`      | the block called `name` in the same file                                      |
+| `file`       | any part of `file` (see [Whole files](#whole-files))                          |
+| `file#/path` | one value inside `file`, such as a JSON or TOML key (see [Symbols](#symbols)) |
+| `#/path`     | one value inside the same file                                                |
 
 ## Example
 
@@ -62,7 +62,7 @@ fixtures. A whole-file target works for all of them. Change the block, and the r
 Things to know:
 
 - **Any edit counts.** Reformatting or a new comment satisfies the target. That is fine for a small file, but noisy for
-  a big one. In a JSON file, point at one key instead: see [Symbols](#symbols).
+  a big one. In a JSON or TOML file, point at one key instead: see [Symbols](#symbols).
 - **Moving the file is not an edit.** A rename that changes no content still fails. Creating the file, even empty,
   counts.
 - **It works one way only.** A file without comments can't hold an `affects` of its own, so "the JSON changed but the
@@ -74,7 +74,7 @@ Things to know:
 ## Symbols
 
 `file#/path` points at one value inside a file. That value is called a **symbol**. JSON files (`.json` and `.jsonc`)
-have symbols: every key and every array item. [`same-as`](same-as.md#symbols-as-targets) explains how to write the path.
+and TOML files (`.toml`) have symbols. [`same-as`](same-as.md#symbols-as-targets) explains how to write the path.
 
 ```rust
 // <block affects="package.json#/version">
@@ -85,9 +85,13 @@ pub const VERSION: &str = "1.4.2";
 The target counts as changed only when the diff touches the key or its value. For an object or array, that means any
 line inside it. Edits elsewhere in `package.json` don't count.
 
-- **A missing or repeated key is a violation**, even without a diff. For a missing key, the message suggests similar
-  paths.
-- **A file with a syntax error stops the run.** A trailing comma counts as an error, even in `.jsonc`.
+A TOML table counts as changed when the diff touches any place it is written. `affects="Cargo.toml#/package"` counts
+a change under `[package.metadata.docs]`, but not one under `[dependencies]`.
+
+- **A missing key is a violation**, even without a diff. The message suggests similar paths. A JSON key that appears
+  twice is a violation too.
+- **A broken file stops the run.** A trailing comma counts as an error, even in `.jsonc`. In TOML, so does a key
+  defined twice.
 
 ## Direction
 
