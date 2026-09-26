@@ -1,6 +1,6 @@
 use crate::Position;
 use crate::symbol_path::SymbolPath;
-use anyhow::{Context, bail, ensure};
+use anyhow::{Context, bail};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
@@ -156,8 +156,6 @@ enum CaptureRole {
     Name,
     /// A scalar node contributing a value.
     Value,
-    /// A document boundary in multi-document files.
-    Document,
 }
 
 /// Turns a captured `@name` or `@value` node into the text it denotes in `source`, following the
@@ -205,7 +203,6 @@ impl QuerySymbolsParser {
                 "container" => Ok(CaptureRole::Container),
                 "name" => Ok(CaptureRole::Name),
                 "value" => Ok(CaptureRole::Value),
-                "document" => Ok(CaptureRole::Document),
                 other => bail!("unrecognized query capture '@{other}'"),
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
@@ -222,8 +219,7 @@ impl QuerySymbolsParser {
     /// match attaches it to. A match with no `@def`, `@item` or `@container` contributes nothing.
     ///
     /// # Errors
-    /// Returns an error if the source holds more than one document, or if the decoder rejects a
-    /// captured name or value.
+    /// Returns an error if the decoder rejects a captured name or value.
     fn collect_contributions(
         &self,
         tree: &tree_sitter::Tree,
@@ -233,14 +229,8 @@ impl QuerySymbolsParser {
         let mut matches = cursor.matches(&self.query, tree.root_node(), source.as_bytes());
 
         let mut contributions = HashMap::new();
-        let mut document_count = 0;
         while let Some(query_match) = matches.next() {
             let match_captures = MatchCaptures::new(query_match.captures(), &self.capture_roles);
-            document_count += match_captures.documents;
-            ensure!(
-                document_count <= 1,
-                "file holds more than one document which is not supported"
-            );
             if let Some((node, contribution)) =
                 match_captures.try_into_contribution(self.node_decoder, source)?
             {
@@ -259,7 +249,6 @@ impl SymbolsParser for QuerySymbolsParser {
     /// # Errors
     /// Returns an error if:
     /// - The source has a syntax error. The error mentions the position of the first one.
-    /// - The source contains more than one document.
     /// - The decoder rejects a captured name or value.
     ///
     /// # Panics
@@ -317,8 +306,6 @@ struct MatchCaptures<'tree> {
     /// The `@name` captures, in source order.
     names: Vec<tree_sitter::Node<'tree>>,
     value: Option<tree_sitter::Node<'tree>>,
-    /// How many `@document` captures the match holds.
-    documents: usize,
 }
 
 impl<'tree> MatchCaptures<'tree> {
@@ -326,8 +313,8 @@ impl<'tree> MatchCaptures<'tree> {
     /// `capture_roles` holds the role of every capture its query declares, indexed by the capture
     /// index each [`tree_sitter::QueryCapture`] carries.
     ///
-    /// The `@name` captures are kept in source order and the `@document` captures are counted. For
-    /// every other role, the last capture of that role in the match wins.
+    /// The `@name` captures are kept in source order. For every other role, the last capture of that
+    /// role in the match wins.
     ///
     /// # Panics
     /// Panics if a capture index falls outside `capture_roles`, which may happen when the captures
@@ -344,7 +331,6 @@ impl<'tree> MatchCaptures<'tree> {
                 CaptureRole::Container => by_role.container = Some(capture.node),
                 CaptureRole::Name => by_role.names.push(capture.node),
                 CaptureRole::Value => by_role.value = Some(capture.node),
-                CaptureRole::Document => by_role.documents += 1,
             }
         }
         by_role
@@ -691,30 +677,6 @@ mod tests {
                 .contains("syntax error at line 2, column 3,"),
             "unexpected error message: {err}"
         );
-    }
-
-    #[test]
-    fn multi_document_file_parse_returns_error() {
-        // Query capturing multiple document nodes on the AST
-        let doc_query = r#"
-            (pair) @document
-            (object) @document
-        "#;
-        let mut parser = json_symbols_parser(doc_query).unwrap();
-
-        let err = parser.parse(r#"{ "a": 1 }"#).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("file holds more than one document"),
-            "unexpected error message: {err}"
-        );
-    }
-
-    #[test]
-    fn single_document_file_parse_succeeds() -> anyhow::Result<()> {
-        let symbols = json_symbols_parser("(document) @document")?.parse(r#"{ "a": 1 }"#)?;
-        assert!(symbols.is_empty());
-        Ok(())
     }
 
     #[test]
