@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.7.0] - 2026-09-28
+
 ### Added
 
 - Support for JSON (`.json`, `.jsonc`) files.

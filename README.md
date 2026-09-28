@@ -160,7 +160,7 @@ See [docs/cli.md](docs/cli.md) for the run modes in full, CLI flags, path exclus
 
 ```yaml
 - repo: https://github.com/mennanov/blockwatch
-  rev: v0.6.0  # Use latest release
+  rev: v0.7.0  # Use latest release
   hooks:
     - id: blockwatch
 ```
