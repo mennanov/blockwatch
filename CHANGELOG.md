@@ -17,10 +17,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - Support for JSON (`.json`, `.jsonc`) files.
 - Symbol references in `same-as` and `affects`. `same-as="package.json#/dependencies/inngest"` compares the block
   with the value at that path in a JSON, TOML or YAML file, and `same-as="#/version"` with one in the block's own
-  file. An object, a table or an array is compared as its source text. `affects="package.json#/version"` is satisfied
-  only when the diff touches that key, not when anything else in the file changes, and a `check-lua` script sees that
-  target in `ctx.affects`, named `#/version`, with its value as its content. A missing or ambiguous symbol is reported
-  as a violation. A target file with a syntax error fails the run, and a JSON trailing comma counts as one.
+  file. A value that holds other values, such as an object, a table or a list, is compared as its source text.
+  `affects="package.json#/version"` is satisfied only when the diff touches that key, not when anything else in the
+  file changes, and a `check-lua` script sees that target in `ctx.affects`, named `#/version`, with its value as its
+  content. A missing or ambiguous symbol is reported as a violation. A target file with a syntax error fails the run,
+  and a JSON trailing comma counts as one.
   - In a TOML file, a path follows TOML's own keys, however they are written: `[tool.ruff]` with `line-length = 88`,
     and `tool.ruff.line-length = 88`, are both `#/tool/ruff/line-length`. The entries of an array of tables count from
     0, as in `#/bin/0/name`.

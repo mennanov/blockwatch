@@ -141,6 +141,7 @@ jobs:
 - **A string counts as the text it holds.** Quotes and escapes are removed. A string written on several lines, `|` and
   `>` blocks included, counts as YAML reads it.
 - **Tags and anchors are not part of a value.** `!!str 123` gives `123`, and `&default 5` gives `5`.
+- **An empty value**, as after `key:`, is an empty string.
 - **An alias (`*name`) is not a symbol.** What it stands for is written elsewhere, so a path to it or through it is not
   found. In a list, an alias still takes its position. `<<` is an ordinary key.
 - **A key that is a list or a mapping,** such as `? [a, b]`, is skipped with everything under it.

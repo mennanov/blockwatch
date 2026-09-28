@@ -82,8 +82,8 @@ pub const VERSION: &str = "1.4.2";
 // </block>
 ```
 
-The target counts as changed only when the diff touches the key or its value. For an object or array, that means any
-line inside it. Edits elsewhere in `package.json` don't count.
+The target counts as changed only when the diff touches the key or its value. For a value that holds other values,
+such as an object or a list, that means any line inside it. Edits elsewhere in `package.json` don't count.
 
 A TOML table counts as changed when the diff touches any place it is written. `affects="Cargo.toml#/package"` counts
 a change under `[package.metadata.docs]`, but not one under `[dependencies]`.

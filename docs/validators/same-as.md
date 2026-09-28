@@ -128,7 +128,8 @@ What a symbol compares as:
 
 - **A string** compares as the text it holds, without its quotes.
 - **Any other plain value** compares as written, so `1_000` stays `1_000`.
-- **An object, a table or an array** compares as its text in the file.
+- **A value that holds other values**, such as an object, a table, a mapping or a list, compares as its text in the
+  file.
 - **A TOML table written in several places** compares as the text of each place, headers included, in the order they
   appear.
 
@@ -187,7 +188,7 @@ Rust writes `60.0` and TypeScript writes `60`. As numbers they are equal. As tex
   side without exactly one value, and a pattern that matches nothing on either side. Two empty sides do not count as
   equal.
 - **Errors that stop the run:** an unknown `same-as-mode` or `same-as-format`, an invalid regex, a missing target file,
-  and a symbol in a file with a syntax error or without symbols.
+  and a symbol in a file with a syntax error, without symbols, or with several YAML documents.
 - **Run it on the whole tree now and then.** `same-as` needs no diff, so a plain `blockwatch` run catches drift that
   `--only-changed` misses. See [CI integration](../ci.md).
 - **A rename alone goes unnoticed in a diff.** Renaming a target file without changing it (a plain `git mv`) gives
