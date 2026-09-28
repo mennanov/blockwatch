@@ -38,19 +38,7 @@ impl SymbolsParser for TomlSymbolsParser {
         // the document `toml_edit` builds, not from a tree-sitter query.
         let document = toml_edit::Document::parse(source)
             .map_err(|error| toml_error_as_error(source, &error))?;
-        let mut walk = Walk {
-            source,
-            path: Vec::new(),
-            symbols: Vec::new(),
-        };
-        // The document itself is not a symbol, so where its keys are written is not needed.
-        walk.add_key_symbols(document.as_table())?;
-        let mut symbols = walk.symbols;
-        // The walk visits one table at a time, so the entries of an array of tables come together
-        // even when other tables are written between them. A stable sort keeps a table ahead of a
-        // key written at the same place.
-        symbols.sort_by_key(|symbol| symbol.def_byte_ranges[0].start);
-        Ok(symbols)
+        Walk::symbols_in(source, document.as_table())
     }
 }
 
@@ -94,7 +82,28 @@ impl Placement {
     }
 }
 
-impl Walk<'_> {
+impl<'s> Walk<'s> {
+    /// The symbols of every key in `table`, the root table of a document in `source`, in document
+    /// order.
+    ///
+    /// # Errors
+    /// Returns an error if `toml_edit` gives no position for an element of the document.
+    fn symbols_in(source: &'s str, table: &Table) -> anyhow::Result<Vec<Symbol>> {
+        let mut walk = Walk {
+            source,
+            path: Vec::new(),
+            symbols: Vec::new(),
+        };
+        // The document itself is not a symbol, so where its keys are written is not needed.
+        walk.add_key_symbols(table)?;
+        let mut symbols = walk.symbols;
+        // The walk visits one table at a time, so the entries of an array of tables come together
+        // even when other tables are written between them. A stable sort keeps a table ahead of a
+        // key written at the same place.
+        symbols.sort_by_key(|symbol| symbol.def_byte_ranges[0].start);
+        Ok(symbols)
+    }
+
     /// Adds a symbol at the current path, and returns where it is in `symbols`. The ranges can be
     /// left empty, and set once the symbol's contents have been walked.
     fn add_symbol(&mut self, def_byte_ranges: Vec<Range<usize>>, value: Option<String>) -> usize {
