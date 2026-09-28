@@ -44,3 +44,17 @@ fn toml_target_resolves() {
     cmd.arg("tests/testdata/symbol_references/toml_source.rs");
     cmd.output().unwrap().assert().success();
 }
+
+#[test]
+fn yaml_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/yaml_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
+fn yml_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/yml_source.rs");
+    cmd.output().unwrap().assert().success();
+}

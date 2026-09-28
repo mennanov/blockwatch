@@ -140,9 +140,11 @@ Key module boundaries:
   `LanguageParser`. Every language knows which node kinds are its comments, and `src/block_parser.rs` turns those
   comments into blocks. `language_parsers/mod.rs::language_parsers()` returns the extension→parser map; **adding a new
   language means adding a module here and registering it in that function**. A language that has symbols also
-  has a `SymbolsParser`, which its `parser()` passes to `.with_symbols(...)`. Most use a `QuerySymbolsParser`, built
-  from a tree-sitter query (`.scm`) and a `NodeDecoder`. TOML derives its symbols with `toml_edit` instead, because
-  what a TOML key means depends on the order of its headers rather than on how the syntax tree nests. Each
+  has a `SymbolsParser`, which its `parser()` passes to `.with_symbols(...)`. JSON uses a `QuerySymbolsParser`, built
+  from a tree-sitter query (`.scm`) and a `NodeDecoder`. TOML derives its symbols with `toml_edit`, because what a
+  TOML key means depends on the order of its headers rather than on how the syntax tree nests. YAML walks its syntax
+  tree itself, because an alias keeps its position in a sequence without being addressable, which a query cannot
+  express. Each
   language's own tests pin the complete list of symbols it derives. Giving a language symbols also means documenting
   its paths in `docs/symbols.md` and in the skill's "Symbols" section. A test in `language_parsers/mod.rs` and the
   repository's own blocks then keep the list of files with symbols, and each language's section, in step with the

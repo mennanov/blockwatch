@@ -792,7 +792,7 @@ mod tests {
         /* <block name="extensions-with-symbols"
         same-as="docs/symbols.md:extensions-with-symbols, .agents/skills/blockwatch/SKILL.md:extensions-with-symbols"
         same-as-pattern='"(?P<value>[^"]+)"'> */
-        let documented = ["json", "jsonc", "toml"];
+        let documented = ["json", "jsonc", "toml", "yaml", "yml"];
         // </block>
         assert_eq!(extensions_with_symbols, documented);
         Ok(())

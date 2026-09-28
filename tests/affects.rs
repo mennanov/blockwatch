@@ -833,3 +833,64 @@ index abc123..def456 100644
             "is modified, but tests/testdata/affects/table_target.toml#/package is not",
         ));
 }
+
+const NESTED_MAPPING_SOURCE_DIFF: &str = r#"
+diff --git a/tests/testdata/affects/nested_mapping_source.rs b/tests/testdata/affects/nested_mapping_source.rs
+index abc123..def456 100644
+--- a/tests/testdata/affects/nested_mapping_source.rs
++++ b/tests/testdata/affects/nested_mapping_source.rs
+@@ -1,3 +1,3 @@
+ // <block affects="tests/testdata/affects/nested_mapping_target.yaml#/image">
+-const IMAGE: &str = "nginx:1.24";
++const IMAGE: &str = "nginx:1.25";
+ // </block>
+"#;
+
+#[test]
+fn diff_deleting_the_last_line_of_a_nested_mapping_succeeds() {
+    let diff_content = format!(
+        "{NESTED_MAPPING_SOURCE_DIFF}{}",
+        r#"diff --git a/tests/testdata/affects/nested_mapping_target.yaml b/tests/testdata/affects/nested_mapping_target.yaml
+index abc123..def456 100644
+--- a/tests/testdata/affects/nested_mapping_target.yaml
++++ b/tests/testdata/affects/nested_mapping_target.yaml
+@@ -4 +3,0 @@
+-  pullPolicy: Always
+"#
+    );
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
+    cmd.write_stdin(diff_content)
+        .output()
+        .unwrap()
+        .assert()
+        .success();
+}
+
+#[test]
+fn diff_touching_the_key_after_a_nested_mapping_fails() {
+    let diff_content = format!(
+        "{NESTED_MAPPING_SOURCE_DIFF}{}",
+        r#"diff --git a/tests/testdata/affects/nested_mapping_target.yaml b/tests/testdata/affects/nested_mapping_target.yaml
+index abc123..def456 100644
+--- a/tests/testdata/affects/nested_mapping_target.yaml
++++ b/tests/testdata/affects/nested_mapping_target.yaml
+@@ -4 +4 @@
+-replicas: 2
++replicas: 3
+"#
+    );
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--diff", "--only-changed"]);
+    cmd.write_stdin(diff_content)
+        .output()
+        .unwrap()
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "is modified, but tests/testdata/affects/nested_mapping_target.yaml#/image is not",
+        ));
+}

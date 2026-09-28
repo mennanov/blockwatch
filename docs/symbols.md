@@ -25,6 +25,7 @@ Three validators use symbols:
 |----------|-------------------|---------------|
 | JSON     | `.json`, `.jsonc` | [JSON](#json) |
 | TOML     | `.toml`           | [TOML](#toml) |
+| YAML     | `.yaml`, `.yml`   | [YAML](#yaml) |
 
 <!-- </block> -->
 
@@ -113,6 +114,39 @@ top.
 - **A table covers every place it is written.** `#/package` covers `[package]` and `[package.metadata.docs]`, even
   with other tables in between.
 - **A key written twice breaks the file.** TOML does not allow it, so it stops the run.
+
+<!-- </block> -->
+
+## YAML
+
+<!-- <block name="yaml-paths"> -->
+
+Every key and every list item is a symbol. Block style and flow style give the same paths:
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo test
+```
+
+| Path                      | Points at        |
+|---------------------------|------------------|
+| `#/jobs/test/runs-on`     | `ubuntu-latest`  |
+| `#/jobs/test/steps`       | the whole list   |
+| `#/jobs/test/steps/1/run` | `cargo test`     |
+
+- **A string counts as the text it holds.** Quotes and escapes are removed. A string written on several lines, `|` and
+  `>` blocks included, counts as YAML reads it.
+- **Tags and anchors are not part of a value.** `!!str 123` gives `123`, and `&default 5` gives `5`.
+- **An alias (`*name`) is not a symbol.** What it stands for is written elsewhere, so a path to it or through it is not
+  found. In a list, an alias still takes its position. `<<` is an ordinary key.
+- **A key that is a list or a mapping,** such as `? [a, b]`, is skipped with everything under it.
+- **A key written twice is a violation**, because BlockWatch can't tell which copy you mean.
+- **A file with several documents stops the run.** A path can't say which document it means. Put the value in a named
+  block instead.
 
 <!-- </block> -->
 

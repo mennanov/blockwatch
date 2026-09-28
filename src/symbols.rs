@@ -259,19 +259,30 @@ impl SymbolsParser for QuerySymbolsParser {
             .parser
             .parse(source, None)
             .context("failed to parse syntax tree")?;
-        // tree-sitter recovers from a syntax error by guessing what the source meant, and a path
-        // resolved through a guess can land on a wrong value. A missing value, for one, is
-        // recovered as an empty one.
-        if let Some(error) = first_syntax_error(&tree) {
+        ensure_no_syntax_error(&tree, source)?;
+        let contributions = self.collect_contributions(&tree, source)?;
+        Ok(symbols_from_contributions(&tree, &contributions))
+    }
+}
+
+/// Refuses `tree`, parsed from `source`, if it has a syntax error.
+///
+/// # Errors
+/// Returns an error that shows the line and column of the first syntax error.
+pub(crate) fn ensure_no_syntax_error(tree: &tree_sitter::Tree, source: &str) -> anyhow::Result<()> {
+    // tree-sitter recovers from a syntax error by guessing what the source meant, and a path
+    // resolved through a guess can land on a wrong value. A missing value, for one, is recovered
+    // as an empty one.
+    match first_syntax_error(tree) {
+        Some(error) => {
             let position = Position::from_byte_offset(source, error.start_byte());
             bail!(
                 "file has a syntax error at line {}, column {}, and a path into it could resolve to the wrong value",
                 position.line,
                 position.character,
-            );
+            )
         }
-        let contributions = self.collect_contributions(&tree, source)?;
-        Ok(symbols_from_contributions(&tree, &contributions))
+        None => Ok(()),
     }
 }
 

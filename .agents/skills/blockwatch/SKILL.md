@@ -140,7 +140,8 @@ the file cannot hold a comment.
 <!-- <block name="extensions-with-symbols" same-as="src/language_parsers/mod.rs:extensions-with-symbols"
      same-as-pattern="`\.(?P<value>[a-z]+)`"> -->
 
-Only these files have symbols: JSON (`.json`, `.jsonc`) and TOML (`.toml`). A path into any other file fails the run.
+Only these files have symbols: JSON (`.json`, `.jsonc`), TOML (`.toml`) and YAML (`.yaml`, `.yml`). A path into any
+other file fails the run.
 
 <!-- </block> -->
 
@@ -171,6 +172,19 @@ Only these files have symbols: JSON (`.json`, `.jsonc`) and TOML (`.toml`). A pa
 - A table covers every place it is written. `affects` counts a change to any of them. `same-as` compares the text of
   each place, in order.
 - A key written twice breaks the file.
+
+<!-- </block> -->
+
+<!-- <block name="yaml-paths"> -->
+
+**YAML.** Every key and every list item is a symbol. Block style and flow style give the same paths.
+
+- A string counts as the text YAML reads, `|` and `>` blocks included. Tags and anchors are not part of a value.
+- An alias (`*name`) is not a symbol, so a path to it or through it is not found. In a list, it still takes its
+  position. `<<` is an ordinary key.
+- A key that is a list or a mapping (`? [a, b]`) is skipped with everything under it.
+- A key written twice is a violation.
+- A file with several documents fails the run. Use a named block there instead.
 
 <!-- </block> -->
 
