@@ -32,7 +32,16 @@ fn main() -> anyhow::Result<()> {
 fn run_list(args: &flags::Args) -> anyhow::Result<()> {
     let file_system = blockwatch::fs::FileSystemImpl::new(&repository_root()?)?;
     let (scan_mode, line_changes) = run_inputs(args, &file_system)?;
-    let (context, _scan_stats) = build_context(args, scan_mode, line_changes, &file_system)?;
+    let language_parsers = language_parsers::language_parsers()?;
+    let settings = args.settings(&language_parsers.keys().collect())?;
+    let (context, _scan_stats) = build_context(
+        args,
+        &settings,
+        scan_mode,
+        line_changes,
+        language_parsers,
+        &file_system,
+    )?;
     let report = context.to_serializable_report();
     serde_json::to_writer_pretty(std::io::stdout(), &report).context("Failed to list blocks")
 }
@@ -41,12 +50,21 @@ fn run_list(args: &flags::Args) -> anyhow::Result<()> {
 fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
     let file_system = Arc::new(blockwatch::fs::FileSystemImpl::new(&repository_root()?)?);
     let (scan_mode, line_changes) = run_inputs(args, file_system.as_ref())?;
-    let (context, scan_stats) = build_context(args, scan_mode, line_changes, file_system.as_ref())?;
+    let language_parsers = language_parsers::language_parsers()?;
+    let settings = args.settings(&language_parsers.keys().collect())?;
+    let (context, scan_stats) = build_context(
+        args,
+        &settings,
+        scan_mode,
+        line_changes,
+        language_parsers,
+        file_system.as_ref(),
+    )?;
     let (sync_validators, async_validators) = validators::detect_validators(
         &context,
         &validators::detector_factories::<blockwatch::fs::FileSystemImpl>(),
-        &args.disabled_validators(),
-        &args.enabled_validators(),
+        &settings.disabled_validators,
+        &settings.enabled_validators,
         &file_system,
     )?;
     let context = Arc::new(context);
@@ -61,8 +79,8 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
     let blocks_needing_diff = (!args.diff).then(|| {
         validators::diff_gated_block_count(
             &context,
-            &args.disabled_validators(),
-            &args.enabled_validators(),
+            &settings.disabled_validators,
+            &settings.enabled_validators,
         )
     });
     write_report(
@@ -166,15 +184,13 @@ fn run_inputs(
 /// Parses every block the run should consider into a `ValidationContext`.
 fn build_context(
     args: &flags::Args,
+    settings: &flags::Settings,
     scan_mode: blocks::ScanMode,
     modified_lines_by_file: HashMap<RepoPath, Vec<diff_parser::LineChange>>,
+    language_parsers: language_parsers::LanguageParsers,
     file_system: &impl FileSystem,
 ) -> anyhow::Result<(validators::ValidationContext, blocks::ScanStats)> {
-    let language_parsers = language_parsers::language_parsers()?;
-    let supported_extensions = language_parsers.keys().collect();
-    args.validate(&supported_extensions)?;
-
-    let extra_file_extensions = args.extensions();
+    args.validate()?;
 
     let mut glob_set = args.globs()?;
     // An empty glob set matches nothing, so "the caller named no files" has to be spelled out as
@@ -184,7 +200,8 @@ fn build_context(
         glob_set = GlobSet::new([globset::Glob::new("**")?])?;
     }
 
-    let path_checker = blockwatch::fs::PathCheckerImpl::new(glob_set, args.ignored_globs()?);
+    let path_checker =
+        blockwatch::fs::PathCheckerImpl::new(glob_set, settings.ignored_globs.clone());
 
     let parsed = blocks::parse_blocks(
         &modified_lines_by_file,
@@ -192,14 +209,14 @@ fn build_context(
         file_system,
         &path_checker,
         &language_parsers,
-        &extra_file_extensions,
+        &settings.extensions,
     )?;
     Ok((
         validators::ValidationContext::new(
             parsed.blocks,
             language_parsers,
             modified_lines_by_file,
-            extra_file_extensions,
+            settings.extensions.clone(),
         ),
         parsed.stats,
     ))

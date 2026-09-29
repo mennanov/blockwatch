@@ -41,8 +41,8 @@ impl std::fmt::Display for Verbosity {
 /// The parsed command line.
 ///
 /// Fields hold the raw strings clap collected; the accessors below turn them into the compiled
-/// glob sets, extension map and validator filters the rest of the program consumes. Flags are
-/// `global` so they may be written before or after a subcommand.
+/// glob sets and the [`Settings`] the rest of the program consumes. Flags are `global` so they may
+/// be written before or after a subcommand.
 #[derive(Parser, Debug)]
 #[command(
     author,
@@ -134,7 +134,7 @@ pub struct Args {
         value_parser = ValueParser::new(parse_validator),
         global = true,
     )]
-    disabled_validators: Vec<String>,
+    disabled_validators: Vec<&'static str>,
 
     /// Enable a validator, e.g. -e check-ai -e line-count
     #[arg(
@@ -145,7 +145,7 @@ pub struct Args {
         value_parser = ValueParser::new(parse_validator),
         global = true,
     )]
-    enabled_validators: Vec<String>,
+    enabled_validators: Vec<&'static str>,
 
     /// Glob patterns to ignore files.
     #[arg(
@@ -154,7 +154,7 @@ pub struct Args {
         action = clap::ArgAction::Append,
         global = true,
     )]
-    pub ignore: Vec<String>,
+    ignore: Vec<String>,
 
     /// How much to report about what the run checked. Printed to stdout.
     #[arg(
@@ -222,23 +222,47 @@ pub enum SubCommand {
     },
 }
 
+/// The settings that hold for a whole project, as opposed to the flags that describe one run.
+///
+/// Every value in it has been checked.
+#[derive(Debug)]
+pub struct Settings {
+    /// Files the run leaves out, even when a glob selects them.
+    pub ignored_globs: GlobSet,
+    /// Extra extension mappings. A file whose extension is a key is parsed as if its extension were
+    /// the value. Every value is an extension a language parser supports.
+    pub extensions: HashMap<OsString, OsString>,
+    /// Validators that do not run. Empty whenever `enabled_validators` is not.
+    pub disabled_validators: HashSet<&'static str>,
+    /// The only validators that run. Empty means every validator that is not disabled runs.
+    pub enabled_validators: HashSet<&'static str>,
+}
+
 impl Args {
-    /// Returns a map of user-provided extension remappings: KEY -> VALUE.
-    pub fn extensions(&self) -> HashMap<OsString, OsString> {
-        self.extensions
-            .iter()
-            .map(|(key, val)| (OsString::from(key), OsString::from(val)))
-            .collect()
-    }
-
-    /// Disabled validator names.
-    pub fn disabled_validators(&self) -> HashSet<&str> {
-        self.disabled_validators.iter().map(AsRef::as_ref).collect()
-    }
-
-    /// Enabled validator names.
-    pub fn enabled_validators(&self) -> HashSet<&str> {
-        self.enabled_validators.iter().map(AsRef::as_ref).collect()
+    /// Resolves the project-wide [`Settings`] from the flags.
+    ///
+    /// `supported_extensions` are the extensions a language parser is registered for. Errors when
+    /// an extension is mapped to one outside that set, when both `--enable` and `--disable` are
+    /// given, or when an ignore glob does not compile.
+    pub fn settings(&self, supported_extensions: &HashSet<&OsString>) -> anyhow::Result<Settings> {
+        for (key, val) in &self.extensions {
+            if !supported_extensions.contains(&OsString::from(val)) {
+                anyhow::bail!("Unsupported extension mapping: {key}={val}");
+            }
+        }
+        if !self.disabled_validators.is_empty() && !self.enabled_validators.is_empty() {
+            anyhow::bail!("--enable and --disable flags must not be set at the same time");
+        }
+        Ok(Settings {
+            ignored_globs: self.ignored_globs()?,
+            extensions: self
+                .extensions
+                .iter()
+                .map(|(key, val)| (OsString::from(key), OsString::from(val)))
+                .collect(),
+            disabled_validators: self.disabled_validators.iter().copied().collect(),
+            enabled_validators: self.enabled_validators.iter().copied().collect(),
+        })
     }
 
     /// The format to write the violations in.
@@ -276,7 +300,7 @@ impl Args {
     }
 
     /// Returns a compiled GlobSet from the provided ignore glob patterns.
-    pub fn ignored_globs(&self) -> anyhow::Result<GlobSet> {
+    fn ignored_globs(&self) -> anyhow::Result<GlobSet> {
         let mut builder = GlobSetBuilder::new();
         for glob_str in &self.ignore {
             let glob = Glob::new(glob_str)
@@ -286,18 +310,8 @@ impl Args {
         builder.build().context("Failed to build ignore glob set")
     }
 
-    /// Validates all arguments.
-    pub fn validate(&self, supported_extensions: &HashSet<&OsString>) -> anyhow::Result<()> {
-        // Check custom extensions.
-        for (key, val) in &self.extensions {
-            if !supported_extensions.contains(&OsString::from(val)) {
-                anyhow::bail!("Unsupported extension mapping: {key}={val}");
-            }
-        }
-        // Check that "--enable" and "--disable" flags are not used together.
-        if !self.disabled_validators.is_empty() && !self.enabled_validators.is_empty() {
-            anyhow::bail!("--enable and --disable flags must not be set at the same time");
-        }
+    /// Validates the arguments that describe one run. [`Args::settings`] checks the rest.
+    pub fn validate(&self) -> anyhow::Result<()> {
         // `list` already prints JSON to stdout. Two JSON documents on one stream cannot be parsed.
         if self.command.is_some() && self.verbosity != Verbosity::None {
             anyhow::bail!(
@@ -374,11 +388,12 @@ fn parse_extensions(s: &str) -> anyhow::Result<(String, String)> {
         .with_context(|| format!("Invalid KEY=VALUE format: {s}"))
 }
 
-fn parse_validator(value: &str) -> anyhow::Result<String> {
+fn parse_validator(value: &str) -> anyhow::Result<&'static str> {
     let validators = validators::validator_names();
     validators
-        .contains(&value)
-        .then(|| value.trim().to_string())
+        .iter()
+        .find(|name| **name == value)
+        .copied()
         .with_context(|| {
             format!(
                 "Unknown validator: {value}. Available validators: {}",
@@ -443,10 +458,47 @@ mod tests {
     }
 
     #[test]
+    fn extension_mapped_to_unsupported_language_is_rejected() -> anyhow::Result<()> {
+        let args = parse(&["blockwatch", "-E", "cxx=cobol"])?;
+        let supported = OsString::from("cpp");
+        let error = args
+            .settings(&HashSet::from([&supported]))
+            .expect_err("a mapping to an extension no parser supports must be rejected");
+        assert!(
+            error.to_string().contains("cxx=cobol"),
+            "the error must quote the offending mapping: {error}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn enable_and_disable_together_are_rejected() -> anyhow::Result<()> {
+        let args = parse(&["blockwatch", "-e", "keep-sorted", "-d", "keep-unique"])?;
+        let error = args
+            .settings(&HashSet::new())
+            .expect_err("--enable and --disable must not be accepted together");
+        assert!(
+            error.to_string().contains("--enable and --disable"),
+            "unexpected error: {error}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_validator_is_rejected() {
+        let error = parse(&["blockwatch", "--disable", "keep-tidy"])
+            .expect_err("a validator that does not exist must be rejected");
+        assert!(
+            error.to_string().contains("keep-tidy"),
+            "the error must quote the offending name: {error}"
+        );
+    }
+
+    #[test]
     fn verbosity_is_rejected_with_the_list_subcommand() -> anyhow::Result<()> {
         let args = parse(&["blockwatch", "list", "--verbosity", "full"])?;
         let error = args
-            .validate(&HashSet::new())
+            .validate()
             .expect_err("--verbosity must not be accepted alongside `list`");
         assert!(
             error.to_string().contains("`list` subcommand"),
@@ -479,7 +531,7 @@ mod tests {
     fn format_is_rejected_with_the_list_subcommand() -> anyhow::Result<()> {
         let args = parse(&["blockwatch", "list", "--format", "sarif"])?;
         let error = args
-            .validate(&HashSet::new())
+            .validate()
             .expect_err("--format must not be accepted alongside `list`");
         assert!(
             error.to_string().contains("`list` subcommand"),
@@ -524,7 +576,7 @@ mod tests {
     fn suppress_is_rejected_after_the_list_subcommand() -> anyhow::Result<()> {
         let args = parse(&["blockwatch", "list", "--suppress", "a.md:n:keep-sorted"])?;
         let error = args
-            .validate(&HashSet::new())
+            .validate()
             .expect_err("--suppress must not be accepted alongside `list`");
         assert!(
             error.to_string().contains("`list` subcommand"),
@@ -537,7 +589,7 @@ mod tests {
     fn suppress_is_rejected_before_the_list_subcommand() -> anyhow::Result<()> {
         let args = parse(&["blockwatch", "--suppress", "a.md:n:keep-sorted", "list"])?;
         let error = args
-            .validate(&HashSet::new())
+            .validate()
             .expect_err("--suppress must not be accepted alongside `list`");
         assert!(
             error.to_string().contains("`list` subcommand"),
@@ -573,7 +625,7 @@ mod tests {
     fn suppress_from_is_rejected_with_the_list_subcommand() -> anyhow::Result<()> {
         let args = parse(&["blockwatch", "list", "--suppress-from", "msg.txt"])?;
         let error = args
-            .validate(&HashSet::new())
+            .validate()
             .expect_err("--suppress-from must not be accepted alongside `list`");
         assert!(
             error.to_string().contains("`list` subcommand"),
@@ -586,7 +638,7 @@ mod tests {
     fn suppress_from_with_nonexistent_file_fails_validation() -> anyhow::Result<()> {
         let args = parse(&["blockwatch", "--suppress-from", "nonexistent_file.txt"])?;
         let error = args
-            .validate(&HashSet::new())
+            .validate()
             .expect_err("nonexistent file must fail validation");
         assert!(
             error
