@@ -3,7 +3,7 @@ use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, python_style_comments_parser,
 };
 use crate::symbol_path::SymbolPath;
-use crate::symbols::{Symbol, SymbolsParser, ensure_no_syntax_error};
+use crate::symbols::{ScalarValue, Symbol, SymbolsParser, ensure_no_syntax_error};
 use anyhow::{Context, bail};
 use std::ops::Range;
 use tree_sitter::Node;
@@ -230,19 +230,30 @@ impl<'s> Walk<'s> {
             Some(value) => Content::of(value)?,
             None => Content::Empty,
         };
-        let decoded = match &content {
-            Content::Scalar(scalar, style) => Some(self.decoded(*scalar, *style)?),
+        let scalar_value = match &content {
+            Content::Scalar(scalar, style) => Some(ScalarValue {
+                text: self.decoded(*scalar, *style)?,
+                byte_range: scalar.byte_range(),
+            }),
             Content::Mapping(_) | Content::Sequence(_) => None,
-            Content::Empty => Some(String::new()),
+            Content::Empty => {
+                // A value that is left out has no text to point at, so its range is the point
+                // where `written` ends. That is before the line break that `written_range` can add.
+                let end = written.end_byte();
+                Some(ScalarValue {
+                    text: String::new(),
+                    byte_range: end..end,
+                })
+            }
             // An alias only points at content elsewhere, so it gets no symbol.
             Content::Alias => return Ok(()),
         };
         let range = self.written_range(written);
-        self.add_symbol(range, decoded);
+        self.add_symbol(range, scalar_value);
         self.add_member_symbols(content)
     }
 
-    fn add_symbol(&mut self, def_byte_range: Range<usize>, value: Option<String>) {
+    fn add_symbol(&mut self, def_byte_range: Range<usize>, value: Option<ScalarValue>) {
         self.symbols.push(Symbol {
             path: SymbolPath::from_segments(self.path.clone()),
             def_byte_ranges: vec![def_byte_range],
@@ -670,7 +681,7 @@ list:
                 };
                 (
                     symbol.path.to_string(),
-                    symbol.value,
+                    symbol.value.map(|value| value.text),
                     source[range.clone()].to_string(),
                 )
             })
@@ -697,6 +708,18 @@ list:
             .into_iter()
             .find(|(derived, _, _)| derived == path)
             .and_then(|(_, value, _)| value))
+    }
+
+    /// Where `source` writes the value of each symbol it derives, in order.
+    fn value_ranges(source: &str) -> anyhow::Result<Vec<(String, Option<Range<usize>>)>> {
+        Ok(parser()?
+            .parse_symbols(source)?
+            .into_iter()
+            .map(|symbol| {
+                let range = symbol.value.map(|value| value.byte_range);
+                (symbol.path.to_string(), range)
+            })
+            .collect())
     }
 
     #[test]
@@ -878,6 +901,53 @@ last: end
     -> anyhow::Result<()> {
         // As in libyaml, no line break is added when the file has none.
         assert_eq!(value_at("v: |\n  a", "/v")?.as_deref(), Some("a"));
+        Ok(())
+    }
+
+    #[test]
+    fn scalar_values_parse_symbols_returns_correct_byte_range() -> anyhow::Result<()> {
+        let source = r#"plain: hello world
+"double": "tab\there"
+tagged: !!str 123
+literal: |
+  line one
+  line two
+list:
+  - first
+"#;
+
+        let byte_range: Vec<(String, Option<&str>)> = value_ranges(source)?
+            .into_iter()
+            .map(|(path, range)| (path, range.map(|range| &source[range])))
+            .collect();
+
+        assert_eq!(
+            byte_range,
+            vec![
+                ("/plain".to_string(), Some("hello world")),
+                ("/double".to_string(), Some(r#""tab\there""#)),
+                ("/tagged".to_string(), Some("123")),
+                ("/literal".to_string(), Some("|\n  line one\n  line two")),
+                ("/list".to_string(), None),
+                ("/list/0".to_string(), Some("first")),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn keys_without_a_value_parse_symbols_returns_an_empty_range_where_each_entry_ends()
+    -> anyhow::Result<()> {
+        // `explicit` ends on its second line, before the line break that its definition covers.
+        let source = "empty:\n? explicit\n:\n";
+
+        assert_eq!(
+            value_ranges(source)?,
+            vec![
+                ("/empty".to_string(), Some(6..6)),
+                ("/explicit".to_string(), Some(19..19)),
+            ]
+        );
         Ok(())
     }
 

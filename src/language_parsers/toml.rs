@@ -3,7 +3,7 @@ use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, python_style_comments_parser,
 };
 use crate::symbol_path::SymbolPath;
-use crate::symbols::{Symbol, SymbolsParser};
+use crate::symbols::{ScalarValue, Symbol, SymbolsParser};
 use anyhow::{Context, anyhow};
 use std::ops::Range;
 use toml_edit::{InlineTable, Item, Key, Table, Value};
@@ -106,7 +106,11 @@ impl<'s> Walk<'s> {
 
     /// Adds a symbol at the current path, and returns where it is in `symbols`. The ranges can be
     /// left empty, and set once the symbol's contents have been walked.
-    fn add_symbol(&mut self, def_byte_ranges: Vec<Range<usize>>, value: Option<String>) -> usize {
+    fn add_symbol(
+        &mut self,
+        def_byte_ranges: Vec<Range<usize>>,
+        value: Option<ScalarValue>,
+    ) -> usize {
         self.symbols.push(Symbol {
             path: SymbolPath::from_segments(self.path.clone()),
             def_byte_ranges,
@@ -195,14 +199,23 @@ impl<'s> Walk<'s> {
     ) -> anyhow::Result<Vec<Range<usize>>> {
         match value {
             Value::String(string) => {
-                let range = start..require_span(value.span())?.end;
-                self.add_symbol(vec![range.clone()], Some(string.value().clone()));
+                let written = require_span(value.span())?;
+                let range = start..written.end;
+                let scalar = ScalarValue {
+                    text: string.value().clone(),
+                    byte_range: written,
+                };
+                self.add_symbol(vec![range.clone()], Some(scalar));
                 Ok(vec![range])
             }
             Value::Integer(_) | Value::Float(_) | Value::Boolean(_) | Value::Datetime(_) => {
                 let written = require_span(value.span())?;
                 let range = start..written.end;
-                self.add_symbol(vec![range.clone()], Some(self.source[written].to_string()));
+                let scalar = ScalarValue {
+                    text: self.source[written.clone()].to_string(),
+                    byte_range: written,
+                };
+                self.add_symbol(vec![range.clone()], Some(scalar));
                 Ok(vec![range])
             }
             Value::Array(array) => {
@@ -355,7 +368,8 @@ dob = 1979-05-27T07:32:00-08:00 # Date of birth with comment
                     .iter()
                     .map(|range| source[range.clone()].to_string())
                     .collect();
-                (symbol.path.to_string(), symbol.value, texts)
+                let value = symbol.value.map(|value| value.text);
+                (symbol.path.to_string(), value, texts)
             })
             .collect())
     }
@@ -618,6 +632,31 @@ raw \n'''
                     "/multiline_literal".to_string(),
                     Some(r"raw \n".to_string())
                 ),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn scalar_values_parse_symbols_returns_correct_byte_range() -> anyhow::Result<()> {
+        let source = r#"string = "a\tb"
+integer = 1_000
+"#;
+
+        let byte_range: Vec<(String, Option<&str>)> = parser()?
+            .parse_symbols(source)?
+            .into_iter()
+            .map(|symbol| {
+                let written = symbol.value.map(|value| &source[value.byte_range]);
+                (symbol.path.to_string(), written)
+            })
+            .collect();
+
+        assert_eq!(
+            byte_range,
+            vec![
+                ("/string".to_string(), Some(r#""a\tb""#)),
+                ("/integer".to_string(), Some("1_000")),
             ]
         );
         Ok(())

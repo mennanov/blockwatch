@@ -9,7 +9,7 @@ use tree_sitter::StreamingIterator;
 /// An addressable element of a source file, such as a JSON key or an array item.
 ///
 /// Contains the rooted [`SymbolPath`], the byte ranges where the symbol is written, and the
-/// unquoted scalar value if the symbol represents a scalar.
+/// scalar value if the symbol represents a scalar.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Symbol {
     /// The symbol path of this symbol (e.g. `/dependencies/inngest`).
@@ -17,12 +17,12 @@ pub struct Symbol {
     /// The byte ranges of the source where the symbol is written, in document order and not
     /// overlapping. Never empty. A symbol written in several places has one range for each.
     pub def_byte_ranges: Vec<Range<usize>>,
-    /// The unquoted scalar value, or `None` if the symbol represents a container or composite node.
-    pub value: Option<String>,
+    /// The scalar value, or `None` if the symbol represents a container or composite node.
+    pub value: Option<ScalarValue>,
 }
 
 impl Symbol {
-    fn new(node: &tree_sitter::Node, path: &[String], value: Option<String>) -> Self {
+    fn new(node: &tree_sitter::Node, path: &[String], value: Option<ScalarValue>) -> Self {
         // A path is empty only when the query gives a `@def` no `@name`, and `from_segments`
         // panics on that. An `@item` always gets its index, so it cannot be the cause.
         Self {
@@ -58,13 +58,24 @@ impl Symbol {
     /// Panics if a byte range does not fit `source`.
     pub fn value_or_definition<'s>(&'s self, source: &'s str) -> Cow<'s, str> {
         match (&self.value, self.def_byte_ranges.as_slice()) {
-            (Some(value), _) => Cow::Borrowed(value),
+            (Some(value), _) => Cow::Borrowed(&value.text),
             (None, [range]) => Cow::Borrowed(&source[range.clone()]),
             (None, ranges) => {
                 Cow::Owned(ranges.iter().map(|range| &source[range.clone()]).collect())
             }
         }
     }
+}
+
+/// The value of a [`Symbol`] that represents a scalar.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScalarValue {
+    /// The text of the value. A string has no quotes and its escapes are decoded. Any other
+    /// scalar is kept as written.
+    pub text: String,
+    /// The byte range of the source where the value is written, quotes included.
+    /// It covers the whole literal as returned by the grammar.
+    pub byte_range: Range<usize>,
 }
 
 /// Why a symbol path did not resolve to exactly one symbol.
@@ -154,7 +165,7 @@ enum CaptureRole {
     Container,
     /// A name fragment contributing one or more path segments.
     Name,
-    /// A scalar node contributing a value.
+    /// A scalar node contributing a value. Its range is where the value is written.
     Value,
 }
 
@@ -364,10 +375,13 @@ impl<'tree> MatchCaptures<'tree> {
             .iter()
             .map(|name| node_decoder(name, source))
             .collect::<anyhow::Result<_>>()?;
-        let value = self
-            .value
-            .map(|value| node_decoder(&value, source))
-            .transpose()?;
+        let value = match self.value {
+            Some(value) => Some(ScalarValue {
+                text: node_decoder(&value, source)?,
+                byte_range: value.byte_range(),
+            }),
+            None => None,
+        };
         match (self.def, self.item, self.container) {
             (Some(node), _, _) => Ok(Some((node, Contribution::Def { names, value }))),
             (None, Some(node), _) => Ok(Some((node, Contribution::Item { names, value }))),
@@ -385,12 +399,12 @@ enum Contribution {
     /// `@def`: addressable by its names.
     Def {
         names: Vec<String>,
-        value: Option<String>,
+        value: Option<ScalarValue>,
     },
     /// `@item`: addressable by its names followed by its index among its parent's items.
     Item {
         names: Vec<String>,
-        value: Option<String>,
+        value: Option<ScalarValue>,
     },
     /// `@container`: not addressable, but its names prefix the paths of its descendants.
     Container { names: Vec<String> },
@@ -540,7 +554,10 @@ mod tests {
 
         let derived: Vec<(String, Option<String>)> = symbols
             .into_iter()
-            .map(|symbol| (symbol.path.to_string(), symbol.value))
+            .map(|symbol| {
+                let value = symbol.value.map(|value| value.text);
+                (symbol.path.to_string(), value)
+            })
             .collect();
         assert_eq!(
             derived,
@@ -566,7 +583,8 @@ mod tests {
         let symbols = json_symbols_parser(container_query)?.parse(source)?;
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].path.to_string(), "/outer/inner");
-        assert_eq!(symbols[0].value, Some("42".to_string()));
+        let value = symbols[0].value.as_ref().map(|value| value.text.as_str());
+        assert_eq!(value, Some("42"));
         Ok(())
     }
 
@@ -585,7 +603,10 @@ mod tests {
             vec![Symbol {
                 path: SymbolPath::from_segments(vec![r#""K""#.to_string()]),
                 def_byte_ranges: vec![1..9],
-                value: Some(r#""V""#.to_string()),
+                value: Some(ScalarValue {
+                    text: r#""V""#.to_string(),
+                    byte_range: 6..9,
+                }),
             }]
         );
         Ok(())

@@ -35,7 +35,10 @@ mod tests {
         Ok(parser()?
             .parse_symbols(source)?
             .into_iter()
-            .map(|symbol| (symbol.path.to_string(), symbol.value))
+            .map(|symbol| {
+                let value = symbol.value.map(|value| value.text);
+                (symbol.path.to_string(), value)
+            })
             .collect())
     }
 
@@ -147,6 +150,31 @@ mod tests {
         assert_eq!(
             derived_symbols(r#"{"object": {}, "array": []}"#)?,
             expected_symbols([("/object", None), ("/array", None)])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn scalar_values_parse_symbols_returns_correct_byte_range() -> anyhow::Result<()> {
+        let source = r#"{"string": "a\nb", "number": 42, "array": ["item"]}"#;
+
+        let byte_range: Vec<(String, Option<&str>)> = parser()?
+            .parse_symbols(source)?
+            .into_iter()
+            .map(|symbol| {
+                let written = symbol.value.map(|value| &source[value.byte_range]);
+                (symbol.path.to_string(), written)
+            })
+            .collect();
+
+        assert_eq!(
+            byte_range,
+            vec![
+                ("/string".to_string(), Some(r#""a\nb""#)),
+                ("/number".to_string(), Some("42")),
+                ("/array".to_string(), None),
+                ("/array/0".to_string(), Some(r#""item""#)),
+            ]
         );
         Ok(())
     }
