@@ -11,10 +11,11 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
 - **Only Changed Blocks**: `git diff --patch | blockwatch --diff --only-changed` narrows the run to them, instead of
   every block in the repository.
 - **List Blocks**: `blockwatch list` outputs a JSON report of all discovered blocks.
-- **Custom Extensions**: Map custom file extensions: `blockwatch -E cxx=cpp`
-- **Disable Validators**: `blockwatch -d check-ai`
-- **Enable Validators**: `blockwatch -e keep-sorted`
-- **Ignore Files**: `blockwatch --ignore "**/generated/**"`
+- **Config File**: `blockwatch --config FILE` reads the project's settings from FILE instead of `blockwatch.toml`
+- **Custom Extensions**: Map custom file extensions: `blockwatch -E cxx=cpp` (config key: `extensions`)
+- **Disable Validators**: `blockwatch -d check-ai` (config key: `disable`)
+- **Enable Validators**: `blockwatch -e keep-sorted` (config key: `enable`)
+- **Ignore Files**: `blockwatch --ignore "**/generated/**"` (config key: `ignore`)
 - **Report What Ran**: `blockwatch --verbosity summary` (or `full` for JSON on stdout)
 - **Suppress Violations**: `blockwatch --suppress FILE[:BLOCK[:VALIDATOR[:HASH]]]` reports them but stops them failing
   the run
@@ -43,6 +44,8 @@ blockwatch "**/*.rs" --ignore "**/generated/**"
 ```
 
 Note: Quote glob patterns to prevent shell expansion before passing arguments to `blockwatch`.
+
+Exclusions that hold for the whole project belong in the `ignore` key of the [config file](#config-file).
 
 Globs **intersect** with whatever the run mode selected, in every mode. They only ever narrow a run: passing
 `"src/**/*.rs"` alongside a diff checks the changed blocks under `src/`, and never adds an unchanged file back.
@@ -160,6 +163,8 @@ blockwatch -E cxx=cpp -E c++=cpp
 
 Files with extensions that do not map to any supported grammar are ignored.
 
+The `extensions` table of the [config file](#config-file) holds the mappings a project always needs.
+
 ## Enabling and Disabling Validators
 
 Control which validators run using `-e` (enable only) or `-d` (disable):
@@ -173,6 +178,66 @@ blockwatch -e keep-sorted -e keep-unique
 ```
 
 Note: `-e` and `-d` cannot be combined in a single invocation.
+
+The `enable` and `disable` keys of the [config file](#config-file) make a selection the default for a project.
+
+## Config File
+
+Settings that stay the same for a project can live in `blockwatch.toml` at the repository root. Then the pre-commit
+hook, the CI job and local scripts no longer each repeat them:
+
+```toml
+ignore = ['**/generated/**', 'tests/testdata/**']
+disable = ['check-ai']
+
+[extensions]
+cxx = 'cpp'
+webmanifest = 'json'
+```
+
+- The file is read from the repository root, whichever directory you run from.
+- Without the file, a run uses the flags alone.
+- `--config FILE` reads another file instead. The path is relative to the working directory, not to the repository
+  root, and the file must exist.
+- The settings apply to `list` too.
+
+Write globs in single quotes. TOML then takes them as written, backslashes included.
+
+Each key matches a flag:
+
+| Key          | Flag        | When the flag is given too                        |
+|--------------|-------------|---------------------------------------------------|
+| `ignore`     | `--ignore`  | Both lists apply.                                 |
+| `extensions` | `-E`        | Both apply. The flag wins for the same extension. |
+| `enable`     | `--enable`  | The flags' selection replaces the config's.       |
+| `disable`    | `--disable` | The flags' selection replaces the config's.       |
+
+So `blockwatch -e keep-sorted` runs only `keep-sorted`, whatever the config enables or disables. An extra `--ignore`
+still skips the files the config skips.
+
+A value is checked as the flag's would be. An unknown validator, a glob that does not compile, an extension mapped to an
+unsupported language, or both `enable` and `disable` in one file all fail the run. So does an unknown key, so a typo
+cannot turn a setting off without anyone noticing. The error quotes the bad key or value. For an unknown key or a value
+of the wrong type, it also shows the line and column:
+
+```text
+Error: invalid config file "blockwatch.toml"
+
+Caused by:
+    TOML parse error at line 1, column 1
+      |
+    1 | ignor = ['x']
+      | ^^^^^
+    unknown field `ignor`, expected one of `ignore`, `extensions`, `enable`, `disable`
+```
+
+Everything else stays out of the file:
+
+- **The globs, `--diff`, `--only-changed`, `--suppress` and `--suppress-from`** describe one run, not the project.
+- **`--format` and `--verbosity`** depend on who reads the output.
+- **The environment variables of `check-ai` and `check-lua`** stay in the environment. Anyone who can open a pull
+  request can edit the config file. From there, unsafe Lua could run any code in CI, and an API URL could send the code
+  and the API key to any server.
 
 ## Suppressing a Violation
 

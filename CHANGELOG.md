@@ -12,6 +12,14 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- A config file. `blockwatch.toml` at the repository root holds the settings that stay the same for a project:
+  `ignore`, `extensions`, `enable` and `disable`, one for each flag. The file's ignore globs and extension mappings
+  add to the flags', and a flag wins for the same extension. `--enable` or `--disable` on the command line replaces
+  the file's selection. An unknown key or a bad value fails the run, and the error quotes it. `--config FILE` reads
+  another file instead. See [Config File](docs/cli.md#config-file).
+
 ## [0.7.0] - 2026-09-28
 
 ### Added

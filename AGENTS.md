@@ -1,14 +1,13 @@
 # AGENTS.md
 
-This file provides guidance to AI coding agents working in this repository. It is the single source of truth,
-regardless of which agent reads it. `CLAUDE.md` is a symlink to this file, because Claude Code only discovers
-`CLAUDE.md`.
+This file tells AI coding agents how to work in this repository. Every agent reads the same file. `CLAUDE.md` is a
+symlink to it, because Claude Code only looks for `CLAUDE.md`.
 
 ## Project
 
-BlockWatch is a language-agnostic linter (Rust CLI, published on crates.io) that enforces rules declared inside
-HTML-like `<block ...>` tags found in source-file comments. It can run across the whole tree or only on the changed
-lines of a piped unified diff.
+BlockWatch is a linter written in Rust and published on crates.io. It works with any language. Rules are written as
+HTML-like `<block ...>` tags inside code comments, and BlockWatch checks them. It can check the whole repository, or
+only the lines changed in a unified diff piped into it.
 
 ## Common commands
 
@@ -20,175 +19,212 @@ markdownlint-cli2                          # lint Markdown (config: .markdownlin
 pre-commit run --all-files                 # run every hook the repository installs
 ```
 
-Fuzzing (nightly toolchain + `cargo-afl` required) lives in `fuzz/`; see `fuzz/README.md`.
+Fuzzing lives in `fuzz/`. It needs the nightly toolchain and `cargo-afl`. See `fuzz/README.md`.
 
-Integration tests use `assert_cmd` to invoke the compiled binary against fixtures in `tests/testdata/`. Many of them
-also pipe synthetic diffs into stdin — when adding a test, mirror the existing pattern in `tests/<validator>.rs`.
+Integration tests use `assert_cmd` to run the built binary on the fixtures in `tests/testdata/`. Many of them also pipe
+a made-up diff into stdin. When you add a test, follow the pattern in `tests/<validator>.rs`.
 
-## Agentic coding rules
+## Rules for agents
 
-Strict adherence to the following rules is *absolutely required* when working with this project.
+You *must* follow every rule below, at all times.
 
-### Navigating and editing code
+### Writing style
 
-- *Always* navigate and edit Rust through a tool that understands the language semantically — an LSP client, an IDE
-  integration, or an equivalent MCP server. Use it to find references, jump to definitions and rename symbols.
-- *Never* rename or restructure Rust symbols with text substitution (`sed`, `perl`, bulk find-and-replace). Either use a
-  semantic rename, or list every reference first and then edit them one at a time.
-- *Prefer* the editing tools the harness provides over one-off scripts.
-- *Always* dispatch on an enum with an exhaustive `match`. A `let ... else`, or an `if` that peels off one variant and
-  funnels the rest into a single branch, silently gives a variant added later whatever the catch-all happened to do. A
-  `match` makes the compiler demand a decision at every place that has to make one.
+These rules apply to everything you write, with no exceptions: code comments, doc comments, `--help` text, error
+messages, docs, `CHANGELOG.md`, commit messages, and your replies to the human in chat.
 
-### Escalating to a human
+- *Always* write so that each sentence is understood on the first read. If a sentence needs a second read, split it or
+  say it more simply.
+- *Always* use short sentences, one idea each, and everyday words.
+- *Always* say the concrete thing. Name the file, flag or value instead of describing it in the abstract.
+- *Always* say what happens, such as what passes or fails, rather than naming a property like "order-insensitive".
+- *Never* use jargon or formal framing, such as "hold for", "as opposed to", "govern" or "self-describes". Use the plain
+  word instead.
+- *Prefer* an example when it is shorter than the explanation.
+- *Prefer* a short list or a table to a long sentence with several clauses.
 
-- *Always* escalate on any ambiguity, and on any UX, security or performance concern. State the problem, lay out the
-  options, and let the human choose.
-- *Never* work around a blocker by going down a rabbit hole. As soon as a solution starts to look complicated, stop and
-  escalate instead.
+For example:
+
+| Hard to follow                                                                             | Easy to follow                                                                                     |
+|--------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
+| The settings that hold for a whole project, as opposed to the flags that describe one run. | The validated settings for a run: the config file merged with the flags.                           |
+| A file whose extension is a key is parsed as if its extension were the value.              | Maps an extension to a supported one. For example, `cxx` to `cpp` makes `.cxx` files parse as C++. |
+| Validates the arguments that describe one run, as opposed to the project-wide settings.    | Validates the flags that are not settings, such as `--format` and `--suppress`.                    |
+
+### Reading and editing code
+
+- *Always* read and edit Rust with a tool that understands the language, such as an LSP client, an IDE plugin or an MCP
+  server. Use it to find references, jump to definitions and rename symbols.
+- *Never* rename or move Rust symbols with text replacement, such as `sed`, `perl` or a bulk find-and-replace. Use the
+  tool's rename. If you can't, list every reference first, then edit them one at a time.
+- *Prefer* the harness's editing tools to one-off scripts.
+- *Always* handle the variants of an enum with an exhaustive `match`. A `let ... else`, or an `if` that handles one
+  variant and sends the rest to a single branch, quietly gives any new variant whatever that branch does. With a
+  `match`, the compiler makes you decide what to do with each new variant.
+
+### Asking the human
+
+- *Always* ask the human when something is unclear, and when a change affects UX, security or performance. Describe
+  the problem, list the options, and let the human choose.
+- *Never* dig deeper and deeper to get around a blocker. As soon as a solution starts to look complicated, stop and ask.
 
 ### Writing comments
 
-These rules apply to doc comments, inline comments and prose alike.
+These rules apply to doc comments, inline comments and docs.
 
-- *Always* explain *why* the code is written the way it is. *Never* narrate what it does — the code already says that.
-  If the reason is too exotic to explain, escalate to a human.
-- *Always* write in plain English, in short sentences. A comment that has to be read twice to be understood is too
-  dense: split it up.
-- *Never* write a comment that only makes sense to someone doing today's task. Assume a future reader who knows neither
-  that task nor this project.
-- *Always* keep a doc comment on the symbol it belongs to, and describe that symbol's contract: what it is, what a
-  function takes and returns, and what a caller has to know — ordering guarantees, when a value is absent, when it
-  panics or errors.
-- *Always* put the explanation of an implementation detail inside the function body, next to the code it explains. A
-  caller should not have to read about internals to use the symbol.
-- *Never* describe how other modules or callers use a symbol. Describe the symbol on its own terms.
-- *Always* analyze all the tests in the module and make sure that they are structurally consistent: the most important
-  tests come first. All tests should have a consistent naming pattern: "state_action_expected_result", the "action" can
-  be omitted if it is obvious from the context.
-- *Always* escalate to a human when the tests need to be refactored to keep them well-structured and consistent.
+- *Always* explain *why* the code is written this way. *Never* describe what it does. The code already shows that. If
+  the reason is too unusual to explain, ask the human.
+- *Never* write a comment that only makes sense to someone working on today's task. Write for a future reader who
+  knows neither the task nor this project.
+- *Always* put a doc comment on the symbol it describes. Say what the symbol is, what a function takes and returns, and
+  what a caller needs to know: the order of results, when a value can be missing, and when it panics or returns an
+  error.
+- *Always* explain an implementation detail inside the function body, next to the code it explains. A caller shouldn't
+  need to read about the internals to use the function.
+- *Never* describe how other modules or callers use a symbol. Describe only the symbol itself.
+- *Always* check that the tests in a module follow one structure. Put the most important tests first. Name every test
+  `state_action_expected_result`. You can leave out `action` when it is obvious.
+- *Always* ask the human before you restructure tests to keep them consistent.
 
 ### Writing and running tests
 
-The goal is a suite that fails when behavior changes, not one that touches every line.
+The goal is a test suite that fails when behavior changes. Running every line is not the goal.
 
-- *Always* start from a test that fails, and fails for the reason you expect.
-- *Always* re-derive the reasoning for each code path a change touches, and give each path its own test.
-- *Always* work out which inputs the change newly changes the answer for, and test the edges of that set. A change that
-  is right for the obvious input and wrong just outside it can be overlooked at review.
-- *Always* mutation-check a new test before calling the work done. E.g. flip each comparison or boundary the change
-  touched, run the suite, confirm a test fails, then restore. A suite that stays green either way is weak.
-- *Always* run tests with coverage as a final check before calling the work done.
-- *Prefer* reading a coverage report (`cargo llvm-cov`) as a list of questions rather than a number to raise. An
-  uncovered branch asks what nobody needed it for, and the answer is either a case worth testing or code worth deleting.
-  *Never* add a test whose only purpose is to turn a coverage report line green.
+- *Always* start with a test that fails, and check that it fails for the reason you expect.
+- *Always* work out again why each code path your change touches is correct, and give each path its own test.
+- *Always* find the inputs whose result your change changes, and test the edges of that group. A change can be right
+  for the obvious input and wrong just next to it, and a reviewer can miss that.
+- *Always* mutation-test a new test before you call the work done. For example, flip each comparison or boundary the
+  change touched, run the tests, check that one fails, then undo the flip. If the tests pass either way, they are too
+  weak.
+- *Always* run the tests with coverage as the last check before you call the work done.
+- *Prefer* to read a coverage report (`cargo llvm-cov`) as a list of questions, not as a number to raise. An uncovered
+  branch asks why nobody needed it. The answer is either a case worth testing or code worth deleting. *Never* add a
+  test only to turn a line in the coverage report green.
 
 ### Committing
 
-- *Never* commit anything automatically. Every change is reviewed by a human first.
-- *Always* prefer committing on the current branch (likely `main`) instead of creating feature branches. If a branch is
-  strongly recommended, escalate.
-- *Always* keep the commit message short: a summary title and a description of one to three sentences.
-- *Never* restate the diff in a commit message — which files changed, and what changed in them. The diff already shows
-  that.
+- *Never* commit on your own. A human reviews every change first.
+- *Always* commit on the current branch, usually `main`, rather than on a new branch. If you think a new branch is really
+  needed, ask the human.
+- *Always* keep the commit message short: a title, and one to three sentences of description.
+- *Never* repeat the diff in a commit message, such as which files changed and how. The diff already shows that.
 
 ## The repository lints itself
 
-Source files here carry real `<block ...>` tags, and the `commit-msg` hook runs the working tree's build of the linter
-over the staged diff. Two consequences:
+Source files here contain real `<block ...>` tags. The `commit-msg` hook builds the linter from the working tree and
+runs it on the staged diff. This means:
 
-- A comment that spells out a block tag *becomes* a block. To write about the syntax in a comment or in Markdown prose,
-  keep it inside a code span so it is not mistaken for a rule.
-- A failing commit is often the linter reporting a rule the change broke, not the hook itself being broken. Read the
-  violation before working around it.
+- A comment that writes out a block tag *becomes* a block. To write about the tag syntax in a comment or in Markdown,
+  put it in a code span, so that it isn't read as a rule.
+- When a commit fails, it is usually the linter reporting a rule that the change broke. The hook itself is usually
+  fine. Read the violation before you work around it.
 
 ## Architecture
 
-Pipeline, end-to-end, lives in `src/main.rs`:
+The whole pipeline is in `src/main.rs`:
 
-1. Parse CLI flags (`flags.rs`, clap-derived). Flags are `global`, so they may be written before or after a subcommand.
-2. Resolve the repository root and build a `fs::FileSystemImpl` confined to it. Every read goes through it, so a path
-   named by a block attribute cannot reach outside the repository.
-3. Decide the run's inputs. With `--diff`, a unified diff is read from stdin and parsed by
-   `diff_parser::line_changes_from_diff` → `HashMap<RepoPath, Vec<LineChange>>`; `--only-changed` additionally narrows
-   the run to the files that diff touched. Without `--diff` stdin is never read and no block counts as changed.
-4. Walk the repo (using the `ignore` crate, honoring `.gitignore`) filtered by globs from args and `--ignore`. Language
-   is resolved by file extension (with `-E ext=lang` overrides).
-5. For each file, the appropriate `language_parsers::<lang>` (tree-sitter grammar) extracts comments; `tag_parser` +
-   `block_parser` turn comment text into `Block` values (attributes + byte/position ranges). Result:
-   `blocks::FileBlocks`, held in a `validators::ValidationContext`.
-6. `validators::detect_validators` dispatches each block through `ValidatorDetector`s (one per validator type). A
-   detector returns either `ValidatorType::Sync` or `ValidatorType::Async`. Async validators (e.g. `check-ai`) run on
-   Tokio; the runtime is only started if at least one async validator is detected.
-7. Validators produce `Violation`s with `ViolationRange` + `BlockSeverity` (error/warning). A symbol reference
-   (`file#/path`) is looked up with `symbols::resolve` among the symbols that `LanguageParser::parse_symbols` derives
-   from the target file, once per file. A missing or ambiguous symbol is a violation, and a target file that does not
-   parse ends the run. Addresses passed to `--suppress` / `--suppress-from` mark the violations they cover as
-   suppressed: those are still reported, but no longer fail the run.
-8. Violations go to stderr, as JSON diagnostics or as a SARIF 2.1.0 log depending on `--format`. The `--verbosity` run
-   report goes to stdout. The exit code comes from the error-severity violations that remain.
+1. Parse the command-line flags (`flags.rs`, built with clap). Flags are `global`, so they can go before or after a
+   subcommand.
+2. Find the repository root and build a `fs::FileSystemImpl` limited to it. Every file read goes through it, so a path
+   in a block attribute can't reach outside the repository.
+3. Decide what the run works on. With `--diff`, a unified diff is read from stdin, and
+   `diff_parser::line_changes_from_diff` turns it into a `HashMap<RepoPath, Vec<LineChange>>`. `--only-changed` also
+   limits the run to the files in that diff. Without `--diff`, stdin is never read and no block counts as changed.
+4. Resolve the run's settings. `config::read` reads `blockwatch.toml` from the repository root, or the file given by
+   `--config`. `Args::raw_settings` returns the settings given as flags. `settings::Settings::resolve` validates both
+   with the same rules and merges them: the ignore globs, the extension mappings and the validator selection.
+5. Walk the repository with the `ignore` crate, which respects `.gitignore`. Keep the files that match the globs from
+   the command line and don't match the settings' ignore globs. Pick each file's language by its extension, using the
+   settings' extension mappings too.
+6. For each file, the matching `language_parsers::<lang>` (a tree-sitter grammar) finds the comments. `tag_parser` and
+   `block_parser` turn the comment text into `Block` values, with their attributes and their byte and line ranges. The
+   result is a `blocks::FileBlocks` for each file, kept in a `validators::ValidationContext`.
+7. `validators::detect_validators` passes each block to the `ValidatorDetector`s, one for each validator. A detector
+   returns either `ValidatorType::Sync` or `ValidatorType::Async`. Async validators, such as `check-ai`, run on Tokio.
+   The Tokio runtime only starts if at least one async validator is needed.
+8. Validators produce `Violation`s, each with a `ViolationRange` and a `BlockSeverity` (error or warning). A symbol
+   reference such as `file#/path` is found with `symbols::resolve`. It searches the symbols that
+   `LanguageParser::parse_symbols` finds in the target file, once per file. A missing or ambiguous symbol is a
+   violation. A target file that doesn't parse stops the run. Addresses given to `--suppress` or `--suppress-from` mark
+   the violations they cover as suppressed. Those are still reported, but they no longer fail the run.
+9. Violations go to stderr, as JSON diagnostics or as a SARIF 2.1.0 log, depending on `--format`. The `--verbosity`
+   report goes to stdout. The exit code depends on the error-severity violations that are not suppressed.
 
-The `list` subcommand stops after step 5 and writes the parsed blocks to stdout as JSON.
+The `list` subcommand stops after step 6 and writes the blocks it found to stdout as JSON.
 
-Key module boundaries:
+The main modules:
 
-- `src/fs.rs` — `FileSystem` / `PathChecker` traits plus the real implementations. These traits are the seam that tests
-  use to inject fakes (see `FakeFileSystem`, `FakePathChecker` in `fs::test_utils`).
-- `src/repo_path.rs` — `RepoPath`, the one spelling of a repository-relative path. A diff header (`b/src/main.rs`), a
-  walk entry and a `file:name` attribute all normalize here, so the same file is always the same map key.
-- `src/language_parsers/` — one tree-sitter grammar per language, each with a `parser()` returning a
-  `LanguageParser`. Every language knows which node kinds are its comments, and `src/block_parser.rs` turns those
-  comments into blocks. `language_parsers/mod.rs::language_parsers()` returns the extension→parser map; **adding a new
-  language means adding a module here and registering it in that function**. A language that has symbols also
-  has a `SymbolsParser`, which its `parser()` passes to `.with_symbols(...)`. JSON uses a `QuerySymbolsParser`, built
-  from a tree-sitter query (`.scm`) and a `NodeDecoder`. TOML derives its symbols with `toml_edit`, because what a
-  TOML key means depends on the order of its headers rather than on how the syntax tree nests. YAML walks its syntax
-  tree itself, because an alias keeps its position in a sequence without being addressable, which a query cannot
-  express. Each
-  language's own tests pin the complete list of symbols it derives. Giving a language symbols also means documenting
-  its paths in `docs/symbols.md` and in the skill's "Symbols" section. A test in `language_parsers/mod.rs` and the
-  repository's own blocks then keep the list of files with symbols, and each language's section, in step with the
+- `src/fs.rs` — the `FileSystem` and `PathChecker` traits, and their real implementations. Tests use these traits to
+  swap in fakes: `FakeFileSystem` and `FakePathChecker` in `fs::test_utils`.
+- `src/settings.rs` — `RawSettings` holds the settings read from one place: the config file or the flags. `Settings` is
+  the validated and merged result. `RawSettings::validate` is the only place the rules for a setting live, so the
+  flags and the config file can't drift apart. Its errors quote the bad value but don't show a line and column.
+  Tracking where each value is written would cost more code than it saves the reader.
+- `src/config.rs` — reads the config file into a `RawSettings`, using `toml_edit`'s serde support. Only the errors that
+  `toml_edit` raises itself, such as an unknown key, show a line and column.
+- `src/repo_path.rs` — `RepoPath`, the one way to write a path relative to the repository root. A diff header
+  (`b/src/main.rs`), a path found in the walk and a `file:name` attribute all become a `RepoPath`. So the same file is
+  always the same map key.
+- `src/language_parsers/` — one tree-sitter grammar for each language. Each language has a `parser()` that returns a
+  `LanguageParser`, which knows which syntax nodes are comments. `src/block_parser.rs` turns those comments into
+  blocks. `language_parsers()` in `language_parsers/mod.rs` returns the map from extension to parser. **To add a
+  language, add a module here and register it in that function.**
+
+  Some languages also have symbols. Such a language has a `SymbolsParser`, which its `parser()` passes to
+  `.with_symbols(...)`:
+
+  - JSON uses a `QuerySymbolsParser`, built from a tree-sitter query (`.scm`) and a `NodeDecoder`.
+  - TOML finds its symbols with `toml_edit`. What a TOML key means depends on the order of the headers, not on how the
+    syntax tree is nested.
+  - YAML walks its syntax tree itself. An alias has a position in a sequence but can't be addressed, and a query can't
+    express that.
+
+  Each language's tests list every symbol it finds. When you give a language symbols, also document its paths in
+  `docs/symbols.md` and in the "Symbols" section of the skill. A test in `language_parsers/mod.rs` and the
+  repository's own blocks keep the list of file types with symbols, and each language's section, in sync with the
   code.
 - `src/symbols.rs` — `Symbol`, the `SymbolsParser` trait, and `resolve`, which finds the symbol a path refers to.
-  `QuerySymbolsParser` runs a language's query and derives every addressable `Symbol` (its path, definition range and
-  decoded value) in one walk of the tree. It suits a language whose structure is its syntax tree. It refuses a file
-  with a syntax error rather than resolve a path through tree-sitter's error recovery. It does not check the query
-  itself.
-- `src/validators/` — one file per validator (`affects`, `check_ai`, `check_lua`, `keep_sorted`, `keep_unique`,
-  `line_count`, `line_pattern`, `same_as`), each exporting a `*ValidatorDetector`. All detectors are wired up in
-  `validators/mod.rs`.
-- `src/diff_parser.rs` — unidiff wrapper producing `LineChange`s, and `range_intersects_any`, which decides whether
-  they touch a range of the file, such as a block's start tag or a symbol's definition. A block's content has its own
-  test in `blocks.rs`, because a deletion right where the content begins removed content. The resulting
-  `is_content_modified` and `is_start_tag_modified` on `BlockWithContext` drive the "only check touched blocks"
-  behavior.
+  `QuerySymbolsParser` runs a language's query and finds every addressable `Symbol` in one walk of the tree, with its
+  path, its definition range and its decoded value. It suits a language whose structure is its syntax tree. It rejects
+  a file with a syntax error, instead of resolving a path through tree-sitter's error recovery. It doesn't check the
+  query itself.
+- `src/validators/` — one file for each validator (`affects`, `check_ai`, `check_lua`, `keep_sorted`, `keep_unique`,
+  `line_count`, `line_pattern`, `same_as`). Each file exports a `*ValidatorDetector`. `validators/mod.rs` registers
+  all of them.
+- `src/diff_parser.rs` — wraps `unidiff` to produce `LineChange`s. `range_intersects_any` decides whether they touch a
+  range of the file, such as a block's start tag or a symbol's definition. A block's content has its own check in
+  `blocks.rs`, because a deletion right where the content starts removes content. The results end up in
+  `is_content_modified` and `is_start_tag_modified` on `BlockWithContext`, which decide which blocks count as changed.
 
-Only blocks whose content or start-tag range intersects a `LineChange` are validated when a diff is provided; this is
-the primary source of subtlety — when debugging "why didn't my rule fire," check whether the diff actually hit the
-block's line range. The same holds for an `affects` symbol target: it counts as changed only when the diff touches the
-definition of the symbol it resolves to, not anywhere else in its file.
+A block counts as changed only when its content or its start tag overlaps a `LineChange`. With
+`--diff --only-changed`, only changed blocks are validated. With `--diff` alone, every block is validated, but rules
+that need a change, such as `affects`, only fire for changed blocks. This is the most common source of surprises. If a
+rule didn't fire, check whether the diff actually touched the block's lines. The same goes for an `affects` target that
+is a symbol. It counts as changed only when the diff touches that symbol's definition, not anything else in its file.
 
-The `check-ai` validator calls an OpenAI-compatible API configured via `BLOCKWATCH_AI_API_KEY` / `BLOCKWATCH_AI_MODEL` /
-`BLOCKWATCH_AI_API_URL`. The `check-lua` validator embeds `mlua` (Lua 5.4); the `BLOCKWATCH_LUA_MODE` env var
-(`sandboxed` default / `safe` / `unsafe`) controls which stdlibs are exposed.
+The `check-ai` validator calls an OpenAI-compatible API. It is configured with `BLOCKWATCH_AI_API_KEY`,
+`BLOCKWATCH_AI_MODEL` and `BLOCKWATCH_AI_API_URL`. The `check-lua` validator embeds Lua 5.4 through `mlua`. The
+`BLOCKWATCH_LUA_MODE` environment variable decides which standard libraries a script can use: `sandboxed` (the
+default), `safe` or `unsafe`.
 
-## What is shipped versus what is guidance
+## What ships to users and what is guidance
 
-`.agents/skills/blockwatch/SKILL.md` and `.claude-plugin/` are *product*: the skill this project distributes so agents
-can annotate **other** repositories. They are not instructions for working on BlockWatch itself, and changes to them are
-user-facing. This file is the guidance for working on BlockWatch.
+`.agents/skills/blockwatch/SKILL.md` and `.claude-plugin/` are part of the *product*. They are the skill this project
+ships, so that agents can add blocks to **other** repositories. They are not instructions for working on BlockWatch,
+and changing them changes what users get. This file is the guidance for working on BlockWatch.
 
-Per-agent local configuration directories (`.claude/`, `.cursor/`, `.gemini/`, `.windsurf/`, `.aider*`, and others
-listed in `.gitignore`) are deliberately untracked. Do not check in agent-specific settings; anything a future
-contributor needs belongs in this file.
+Each agent's local config directory is left out of git on purpose: `.claude/`, `.cursor/`, `.gemini/`, `.windsurf/`,
+`.aider*`, and the others listed in `.gitignore`. Don't commit agent-specific settings. Anything a future contributor
+needs belongs in this file.
 
 ## Release
 
-Releases are produced by `cargo-dist` (see `dist-workspace.toml`) and the GitHub Actions workflow in
-`.github/workflows/`. Version bumps happen in `Cargo.toml` and land via a `chore: Release blockwatch version X.Y.Z`
-commit.
+The GitHub Actions workflows in `.github/workflows/` build releases with `cargo-dist`, configured in
+`dist-workspace.toml`. The version is bumped in `Cargo.toml`, in a commit titled
+`chore: Release blockwatch version X.Y.Z`.
 
-User-facing changes get a `CHANGELOG.md` entry under `## [Unreleased]`, written in the same commit that makes the
-change; refactors, tests and CI work get none. `cargo release` renames that heading to the version being released (see
-the replacements in `release.toml`) and `dist` publishes the renamed section as the GitHub release notes, so an empty
-`Unreleased` section at release time means a release with no notes.
+A user-facing change gets a `CHANGELOG.md` entry under `## [Unreleased]`, in the same commit as the change.
+Refactors, tests and CI changes get no entry. `cargo release` renames that heading to the new version (see the
+replacements in `release.toml`). `dist` then publishes that section as the GitHub release notes. So if `Unreleased` is
+empty at release time, the release has no notes.

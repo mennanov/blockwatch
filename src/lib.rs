@@ -3,6 +3,8 @@ use serde::Serialize;
 mod block_parser;
 /// The `Block` type and the repository scan that turns source files into blocks to validate.
 pub mod blocks;
+/// Reads the settings from the config file, `blockwatch.toml`.
+pub mod config;
 /// Reads a unified diff into the per-file line changes that decide which blocks are checked.
 pub mod diff_parser;
 /// Command-line arguments and the accessors that turn them into globs, filters, and extension maps.
@@ -17,6 +19,8 @@ pub mod repo_path;
 pub mod report;
 /// Renders the violations of a run as a SARIF log, the format code-scanning services read.
 pub mod sarif;
+/// Project settings: how they are validated, and how the flags and the config file are merged.
+pub mod settings;
 /// `SymbolPath`: a parsed and validated RFC 6901 symbol path.
 pub mod symbol_path;
 /// Derives the symbols of a file: the elements a symbol reference can address.

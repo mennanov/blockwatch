@@ -1,10 +1,8 @@
-use crate::validators;
+use crate::settings::{RawSettings, parse_validator};
 use crate::violation_address::ViolationAddress;
 use anyhow::Context;
 use clap::{Parser, builder::ValueParser, crate_version};
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use std::collections::{HashMap, HashSet};
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 /// How much a run reports about what it checked.
@@ -40,9 +38,9 @@ impl std::fmt::Display for Verbosity {
 
 /// The parsed command line.
 ///
-/// Fields hold the raw strings clap collected; the accessors below turn them into the compiled
-/// glob sets and the [`Settings`] the rest of the program consumes. Flags are `global` so they may
-/// be written before or after a subcommand.
+/// The fields hold the values as clap parsed them. The methods below turn them into what the rest
+/// of the program uses, such as glob sets and [`RawSettings`]. Flags are `global`, so they can go
+/// before or after a subcommand.
 #[derive(Parser, Debug)]
 #[command(
     author,
@@ -50,7 +48,10 @@ impl std::fmt::Display for Verbosity {
     about = "Validate interdependent code/doc blocks to prevent drift.",
     long_about = r"Blockwatch validates that named blocks, sorted segments, and other constraints declared in block tags remain consistent across files. It is designed for use in pre-commit hooks and CI.
 
-By default it scans every file in the repository. Pass --diff to additionally read a unified diff from stdin, which marks the blocks the diff changed; rules that only fire on changed content, such as `affects`, need it. Add --only-changed to narrow the run down to those blocks, which is what a pre-commit hook or a per-pull-request check usually wants.",
+By default it scans every file in the repository. Pass --diff to additionally read a unified diff from stdin, which marks the blocks the diff changed; rules that only fire on changed content, such as `affects`, need it.
+Add --only-changed to narrow the run down to those blocks, which is what a pre-commit hook or a per-pull-request check usually wants.
+
+You can put project-wide settings (--ignore, -E, --enable, --disable) in blockwatch.toml at the repository root.",
     after_help = r"EXAMPLES:
     # Check every block in the repository
     blockwatch
@@ -81,6 +82,9 @@ By default it scans every file in the repository. Pass --diff to additionally re
 
     # Enable specific validators only
     blockwatch -e keep-sorted -e line-count
+
+    # Read settings from a different file instead of blockwatch.toml
+    blockwatch --config ci/blockwatch.toml
 
     # Suppress a reported violation without editing the source
     blockwatch --suppress docs/cli.md:cli-docs:keep-sorted
@@ -156,6 +160,13 @@ pub struct Args {
     )]
     ignore: Vec<String>,
 
+    /// Read settings from FILE instead of blockwatch.toml in the repository root.
+    ///
+    /// A relative path starts from the current directory, not from the repository root.
+    /// blockwatch.toml is optional, but FILE must exist.
+    #[arg(long = "config", value_name = "FILE", global = true)]
+    pub config: Option<PathBuf>,
+
     /// How much to report about what the run checked. Printed to stdout.
     #[arg(
         long = "verbosity",
@@ -222,47 +233,23 @@ pub enum SubCommand {
     },
 }
 
-/// The settings that hold for a whole project, as opposed to the flags that describe one run.
-///
-/// Every value in it has been checked.
-#[derive(Debug)]
-pub struct Settings {
-    /// Files the run leaves out, even when a glob selects them.
-    pub ignored_globs: GlobSet,
-    /// Extra extension mappings. A file whose extension is a key is parsed as if its extension were
-    /// the value. Every value is an extension a language parser supports.
-    pub extensions: HashMap<OsString, OsString>,
-    /// Validators that do not run. Empty whenever `enabled_validators` is not.
-    pub disabled_validators: HashSet<&'static str>,
-    /// The only validators that run. Empty means every validator that is not disabled runs.
-    pub enabled_validators: HashSet<&'static str>,
-}
-
 impl Args {
-    /// Resolves the project-wide [`Settings`] from the flags.
-    ///
-    /// `supported_extensions` are the extensions a language parser is registered for. Errors when
-    /// an extension is mapped to one outside that set, when both `--enable` and `--disable` are
-    /// given, or when an ignore glob does not compile.
-    pub fn settings(&self, supported_extensions: &HashSet<&OsString>) -> anyhow::Result<Settings> {
-        for (key, val) in &self.extensions {
-            if !supported_extensions.contains(&OsString::from(val)) {
-                anyhow::bail!("Unsupported extension mapping: {key}={val}");
-            }
-        }
-        if !self.disabled_validators.is_empty() && !self.enabled_validators.is_empty() {
-            anyhow::bail!("--enable and --disable flags must not be set at the same time");
-        }
-        Ok(Settings {
-            ignored_globs: self.ignored_globs()?,
-            extensions: self
-                .extensions
+    /// Returns the settings given on the command line. They are not validated yet.
+    pub fn raw_settings(&self) -> RawSettings {
+        RawSettings {
+            ignore: self.ignore.clone(),
+            extensions: self.extensions.iter().cloned().collect(),
+            enable: self
+                .enabled_validators
                 .iter()
-                .map(|(key, val)| (OsString::from(key), OsString::from(val)))
+                .map(|name| name.to_string())
                 .collect(),
-            disabled_validators: self.disabled_validators.iter().copied().collect(),
-            enabled_validators: self.enabled_validators.iter().copied().collect(),
-        })
+            disable: self
+                .disabled_validators
+                .iter()
+                .map(|name| name.to_string())
+                .collect(),
+        }
     }
 
     /// The format to write the violations in.
@@ -299,18 +286,7 @@ impl Args {
         builder.build().context("Failed to build glob set")
     }
 
-    /// Returns a compiled GlobSet from the provided ignore glob patterns.
-    fn ignored_globs(&self) -> anyhow::Result<GlobSet> {
-        let mut builder = GlobSetBuilder::new();
-        for glob_str in &self.ignore {
-            let glob = Glob::new(glob_str)
-                .with_context(|| format!("Invalid ignore glob pattern: {}", glob_str))?;
-            builder.add(glob);
-        }
-        builder.build().context("Failed to build ignore glob set")
-    }
-
-    /// Validates the arguments that describe one run. [`Args::settings`] checks the rest.
+    /// Validates the flags that are not settings, such as `--format` and `--suppress`.
     pub fn validate(&self) -> anyhow::Result<()> {
         // `list` already prints JSON to stdout. Two JSON documents on one stream cannot be parsed.
         if self.command.is_some() && self.verbosity != Verbosity::None {
@@ -388,20 +364,6 @@ fn parse_extensions(s: &str) -> anyhow::Result<(String, String)> {
         .with_context(|| format!("Invalid KEY=VALUE format: {s}"))
 }
 
-fn parse_validator(value: &str) -> anyhow::Result<&'static str> {
-    let validators = validators::validator_names();
-    validators
-        .iter()
-        .find(|name| **name == value)
-        .copied()
-        .with_context(|| {
-            format!(
-                "Unknown validator: {value}. Available validators: {}",
-                validators.join(", ")
-            )
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -454,33 +416,6 @@ mod tests {
         assert!(args.diff);
         assert!(args.only_changed);
         assert!(matches!(args.command, Some(SubCommand::List { .. })));
-        Ok(())
-    }
-
-    #[test]
-    fn extension_mapped_to_unsupported_language_is_rejected() -> anyhow::Result<()> {
-        let args = parse(&["blockwatch", "-E", "cxx=cobol"])?;
-        let supported = OsString::from("cpp");
-        let error = args
-            .settings(&HashSet::from([&supported]))
-            .expect_err("a mapping to an extension no parser supports must be rejected");
-        assert!(
-            error.to_string().contains("cxx=cobol"),
-            "the error must quote the offending mapping: {error}"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn enable_and_disable_together_are_rejected() -> anyhow::Result<()> {
-        let args = parse(&["blockwatch", "-e", "keep-sorted", "-d", "keep-unique"])?;
-        let error = args
-            .settings(&HashSet::new())
-            .expect_err("--enable and --disable must not be accepted together");
-        assert!(
-            error.to_string().contains("--enable and --disable"),
-            "unexpected error: {error}"
-        );
         Ok(())
     }
 

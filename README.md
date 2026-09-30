@@ -146,10 +146,19 @@ git diff --cached --patch | blockwatch --diff --only-changed
 blockwatch list
 ```
 
-Everything is flags and comments. There is no config file, deliberately: a central config is one more thing that drifts
-away from the code it describes, which is the problem this tool exists to solve.
+Rules live in comments, next to the code they describe. Settings that stay the same for a project, such as ignored
+paths, extension mappings and the validators to run, can live in `blockwatch.toml` at the repository root:
 
-See [docs/cli.md](docs/cli.md) for the run modes in full, CLI flags, path exclusions, and custom extension mappings.
+```toml
+ignore = ['**/generated/**']
+disable = ['check-ai']
+
+[extensions]
+cxx = 'cpp'
+```
+
+See [docs/cli.md](docs/cli.md) for the run modes in full, CLI flags, the [config file](docs/cli.md#config-file), path
+exclusions, and custom extension mappings.
 
 ## CI Integration
 
@@ -224,7 +233,8 @@ see [docs/ci.md](docs/ci.md).
 [//]: # (</block>)
 
 Only the extensions listed above are recognized. Anything else is ignored, including spellings a grammar would otherwise
-handle, `.hpp`, `.hxx` and `.cxx` among them. Map those to a supported syntax with `-E`:
+handle, `.hpp`, `.hxx` and `.cxx` among them. Map those to a supported syntax with `-E`, or with the `extensions` table
+of the config file:
 
 ```shell
 blockwatch -E cxx=cpp -E hpp=cpp
