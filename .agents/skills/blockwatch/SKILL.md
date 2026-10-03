@@ -1,6 +1,6 @@
 ---
 name: blockwatch
-description: Use when writing or modifying code in a project that uses BlockWatch — proactively link co-dependent code with `<block affects=...>`/`<block name=...>` so it catches drift when one side changes without the other (an enum and its docs, a constant and its config), or assert two places hold the same value with `<block same-as=...>`. Also for lists that must stay sorted/unique or values with a strict format/size, and when editing files that contain `<block ...>` tags (affects, same-as, keep-sorted, keep-unique, line-pattern, line-count, check-ai, check-lua).
+description: Use when writing or modifying code in a project that uses BlockWatch — proactively link co-dependent code with `<block affects=...>`/`<block name=...>` so it catches drift when one side changes without the other (an enum and its docs, a constant and its config), or assert two places hold the same value with `<block same-as=...>`. Also for lists that must stay sorted/unique or values with a strict format/size, for rules on one key of a JSON, TOML or YAML file (such as `version` in `package.json`) through `[[block]]` entries in `blockwatch.toml`, and when editing files that contain `<block ...>` tags (affects, same-as, keep-sorted, keep-unique, line-pattern, line-count, check-ai, check-lua) or that `blockwatch.toml` targets.
 ---
 
 # BlockWatch
@@ -8,7 +8,8 @@ description: Use when writing or modifying code in a project that uses BlockWatc
 BlockWatch is a language-agnostic linter that enforces rules declared inside HTML-like `<block ...>` tags placed in
 source-file comments. It works across Rust, Python, JS/TS, Go, Java, Markdown, YAML, TOML, HTML, and more. By default it
 checks the whole tree; given a `git diff` on stdin plus `--diff --only-changed` it checks only the blocks that diff
-changed.
+changed. Project-wide settings, and blocks declared around a key instead of with tags, live in `blockwatch.toml` (see
+[The config file](#the-config-file-blockwatchtoml)).
 
 Use this skill in three situations:
 
@@ -40,10 +41,13 @@ verifying*).
 
 1. Survey the repo for the patterns in the catalog below. Read the code *and* the docs/config; use `rg`/grep to find
    lists, enums, match arms, tables, and constants.
-2. For each candidate, add the minimal block tag using the comment syntax of that file's language.
+2. For each candidate, add the minimal block tag using the comment syntax of that file's language. For one key of a
+   JSON, TOML or YAML file, a `[[block]]` entry in `blockwatch.toml` is often simpler. A JSON file needs one, since it
+   can't hold a tag.
 3. Run `blockwatch list` to confirm every new tag parses and is recognized, then run `blockwatch` to confirm all blocks
    pass on the current (clean) tree. Fix any tag you placed on already-inconsistent content.
-4. Commit, then wire BlockWatch into hooks/CI (see below) so the rules are enforced from now on.
+4. Put the flags every run needs, such as `--ignore` for generated code, in `blockwatch.toml`.
+5. Commit, then wire BlockWatch into hooks/CI (see below) so the rules are enforced from now on.
 
 ### Where blocks add value (catalog)
 
@@ -76,6 +80,8 @@ catches drift that a changed-blocks-only check would miss.
 - Tags live **inside comments**, using the host language's comment syntax. Open with `<block ...>`, close with
   `</block>`.
 - The block's *content* is the lines between the two tags.
+- A block around one key of a JSON, TOML or YAML file can be a `[[block]]` entry in `blockwatch.toml` instead of
+  tags (see [The config file](#the-config-file-blockwatchtoml)). A JSON file can't hold a tag, so it needs one.
 - Under `--diff --only-changed` a block is only validated when its content (or its start tag) is touched by the diff, so
   annotating is safe to do incrementally — adding a tag never retroactively fails unrelated code. A bare
   `blockwatch` run checks every block in the tree, so use it to find the tags you placed on already-inconsistent
@@ -135,7 +141,7 @@ pub enum Language { Rust, Python }
 
 A symbol is one value inside a file, such as the `version` key in `package.json`. `affects` and `same-as` point at one
 with `file#/path`, or with `#/path` for the block's own file. Use a symbol when only one key in a file matters, or when
-the file cannot hold a comment.
+the file cannot hold a comment. To put rules on the value itself, wrap it in a `[[block]]` entry in `blockwatch.toml`.
 
 <!-- <block name="extensions-with-symbols" same-as="src/language_parsers/mod.rs:extensions-with-symbols"
      same-as-pattern="`\.(?P<value>[a-z]+)`"> -->
@@ -189,6 +195,76 @@ other file fails the run.
 
 <!-- </block> -->
 
+## The config file (`blockwatch.toml`)
+
+Every run reads `blockwatch.toml` from the repository root, from any directory: the hook, CI and your own runs.
+`--config FILE` reads another file instead.
+
+### Project-wide settings
+
+Put the flags that every run repeats in the config:
+
+```toml
+ignore = ['**/generated/**', 'vendor/**'] # like --ignore
+disable = ['check-ai']                    # like --disable; `enable` is like --enable, never set both
+
+[extensions]
+cxx = 'cpp'                               # like -E cxx=cpp
+```
+
+- Write globs and regexes in single quotes. TOML then takes them as written, backslashes included.
+- `ignore` and `extensions` add to the flags. `--enable` or `--disable` on the command line replaces the config's
+  selection.
+- An unknown key or a bad value fails the run, so a typo can't turn a setting off.
+- The settings of `check-ai` and `check-lua` stay in environment variables. The config can't hold them.
+
+### Blocks around a key
+
+A `[[block]]` entry declares a block around one [symbol](#symbols), with the attributes a tag would have. Prefer it to
+tags when:
+
+- The file can't hold a comment, such as `package.json`.
+- The rule is about one value, such as a version. The block's content is then just the value, so a rule needs no
+  pattern to skip the key and the quotes.
+- The file should stay free of tags, or the project keeps its rules in one place.
+
+```toml
+# The oldest Rust that CI tests must be the one Cargo.toml promises.
+[[block]]
+target = 'Cargo.toml#/package/rust-version'
+same-as = '.github/workflows/ci.yml#/jobs/test/strategy/matrix/rust/0'
+
+# Bumping React must update the install guide.
+[[block]]
+target = 'package.json#/dependencies/react'
+name = 'react-version'
+affects = 'docs/install.md:react-version'
+
+[[block]]
+target = 'package.json#/version'
+line-pattern = '^\d+\.\d+\.\d+$'
+
+[[block]]
+target = 'package.json#/keywords'
+keep-sorted = true
+keep-sorted-pattern = '^"(?P<value>[^"]+)",?$'
+```
+
+- `target` is required, and it must be `file#/path`. A whole file or a named block is not a valid target.
+- `true` stands for an attribute without a value: `keep-unique = true`. An integer counts as its digits:
+  `check-lua-timeout = 30`.
+- A symbol has at most one entry. Put all its rules in one.
+- **The content is what a reference to the symbol reads.** A string is its value without quotes, so the
+  `line-pattern` above checks `1.2.3`. A list, an object or a table is its text, key line included. That is why the
+  `keep-sorted-pattern` above takes the value out of each quoted item and skips the `"keywords": [` and `]` lines.
+- A `name` works like a tag's. A tag in another file can point at it: `same-as="package.json:react-version"`.
+- Violations are reported in the wrapped file, at the symbol. The message shows the entry's line in `blockwatch.toml`.
+- The block counts as changed when the diff touches the symbol or the entry. So `--only-changed` checks a block whose
+  entry you edited, even if the wrapped file did not change.
+- A target that does not resolve stops the run: a missing file or key, or a file that does not parse.
+
+To only point *at* a key from a tag, a `file#/path` target is enough. An entry is for putting rules *on* the key.
+
 ## Maintaining blocks (editing annotated files)
 
 When you change code in a file that contains blocks, you **MUST**:
@@ -201,7 +277,10 @@ When you change code in a file that contains blocks, you **MUST**:
 3. **Honor `affects`:** if you change a block carrying `affects="file:name"`, you must also update the referenced
    `<block name="name">` in `file` — they are meant to move together. A target without `:` or `#` is a whole file, so
    that file has to change too. A `file#/path` target is one [symbol](#symbols), so its key or its value has to change.
-4. **Verify** before claiming the change is done (see below).
+4. **Check `blockwatch.toml` before editing a JSON, TOML or YAML file.** A `[[block]]` entry can put rules on a key
+   there, though the file shows no tag. If you rename or move that key, update the entry's `target` in the same
+   change, or the run stops.
+5. **Verify** before claiming the change is done (see below).
 
 ## Running and verifying
 
@@ -214,8 +293,11 @@ git diff --cached --patch | blockwatch --diff --only-changed # staged changes on
 git diff --patch | blockwatch --diff                         # whole tree, with `affects` enforced
 blockwatch list                                              # JSON dump of every block found (audit / debug)
 blockwatch "src/**/*.rs" "**/*.md"                           # restrict to globs (quote them)
-blockwatch --ignore "**/generated/**"                        # exclude paths
+blockwatch --ignore "**/generated/**"                        # exclude paths for this run
 ```
+
+Every run also applies the settings in `blockwatch.toml`. Put an exclusion the project always needs in its `ignore` key,
+not in each command.
 
 Stdin is read **only** with `--diff`; piping a diff without it is silently ignored and the whole tree is scanned
 instead. `--only-changed` narrows the run to the blocks the diff touched and requires `--diff`.

@@ -20,8 +20,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   the file's selection. An unknown key or a bad value fails the run, and the error quotes it. `--config FILE` reads
   another file instead. See [Config File](docs/cli.md#config-file).
 - Blocks in the config file. A `[[block]]` entry in `blockwatch.toml` declares a block around a symbol, such as
-  `target = 'package.json#/version'`, with the attributes a tag would have. So a file without comments, such as
-  `package.json`, can have rules. A symbol can have one such block. Its content is what a reference to the symbol
+  `target = 'package.json#/version'`, with the attributes a tag would have. So `package.json`, which can't hold a
+  comment, can have rules, and a key in a TOML or YAML file can have them without tags. A symbol can have one such
+  block. Its content is what a reference to the symbol
   reads: a scalar's value, or the text of an object, a list or a table. Its violations are reported in that file. A
   named one is found by references such as `affects="package.json:react-version"`, as a tag is. It counts as changed
   when the diff touches the symbol or the entry, so `--diff --only-changed` checks a block whose entry you edited.

@@ -9,7 +9,7 @@
 Some parts of your codebase must change together: a function and its docs, a value across config files, etc. Blockwatch
 makes these relationships explicit and fails a CI run or a pre-commit hook if they drift.
 
-Supports 34 languages. No config files are needed.
+Supports 34 languages.
 
 [//]: # (</block>)
 
@@ -157,8 +157,8 @@ disable = ['check-ai']
 cxx = 'cpp'
 ```
 
-A file without comments, such as `package.json`, can get its rules there too, as
-[blocks in the config file](docs/cli.md#blocks-in-the-config-file).
+The config file can also declare [blocks around a key](docs/cli.md#blocks-in-the-config-file) of a JSON, TOML or YAML
+file, instead of tags. That is how a file without comments, such as `package.json`, gets rules.
 
 See [docs/cli.md](docs/cli.md) for the run modes in full, CLI flags, the [config file](docs/cli.md#config-file), path
 exclusions, and custom extension mappings.

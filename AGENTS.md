@@ -169,8 +169,9 @@ The main modules:
 - `src/config.rs` — reads the config file into a `RawSettings` and the virtual blocks, using `toml_edit`'s serde
   support. Only the errors that `toml_edit` raises itself, such as an unknown key, show a line and column. An error
   about a `[[block]]` entry shows the line of its header, which `serde_spanned` gives.
-- `src/virtual_blocks.rs` — `VirtualBlock`, a block that the config file declares around a symbol, for a file without
-  comments. It is a block of the file it wraps. Its content is what a reference to the symbol reads: a scalar's decoded
+- `src/virtual_blocks.rs` — `VirtualBlock`, a block that the config file declares around a symbol, instead of tags in a
+  comment. A file without comments, such as `package.json`, can only get blocks this way. It is a block of the file it
+  wraps. Its content is what a reference to the symbol reads: a scalar's decoded
   value (`ContentText::Decoded`), or else the definition's text. Its `Block::declaration` is the config entry, so every
   message about it shows that line, through `Block::declared_at`. `ValidationContext` keeps every virtual block's
   declaration. So when `affects` or `same-as` reads a file the run did not keep, `ValidationContext::parse_file` adds

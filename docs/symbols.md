@@ -16,8 +16,8 @@ Three validators use symbols:
 - [`affects`](validators/affects.md#symbols) counts a symbol as changed only when the diff touches it.
 - [`check-lua`](validators/check-lua.md) gives a script the value of each symbol the block's `affects` points at.
 
-A [virtual block](cli.md#blocks-in-the-config-file) wraps a symbol too. It is a block that the config file declares,
-for a file that has no comments to hold a tag.
+A [virtual block](cli.md#blocks-in-the-config-file) wraps a symbol too. It is a block that the config file declares
+around a symbol, instead of tags in a comment.
 
 ## Files with symbols
 

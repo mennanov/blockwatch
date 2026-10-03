@@ -241,8 +241,14 @@ Everything else stays out of the file:
 
 ### Blocks in the Config File
 
-A file without comments, such as `package.json`, has no place for a tag. Declare its blocks in the config file instead.
-Each `[[block]]` entry wraps one [symbol](symbols.md). Such a block is a **virtual block**:
+A `[[block]]` entry in the config file declares a block around one [symbol](symbols.md), instead of tags in a comment.
+Such a block is a **virtual block**. Use one when:
+
+- The file can't hold a comment, such as `package.json`.
+- The rule is about one value, such as a version. The block then sees just the value, without the key and the quotes.
+- The file should stay free of tags, or the project keeps its rules in one place.
+
+For example:
 
 ```toml
 # When the React version changes, the install guide must change too.
