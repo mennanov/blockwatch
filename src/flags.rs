@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 /// How much a run reports about what it checked.
 #[derive(clap::ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Verbosity {
+pub(crate) enum Verbosity {
     /// Print no report.
     #[default]
     None,
@@ -19,7 +19,7 @@ pub enum Verbosity {
 
 /// Violations output format.
 #[derive(clap::ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum OutputFormat {
+pub(crate) enum OutputFormat {
     /// One JSON object of diagnostics, grouped by file.
     #[default]
     Json,
@@ -104,7 +104,7 @@ You can put project-wide settings (--ignore, -E, --enable, --disable) in blockwa
     # List only the blocks the diff changed
     git diff --patch | blockwatch list --diff --only-changed",
 )]
-pub struct Args {
+pub(crate) struct Args {
     /* <block name="cli-flags" affects="docs/cli.md:cli-docs"
     same-as-pattern='long = "(?P<value>[a-z-]+)"'> */
     /// Read a unified diff from stdin to mark which blocks it changed.
@@ -112,11 +112,11 @@ pub struct Args {
     /// Without this flag stdin is never read. Rules that only fire on changed content, such as
     /// `affects`, need it.
     #[arg(long = "diff", global = true)]
-    pub diff: bool,
+    pub(crate) diff: bool,
 
     /// Restrict the run to the blocks the diff changed, instead of every block in the repository.
     #[arg(long = "only-changed", requires = "diff", global = true)]
-    pub only_changed: bool,
+    pub(crate) only_changed: bool,
 
     /// Additional file extension mappings, e.g. -E c++=cpp -E cxx=cpp
     #[arg(
@@ -165,7 +165,7 @@ pub struct Args {
     /// A relative path starts from the current directory, not from the repository root.
     /// blockwatch.toml is optional, but FILE must exist.
     #[arg(long = "config", value_name = "FILE", global = true)]
-    pub config: Option<PathBuf>,
+    pub(crate) config: Option<PathBuf>,
 
     /// How much to report about what the run checked. Printed to stdout.
     #[arg(
@@ -175,7 +175,7 @@ pub struct Args {
         default_value_t = Verbosity::None,
         global = true,
     )]
-    pub verbosity: Verbosity,
+    pub(crate) verbosity: Verbosity,
 
     /// The format the violations are written in. Printed to stderr.
     ///
@@ -219,13 +219,13 @@ pub struct Args {
 
     /// The subcommand to run, if any. `None` means the default action: validate.
     #[command(subcommand)]
-    pub command: Option<SubCommand>,
+    pub(crate) command: Option<SubCommand>,
     // </block>
 }
 
 /// A mode that inspects blocks instead of validating them.
 #[derive(clap::Subcommand, Debug, Clone)]
-pub enum SubCommand {
+pub(crate) enum SubCommand {
     /// List all blocks found in the scanned files.
     List {
         #[arg(value_name = "GLOBS")]
@@ -235,7 +235,7 @@ pub enum SubCommand {
 
 impl Args {
     /// Returns the settings given on the command line. They are not validated yet.
-    pub fn raw_settings(&self) -> RawSettings {
+    pub(crate) fn raw_settings(&self) -> RawSettings {
         RawSettings {
             ignore: self.ignore.clone(),
             extensions: self.extensions.iter().cloned().collect(),
@@ -253,7 +253,7 @@ impl Args {
     }
 
     /// The format to write the violations in.
-    pub fn output_format(&self) -> OutputFormat {
+    pub(crate) fn output_format(&self) -> OutputFormat {
         self.format.unwrap_or_default()
     }
 
@@ -262,7 +262,7 @@ impl Args {
     /// Combines addresses passed directly via `--suppress` and those read from files
     /// passed via `--suppress-from`. Errors when such a file cannot be read or holds an address
     /// that does not parse.
-    pub fn suppressed_addresses(&self) -> anyhow::Result<Vec<ViolationAddress>> {
+    pub(crate) fn suppressed_addresses(&self) -> anyhow::Result<Vec<ViolationAddress>> {
         let mut addresses = self.suppressed_addresses.clone();
         for path in &self.suppress_from {
             addresses.extend(parse_suppressions_from_file(path)?);
@@ -271,7 +271,7 @@ impl Args {
     }
 
     /// Returns a compiled GlobSet from the provided glob patterns.
-    pub fn globs(&self) -> anyhow::Result<GlobSet> {
+    pub(crate) fn globs(&self) -> anyhow::Result<GlobSet> {
         let mut builder = GlobSetBuilder::new();
         let mut globs = self.globs.clone();
         if let Some(SubCommand::List { globs: list_globs }) = &self.command {
@@ -287,7 +287,7 @@ impl Args {
     }
 
     /// Validates the flags that are not settings, such as `--format` and `--suppress`.
-    pub fn validate(&self) -> anyhow::Result<()> {
+    pub(crate) fn validate(&self) -> anyhow::Result<()> {
         // `list` already prints JSON to stdout. Two JSON documents on one stream cannot be parsed.
         if self.command.is_some() && self.verbosity != Verbosity::None {
             anyhow::bail!(

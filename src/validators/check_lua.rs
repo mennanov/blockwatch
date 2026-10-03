@@ -65,13 +65,13 @@ fn lua_from_env() -> Lua {
 /// Needs a filesystem to read the script, which is resolved inside the repository like any other
 /// referenced file. How much of the Lua standard library the script may use is set by
 /// `BLOCKWATCH_LUA_MODE`.
-pub(crate) struct CheckLuaValidator<Fs: FileSystem> {
+struct CheckLuaValidator<Fs: FileSystem> {
     file_system: Arc<Fs>,
 }
 
 impl<Fs: FileSystem + 'static> CheckLuaValidator<Fs> {
     /// Creates the validator over the filesystem it will read scripts from.
-    pub(super) fn new(file_system: Arc<Fs>) -> Self {
+    fn new(file_system: Arc<Fs>) -> Self {
         Self { file_system }
     }
 }
@@ -545,11 +545,11 @@ fn resolve_affected_targets<Fs: FileSystem>(
 }
 
 /// Selects [`CheckLuaValidator`] for blocks carrying a `check-lua` attribute.
-pub(crate) struct CheckLuaValidatorDetector;
+pub(super) struct CheckLuaValidatorDetector;
 
 impl CheckLuaValidatorDetector {
     /// Creates the detector. Registered in [`crate::validators::detector_factories`].
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self
     }
 }

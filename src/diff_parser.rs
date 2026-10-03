@@ -11,11 +11,11 @@ use unidiff::{Line, PatchSet, PatchedFile};
 
 /// Represents a line change from a diff.
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub struct LineChange {
+pub(crate) struct LineChange {
     /// 1-based line number with a change, in the diff's target file.
-    pub line: usize,
+    pub(crate) line: usize,
     /// What the diff did to that line.
-    pub kind: LineChangeKind,
+    pub(crate) kind: LineChangeKind,
 }
 
 /// Checks whether the 0-based character ranges of a modified line intersect a 1-based half-open
@@ -117,7 +117,7 @@ pub(crate) fn deletion_point(line: usize) -> Position {
 
 /// What a diff did to one line of its target file.
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub enum LineChangeKind {
+pub(crate) enum LineChangeKind {
     /// The line replaced one the diff removed. Holds the 0-based character ranges whose text
     /// differs from the removed line; everything outside them is unchanged, the line break that
     /// ends the line included.
@@ -131,7 +131,7 @@ pub enum LineChangeKind {
 }
 
 /// Rejects input that cannot be a unified diff, with a message naming the likely cause.
-pub fn validate_diff_input(diff: &str) -> anyhow::Result<()> {
+pub(crate) fn validate_diff_input(diff: &str) -> anyhow::Result<()> {
     if diff.trim().is_empty() {
         anyhow::bail!("diff in stdin is empty.");
     }
@@ -151,7 +151,7 @@ pub fn validate_diff_input(diff: &str) -> anyhow::Result<()> {
 ///
 /// Parses a patch/diff string and extracts all line changes grouped by file path.
 /// Deleted files are ignored and not included in the result.
-pub fn line_changes_from_diff(
+pub(crate) fn line_changes_from_diff(
     patch_diff: &str,
     file_system: &impl FileSystem,
 ) -> anyhow::Result<HashMap<RepoPath, Vec<LineChange>>> {

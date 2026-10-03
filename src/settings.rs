@@ -9,15 +9,15 @@ use std::ffi::OsString;
 /// Can be constructed from a config file or the command line.
 /// The values are not guaranteed to be valid. The [`RawSettings::validate`] method validates them.
 #[derive(Debug, Default)]
-pub struct RawSettings {
+pub(crate) struct RawSettings {
     /// Glob patterns of files to leave out.
-    pub ignore: Vec<String>,
+    pub(crate) ignore: Vec<String>,
     /// Extra file extension mappings.
-    pub extensions: HashMap<String, String>,
+    pub(crate) extensions: HashMap<String, String>,
     /// The only validators to run.
-    pub enable: Vec<String>,
+    pub(crate) enable: Vec<String>,
     /// Validators to leave out.
-    pub disable: Vec<String>,
+    pub(crate) disable: Vec<String>,
 }
 
 impl RawSettings {
@@ -49,7 +49,7 @@ impl RawSettings {
 /// The fields are private, so the only way to get a `Settings` is [`Settings::resolve`], which
 /// checks every value.
 #[derive(Debug)]
-pub struct Settings {
+pub(crate) struct Settings {
     ignored_globs: GlobSet,
     extensions: HashMap<OsString, OsString>,
     disabled_validators: HashSet<&'static str>,
@@ -68,7 +68,7 @@ impl Settings {
     ///
     /// `supported_extensions` are the extensions that have a language parser. Returns an error if
     /// either source has an invalid value. The error says which source it came from.
-    pub fn resolve(
+    pub(crate) fn resolve(
         flags: RawSettings,
         config_file: RawSettings,
         supported_extensions: &HashSet<&OsString>,
@@ -125,24 +125,24 @@ impl Settings {
     }
 
     /// Files to skip, even if a glob selects them.
-    pub fn ignored_globs(&self) -> &GlobSet {
+    pub(crate) fn ignored_globs(&self) -> &GlobSet {
         &self.ignored_globs
     }
 
     /// Maps an extension to a supported one. For example, `cxx` to `cpp` makes `.cxx` files parse
     /// as C++.
-    pub fn extensions(&self) -> &HashMap<OsString, OsString> {
+    pub(crate) fn extensions(&self) -> &HashMap<OsString, OsString> {
         &self.extensions
     }
 
     /// Validators to skip. Empty if [`Settings::enabled_validators`] is not.
-    pub fn disabled_validators(&self) -> &HashSet<&'static str> {
+    pub(crate) fn disabled_validators(&self) -> &HashSet<&'static str> {
         &self.disabled_validators
     }
 
     /// If not empty, only these validators run. If empty, every validator runs except the
     /// disabled ones.
-    pub fn enabled_validators(&self) -> &HashSet<&'static str> {
+    pub(crate) fn enabled_validators(&self) -> &HashSet<&'static str> {
         &self.enabled_validators
     }
 }

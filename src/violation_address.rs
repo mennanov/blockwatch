@@ -13,7 +13,7 @@ const TEXT_HASH_HEX_LEN: usize = 8;
 /// Only the leading `FILE` segment is required. Every segment left off the end widens what the
 /// address covers. See [`Self::matches`].
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ViolationAddress {
+pub(crate) struct ViolationAddress {
     file: RepoPath,
     block_name: Option<String>,
     validator: Option<String>,
@@ -37,7 +37,7 @@ impl ViolationAddress {
     }
 
     /// Parses the [`ViolationAddress`] from string.
-    pub fn parse(address: &str) -> anyhow::Result<Self> {
+    pub(crate) fn parse(address: &str) -> anyhow::Result<Self> {
         let segments: Vec<&str> = address.split(':').collect();
         if segments.len() > 4 {
             bail!("expected FILE[:BLOCK_NAME[:VALIDATOR[:HASH]]], got \"{address}\"");
@@ -71,7 +71,7 @@ impl ViolationAddress {
     /// A segment this address leaves off covers whatever the violation has in its place, so
     /// `FILE` covers every violation in the file, `FILE:BLOCK_NAME` every violation of that block,
     /// and so on down to the single violation a four-segment address mentions.
-    pub fn matches(&self, violation_address: &Self) -> bool {
+    pub(crate) fn matches(&self, violation_address: &Self) -> bool {
         /// An absent segment matches any value; a present one has to be equal.
         fn covers(suppressed: &Option<String>, reported: &Option<String>) -> bool {
             suppressed.is_none() || suppressed == reported
@@ -85,7 +85,7 @@ impl ViolationAddress {
 
     /// Whether this address covers every violation in `file`, including the ones on unnamed blocks
     /// that have no address of their own.
-    pub fn covers_whole_file(&self, file: &RepoPath) -> bool {
+    pub(crate) fn covers_whole_file(&self, file: &RepoPath) -> bool {
         self.file == *file && self.block_name.is_none()
     }
 }

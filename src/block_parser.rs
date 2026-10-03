@@ -31,7 +31,7 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
 }
 
 /// Assembles [`Block`]s out of a comment stream.
-pub(crate) struct BlocksIterator<I: Iterator<Item = Comment>> {
+struct BlocksIterator<I: Iterator<Item = Comment>> {
     partial_blocks: PartialBlocksIterator<I>,
     /// Start tags still waiting for their end tag, outermost first.
     open_blocks: Vec<BlockStart>,
@@ -45,7 +45,7 @@ pub(crate) struct BlocksIterator<I: Iterator<Item = Comment>> {
 
 impl<I: Iterator<Item = Comment>> BlocksIterator<I> {
     /// Starts the block stream over the given comments, which must be in source order.
-    pub(crate) fn new(comments: I) -> Self {
+    fn new(comments: I) -> Self {
         Self {
             partial_blocks: PartialBlocksIterator::new(comments),
             open_blocks: Vec::new(),
@@ -139,7 +139,7 @@ impl<I: Iterator<Item = Comment>> Iterator for BlocksIterator<I> {
 /// One comment may hold several tags (or a whole block, opened and closed in the same comment), so
 /// the iterator keeps a cursor into the current comment's text and only advances to the next
 /// comment once that text is exhausted.
-pub(crate) struct PartialBlocksIterator<I: Iterator<Item = Comment>> {
+struct PartialBlocksIterator<I: Iterator<Item = Comment>> {
     comments: I,
     comment: Option<Rc<Comment>>,
     tags_parser_cursor: usize,
@@ -147,7 +147,7 @@ pub(crate) struct PartialBlocksIterator<I: Iterator<Item = Comment>> {
 
 impl<I: Iterator<Item = Comment>> PartialBlocksIterator<I> {
     /// Starts the tag stream over the given comments, which must be in source order.
-    pub(crate) fn new(comments: I) -> Self {
+    fn new(comments: I) -> Self {
         Self {
             comments,
             comment: None,
@@ -213,13 +213,13 @@ impl<I: Iterator<Item = Comment>> Iterator for PartialBlocksIterator<I> {
 
 /// One half of a block. A [`Block`] is only formed once a `Start` has been matched with an `End`,
 /// which is what lets blocks nest.
-pub(crate) enum PartialBlock {
+enum PartialBlock {
     Start(BlockStart),
     End(BlockEnd),
 }
 
 /// An opening block tag: its attributes, and where it sits in the source.
-pub(crate) struct BlockStart {
+struct BlockStart {
     /// The comment the tag was found in. Shared with [`BlockEnd`] via `Rc` so that a block opened
     /// and closed inside a single comment can be recognized by pointer identity.
     comment: Rc<Comment>,
@@ -267,7 +267,7 @@ impl BlockStart {
 }
 
 /// Represents the end of a block, capturing its content range and position range.
-pub(crate) struct BlockEnd {
+struct BlockEnd {
     /// The comment holding the closing tag. The block's content ends where this comment begins.
     comment: Rc<Comment>,
     /// Byte offset of the tag within `comment`, used to report unmatched end tags.
@@ -286,7 +286,7 @@ impl BlockEnd {
     ///
     /// The content is everything between the two comments, so a block opened and closed within one
     /// comment has no content at all.
-    pub(crate) fn into_block(self, block_start: BlockStart) -> Block {
+    fn into_block(self, block_start: BlockStart) -> Block {
         let content_range = if !Rc::ptr_eq(&self.comment, &block_start.comment) {
             block_start.comment.source_range.end..self.comment.source_range.start
         } else {

@@ -14,7 +14,7 @@ const VCS_METADATA_DIRECTORY_NAMES: [&str; 4] = [".git", ".hg", ".jj", ".svn"];
 /// Every read the program performs, behind a trait.
 ///
 /// `Send + Sync` so an `Arc<Fs>` can be shared into validator threads (std::thread and Tokio).
-pub trait FileSystem: Send + Sync {
+pub(crate) trait FileSystem: Send + Sync {
     /// Reads the entire contents of a file into a string.
     fn read_to_string(&self, path: &Path) -> anyhow::Result<String>;
 
@@ -30,7 +30,7 @@ pub trait FileSystem: Send + Sync {
 }
 
 /// Checks whether a path should be allowed or ignored when parsing blocks from files.
-pub trait PathChecker {
+pub(crate) trait PathChecker {
     /// Whether the given `path` should be explicitly allowed.
     fn should_allow(&self, path: &Path) -> bool;
 
@@ -43,7 +43,7 @@ pub trait PathChecker {
 /// Block attributes name other files (`affects="docs/cli.md:intro"`, `check-lua="scripts/x.lua"`),
 /// and those names come from the files being linted. Routing every read through this type means a
 /// crafted attribute cannot make the linter read outside the repository.
-pub struct FileSystemImpl {
+pub(crate) struct FileSystemImpl {
     /// The repository root, canonicalized so that containment checks compare like with like.
     root_path: PathBuf,
 }
@@ -52,7 +52,7 @@ impl FileSystemImpl {
     /// Creates a reader confined to `root_path`, which must name an existing directory.
     ///
     /// The root is canonicalized here so every later resolution can compare against it directly.
-    pub fn new(root_path: &Path) -> anyhow::Result<Self> {
+    pub(crate) fn new(root_path: &Path) -> anyhow::Result<Self> {
         let root_path = std::fs::canonicalize(root_path).with_context(|| {
             format!(
                 "failed to canonicalize repository root: {}",
@@ -139,7 +139,7 @@ impl FileSystem for FileSystemImpl {
 }
 
 /// Checks whether a path should be allowed or ignored.
-pub struct PathCheckerImpl {
+pub(crate) struct PathCheckerImpl {
     glob_set: GlobSet,
     ignored_glob_set: GlobSet,
 }
@@ -149,7 +149,7 @@ impl PathCheckerImpl {
     ///
     /// An empty `glob_set` matches nothing, so callers treat "no filters given" as "every file" on
     /// their own rather than relying on this type.
-    pub fn new(glob_set: GlobSet, ignored_glob_set: GlobSet) -> Self {
+    pub(crate) fn new(glob_set: GlobSet, ignored_glob_set: GlobSet) -> Self {
         Self {
             glob_set,
             ignored_glob_set,
@@ -359,7 +359,7 @@ mod file_system_impl_tests {
 /// In-memory stand-ins for [`FileSystem`] and [`PathChecker`], so unit tests can describe a source
 /// tree as a map of strings instead of creating temporary directories.
 #[cfg(test)]
-pub mod test_utils {
+pub(crate) mod test_utils {
     use crate::fs::{FileSystem, PathChecker};
     use crate::repo_path::RepoPath;
     use globset::GlobSet;

@@ -40,21 +40,21 @@ use std::sync::Arc;
 
 /// Validates the given `Context` and returns a list of the violations grouped by filename.
 #[async_trait]
-pub trait ValidatorAsync: Send + Sync {
+pub(crate) trait ValidatorAsync: Send + Sync {
     async fn validate(&self, context: Arc<ValidationContext>) -> anyhow::Result<ValidationReport>;
 }
 
 /// The same contract as [`ValidatorAsync`] for validators that need no I/O beyond the filesystem,
 /// so the common case runs on plain threads and no Tokio runtime has to be started if no async
 /// validators are involved.
-pub trait ValidatorSync: Send + Sync {
+pub(crate) trait ValidatorSync: Send + Sync {
     fn validate(&self, context: Arc<ValidationContext>) -> anyhow::Result<ValidationReport>;
 }
 
 /// Detects a [`ValidatorType`] for the given `block` (if any).
 ///
 /// This is used to determine whether an async runtime (e.g. Tokio) is needed to run the validators.
-pub trait ValidatorDetector<Fs: FileSystem> {
+pub(crate) trait ValidatorDetector<Fs: FileSystem> {
     fn detect(
         &self,
         block_with_context: &BlockWithContext,
@@ -63,7 +63,7 @@ pub trait ValidatorDetector<Fs: FileSystem> {
 }
 
 /// Validator type (sync or async).
-pub enum ValidatorType {
+pub(crate) enum ValidatorType {
     Sync(Box<dyn ValidatorSync>),
     Async(Box<dyn ValidatorAsync>),
 }
@@ -73,7 +73,7 @@ pub enum ValidatorType {
 /// Fields are private because the public shape of a violation is [`SimpleDiagnostic`], the form
 /// that gets serialized for editors and CI.
 #[derive(Debug)]
-pub struct Violation {
+pub(crate) struct Violation {
     /// Where to underline in the file — normally the block's start tag, or the offending line.
     range: ViolationRange,
     /// The name of the validator that reported it, e.g. `"keep-sorted"`.
@@ -102,7 +102,7 @@ impl Violation {
     /// `violation_text` is the text the violation is about — the offending line, or the target a
     /// reference names — and tells one violation of a block from its siblings. Validators that
     /// report at most one violation per block pass `None`.
-    pub fn new(
+    pub(crate) fn new(
         range: ViolationRange,
         file: &RepoPath,
         block: &Block,
@@ -123,16 +123,16 @@ impl Violation {
     }
 
     /// A unique address of this violation or `None` if its block is unnamed.
-    pub fn address(&self) -> Option<&ViolationAddress> {
+    pub(crate) fn address(&self) -> Option<&ViolationAddress> {
         self.address.as_ref()
     }
 
     /// Marks this violation as suppressed.
-    pub fn suppress(&mut self) {
+    pub(crate) fn suppress(&mut self) {
         self.suppressed = true;
     }
 
-    pub fn as_simple_diagnostic(&self) -> SimpleDiagnostic<'_> {
+    pub(crate) fn as_simple_diagnostic(&self) -> SimpleDiagnostic<'_> {
         SimpleDiagnostic {
             range: &self.range,
             code: self.code.as_str(),
@@ -149,7 +149,7 @@ impl Violation {
 ///
 /// A block is identified by its [`BlockKey`], because a block may have no name.
 #[derive(Debug, Default)]
-pub struct ValidationReport {
+pub(crate) struct ValidationReport {
     /// Violations grouped by the file they were found in. A file without violations has no entry,
     /// so the map is empty when the validator found nothing.
     violations: HashMap<RepoPath, Vec<Violation>>,
@@ -159,18 +159,18 @@ pub struct ValidationReport {
 
 impl ValidationReport {
     /// Adds a checked block together with the violations found in it.
-    pub fn add_all(&mut self, file: &RepoPath, block: &Block, violations: Vec<Violation>) {
+    pub(crate) fn add_all(&mut self, file: &RepoPath, block: &Block, violations: Vec<Violation>) {
         self.add_checked_block(file, block);
         self.add_violations(file, violations);
     }
 
     /// Adds `block` in `file` to the blocks this validator checked.
-    pub fn add_checked_block(&mut self, file: &RepoPath, block: &Block) {
+    fn add_checked_block(&mut self, file: &RepoPath, block: &Block) {
         self.checked_blocks.push((file.clone(), block.key()));
     }
 
     /// Stores violations found in `file`.
-    pub fn add_violations(&mut self, file: &RepoPath, violations: Vec<Violation>) {
+    fn add_violations(&mut self, file: &RepoPath, violations: Vec<Violation>) {
         if !violations.is_empty() {
             self.violations
                 .entry(file.clone())
@@ -185,17 +185,21 @@ impl ValidationReport {
 /// Checked blocks are keyed by file, then by the [`BlockKey`] of the block, then by the names of
 /// the validators that checked it.
 #[derive(Debug, Default)]
-pub struct ValidationLog {
+pub(crate) struct ValidationLog {
     /// Violations grouped by the file they were found in.
-    pub violations: HashMap<RepoPath, Vec<Violation>>,
+    pub(crate) violations: HashMap<RepoPath, Vec<Violation>>,
     /// Every block that was examined, and by which validators. BTreeMap is used so the
     /// `--verbosity` report comes out in a stable order regardless of the validators order.
-    pub checked_blocks: BTreeMap<RepoPath, BTreeMap<BlockKey, BTreeSet<&'static str>>>,
+    pub(crate) checked_blocks: BTreeMap<RepoPath, BTreeMap<BlockKey, BTreeSet<&'static str>>>,
 }
 
 impl ValidationLog {
     /// Adds one validator's `report` for the corresponding `validator` name.
-    pub fn add_validation_report(&mut self, validator: &'static str, report: ValidationReport) {
+    pub(crate) fn add_validation_report(
+        &mut self,
+        validator: &'static str,
+        report: ValidationReport,
+    ) {
         for (file, key) in report.checked_blocks {
             self.checked_blocks
                 .entry(file)
@@ -210,7 +214,7 @@ impl ValidationLog {
     }
 
     /// Adds every checked block and violation from `other` to this log.
-    pub fn merge(&mut self, other: ValidationLog) {
+    fn merge(&mut self, other: ValidationLog) {
         for (file, blocks) in other.checked_blocks {
             let checked_in_file = self.checked_blocks.entry(file).or_default();
             for (key, validators) in blocks {
@@ -226,7 +230,7 @@ impl ValidationLog {
 /// The span an editor should highlight for a violation. 1-based and half-open: the start is
 /// inclusive, the end is exclusive.
 #[derive(Serialize, Debug, PartialEq)]
-pub struct ViolationRange {
+pub(crate) struct ViolationRange {
     start: Position,
     end: Position,
 }
@@ -238,12 +242,12 @@ impl ViolationRange {
     }
 
     /// The first position of the range.
-    pub fn start(&self) -> &Position {
+    pub(crate) fn start(&self) -> &Position {
         &self.start
     }
 
     /// The position just past the last one of the range: the end is exclusive.
-    pub fn end(&self) -> &Position {
+    pub(crate) fn end(&self) -> &Position {
         &self.end
     }
 }
@@ -253,7 +257,7 @@ impl ViolationRange {
 /// It mimics the [Diagnostic](https://github.com/microsoft/vscode-languageserver-node/blob/3412a17149850f445bf35b4ad71148cfe5f8411e/types/src/main.ts#L688)
 /// object but omits some redundant fields and keeps all line numbers 1-based instead of zero-based.
 #[derive(Serialize, Debug)]
-pub struct SimpleDiagnostic<'a> {
+pub(crate) struct SimpleDiagnostic<'a> {
     range: &'a ViolationRange,
     code: &'a str,
     message: &'a str,
@@ -273,37 +277,37 @@ fn is_false(value: &bool) -> bool {
 
 impl<'a> SimpleDiagnostic<'a> {
     /// Whether `--suppress` matched this violation, in which case it must not fail the run.
-    pub fn is_suppressed(&self) -> bool {
+    pub(crate) fn is_suppressed(&self) -> bool {
         self.suppressed
     }
 
     /// The severity, which the caller uses to decide the process exit code.
-    pub fn severity(&self) -> BlockSeverity {
+    pub(crate) fn severity(&self) -> BlockSeverity {
         self.severity
     }
 
     /// Where to underline in the file.
-    pub fn range(&self) -> &'a ViolationRange {
+    pub(crate) fn range(&self) -> &'a ViolationRange {
         self.range
     }
 
     /// The name of the validator that reported it, e.g. `"keep-sorted"`.
-    pub fn code(&self) -> &'a str {
+    pub(crate) fn code(&self) -> &'a str {
         self.code
     }
 
     /// The human-readable explanation.
-    pub fn message(&self) -> &'a str {
+    pub(crate) fn message(&self) -> &'a str {
         self.message
     }
 
     /// The address `--suppress` may point at, or `None` when the block has no `name`.
-    pub fn address(&self) -> Option<&'a ViolationAddress> {
+    pub(crate) fn address(&self) -> Option<&'a ViolationAddress> {
         self.address
     }
 
     /// Validator-specific details for tools.
-    pub fn data(&self) -> &'a Option<serde_json::Value> {
+    pub(crate) fn data(&self) -> &'a Option<serde_json::Value> {
         self.data
     }
 }
@@ -313,7 +317,7 @@ impl<'a> SimpleDiagnostic<'a> {
 /// Built once per run and handed out as an `Arc`, because validators run concurrently on separate
 /// threads and each needs the whole picture: a rule such as `affects` has to see blocks in files
 /// other than the one it started from.
-pub struct ValidationContext {
+pub(crate) struct ValidationContext {
     /// Blocks with their corresponding source file contents grouped by filename.
     blocks: HashMap<RepoPath, FileBlocks>,
     /// Language parsers per file type, used by validators to parse referenced source files.
@@ -329,7 +333,7 @@ pub struct ValidationContext {
 
 impl ValidationContext {
     /// Creates a new validation context with modified blocks grouped by filename.
-    pub fn new(
+    pub(crate) fn new(
         blocks: HashMap<RepoPath, FileBlocks>,
         parsers: LanguageParsers,
         line_changes: HashMap<RepoPath, Vec<LineChange>>,
@@ -357,7 +361,7 @@ impl ValidationContext {
     /// # Errors
     /// Returns an error if the file can't be read, a tag is malformed, a name is used twice, or a
     /// virtual block's target does not resolve.
-    pub(crate) fn parse_file(
+    fn parse_file(
         &self,
         file_system: &impl FileSystem,
         file_path: &RepoPath,
@@ -379,12 +383,12 @@ impl ValidationContext {
     }
 
     /// The line changes the diff reported for the `file_path`.
-    pub(crate) fn line_changes_for(&self, file_path: &RepoPath) -> Option<&[LineChange]> {
+    fn line_changes_for(&self, file_path: &RepoPath) -> Option<&[LineChange]> {
         self.line_changes.get(file_path).map(Vec::as_slice)
     }
 
     /// Converts the validation context to a serializable report that can be displayed as JSON.
-    pub fn to_serializable_report(&self) -> HashMap<RepoPath, Vec<serde_json::Value>> {
+    pub(crate) fn to_serializable_report(&self) -> HashMap<RepoPath, Vec<serde_json::Value>> {
         let mut report = HashMap::new();
         for (path, file_blocks) in &self.blocks {
             report.insert(path.clone(), file_blocks.to_serializable_report());
@@ -451,7 +455,7 @@ fn run_async_validators(
 }
 
 /// Run the given sync and async validators in separate threads in parallel.
-pub fn run(
+pub(crate) fn run(
     context: Arc<ValidationContext>,
     sync_validators: SyncValidators,
     async_validators: AsyncValidators,
@@ -489,7 +493,8 @@ type DetectorFactory<Fs> = fn() -> Box<dyn ValidatorDetector<Fs>>;
 /// This is a generic function rather than a `const` because each [`DetectorFactory`] is now
 /// parameterized by the filesystem type its detectors receive, so the registry has to be
 /// instantiated per `Fs` (the production `FileSystemImpl`, a `FakeFileSystem` in tests).
-pub fn detector_factories<Fs: FileSystem + 'static>() -> Vec<(&'static str, DetectorFactory<Fs>)> {
+pub(crate) fn detector_factories<Fs: FileSystem + 'static>()
+-> Vec<(&'static str, DetectorFactory<Fs>)> {
     vec![
         /* <block name="validator-registry" affects="README.md:available-validators"
         keep-unique='\("(?P<value>[^"]+)"'
@@ -514,7 +519,7 @@ pub fn detector_factories<Fs: FileSystem + 'static>() -> Vec<(&'static str, Dete
 }
 
 /// The names of every registered validator, in registry order.
-pub fn validator_names() -> Vec<&'static str> {
+pub(crate) fn validator_names() -> Vec<&'static str> {
     // The concrete filesystem is irrelevant here (only the names are read), so the `FileSystemImpl`
     // is used to avoid making every caller pass a type parameter.
     detector_factories::<crate::fs::FileSystemImpl>()
@@ -525,7 +530,7 @@ pub fn validator_names() -> Vec<&'static str> {
 
 /// Validators that only ever fire when a diff touches the corresponding blocks, each paired with
 /// the block attribute that selects it.
-pub const DIFF_GATED_VALIDATORS: &[(&str, &str)] = &[("affects", "affects")];
+const DIFF_GATED_VALIDATORS: &[(&str, &str)] = &[("affects", "affects")];
 
 /// Whether a validator is enabled/disabled.
 fn is_validator_active(
@@ -542,7 +547,7 @@ fn is_validator_active(
 
 /// Counts the blocks in `context` carrying a rule that cannot fire unless a diff is supplied; see
 /// [`DIFF_GATED_VALIDATORS`].
-pub fn diff_gated_block_count(
+pub(crate) fn diff_gated_block_count(
     context: &ValidationContext,
     disabled_validators: &HashSet<&str>,
     enabled_validators: &HashSet<&str>,
@@ -574,7 +579,7 @@ pub fn diff_gated_block_count(
 ///
 /// `enabled_validators` takes precedence over `disabled_validators`: when it is non-empty, only the
 /// validators it names are considered. Passing both is rejected earlier, when the flags are parsed.
-pub fn detect_validators<Fs: FileSystem + 'static>(
+pub(crate) fn detect_validators<Fs: FileSystem + 'static>(
     context: &ValidationContext,
     detectors: &[(&'static str, DetectorFactory<Fs>)],
     disabled_validators: &HashSet<&str>,
@@ -648,9 +653,7 @@ pub(crate) enum TargetReference {
 /// A reference whose block name or symbol path is empty (`file.rs:` or `file.json#`) is rejected
 /// rather than treated as a whole-file reference, avoiding silently turning a syntax typo
 /// into a much coarser rule.
-pub(in crate::validators) fn parse_target_references(
-    value: &str,
-) -> anyhow::Result<Vec<TargetReference>> {
+fn parse_target_references(value: &str) -> anyhow::Result<Vec<TargetReference>> {
     value.split(',').map(parse_single_reference).collect()
 }
 
@@ -732,7 +735,7 @@ fn parse_optional_repo_path(file_part: &str) -> anyhow::Result<Option<RepoPath>>
 /// and `file <path>` for a whole file.
 ///
 /// `name` is a block name, or a symbol path with its leading `#`. It is `None` for a whole file.
-pub(in crate::validators) fn target_display(file: &RepoPath, name: Option<&str>) -> String {
+fn target_display(file: &RepoPath, name: Option<&str>) -> String {
     match name {
         // A symbol path keeps its `#`, which already separates it from the file.
         Some(name) if name.starts_with('#') => format!("{}{name}", file.display()),
@@ -744,11 +747,11 @@ pub(in crate::validators) fn target_display(file: &RepoPath, name: Option<&str>)
 /// What a reference's target resolves to, or the reason it does not resolve, such as a missing
 /// block or a missing symbol. The reason is reported as the reference's violation. A failure that
 /// ends the run is the `Err` of an enclosing `anyhow::Result` instead.
-pub(in crate::validators) type TargetResult<T> = Result<T, String>;
+type TargetResult<T> = Result<T, String>;
 
 /// The text and the symbols of the files that references point into, each read and derived at most
 /// once.
-pub(in crate::validators) struct TargetFiles<'a, Fs: FileSystem> {
+struct TargetFiles<'a, Fs: FileSystem> {
     context: &'a ValidationContext,
     /// Reads the target files that are not in `context`.
     file_system: &'a Fs,
@@ -759,7 +762,7 @@ pub(in crate::validators) struct TargetFiles<'a, Fs: FileSystem> {
 }
 
 impl<'a, Fs: FileSystem> TargetFiles<'a, Fs> {
-    pub(in crate::validators) fn new(context: &'a ValidationContext, file_system: &'a Fs) -> Self {
+    fn new(context: &'a ValidationContext, file_system: &'a Fs) -> Self {
         Self {
             context,
             file_system,
@@ -773,7 +776,7 @@ impl<'a, Fs: FileSystem> TargetFiles<'a, Fs> {
     ///
     /// # Errors
     /// Returns an error if the file is not in the context and cannot be read.
-    pub(in crate::validators) fn content(&mut self, file: &RepoPath) -> anyhow::Result<&str> {
+    fn content(&mut self, file: &RepoPath) -> anyhow::Result<&str> {
         file_content(self.context, self.file_system, &mut self.contents, file)
     }
 
@@ -783,7 +786,7 @@ impl<'a, Fs: FileSystem> TargetFiles<'a, Fs> {
     /// # Errors
     /// Returns an error that shows the reference if `file` cannot be read, has no grammar, is in a
     /// language without symbols, or does not parse.
-    pub(in crate::validators) fn resolve_symbol(
+    fn resolve_symbol(
         &mut self,
         file: &RepoPath,
         path: &SymbolPath,
@@ -842,16 +845,14 @@ fn file_content<'c, Fs: FileSystem>(
 }
 
 /// Returns the captured named regexp group `value`, or the whole match if there is no named group.
-pub(in crate::validators) fn value_match<'h>(
-    captures: &regex::Captures<'h>,
-) -> Option<regex::Match<'h>> {
+fn value_match<'h>(captures: &regex::Captures<'h>) -> Option<regex::Match<'h>> {
     captures.name("value").or_else(|| captures.get(0))
 }
 
 /// Returns the non-empty trimmed content of `line` together with its 0-based character-column
 /// range within `line`, or `None` for a blank line. The range is measured in characters rather than
 /// bytes and is half-open: `[start, end)`.
-pub(in crate::validators) fn trimmed_line_value(line: &str) -> Option<(&str, Range<usize>)> {
+fn trimmed_line_value(line: &str) -> Option<(&str, Range<usize>)> {
     let trimmed_line = line.trim();
     if trimmed_line.is_empty() {
         None
@@ -872,10 +873,7 @@ pub(in crate::validators) fn trimmed_line_value(line: &str) -> Option<(&str, Ran
 ///
 /// A blank line, an unmatched line, and a line whose match is empty all return `None`: none of them
 /// carry a value.
-pub(in crate::validators) fn regex_value<'a>(
-    line: &'a str,
-    regex: &regex::Regex,
-) -> Option<(&'a str, Range<usize>)> {
+fn regex_value<'a>(line: &'a str, regex: &regex::Regex) -> Option<(&'a str, Range<usize>)> {
     let trimmed_line = line.trim();
     if trimmed_line.is_empty() {
         return None;
@@ -892,7 +890,7 @@ pub(in crate::validators) fn regex_value<'a>(
 }
 
 /// The content for the `*-pattern` attribute extracted from the block.
-pub(in crate::validators) enum PatternContent<'c> {
+enum PatternContent<'c> {
     /// No `*-pattern` attribute: the block's whole content (trimmed).
     Whole(&'c str),
     /// A `*-pattern` attribute: the value of every match, in the order they appear in the block.
@@ -900,7 +898,7 @@ pub(in crate::validators) enum PatternContent<'c> {
 }
 
 /// Returns the content for the `*-pattern` attribute, e.g. `check-ai-pattern` for `check-ai`.
-pub(in crate::validators) fn block_content_for_pattern<'c>(
+fn block_content_for_pattern<'c>(
     block_with_context: &'c BlockWithContext,
     file_content: &'c str,
     pattern_attribute: &str,
@@ -922,7 +920,7 @@ pub(in crate::validators) fn block_content_for_pattern<'c>(
 /// Parses a numeric value from string.
 ///
 /// Supports very big numbers (bigger than `f64` may hold) and `_` digits separator.
-pub(in crate::validators) fn parse_number(value: &str) -> Option<BigDecimal> {
+fn parse_number(value: &str) -> Option<BigDecimal> {
     let bytes = value.as_bytes();
     let separator_positions: Vec<usize> = bytes
         .iter()

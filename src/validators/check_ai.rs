@@ -41,7 +41,7 @@ const API_MODEL_ENV_VAR_NAME: &str = "BLOCKWATCH_AI_MODEL";
 /// condition stated in prose, for rules too fuzzy to express as a regex.
 ///
 /// Async because each block costs a network round trip; blocks are checked concurrently.
-pub(crate) struct CheckAiValidator<C: AiClient> {
+struct CheckAiValidator<C: AiClient> {
     client: Arc<C>,
 }
 
@@ -114,11 +114,11 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
 
 /// Selects [`CheckAiValidator`] for blocks carrying a `check-ai` attribute, building a client from
 /// the `BLOCKWATCH_AI_*` environment variables.
-pub(crate) struct CheckAiValidatorDetector();
+pub(super) struct CheckAiValidatorDetector();
 
 impl CheckAiValidatorDetector {
     /// Creates the detector. Registered in [`crate::validators::detector_factories`].
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {}
     }
 }
@@ -222,7 +222,7 @@ fn block_violation(
 impl<C: AiClient> CheckAiValidator<C> {
     /// Creates the validator over a given client, which is what makes it testable without a
     /// network call.
-    pub(super) fn with_client(client: C) -> Self {
+    fn with_client(client: C) -> Self {
         Self {
             client: Arc::new(client),
         }
@@ -265,7 +265,7 @@ struct CheckAiViolation<'a> {
 /// Narrow on purpose: it hides prompt construction and response parsing behind one method, so the
 /// validator's own logic can be tested against a canned client.
 #[async_trait]
-pub(crate) trait AiClient: Send + Sync {
+trait AiClient: Send + Sync {
     /// Returns Ok(None) if the block satisfies the condition, Ok(Some(error_message)) otherwise.
     async fn check_block(
         &self,
@@ -275,7 +275,7 @@ pub(crate) trait AiClient: Send + Sync {
 }
 
 /// Default OpenAI-based implementation. Uses async-openai crate.
-pub(super) struct OpenAiClient {
+struct OpenAiClient {
     client: Client<OpenAIConfig>,
     model: String,
 }
@@ -283,7 +283,7 @@ pub(super) struct OpenAiClient {
 impl OpenAiClient {
     /// Creates a new OpenAI client from environment variables (BLOCKWATCH_AI_*),
     /// falling back to `async-openai` crate defaults when not provided.
-    pub(crate) fn new_from_env() -> Self {
+    fn new_from_env() -> Self {
         let model = std::env::var(API_MODEL_ENV_VAR_NAME).unwrap_or(DEFAULT_MODEL_NAME.into());
         let api_base = std::env::var(API_URL_ENV_VAR_NAME).unwrap_or(OPENAI_API_BASE.into());
         let api_key = std::env::var(API_KEY_ENV_VAR_NAME).unwrap_or("".into());

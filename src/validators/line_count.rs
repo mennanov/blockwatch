@@ -14,11 +14,11 @@ use std::sync::Arc;
 ///
 /// Useful for keeping a section from silently growing past the size it was designed for — a code
 /// sample that must stay readable, or a list with a hard limit.
-pub(crate) struct LineCountValidator {}
+struct LineCountValidator {}
 
 impl LineCountValidator {
     /// Creates the validator. It is stateless; all input arrives through the validation context.
-    pub(super) fn new() -> Self {
+    fn new() -> Self {
         Self {}
     }
 }
@@ -126,11 +126,11 @@ fn create_violation(
 }
 
 /// Selects [`LineCountValidator`] for blocks carrying a `line-count` attribute.
-pub(crate) struct LineCountValidatorDetector();
+pub(super) struct LineCountValidatorDetector();
 
 impl LineCountValidatorDetector {
     /// Creates the detector. Registered in [`validators::detector_factories`].
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {}
     }
 }

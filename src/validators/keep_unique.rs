@@ -13,11 +13,11 @@ use std::sync::Arc;
 ///
 /// The attribute's value optionally supplies a regex selecting the part of each line that must be
 /// unique, which is how lists of ids or keys are checked without regard to the rest of the line.
-pub(super) struct KeepUniqueValidator {}
+struct KeepUniqueValidator {}
 
 impl KeepUniqueValidator {
     /// Creates a validator that ensures lines (or regex matches) within a block are unique.
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self {}
     }
 }
@@ -101,11 +101,11 @@ impl ValidatorSync for KeepUniqueValidator {
 }
 
 /// Selects [`KeepUniqueValidator`] for blocks carrying a `keep-unique` attribute.
-pub(crate) struct KeepUniqueValidatorDetector();
+pub(super) struct KeepUniqueValidatorDetector();
 
 impl KeepUniqueValidatorDetector {
     /// Creates the detector. Registered in [`validators::detector_factories`].
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {}
     }
 }

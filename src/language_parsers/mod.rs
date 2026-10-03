@@ -48,7 +48,7 @@ use std::sync::{Arc, Mutex};
 use tree_sitter::{Language, Node, Parser, Tree, TreeCursor};
 
 /// Parses the source files of one language.
-pub trait LanguageParser: Send + Sync {
+pub(crate) trait LanguageParser: Send + Sync {
     /// Returns an iterator over the [`Block`]s found in the given `contents` string.
     ///
     /// The blocks are required to be yielded sorted by the `starts_at` field in ascending order.
@@ -74,7 +74,7 @@ pub trait LanguageParser: Send + Sync {
 
 /// A [`LanguageParser`] that finds blocks in the comments `C` extracts, and symbols if the language
 /// has a [`SymbolsParser`].
-pub(crate) struct LanguageParserImpl<C: CommentsParser> {
+struct LanguageParserImpl<C: CommentsParser> {
     blocks_parser: BlocksFromCommentsParser<C>,
     symbols_parser: Option<Box<dyn SymbolsParser>>,
 }
@@ -122,10 +122,10 @@ pub(crate) type SharedLanguageParser = Arc<Mutex<Box<dyn LanguageParser>>>;
 
 /// Parsers keyed by file extension (or by the whole filename for extensionless files such as
 /// `Dockerfile`). Also serves as the list of extensions the CLI recognizes.
-pub type LanguageParsers = HashMap<OsString, SharedLanguageParser>;
+pub(crate) type LanguageParsers = HashMap<OsString, SharedLanguageParser>;
 
 /// Returns a map of all available language parsers by their file extensions.
-pub fn language_parsers() -> anyhow::Result<LanguageParsers> {
+pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
     fn parser<P: LanguageParser + 'static>(p: P) -> SharedLanguageParser {
         Arc::new(Mutex::new(Box::new(p) as Box<dyn LanguageParser>))
     }

@@ -11,14 +11,14 @@ use tree_sitter::StreamingIterator;
 /// Contains the rooted [`SymbolPath`], the byte ranges where the symbol is written, and the
 /// scalar value if the symbol represents a scalar.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Symbol {
+pub(crate) struct Symbol {
     /// The symbol path of this symbol (e.g. `/dependencies/inngest`).
-    pub path: SymbolPath,
+    pub(crate) path: SymbolPath,
     /// The byte ranges of the source where the symbol is written, in document order and not
     /// overlapping. Never empty. A symbol written in several places has one range for each.
-    pub def_byte_ranges: Vec<Range<usize>>,
+    pub(crate) def_byte_ranges: Vec<Range<usize>>,
     /// The scalar value, or `None` if the symbol represents a container or composite node.
-    pub value: Option<ScalarValue>,
+    pub(crate) value: Option<ScalarValue>,
 }
 
 impl Symbol {
@@ -40,7 +40,7 @@ impl Symbol {
     ///
     /// # Panics
     /// Panics if a byte range does not fit `source`.
-    pub fn position_ranges(&self, source: &str) -> Vec<Range<Position>> {
+    pub(crate) fn position_ranges(&self, source: &str) -> Vec<Range<Position>> {
         self.def_byte_ranges
             .iter()
             .map(|range| {
@@ -56,7 +56,7 @@ impl Symbol {
     ///
     /// # Panics
     /// Panics if a byte range does not fit `source`.
-    pub fn value_or_definition<'s>(&'s self, source: &'s str) -> Cow<'s, str> {
+    pub(crate) fn value_or_definition<'s>(&'s self, source: &'s str) -> Cow<'s, str> {
         match (&self.value, self.def_byte_ranges.as_slice()) {
             (Some(value), _) => Cow::Borrowed(&value.text),
             (None, [range]) => Cow::Borrowed(&source[range.clone()]),
@@ -69,13 +69,13 @@ impl Symbol {
 
 /// The value of a [`Symbol`] that represents a scalar.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ScalarValue {
+pub(crate) struct ScalarValue {
     /// The text of the value. A string has no quotes and its escapes are decoded. Any other
     /// scalar is kept as written.
-    pub text: String,
+    pub(crate) text: String,
     /// The byte range of the source where the value is written, quotes included.
     /// It covers the whole literal as returned by the grammar.
-    pub byte_range: Range<usize>,
+    pub(crate) byte_range: Range<usize>,
 }
 
 /// Why a symbol path did not resolve to exactly one symbol.
@@ -204,7 +204,7 @@ enum CaptureRole {
 ///
 /// # Errors
 /// Returns an error if the node's text is not a valid spelling in the language.
-pub(crate) type NodeDecoder = fn(&tree_sitter::Node, &str) -> anyhow::Result<String>;
+type NodeDecoder = fn(&tree_sitter::Node, &str) -> anyhow::Result<String>;
 
 /// A [`SymbolsParser`] driven by a tree-sitter query that declares what is addressable in one
 /// language.

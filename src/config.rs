@@ -17,15 +17,15 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// The default name of the config file.
-pub const DEFAULT_FILE: &str = "blockwatch.toml";
+const DEFAULT_FILE: &str = "blockwatch.toml";
 
 /// What the config file holds.
 #[derive(Debug, Default)]
-pub struct Config {
+pub(crate) struct Config {
     /// The settings. They are not validated yet.
-    pub settings: RawSettings,
+    pub(crate) settings: RawSettings,
     /// The virtual blocks, in the order the file declares them.
-    pub blocks: Vec<VirtualBlock>,
+    pub(crate) blocks: Vec<VirtualBlock>,
 }
 
 /// The config file, as written.
@@ -84,7 +84,7 @@ enum AttributeValue {
 /// The settings are not validated here. Returns an error if the file can't be read, isn't valid
 /// TOML, has an unknown key or a value of the wrong type, or declares a block that is not valid.
 /// The error shows the file, and the line of the problem.
-pub fn read(
+pub(crate) fn read(
     path: Option<&Path>,
     file_system: &impl FileSystem,
     line_changes_by_file: &HashMap<RepoPath, Vec<LineChange>>,

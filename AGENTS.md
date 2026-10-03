@@ -61,6 +61,9 @@ For example:
 - *Always* handle the variants of an enum with an exhaustive `match`. A `let ... else`, or an `if` that handles one
   variant and sends the rest to a single branch, quietly gives any new variant whatever that branch does. With a
   `match`, the compiler makes you decide what to do with each new variant.
+- *Always* give an item the narrowest visibility that compiles: private, then `pub(super)`, then `pub(crate)`.
+  BlockWatch is a program, not a library. Only `run` and `count_rust_blocks` in `lib.rs` are `pub`, for `main.rs` and
+  the fuzz target. The `unreachable_pub` lint makes `cargo clippy -- -D warnings` fail on any other `pub`.
 
 ### Asking the human
 
@@ -122,7 +125,7 @@ runs it on the staged diff. This means:
 
 ## Architecture
 
-The whole pipeline is in `src/main.rs`:
+The whole pipeline is in `src/cli.rs`. `src/main.rs` only calls `blockwatch::run`:
 
 1. Parse the command-line flags (`flags.rs`, built with clap). Flags are `global`, so they can go before or after a
    subcommand.

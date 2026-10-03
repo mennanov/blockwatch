@@ -31,7 +31,7 @@ const DIFF_PATH_PREFIXES: [&str; 6] = ["a/", "b/", "i/", "w/", "c/", "o/"];
 ///
 /// Windows accepts `/` in its filesystem APIs, so [`RepoPath::as_path`] stays usable for reads.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct RepoPath(String);
+pub(crate) struct RepoPath(String);
 
 impl RepoPath {
     /// Builds a path from a value that is already relative to the repository root, such as an
@@ -40,7 +40,7 @@ impl RepoPath {
     /// Returns an error for anything that could name a file outside the repository — an absolute
     /// path, or one containing `..` — so that confinement does not depend on the caller
     /// remembering to check.
-    pub fn from_relative(path: &Path) -> anyhow::Result<Self> {
+    pub(crate) fn from_relative(path: &Path) -> anyhow::Result<Self> {
         let mut segments = Vec::new();
         for component in path.components() {
             match component {
@@ -63,7 +63,7 @@ impl RepoPath {
     ///
     /// Authors spell these by hand, so `./target.py` and `target.py` both occur and must resolve
     /// to the same file.
-    pub fn from_reference(reference: &str) -> anyhow::Result<Self> {
+    pub(crate) fn from_reference(reference: &str) -> anyhow::Result<Self> {
         Self::from_relative(Path::new(reference))
     }
 
@@ -76,7 +76,7 @@ impl RepoPath {
     /// The path is returned whether or not it points at an existing file; `parse_blocks` decides
     /// whether an absent one matters.
     // </block>
-    pub fn from_diff_target(
+    pub(crate) fn from_diff_target(
         source: &str,
         target: &str,
         file_system: &impl FileSystem,
@@ -135,12 +135,12 @@ impl RepoPath {
     }
 
     /// Borrows the path for filesystem operations.
-    pub fn as_path(&self) -> &Path {
+    pub(crate) fn as_path(&self) -> &Path {
         Path::new(&self.0)
     }
 
     /// Borrows the canonical `/`-separated spelling.
-    pub fn as_str(&self) -> &str {
+    pub(crate) fn as_str(&self) -> &str {
         &self.0
     }
 }

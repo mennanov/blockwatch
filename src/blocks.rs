@@ -22,7 +22,7 @@ const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
 /// A pair of tags in the file's comments declares a block. So does a `[[block]]` entry of the
 /// config file, around a symbol of the file. That is a virtual block.
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Block {
+pub(crate) struct Block {
     /// Optional attributes in the `block` tag, or in the `[[block]]` entry of a virtual block.
     /// Their names are what selects the validators that will check this block (`affects`,
     /// `keep-sorted`, …).
@@ -70,7 +70,7 @@ pub(crate) enum Declaration {
 
 /// What tells a block apart from the other blocks of its file.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct BlockKey {
+pub(crate) struct BlockKey {
     /// Where the block starts. Two blocks with tags never start at the same place.
     start: Position,
     /// The config line of a virtual block, or `None` for a block with tags. Two virtual blocks
@@ -246,7 +246,7 @@ impl Block {
 #[strum(ascii_case_insensitive)]
 #[repr(u8)]
 // <block name="block-severity" affects="docs/validators/README.md:severity-levels">
-pub enum BlockSeverity {
+pub(crate) enum BlockSeverity {
     /// The default. A violation at this level makes the run exit non-zero, failing a hook or CI.
     Error = 1,
     /// Reported like an error but does not affect the exit code.
@@ -260,7 +260,7 @@ pub enum BlockSeverity {
 
 /// Represents a source field with its corresponding modified blocks.
 #[derive(Debug)]
-pub struct FileBlocks {
+pub(crate) struct FileBlocks {
     /// Source file contents.
     pub(crate) file_content: String,
     /// Blocks to be validated.
@@ -301,7 +301,7 @@ impl FileBlocks {
 
 /// Represents a block with its corresponding validation context.
 #[derive(Debug, Clone)]
-pub struct BlockWithContext {
+pub(crate) struct BlockWithContext {
     /// The block itself, as parsed from the source comment or the config file.
     pub(crate) block: Block,
     /// Whether the block's start tag is modified (computed from the input diff).
@@ -313,26 +313,26 @@ pub struct BlockWithContext {
 
 /// Counts of the files a scan looked at.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct ScanStats {
+pub(crate) struct ScanStats {
     /// Number of files that were read and parsed for blocks.
-    pub files_scanned: usize,
+    pub(crate) files_scanned: usize,
     /// Number of files that were not parsed because their extension has no parser.
-    pub files_skipped: usize,
+    pub(crate) files_skipped: usize,
 }
 
 /// The blocks found in each file, together with the counts of files the scan looked at.
 #[derive(Debug, Default)]
-pub struct ParsedBlocks {
+pub(crate) struct ParsedBlocks {
     /// The blocks to validate, grouped by the file they were found in.
-    pub blocks: HashMap<RepoPath, FileBlocks>,
+    pub(crate) blocks: HashMap<RepoPath, FileBlocks>,
     /// File counts for the run report; carried alongside the blocks because only the scan knows
     /// how many files it looked at but produced no blocks for.
-    pub stats: ScanStats,
+    pub(crate) stats: ScanStats,
 }
 
 /// How a run decides which files it reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ScanMode {
+pub(crate) enum ScanMode {
     /// Read every file in the repository. If a diff is supplied then the corresponding blocks are
     /// marked as modified.
     All,
@@ -359,7 +359,7 @@ pub enum ScanMode {
 /// fails if a virtual block's target does not resolve in a file that is read, or if its file
 /// passes the filters but does not exist. In [`ScanMode::OnlyChanged`], only a virtual block
 /// whose entry the diff modified fails for a missing file.
-pub fn parse_blocks(
+pub(crate) fn parse_blocks(
     line_changes_by_file: &HashMap<RepoPath, Vec<LineChange>>,
     scan_mode: ScanMode,
     file_system: &impl FileSystem,
@@ -581,12 +581,12 @@ fn record_parsed_file(
 }
 
 /// Keeps every block the file declares, whether or not a diff touched it.
-pub fn every_block(_block: &BlockWithContext) -> bool {
+pub(crate) fn every_block(_block: &BlockWithContext) -> bool {
     true
 }
 
 /// Keeps only the blocks a diff touched, by their content or by their start tag.
-pub fn modified_blocks(block: &BlockWithContext) -> bool {
+fn modified_blocks(block: &BlockWithContext) -> bool {
     // A block with a modified start tag is considered modified because its rules (attributes) are
     // modified.
     block.is_content_modified || block.is_start_tag_modified
@@ -599,7 +599,7 @@ pub fn modified_blocks(block: &BlockWithContext) -> bool {
 /// # Errors
 /// Returns an error if a tag is malformed or a name is used twice, or if a virtual block's target
 /// does not resolve in the file.
-pub fn parse_file(
+pub(crate) fn parse_file(
     file_system: &impl FileSystem,
     file_path: &Path,
     line_changes: &[LineChange],
@@ -864,7 +864,7 @@ mod block_severity_from_str_tests {
 
     /// Builds a contentless block carrying only a `severity` attribute to test how that attribute
     /// is parsed.
-    pub(crate) fn new_empty_block_with_severity(severity: &str) -> Block {
+    fn new_empty_block_with_severity(severity: &str) -> Block {
         Block {
             attributes: HashMap::from([("severity".into(), severity.into())]),
             start_tag_position_range: Position::new(0, 0)..Position::new(0, 0),

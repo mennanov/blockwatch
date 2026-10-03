@@ -22,7 +22,7 @@ use std::sync::Arc;
 ///
 /// A target spelled without a `:` names a whole file, whose entire text is then the thing compared
 /// against — so a file with no comments to declare a block in can still be a target.
-pub(crate) struct SameAsValidator<Fs: FileSystem> {
+struct SameAsValidator<Fs: FileSystem> {
     /// Reads files containing referenced target blocks that are not already parsed into the
     /// validation context.
     file_system: Arc<Fs>,
@@ -30,7 +30,7 @@ pub(crate) struct SameAsValidator<Fs: FileSystem> {
 
 impl<Fs: FileSystem + 'static> SameAsValidator<Fs> {
     /// Creates the validator over the filesystem it will read referenced files from.
-    pub(super) fn new(file_system: Arc<Fs>) -> Self {
+    fn new(file_system: Arc<Fs>) -> Self {
         Self { file_system }
     }
 }
@@ -488,11 +488,11 @@ fn create_violation(
 }
 
 /// Selects [`SameAsValidator`] for blocks carrying a `same-as` attribute.
-pub(crate) struct SameAsValidatorDetector();
+pub(super) struct SameAsValidatorDetector();
 
 impl SameAsValidatorDetector {
     /// Creates the detector. Registered in [`validators::detector_factories`].
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self()
     }
 }

@@ -13,7 +13,7 @@ use std::path::PathBuf;
 /// A block that an entry of the config file declares around a symbol, instead of tags in a
 /// comment. It is a block of the file the symbol is in.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct VirtualBlock {
+pub(crate) struct VirtualBlock {
     /// The file the symbol is in.
     pub(crate) file: RepoPath,
     /// The symbol's path in `file`.
@@ -28,7 +28,7 @@ pub struct VirtualBlock {
 
 /// A `[[block]]` entry of the config file. It shows as `line 7 of "blockwatch.toml"`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ConfigEntry {
+pub(crate) struct ConfigEntry {
     /// The config file.
     pub(crate) file: PathBuf,
     /// The line of the entry's `[[block]]` header.

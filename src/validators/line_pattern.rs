@@ -14,11 +14,11 @@ use std::sync::Arc;
 ///
 /// Keeps hand-maintained lists in shape — a table of `KEY=value` settings, or entries that must
 /// all be relative paths.
-pub(crate) struct LinePatternValidator {}
+struct LinePatternValidator {}
 
 impl LinePatternValidator {
     /// Creates the validator. It is stateless; all input arrives through the validation context.
-    pub(super) fn new() -> Self {
+    fn new() -> Self {
         Self {}
     }
 }
@@ -91,11 +91,11 @@ impl ValidatorSync for LinePatternValidator {
 }
 
 /// Selects [`LinePatternValidator`] for blocks carrying a `line-pattern` attribute.
-pub(crate) struct LinePatternValidatorDetector();
+pub(super) struct LinePatternValidatorDetector();
 
 impl LinePatternValidatorDetector {
     /// Creates the detector. Registered in [`validators::detector_factories`].
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {}
     }
 }

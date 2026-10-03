@@ -12,7 +12,7 @@ use std::fmt;
 /// - Segments are separated by `/`.
 /// - RFC 6901 escape sequences in each segment are unescaped: `~1` becomes `/` and `~0` becomes `~`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct SymbolPath {
+pub(crate) struct SymbolPath {
     segments: Vec<String>,
 }
 
@@ -21,7 +21,7 @@ impl SymbolPath {
     ///
     /// The input may optionally include a leading `#`. The path must be rooted with a leading `/`.
     /// `%2F` acts as a `/` separator as well.
-    pub fn parse(fragment: &str) -> anyhow::Result<Self> {
+    pub(crate) fn parse(fragment: &str) -> anyhow::Result<Self> {
         let trimmed = fragment.trim();
         let path_str = trimmed.strip_prefix('#').unwrap_or(trimmed);
         if path_str.is_empty() {
@@ -53,7 +53,7 @@ impl SymbolPath {
     }
 
     /// Returns the parsed and unescaped path segments.
-    pub fn segments(&self) -> &[String] {
+    pub(crate) fn segments(&self) -> &[String] {
         &self.segments
     }
 

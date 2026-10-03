@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 /// Which of the three run modes produced a report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunMode {
+pub(crate) enum RunMode {
     /// No diff: every block in the scope is parsed and validated, and no block counts as changed.
     All,
     /// A diff marks which blocks changed, but every file in the scope is still parsed.
@@ -20,7 +20,7 @@ pub enum RunMode {
 
 impl RunMode {
     /// Derives the mode from the two flags that select it.
-    pub fn new(with_diff: bool, only_changed: bool) -> Self {
+    pub(crate) fn new(with_diff: bool, only_changed: bool) -> Self {
         match (with_diff, only_changed) {
             (false, _) => Self::All,
             (true, false) => Self::AllWithDiff,
@@ -29,7 +29,7 @@ impl RunMode {
     }
 
     /// The name the mode goes by in the report, on both the summary line and in the JSON.
-    pub fn as_str(&self) -> &'static str {
+    fn as_str(&self) -> &'static str {
         match self {
             Self::All => "all",
             Self::AllWithDiff => "all+diff",
@@ -69,7 +69,7 @@ struct ReportSummary {
 /// Each block is described the same way the `list` subcommand describes it, plus the checks that
 /// ran on it.
 #[derive(Serialize, Debug)]
-pub struct RunReport {
+pub(crate) struct RunReport {
     summary: ReportSummary,
     /// `BTreeMap` is used for its deterministic sorting order.
     files: BTreeMap<RepoPath, Vec<serde_json::Value>>,
@@ -78,7 +78,7 @@ pub struct RunReport {
 impl RunReport {
     /// Builds a report from the run mode, the scan counts, the blocks in scope, and the checks that
     /// ran.
-    pub fn new(
+    pub(crate) fn new(
         mode: RunMode,
         blocks_needing_diff: Option<usize>,
         stats: ScanStats,
@@ -139,7 +139,7 @@ impl RunReport {
     }
 
     /// Returns the run totals as a single line of text.
-    pub fn summary_line(&self) -> String {
+    pub(crate) fn summary_line(&self) -> String {
         let needs_diff = match self.summary.blocks_needing_diff {
             Some(count) => format!(", {count} needs --diff"),
             None => String::new(),

@@ -19,14 +19,14 @@ use std::sync::Arc;
 ///
 /// E.g., catches a constant edited without its documentation, or an enum extended without its
 /// switch statement.
-pub(crate) struct AffectsValidator<Fs: FileSystem> {
+struct AffectsValidator<Fs: FileSystem> {
     /// Reads target files that are not already parsed into the validation context.
     file_system: Arc<Fs>,
 }
 
 impl<Fs: FileSystem + 'static> AffectsValidator<Fs> {
     /// Creates the validator over the filesystem it will read excluded target files from.
-    pub(super) fn new(file_system: Arc<Fs>) -> Self {
+    fn new(file_system: Arc<Fs>) -> Self {
         Self { file_system }
     }
 }
@@ -331,11 +331,11 @@ fn name_index(file_blocks: &FileBlocks) -> HashMap<String, bool> {
 /// It does not gate on whether the block was modified: the validator also checks that each
 /// referenced target still resolves, and a dangling reference has to be reported even when the
 /// referencing block itself is untouched.
-pub(crate) struct AffectsValidatorDetector();
+pub(super) struct AffectsValidatorDetector();
 
 impl AffectsValidatorDetector {
     /// Creates the detector. Registered in [`validators::detector_factories`].
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {}
     }
 }

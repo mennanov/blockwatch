@@ -1,8 +1,5 @@
 use afl::fuzz;
-use blockwatch::blocks::Block;
-use blockwatch::language_parsers;
 use regex::Regex;
-use std::ffi::OsString;
 
 fn main() {
     fuzz!(|data: &[u8]| {
@@ -27,24 +24,15 @@ fn main() {
             "/* {noise1_before} <block> {noise1_after} */\nlet variable = \"value\";\n// {noise2_before} </block> {noise2_after}"
         );
 
-        match parse_rust_blocks(&source) {
-            Ok(blocks) => {
-                assert_eq!(blocks.len(), 1, "input: {source}");
+        match blockwatch::count_rust_blocks(&source) {
+            Ok(count) => {
+                assert_eq!(count, 1, "input: {source}");
             }
             Err(err) => {
                 panic!("parser returned error: {err}\ninput:\n{source}");
             }
         }
     });
-}
-
-fn parse_rust_blocks(source: &str) -> anyhow::Result<Vec<Block>> {
-    let parsers = language_parsers::language_parsers()?;
-    parsers[&OsString::from("rs")]
-        .lock()
-        .expect("no active locks")
-        .parse_blocks(source)
-        .collect()
 }
 
 fn split_in_half(input: &str) -> Option<(&str, &str)> {
