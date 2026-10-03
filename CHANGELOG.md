@@ -30,6 +30,12 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   the run, and the error shows the entry's line. See
   [Blocks in the Config File](docs/cli.md#blocks-in-the-config-file).
 
+### Changed
+
+- A run over the whole repository is much faster. A file is parsed only when it contains `<block` or `</block`, and
+  most files contain neither. On the kubernetes repository, a run takes about 1 s instead of 15 s. As a result, in a
+  file without a start tag, an end tag with a space in it, such as `</ block>`, is no longer reported.
+
 ## [0.7.0] - 2026-09-28
 
 ### Added

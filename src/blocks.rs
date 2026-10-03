@@ -662,6 +662,13 @@ fn tag_blocks(
     block_predicate: &impl Fn(&BlockWithContext) -> bool,
     names_seen: &mut HashMap<String, String>,
 ) -> anyhow::Result<Vec<BlockWithContext>> {
+    // Tree-sitter takes most of the time a scan spends on a file, and most files hold no tags. A
+    // file without the text that opens a start tag holds no block. The text that opens an end tag
+    // is checked too, so that an end tag left behind when its start tag was deleted still fails
+    // the run. An end tag with a space before or after its slash is missed in such a file.
+    if !source.contains("<block") && !source.contains("</block") {
+        return Ok(Vec::new());
+    }
     // Blocks are filtered as the parser yields them, so only the ones this run will validate are
     // ever held. The parser's lock lives until the end of the statement, which is as long as the
     // iterator borrowing it does.
@@ -2030,6 +2037,58 @@ mod parse_blocks_tests {
         assert_eq!(
             file_blocks.unwrap_err().source().unwrap().to_string(),
             "Block a.py:x at line 4 duplicates the name of the block at line 1"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn end_tag_without_a_start_tag_fails_with_error() -> anyhow::Result<()> {
+        // A file without a start tag must still be parsed, so that its end tag fails the run.
+        let file_system = FakeFileSystem::new(HashMap::from([(
+            "a.py".to_string(),
+            "1\n# </block>".to_string(),
+        )]));
+        let parsers = language_parsers()?;
+        let file_blocks = parse_file(
+            &file_system,
+            Path::new("a.py"),
+            &[],
+            every_block,
+            &parsers,
+            &HashMap::new(),
+            &[],
+        );
+
+        assert!(file_blocks.is_err());
+        assert_eq!(
+            file_blocks.unwrap_err().source().unwrap().to_string(),
+            "Unexpected closed block at line 2, column 3"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn start_tag_without_an_end_tag_fails_with_error() -> anyhow::Result<()> {
+        // A file without an end tag must still be parsed, so that its start tag fails the run.
+        let file_system = FakeFileSystem::new(HashMap::from([(
+            "a.py".to_string(),
+            "# <block>\n1".to_string(),
+        )]));
+        let parsers = language_parsers()?;
+        let file_blocks = parse_file(
+            &file_system,
+            Path::new("a.py"),
+            &[],
+            every_block,
+            &parsers,
+            &HashMap::new(),
+            &[],
+        );
+
+        assert!(file_blocks.is_err());
+        assert_eq!(
+            file_blocks.unwrap_err().source().unwrap().to_string(),
+            "Block at line 1 is not closed"
         );
         Ok(())
     }
