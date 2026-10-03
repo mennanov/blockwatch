@@ -36,7 +36,8 @@ fn run_list(args: &flags::Args) -> anyhow::Result<()> {
     let file_system = blockwatch::fs::FileSystemImpl::new(&repository_root()?)?;
     let (scan_mode, line_changes) = run_inputs(args, &file_system)?;
     let language_parsers = language_parsers::language_parsers()?;
-    let (settings, virtual_blocks) = read_config(args, &file_system, &language_parsers)?;
+    let (settings, virtual_blocks) =
+        read_config(args, &file_system, &line_changes, &language_parsers)?;
     let (context, _scan_stats) = build_context(
         args,
         &settings,
@@ -55,7 +56,8 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
     let file_system = Arc::new(blockwatch::fs::FileSystemImpl::new(&repository_root()?)?);
     let (scan_mode, line_changes) = run_inputs(args, file_system.as_ref())?;
     let language_parsers = language_parsers::language_parsers()?;
-    let (settings, virtual_blocks) = read_config(args, file_system.as_ref(), &language_parsers)?;
+    let (settings, virtual_blocks) =
+        read_config(args, file_system.as_ref(), &line_changes, &language_parsers)?;
     let (context, scan_stats) = build_context(
         args,
         &settings,
@@ -188,12 +190,15 @@ fn run_inputs(
 
 /// Reads the config file. Returns the settings for this run, which merge the file's with the
 /// flags, and the file's virtual blocks.
+///
+/// `line_changes` are the diff's changes, by file.
 fn read_config(
     args: &flags::Args,
     file_system: &impl FileSystem,
+    line_changes: &HashMap<RepoPath, Vec<diff_parser::LineChange>>,
     language_parsers: &language_parsers::LanguageParsers,
 ) -> anyhow::Result<(Settings, Vec<VirtualBlock>)> {
-    let config = config::read(args.config.as_deref(), file_system)?;
+    let config = config::read(args.config.as_deref(), file_system, line_changes)?;
     let settings = Settings::resolve(
         args.raw_settings(),
         config.settings,

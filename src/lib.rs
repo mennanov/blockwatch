@@ -181,6 +181,7 @@ mod test_utils {
                 file: PathBuf::from("blockwatch.toml"),
                 line: 7,
             },
+            is_entry_modified: false,
         })
     }
 

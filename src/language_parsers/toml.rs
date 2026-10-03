@@ -13,6 +13,14 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
     Ok(LanguageParserImpl::new(comments_parser()?).with_symbols(TomlSymbolsParser))
 }
 
+/// The symbols of `source`, a TOML document, in document order.
+///
+/// # Errors
+/// Returns an error if `source` is not valid TOML.
+pub(crate) fn parse_symbols(source: &str) -> anyhow::Result<Vec<Symbol>> {
+    TomlSymbolsParser.parse(source)
+}
+
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let toml_language = tree_sitter_toml_ng::LANGUAGE.into();
     let parser = python_style_comments_parser(&toml_language, "comment");

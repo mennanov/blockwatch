@@ -106,3 +106,125 @@ fn config_with_an_unknown_key_fails_the_run_at_its_position() -> anyhow::Result<
         .stderr(predicate::str::contains("unknown field `ignor`"));
     Ok(())
 }
+
+/// Creates a repository in `parent` whose `package.json` breaks the rule that the config file
+/// `config_file` declares for it. Returns the repository root.
+fn repo_with_a_virtual_block_violation(
+    parent: &Path,
+    config_file: &str,
+) -> anyhow::Result<PathBuf> {
+    let root = parent.join("repo");
+    std::fs::create_dir_all(root.join(".git"))?;
+    std::fs::create_dir_all(root.join("src"))?;
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+  "version": "1.2"
+}
+"#,
+    )?;
+    std::fs::write(
+        root.join(config_file),
+        r"[[block]]
+target = 'package.json#/version'
+line-pattern = '^\d+\.\d+\.\d+$'
+",
+    )?;
+    Ok(root)
+}
+
+/// A diff that adds the last line of the `[[block]]` entry in `config_file`.
+fn diff_adding_the_rule(config_file: &str) -> String {
+    format!(
+        r"diff --git a/{config_file} b/{config_file}
+--- a/{config_file}
++++ b/{config_file}
+@@ -1,2 +1,3 @@
+ [[block]]
+ target = 'package.json#/version'
++line-pattern = '^\d+\.\d+\.\d+$'
+"
+    )
+}
+
+#[test]
+fn diff_touching_a_config_entry_rechecks_its_block_under_only_changed() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = repo_with_a_virtual_block_violation(temp.path(), "blockwatch.toml")?;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.current_dir(&root);
+    cmd.args(["--diff", "--only-changed"]);
+    cmd.write_stdin(diff_adding_the_rule("blockwatch.toml"));
+
+    cmd.output()?
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("\"package.json\""));
+    Ok(())
+}
+
+#[test]
+fn diff_touching_an_entry_of_the_config_flag_file_rechecks_its_block() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = repo_with_a_virtual_block_violation(temp.path(), "src/settings.toml")?;
+
+    let mut cmd = cargo_bin_cmd!();
+    // The flag's path starts at `src/`, and the diff's path at the repository root.
+    cmd.current_dir(root.join("src"));
+    cmd.args(["--config", "settings.toml", "--diff", "--only-changed"]);
+    cmd.write_stdin(diff_adding_the_rule("src/settings.toml"));
+
+    cmd.output()?
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("\"package.json\""));
+    Ok(())
+}
+
+#[test]
+fn config_flag_file_outside_the_repository_is_read_with_a_diff() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = repo_with_a_virtual_block_violation(temp.path(), "src/settings.toml")?;
+    std::fs::rename(
+        root.join("src/settings.toml"),
+        temp.path().join("shared.toml"),
+    )?;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.current_dir(&root);
+    cmd.args(["--config", "../shared.toml", "--diff", "--only-changed"]);
+    cmd.write_stdin(
+        r#"diff --git a/package.json b/package.json
+--- a/package.json
++++ b/package.json
+@@ -2 +2 @@
+-  "version": "1.1"
++  "version": "1.2"
+"#,
+    );
+
+    cmd.output()?
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("\"package.json\""));
+    Ok(())
+}
+
+#[test]
+fn missing_config_flag_file_fails_the_run_with_its_path() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = repo_with_a_generated_violation(temp.path())?;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.current_dir(&root);
+    cmd.args(["--config", "missing.toml"]);
+
+    cmd.output()?
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "failed to read config file \"missing.toml\"",
+        ));
+    Ok(())
+}

@@ -21,6 +21,10 @@ pub trait FileSystem: Send + Sync {
     /// Whether a readable file exists at `path` inside the repository.
     fn exists(&self, path: &Path) -> bool;
 
+    /// The path of the file at `path`, relative to the repository root. Returns `None` if the file
+    /// does not exist or is outside the repository.
+    fn repo_path(&self, path: &Path) -> Option<RepoPath>;
+
     /// Walks the directory tree rooted at the file system's root path, returning an iterator over the paths of all files.
     fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>>;
 }
@@ -100,6 +104,11 @@ impl FileSystem for FileSystemImpl {
             .is_ok_and(|resolved| resolved.is_file())
     }
 
+    fn repo_path(&self, path: &Path) -> Option<RepoPath> {
+        let resolved = self.resolve_within_root(path).ok()?;
+        RepoPath::from_relative(resolved.strip_prefix(&self.root_path).ok()?).ok()
+    }
+
     fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>> {
         // Clone root_path for the closure.
         let root_path = self.root_path.clone();
@@ -161,6 +170,7 @@ impl PathChecker for PathCheckerImpl {
 #[cfg(test)]
 mod file_system_impl_tests {
     use crate::fs::{FileSystem, FileSystemImpl};
+    use crate::repo_path::RepoPath;
     use std::path::{Path, PathBuf};
 
     /// Writes `content` to `name` inside a fresh temp dir that doubles as the repository root.
@@ -302,6 +312,28 @@ mod file_system_impl_tests {
         Ok(())
     }
 
+    #[test]
+    fn absolute_path_inside_root_repo_path_returns_it_from_the_root() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        write_file(root.path(), "src/a.txt", "hello");
+        let file_system = FileSystemImpl::new(root.path())?;
+
+        let repo_path = file_system.repo_path(&root.path().join("src/a.txt"));
+
+        assert_eq!(repo_path.as_ref().map(RepoPath::as_str), Some("src/a.txt"));
+        Ok(())
+    }
+
+    #[test]
+    fn path_outside_root_repo_path_returns_none() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let (_outside_root, outside) = root_with_file("a.txt", "hello");
+        let file_system = FileSystemImpl::new(root.path())?;
+
+        assert_eq!(file_system.repo_path(&outside), None);
+        Ok(())
+    }
+
     #[cfg(unix)]
     #[test]
     fn read_to_string_rejects_symlink_escaping_root() -> anyhow::Result<()> {
@@ -361,6 +393,12 @@ pub mod test_utils {
 
         fn exists(&self, path: &Path) -> bool {
             self.files.contains_key(&path.display().to_string())
+        }
+
+        fn repo_path(&self, path: &Path) -> Option<RepoPath> {
+            RepoPath::from_relative(path)
+                .ok()
+                .filter(|repo_path| self.exists(repo_path.as_path()))
         }
 
         fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>> {

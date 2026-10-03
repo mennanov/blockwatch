@@ -31,7 +31,7 @@ mod scala;
 mod sql;
 mod starlark;
 mod swift;
-mod toml;
+pub(crate) mod toml;
 mod tsx;
 mod typescript;
 mod xml;

@@ -22,6 +22,8 @@ pub struct VirtualBlock {
     pub(crate) attributes: HashMap<String, String>,
     /// The entry of the config file that declares the block.
     pub(crate) entry: ConfigEntry,
+    /// Whether the diff touches `entry`.
+    pub(crate) is_entry_modified: bool,
 }
 
 /// A `[[block]]` entry of the config file. It shows as `line 7 of "blockwatch.toml"`.
@@ -59,8 +61,9 @@ impl VirtualBlock {
     /// - `symbols` are all the symbols of that file.
     /// - `line_changes` are the diff's changes to that file.
     ///
-    /// The block counts as changed when the diff touches the symbol, its key included. A change
-    /// elsewhere in the file does not count.
+    /// The block's content counts as changed when the diff touches the symbol, its key included. A
+    /// change elsewhere in the file does not count. Its start tag counts as changed when the diff
+    /// touches its entry in the config file.
     ///
     /// # Errors
     /// Returns an error when:
@@ -118,8 +121,9 @@ impl VirtualBlock {
                 &definition_positions,
                 line_changes,
             ),
-            // The block's attributes are written in the config file, not in this one.
-            is_start_tag_modified: false,
+            // The block's attributes are written in its entry in the config file, so the entry
+            // plays the part of the start tag.
+            is_start_tag_modified: self.is_entry_modified,
         })
     }
 

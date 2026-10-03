@@ -278,7 +278,9 @@ A virtual block is a block of the file it wraps:
 - **Its `name` is a block name in that file.** A name that another block in the file already has is an error.
 - **The run's filters apply to that file.** When the globs, `--ignore` or `.gitignore` leave the file out, its virtual
   blocks are not checked.
-- **It counts as changed when the diff touches the symbol.** A change elsewhere in the file does not count.
+- **It counts as changed when the diff touches the symbol or the entry.** A change elsewhere in either file does not
+  count. The entry plays the part of the start tag. So when you edit an entry, `--diff --only-changed` checks its
+  block, even if the diff does not touch the file the block wraps.
 
 A target that does not resolve stops the run. That is a missing file, a file without symbols or with a syntax error,
 a missing or ambiguous symbol, or a TOML table written in several places. The error shows the entry's line:

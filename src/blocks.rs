@@ -7,8 +7,8 @@ use crate::virtual_blocks::{ConfigEntry, VirtualBlock};
 use anyhow::{Context, anyhow, bail};
 use serde_repr::Serialize_repr;
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::ops::Range;
 use std::path::Path;
@@ -311,6 +311,8 @@ pub enum ScanMode {
     /// marked as modified.
     All,
     /// Read only the files from the supplied diff, keeping just the blocks that the diff modified.
+    /// The file of a virtual block is read too when the diff modified the block's entry in the
+    /// config file.
     OnlyChanged,
 }
 
@@ -328,8 +330,9 @@ pub enum ScanMode {
 /// In either mode a file is read only if it passes the allow globs and is not ignored.
 ///
 /// Fails if `line_changes_by_file` is invalid, e.g. it refers to files that do not exist. Also
-/// fails if a virtual block's target does not resolve in a file that is read, or, in
-/// [`ScanMode::All`], if its file passes the filters but does not exist.
+/// fails if a virtual block's target does not resolve in a file that is read, or if its file
+/// passes the filters but does not exist. In [`ScanMode::OnlyChanged`], only a virtual block
+/// whose entry the diff modified fails for a missing file.
 pub fn parse_blocks(
     line_changes_by_file: &HashMap<RepoPath, Vec<LineChange>>,
     scan_mode: ScanMode,
@@ -355,7 +358,7 @@ pub fn parse_blocks(
     }
     match scan_mode {
         ScanMode::All => {
-            ensure_target_files_exist(virtual_blocks, file_system, path_checker)?;
+            ensure_target_files_exist(virtual_blocks.iter(), file_system, path_checker)?;
             parse_all_files(
                 line_changes_by_file,
                 file_system,
@@ -365,20 +368,29 @@ pub fn parse_blocks(
                 &virtual_blocks_by_file,
             )
         }
-        ScanMode::OnlyChanged => parse_changed_files(
-            line_changes_by_file,
-            file_system,
-            path_checker,
-            parsers,
-            extra_file_extensions,
-            &virtual_blocks_by_file,
-        ),
+        ScanMode::OnlyChanged => {
+            ensure_target_files_exist(
+                virtual_blocks
+                    .iter()
+                    .filter(|virtual_block| virtual_block.is_entry_modified),
+                file_system,
+                path_checker,
+            )?;
+            parse_changed_files(
+                line_changes_by_file,
+                file_system,
+                path_checker,
+                parsers,
+                extra_file_extensions,
+                &virtual_blocks_by_file,
+            )
+        }
     }
 }
 
 /// Rejects a virtual block whose file is allowed by `path_checker` but does not exist.
-fn ensure_target_files_exist(
-    virtual_blocks: &[VirtualBlock],
+fn ensure_target_files_exist<'v>(
+    virtual_blocks: impl Iterator<Item = &'v VirtualBlock>,
     file_system: &impl FileSystem,
     path_checker: &impl PathChecker,
 ) -> anyhow::Result<()> {
@@ -468,7 +480,8 @@ fn parse_all_files(
     Ok(parsed)
 }
 
-/// Parses only the files in the diff, keeping the blocks whose start tag or content it modified.
+/// Parses only the files in the diff, and the files of the virtual blocks whose entry it modified.
+/// Keeps the blocks whose start tag or content it modified.
 fn parse_changed_files(
     line_changes_by_file: &HashMap<RepoPath, Vec<LineChange>>,
     file_system: &impl FileSystem,
@@ -477,11 +490,25 @@ fn parse_changed_files(
     extra_file_extensions: &HashMap<OsString, OsString>,
     virtual_blocks_by_file: &HashMap<&RepoPath, Vec<&VirtualBlock>>,
 ) -> anyhow::Result<ParsedBlocks> {
+    // A changed entry in the config file changes the rules of its block, as a changed tag does. So
+    // the block is checked even when the diff does not touch its file.
+    let entry_files = virtual_blocks_by_file
+        .iter()
+        .filter(|(_, virtual_blocks)| {
+            virtual_blocks
+                .iter()
+                .any(|virtual_block| virtual_block.is_entry_modified)
+        })
+        .map(|(file_path, _)| *file_path);
+    let files: HashSet<&RepoPath> = line_changes_by_file.keys().chain(entry_files).collect();
     let mut parsed = ParsedBlocks::default();
-    for (file_path, line_changes) in line_changes_by_file {
+    for file_path in files {
         if !path_checker.should_allow(file_path) || path_checker.should_ignore(file_path) {
             continue;
         }
+        let line_changes = line_changes_by_file
+            .get(file_path)
+            .map_or(&[][..], Vec::as_slice);
         let file_blocks = parse_file(
             file_system,
             file_path.as_path(),
@@ -2102,6 +2129,84 @@ mod parse_blocks_tests {
             .map(|block_with_context| block_with_context.block.name())
             .collect();
         assert_eq!(names, vec![Some("b")]);
+        Ok(())
+    }
+
+    #[test]
+    fn only_changed_parse_blocks_reads_the_file_of_a_modified_entry() -> anyhow::Result<()> {
+        let source = r#"{
+  "a": 1,
+  // <block name="tag">
+  "b": 2,
+  // </block>
+  "c": 3
+}
+"#;
+        let file_system = FakeFileSystem::new(HashMap::from([
+            ("a.json".to_string(), source.to_string()),
+            ("b.json".to_string(), source.to_string()),
+        ]));
+        let modified_entry = |target: &str| -> anyhow::Result<VirtualBlock> {
+            let mut virtual_block = test_utils::virtual_block(target, &[("name", "a")])?;
+            virtual_block.is_entry_modified = true;
+            Ok(virtual_block)
+        };
+        // The diff touches only the tag in `b.json`. `vendor/gone.json` is outside the globs, so
+        // it is not read even though its entry is modified.
+        let virtual_blocks = [
+            modified_entry("a.json#/a")?,
+            test_utils::virtual_block("a.json#/c", &[("name", "c")])?,
+            modified_entry("b.json#/a")?,
+            modified_entry("vendor/gone.json#/x")?,
+        ];
+        let line_changes = HashMap::from([(RepoPath::from_reference("b.json")?, vec![added(4)])]);
+
+        let parsed = parse_blocks(
+            &line_changes,
+            ScanMode::OnlyChanged,
+            &file_system,
+            &FakePathChecker::allow_only("{a,b}.json"),
+            &language_parsers()?,
+            &HashMap::new(),
+            &virtual_blocks,
+        )?;
+
+        let names = |file: &str| -> anyhow::Result<Vec<Option<&str>>> {
+            Ok(parsed.blocks[&RepoPath::from_reference(file)?]
+                .blocks_with_context
+                .iter()
+                .map(|block_with_context| block_with_context.block.name())
+                .collect())
+        };
+        assert_eq!(names("a.json")?, vec![Some("a")]);
+        assert_eq!(names("b.json")?, vec![Some("a"), Some("tag")]);
+        // Each file is read once, even when both the diff and an entry lead to it.
+        assert_eq!(parsed.stats.files_scanned, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn only_changed_with_a_modified_entry_for_a_missing_file_parse_blocks_returns_error()
+    -> anyhow::Result<()> {
+        let mut virtual_block = test_utils::virtual_block("gone.json#/x", &[])?;
+        virtual_block.is_entry_modified = true;
+
+        let error = parse_blocks(
+            &HashMap::new(),
+            ScanMode::OnlyChanged,
+            &FakeFileSystem::new(HashMap::new()),
+            &FakePathChecker::allow_all(),
+            &language_parsers()?,
+            &HashMap::new(),
+            &[virtual_block],
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "invalid block at line 7 of \"blockwatch.toml\": target gone.json#/x does not \
+             resolve: file does not exist"
+        );
         Ok(())
     }
 

@@ -627,6 +627,10 @@ mod tests {
             )
         }
 
+        fn repo_path(&self, _path: &Path) -> Option<RepoPath> {
+            unimplemented!("diff parsing never maps a path to the repository")
+        }
+
         fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>> {
             std::iter::empty()
         }

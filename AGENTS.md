@@ -134,14 +134,16 @@ The whole pipeline is in `src/main.rs`:
 4. Resolve the run's settings. `config::read` reads `blockwatch.toml` from the repository root, or the file given by
    `--config`. `Args::raw_settings` returns the settings given as flags. `settings::Settings::resolve` validates both
    with the same rules and merges them: the ignore globs, the extension mappings and the validator selection.
-   `config::read` also returns the file's virtual blocks: its `[[block]]` entries, each around a symbol.
+   `config::read` also returns the file's virtual blocks: its `[[block]]` entries, each around a symbol. It marks the
+   ones whose entry the diff touches.
 5. Walk the repository with the `ignore` crate, which respects `.gitignore`. Keep the files that match the globs from
    the command line and don't match the settings' ignore globs. Pick each file's language by its extension, using the
    settings' extension mappings too.
 6. For each file, the matching `language_parsers::<lang>` (a tree-sitter grammar) finds the comments. `tag_parser` and
    `block_parser` turn the comment text into `Block` values, with their attributes and their byte and line ranges.
    `VirtualBlock::resolve` finds the symbol of each virtual block in the file, and adds it as a `Block` too. A target
-   that does not resolve stops the run. The result is a `blocks::FileBlocks` for each file, kept in a
+   that does not resolve stops the run. `--only-changed` also parses the file of a virtual block whose entry the diff
+   touches, even when the diff does not touch that file. The result is a `blocks::FileBlocks` for each file, kept in a
    `validators::ValidationContext`.
 7. `validators::detect_validators` passes each block to the `ValidatorDetector`s, one for each validator. A detector
    returns either `ValidatorType::Sync` or `ValidatorType::Async`. Async validators, such as `check-ai`, run on Tokio.
@@ -210,7 +212,8 @@ A block counts as changed only when its content or its start tag overlaps a `Lin
 that need a change, such as `affects`, only fire for changed blocks. This is the most common source of surprises. If a
 rule didn't fire, check whether the diff actually touched the block's lines. The same goes for an `affects` target that
 is a symbol, and for a virtual block. They count as changed only when the diff touches the symbol's definition, not
-anything else in its file.
+anything else in its file. A virtual block also counts as changed when the diff touches its `[[block]]` entry, which
+plays the part of its start tag.
 
 The `check-ai` validator calls an OpenAI-compatible API. It is configured with `BLOCKWATCH_AI_API_KEY`,
 `BLOCKWATCH_AI_MODEL` and `BLOCKWATCH_AI_API_URL`. The `check-lua` validator embeds Lua 5.4 through `mlua`. The
