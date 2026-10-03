@@ -160,6 +160,7 @@ mod test_utils {
             parsers,
             line_changes_by_file,
             HashMap::new(),
+            Vec::new(),
         ))
     }
 
@@ -183,6 +184,21 @@ mod test_utils {
             },
             is_entry_modified: false,
         })
+    }
+
+    /// `context` with `virtual_blocks` as the config file's virtual blocks.
+    pub(crate) fn with_virtual_blocks(
+        context: Arc<ValidationContext>,
+        virtual_blocks: Vec<VirtualBlock>,
+    ) -> Arc<ValidationContext> {
+        let context = Arc::into_inner(context).expect("the context is not shared");
+        Arc::new(ValidationContext::new(
+            context.blocks,
+            context.parsers,
+            context.line_changes,
+            context.extra_file_extensions,
+            virtual_blocks,
+        ))
     }
 
     /// Combines several single-file contexts into one, so a test can exercise a validator that
@@ -216,6 +232,7 @@ mod test_utils {
             parsers,
             merged_line_changes,
             HashMap::new(),
+            Vec::new(),
         ))
     }
 }

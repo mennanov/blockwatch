@@ -9,7 +9,8 @@ mod same_as;
 
 use crate::Position;
 use crate::blocks::{
-    Block, BlockKey, BlockSeverity, BlockWithContext, FileBlocks, parser_for_file_path,
+    self, Block, BlockKey, BlockSeverity, BlockWithContext, FileBlocks, every_block,
+    parser_for_file_path,
 };
 use crate::diff_parser::LineChange;
 use crate::fs::FileSystem;
@@ -26,6 +27,7 @@ use crate::validators::line_count::LineCountValidatorDetector;
 use crate::validators::line_pattern::LinePatternValidatorDetector;
 use crate::validators::same_as::SameAsValidatorDetector;
 use crate::violation_address::ViolationAddress;
+use crate::virtual_blocks::VirtualBlock;
 use anyhow::{Context, bail};
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
@@ -319,6 +321,9 @@ pub struct ValidationContext {
     pub(crate) line_changes: HashMap<RepoPath, Vec<LineChange>>,
     /// Extension remappings from the command line.
     pub(crate) extra_file_extensions: HashMap<OsString, OsString>,
+    /// The declarations of every virtual block in the config file, in its order. Unlike `blocks`,
+    /// they are not resolved, and they cover the files the run did not keep too.
+    virtual_blocks: Vec<VirtualBlock>,
 }
 
 impl ValidationContext {
@@ -328,12 +333,14 @@ impl ValidationContext {
         parsers: LanguageParsers,
         line_changes: HashMap<RepoPath, Vec<LineChange>>,
         extra_file_extensions: HashMap<OsString, OsString>,
+        virtual_blocks: Vec<VirtualBlock>,
     ) -> Self {
         Self {
             blocks,
             parsers,
             line_changes,
             extra_file_extensions,
+            virtual_blocks,
         }
     }
 
@@ -345,6 +352,34 @@ impl ValidationContext {
     /// The extension remappings the run was given.
     pub(crate) fn extra_file_extensions(&self) -> &HashMap<OsString, OsString> {
         &self.extra_file_extensions
+    }
+
+    /// Reads and parses `file_path` the way the run parses a file it checks: its tags and its
+    /// virtual blocks. Every block is kept, and the diff's changes to the file mark the ones it
+    /// touched. Returns `None` if the file's format is unsupported and it has no virtual blocks.
+    ///
+    /// # Errors
+    /// Returns an error if the file can't be read, a tag is malformed, a name is used twice, or a
+    /// virtual block's target does not resolve.
+    pub(crate) fn parse_file(
+        &self,
+        file_system: &impl FileSystem,
+        file_path: &RepoPath,
+    ) -> anyhow::Result<Option<FileBlocks>> {
+        let virtual_blocks: Vec<&VirtualBlock> = self
+            .virtual_blocks
+            .iter()
+            .filter(|virtual_block| virtual_block.file == *file_path)
+            .collect();
+        blocks::parse_file(
+            file_system,
+            file_path.as_path(),
+            self.line_changes_for(file_path).unwrap_or(&[]),
+            every_block,
+            &self.parsers,
+            &self.extra_file_extensions,
+            &virtual_blocks,
+        )
     }
 
     /// The line changes the diff reported for the `file_path`.

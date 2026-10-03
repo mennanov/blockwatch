@@ -460,6 +460,7 @@ C
             HashMap::new(),
             HashMap::new(),
             HashMap::new(),
+            Vec::new(),
         ));
 
         let violations = validator.validate(context)?.violations;

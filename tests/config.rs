@@ -107,8 +107,9 @@ fn config_with_an_unknown_key_fails_the_run_at_its_position() -> anyhow::Result<
     Ok(())
 }
 
-/// Creates a repository in `parent` whose `package.json` breaks the rule that the config file
-/// `config_file` declares for it. Returns the repository root.
+/// Creates a repository in `parent` whose `package.json` breaks the rule of the block
+/// `package.json:version`, which the config file `config_file` declares. Returns the repository
+/// root.
 fn repo_with_a_virtual_block_violation(
     parent: &Path,
     config_file: &str,
@@ -128,6 +129,7 @@ fn repo_with_a_virtual_block_violation(
         r"[[block]]
 target = 'package.json#/version'
 line-pattern = '^\d+\.\d+\.\d+$'
+name = 'version'
 ",
     )?;
     Ok(root)
@@ -226,5 +228,28 @@ fn missing_config_flag_file_fails_the_run_with_its_path() -> anyhow::Result<()> 
         .stderr(predicate::str::contains(
             "failed to read config file \"missing.toml\"",
         ));
+    Ok(())
+}
+
+#[test]
+fn block_referencing_a_virtual_block_reads_it_from_a_file_outside_the_globs() -> anyhow::Result<()>
+{
+    let temp = tempfile::tempdir()?;
+    let root = repo_with_a_virtual_block_violation(temp.path(), "blockwatch.toml")?;
+    std::fs::write(
+        root.join("README.md"),
+        r#"<!-- <block same-as="package.json:version"> -->
+1.2
+<!-- </block> -->
+"#,
+    )?;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.current_dir(&root);
+    // The glob leaves `package.json` out. So the rule of its block is not checked, and `same-as`
+    // reads the file itself.
+    cmd.arg("*.md");
+
+    cmd.output()?.assert().success();
     Ok(())
 }

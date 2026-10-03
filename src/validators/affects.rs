@@ -1,4 +1,4 @@
-use crate::blocks::{Block, BlockWithContext, FileBlocks, every_block, parse_file};
+use crate::blocks::{Block, BlockWithContext, FileBlocks};
 use crate::diff_parser::range_intersects_any;
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
@@ -110,28 +110,18 @@ impl<'a, Fs: FileSystem> TargetIndex<'a, Fs> {
         {
             return Ok(Some(modified));
         }
-        // Parsing with the target's own line changes recovers both its blocks and their modified
-        // state; a file the diff never referenced simply has no line changes, so nothing in it
-        // counts as modified.
-        let line_changes = self.context.line_changes_for(target_file).unwrap_or(&[]);
         let index = match self.read.entry(target_file.clone()) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
-                let parsed = parse_file(
-                    self.file_system,
-                    target_file.as_path(),
-                    line_changes,
-                    every_block,
-                    self.context.parsers(),
-                    self.context.extra_file_extensions(),
-                    &[],
-                )?
-                .ok_or_else(|| {
-                    anyhow!(
-                        "affects target file format is unsupported: {}",
-                        target_file.display()
-                    )
-                })?;
+                let parsed = self
+                    .context
+                    .parse_file(self.file_system, target_file)?
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "affects target file format is unsupported: {}",
+                            target_file.display()
+                        )
+                    })?;
                 entry.insert(name_index(&parsed))
             }
         };
@@ -454,7 +444,7 @@ mod validate_tests {
     use crate::repo_path::RepoPath;
     use crate::test_utils::{
         checked_lines, merge_validation_contexts, validation_context,
-        validation_context_with_changes, violation_count,
+        validation_context_with_changes, violation_count, virtual_block, with_virtual_blocks,
     };
     use crate::validators::ValidatorSync;
 
@@ -508,6 +498,7 @@ mod validate_tests {
             parsers,
             line_changes,
             HashMap::new(),
+            Vec::new(),
         )))
     }
 
@@ -825,6 +816,52 @@ pass
     }
 
     #[test]
+    fn modified_virtual_block_outside_the_globs_returns_no_violations() -> anyhow::Result<()> {
+        let file_system = FakeFileSystem::new(HashMap::from([
+            (
+                "source.py".to_string(),
+                r#"# <block affects="package.json:version">
+value = 2
+# </block>
+"#
+                .to_string(),
+            ),
+            (
+                "package.json".to_string(),
+                r#"{
+  "version": "1.2.3"
+}
+"#
+                .to_string(),
+            ),
+        ]));
+        let added = |line| LineChange {
+            line,
+            kind: LineChangeKind::Added,
+        };
+        let line_changes = HashMap::from([
+            (RepoPath::from_reference("source.py")?, vec![added(2)]),
+            (RepoPath::from_reference("package.json")?, vec![added(2)]),
+        ]);
+        // The validator reads `package.json` itself. The block it refers to is declared in the
+        // config file.
+        let context = with_virtual_blocks(
+            context_scoped_to_source(&file_system, line_changes)?,
+            vec![virtual_block(
+                "package.json#/version",
+                &[("name", "version")],
+            )?],
+        );
+
+        let violations = AffectsValidator::new(Arc::new(file_system))
+            .validate(context)?
+            .violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn blocks_with_cyclic_references_partly_modified_returns_violations() -> anyhow::Result<()> {
         let contents = r#"# <block name="foo" affects=":bar">
 print("foo")
@@ -1012,6 +1049,7 @@ pass
             parsers,
             line_changes,
             HashMap::new(),
+            Vec::new(),
         )))
     }
 

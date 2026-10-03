@@ -392,6 +392,7 @@ mod tests {
             HashMap::new(),
             HashMap::new(),
             HashMap::new(),
+            Vec::new(),
         );
         let mut log = ValidationLog::default();
         let blocks = &context.blocks[&file_path].blocks_with_context;

@@ -275,15 +275,17 @@ A virtual block is a block of the file it wraps:
   `"version": "1.2.3"`. An object, a list or a table gives its text, key included.
 - **Its violations are reported in that file.** A violation of the whole block points at the first line of the symbol.
   A violation inside a scalar points at the start of the value.
-- **Its `name` is a block name in that file.** A name that another block in the file already has is an error.
+- **Its `name` is a block name in that file.** A name that another block in the file already has is an error. A
+  reference such as `affects="package.json:react-version"` finds the block, as it finds a tag.
 - **The run's filters apply to that file.** When the globs, `--ignore` or `.gitignore` leave the file out, its virtual
-  blocks are not checked.
+  blocks are not checked. A reference to one of them still finds it.
 - **It counts as changed when the diff touches the symbol or the entry.** A change elsewhere in either file does not
   count. The entry plays the part of the start tag. So when you edit an entry, `--diff --only-changed` checks its
   block, even if the diff does not touch the file the block wraps.
 
-A target that does not resolve stops the run. That is a missing file, a file without symbols or with a syntax error,
-a missing or ambiguous symbol, or a TOML table written in several places. The error shows the entry's line:
+A target that does not resolve stops the run when its file is checked or a reference reads that file. That is a
+missing file, a file without symbols or with a syntax error, a missing or ambiguous symbol, or a TOML table written in
+several places. The error shows the entry's line:
 
 ```text
 Error: invalid block at line 7 of "blockwatch.toml"

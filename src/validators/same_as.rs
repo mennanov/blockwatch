@@ -1,4 +1,4 @@
-use crate::blocks::{Block, BlockWithContext, FileBlocks, every_block, parse_file};
+use crate::blocks::{Block, BlockWithContext, FileBlocks};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
@@ -281,21 +281,15 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
         let file_blocks = match self.parsed.entry(target_file.clone()) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
-                let parsed = parse_file(
-                    self.file_system,
-                    target_file,
-                    &[],
-                    every_block,
-                    self.context.parsers(),
-                    self.context.extra_file_extensions(),
-                    &[],
-                )?
-                .ok_or_else(|| {
-                    anyhow!(
-                        "same-as target file format is unsupported: {}",
-                        target_file.display()
-                    )
-                })?;
+                let parsed = self
+                    .context
+                    .parse_file(self.file_system, target_file)?
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "same-as target file format is unsupported: {}",
+                            target_file.display()
+                        )
+                    })?;
                 entry.insert(parsed)
             }
         };
@@ -527,7 +521,10 @@ mod validate_tests {
     use crate::repo_path::RepoPath;
     use crate::test_utils::validation_context;
     use crate::test_utils::validation_context_with_changes;
-    use crate::test_utils::{checked_lines, merge_validation_contexts, violation_count};
+    use crate::test_utils::{
+        checked_lines, merge_validation_contexts, violation_count, virtual_block,
+        with_virtual_blocks,
+    };
 
     /// Build a validator with a fake filesystem seeded with `files` (path, contents). Used by every
     /// same-as unit test; pass `&[]` when the target is in-scope (no disk read).
@@ -611,6 +608,55 @@ mod validate_tests {
             "[//]: # (<block name=\"doc\">)\n\nX\n\n[//]: # (</block>)",
         )]);
         assert!(v.validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn block_equal_to_a_virtual_block_outside_the_scan_returns_no_violations() -> anyhow::Result<()>
+    {
+        let source = r#"// <block same-as="package.json:version">
+1.2.3
+// </block>
+"#;
+        // Only `a.rs` is in scope, so the validator reads `package.json` itself. The block it
+        // refers to is declared in the config file. The block of `other.json` must not be looked
+        // for in `package.json`.
+        let context = with_virtual_blocks(
+            validation_context("a.rs", source),
+            vec![
+                virtual_block("other.json#/x", &[])?,
+                virtual_block("package.json#/version", &[("name", "version")])?,
+            ],
+        );
+        let v = validator(&[("package.json", r#"{"version": "1.2.3"}"#)]);
+
+        assert!(v.validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn virtual_block_that_does_not_resolve_in_a_file_outside_the_scan_returns_an_error()
+    -> anyhow::Result<()> {
+        let source = r#"// <block same-as="package.json:version">
+1.2.3
+// </block>
+"#;
+        let context = with_virtual_blocks(
+            validation_context("a.rs", source),
+            vec![
+                virtual_block("package.json#/version", &[("name", "version")])?,
+                virtual_block("package.json#/versoin", &[])?,
+            ],
+        );
+        let v = validator(&[("package.json", r#"{"version": "1.2.3"}"#)]);
+
+        let error = v.validate(context).unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "invalid block at line 7 of \"blockwatch.toml\": target package.json#/versoin does \
+             not resolve: symbol not found; did you mean: /version"
+        );
         Ok(())
     }
 

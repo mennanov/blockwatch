@@ -172,7 +172,9 @@ The main modules:
 - `src/virtual_blocks.rs` — `VirtualBlock`, a block that the config file declares around a symbol, for a file without
   comments. It is a block of the file it wraps. Its content is what a reference to the symbol reads: a scalar's decoded
   value (`ContentText::Decoded`), or else the definition's text. Its `Block::declaration` is the config entry, so every
-  message about it shows that line, through `Block::declared_at`.
+  message about it shows that line, through `Block::declared_at`. `ValidationContext` keeps every virtual block's
+  declaration. So when `affects` or `same-as` reads a file the run did not keep, `ValidationContext::parse_file` adds
+  that file's virtual blocks, as the run does.
 - `src/repo_path.rs` — `RepoPath`, the one way to write a path relative to the repository root. A diff header
   (`b/src/main.rs`), a path found in the walk and a `file:name` attribute all become a `RepoPath`. So the same file is
   always the same map key.

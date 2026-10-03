@@ -41,7 +41,7 @@ fn run_list(args: &flags::Args) -> anyhow::Result<()> {
     let (context, _scan_stats) = build_context(
         args,
         &settings,
-        &virtual_blocks,
+        virtual_blocks,
         scan_mode,
         line_changes,
         language_parsers,
@@ -61,7 +61,7 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
     let (context, scan_stats) = build_context(
         args,
         &settings,
-        &virtual_blocks,
+        virtual_blocks,
         scan_mode,
         line_changes,
         language_parsers,
@@ -211,7 +211,7 @@ fn read_config(
 fn build_context(
     args: &flags::Args,
     settings: &Settings,
-    virtual_blocks: &[VirtualBlock],
+    virtual_blocks: Vec<VirtualBlock>,
     scan_mode: blocks::ScanMode,
     modified_lines_by_file: HashMap<RepoPath, Vec<diff_parser::LineChange>>,
     language_parsers: language_parsers::LanguageParsers,
@@ -237,7 +237,7 @@ fn build_context(
         &path_checker,
         &language_parsers,
         &settings.extensions,
-        virtual_blocks,
+        &virtual_blocks,
     )?;
     Ok((
         validators::ValidationContext::new(
@@ -245,6 +245,7 @@ fn build_context(
             language_parsers,
             modified_lines_by_file,
             settings.extensions.clone(),
+            virtual_blocks,
         ),
         parsed.stats,
     ))
