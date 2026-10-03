@@ -442,11 +442,11 @@ mod validate_tests {
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::{
-        checked_lines, merge_validation_contexts, validation_context,
-        validation_context_with_changes, violation_count, virtual_block, with_virtual_blocks,
-    };
+    use crate::test_utils::{validation_context, validation_context_with_changes, virtual_block};
     use crate::validators::ValidatorSync;
+    use crate::validators::test_utils::{
+        checked_lines, merge_validation_contexts, violation_count, with_virtual_blocks,
+    };
 
     /// Builds a validator with a fake filesystem seeded with `files` (path, contents).
     fn validator(files: &[(&str, &str)]) -> AffectsValidator<FakeFileSystem> {

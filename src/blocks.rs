@@ -41,16 +41,16 @@ pub struct Block {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) struct Content {
     /// The content's text.
-    pub(crate) text: ContentText,
+    text: ContentText,
     /// Where the content is written in the block's file. For a block with tags, it runs from the
     /// end of the comment with the start tag to the start of the comment with the end tag. For a
     /// virtual block, it is where the symbol's value or definition is written.
-    pub(crate) positions: Range<Position>,
+    positions: Range<Position>,
 }
 
 /// The text of a block's [`Content`].
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) enum ContentText {
+enum ContentText {
     /// The source text in this byte range: the lines between the block's tags, or the definition
     /// of the object, list or table that a virtual block wraps.
     Source(Range<usize>),
@@ -72,11 +72,19 @@ pub(crate) enum Declaration {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BlockKey {
     /// Where the block starts. Two blocks with tags never start at the same place.
-    pub(crate) start: Position,
+    start: Position,
     /// The config line of a virtual block, or `None` for a block with tags. Two virtual blocks
     /// can start at the same place, such as TOML's `/a` and `/a/b` in `a.b = 1`, but they never
     /// share a config line.
-    pub(crate) config_line: Option<usize>,
+    config_line: Option<usize>,
+}
+
+#[cfg(test)]
+impl BlockKey {
+    /// The line the block starts on.
+    pub(crate) fn start_line(&self) -> usize {
+        self.start.line
+    }
 }
 
 impl PartialOrd for Block {
@@ -94,6 +102,24 @@ impl Ord for Block {
 }
 
 impl Content {
+    /// Content whose text is the bytes in `byte_range` of the block's file. `positions` are where
+    /// those bytes are.
+    pub(crate) fn source(byte_range: Range<usize>, positions: Range<Position>) -> Self {
+        Self {
+            text: ContentText::Source(byte_range),
+            positions,
+        }
+    }
+
+    /// Content whose text is `text`, the decoded value of a scalar. `positions` are where the
+    /// scalar is written in the block's file.
+    pub(crate) fn decoded(text: String, positions: Range<Position>) -> Self {
+        Self {
+            text: ContentText::Decoded(text),
+            positions,
+        }
+    }
+
     /// Returns the content's text. `source` must be the text of the block's file.
     pub(crate) fn text<'a>(&'a self, source: &'a str) -> &'a str {
         match &self.text {
@@ -833,7 +859,7 @@ fn try_parser_for_extension<'p>(
 #[cfg(test)]
 mod block_severity_from_str_tests {
     use crate::Position;
-    use crate::blocks::{Block, BlockSeverity, Content, ContentText, Declaration};
+    use crate::blocks::{Block, BlockSeverity, Content, Declaration};
     use std::collections::HashMap;
 
     /// Builds a contentless block carrying only a `severity` attribute to test how that attribute
@@ -842,10 +868,7 @@ mod block_severity_from_str_tests {
         Block {
             attributes: HashMap::from([("severity".into(), severity.into())]),
             start_tag_position_range: Position::new(0, 0)..Position::new(0, 0),
-            content: Content {
-                text: ContentText::Source(0..0),
-                positions: Position::new(0, 0)..Position::new(0, 0),
-            },
+            content: Content::source(0..0, Position::new(0, 0)..Position::new(0, 0)),
             declaration: Declaration::Tags,
         }
     }
@@ -869,10 +892,7 @@ mod block_severity_from_str_tests {
         let block = Block {
             attributes: HashMap::new(),
             start_tag_position_range: Position::new(0, 0)..Position::new(0, 0),
-            content: Content {
-                text: ContentText::Source(0..0),
-                positions: Position::new(0, 0)..Position::new(0, 0),
-            },
+            content: Content::source(0..0, Position::new(0, 0)..Position::new(0, 0)),
             declaration: Declaration::Tags,
         };
 

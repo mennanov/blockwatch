@@ -72,7 +72,7 @@ pub(crate) fn character_column_at(text: &str, byte_offset: usize) -> usize {
 
 #[cfg(test)]
 mod test_utils {
-    use crate::blocks::{FileBlocks, ScanMode, parse_blocks};
+    use crate::blocks::{ScanMode, parse_blocks};
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::test_utils::{FakeFileSystem, FakePathChecker};
     use crate::language_parsers;
@@ -84,20 +84,6 @@ mod test_utils {
     use std::ops::Range;
     use std::path::PathBuf;
     use std::sync::Arc;
-
-    /// The start line of every block a validator reported checking, in the order it checked them.
-    pub(crate) fn checked_lines(report: &crate::validators::ValidationReport) -> Vec<usize> {
-        report
-            .checked_blocks
-            .iter()
-            .map(|(_, key)| key.start.line)
-            .collect()
-    }
-
-    /// How many violations a validator reported, across every file.
-    pub(crate) fn violation_count(report: &crate::validators::ValidationReport) -> usize {
-        report.violations.values().map(Vec::len).sum()
-    }
 
     /// Finds the byte range of the first occurrence of a substring within a string.
     ///
@@ -184,55 +170,5 @@ mod test_utils {
             },
             is_entry_modified: false,
         })
-    }
-
-    /// `context` with `virtual_blocks` as the config file's virtual blocks.
-    pub(crate) fn with_virtual_blocks(
-        context: Arc<ValidationContext>,
-        virtual_blocks: Vec<VirtualBlock>,
-    ) -> Arc<ValidationContext> {
-        let context = Arc::into_inner(context).expect("the context is not shared");
-        Arc::new(ValidationContext::new(
-            context.blocks,
-            context.parsers,
-            context.line_changes,
-            context.extra_file_extensions,
-            virtual_blocks,
-        ))
-    }
-
-    /// Combines several single-file contexts into one, so a test can exercise a validator that
-    /// resolves references across files.
-    pub(crate) fn merge_validation_contexts(
-        contexts: Vec<Arc<ValidationContext>>,
-    ) -> Arc<ValidationContext> {
-        let parsers = contexts
-            .first()
-            .map(|context| context.parsers.clone())
-            .unwrap_or_default();
-        let mut merged_modified_blocks = HashMap::new();
-        let mut merged_line_changes = HashMap::new();
-        for context in contexts {
-            for (file_path, file_blocks) in &context.blocks {
-                merged_modified_blocks
-                    .entry(file_path.clone())
-                    .or_insert_with(|| FileBlocks {
-                        file_content: file_blocks.file_content.clone(),
-                        blocks_with_context: vec![],
-                    })
-                    .blocks_with_context
-                    .extend(file_blocks.blocks_with_context.clone());
-            }
-            for (file_path, line_changes) in &context.line_changes {
-                merged_line_changes.insert(file_path.clone(), line_changes.to_vec());
-            }
-        }
-        Arc::new(ValidationContext::new(
-            merged_modified_blocks,
-            parsers,
-            merged_line_changes,
-            HashMap::new(),
-            Vec::new(),
-        ))
     }
 }

@@ -70,8 +70,8 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
     let (sync_validators, async_validators) = validators::detect_validators(
         &context,
         &validators::detector_factories::<blockwatch::fs::FileSystemImpl>(),
-        &settings.disabled_validators,
-        &settings.enabled_validators,
+        settings.disabled_validators(),
+        settings.enabled_validators(),
         &file_system,
     )?;
     let context = Arc::new(context);
@@ -86,8 +86,8 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
     let blocks_needing_diff = (!args.diff).then(|| {
         validators::diff_gated_block_count(
             &context,
-            &settings.disabled_validators,
-            &settings.enabled_validators,
+            settings.disabled_validators(),
+            settings.enabled_validators(),
         )
     });
     write_report(
@@ -228,7 +228,7 @@ fn build_context(
     }
 
     let path_checker =
-        blockwatch::fs::PathCheckerImpl::new(glob_set, settings.ignored_globs.clone());
+        blockwatch::fs::PathCheckerImpl::new(glob_set, settings.ignored_globs().clone());
 
     let parsed = blocks::parse_blocks(
         &modified_lines_by_file,
@@ -236,7 +236,7 @@ fn build_context(
         file_system,
         &path_checker,
         &language_parsers,
-        &settings.extensions,
+        settings.extensions(),
         &virtual_blocks,
     )?;
     Ok((
@@ -244,7 +244,7 @@ fn build_context(
             parsed.blocks,
             language_parsers,
             modified_lines_by_file,
-            settings.extensions.clone(),
+            settings.extensions().clone(),
             virtual_blocks,
         ),
         parsed.stats,

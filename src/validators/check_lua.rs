@@ -585,9 +585,9 @@ mod tests {
     use super::*;
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::{
-        checked_lines, merge_validation_contexts, validation_context,
-        validation_context_with_changes, violation_count,
+    use crate::test_utils::{validation_context, validation_context_with_changes};
+    use crate::validators::test_utils::{
+        checked_lines, merge_validation_contexts, violation_count,
     };
     use serde_json::json;
 

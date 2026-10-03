@@ -150,10 +150,11 @@ impl Violation {
 /// A block is identified by its [`BlockKey`], because a block may have no name.
 #[derive(Debug, Default)]
 pub struct ValidationReport {
-    /// Violations grouped by the file they were found in.
-    pub violations: HashMap<RepoPath, Vec<Violation>>,
+    /// Violations grouped by the file they were found in. A file without violations has no entry,
+    /// so the map is empty when the validator found nothing.
+    violations: HashMap<RepoPath, Vec<Violation>>,
     /// The key of every block this validator checked.
-    pub checked_blocks: Vec<(RepoPath, BlockKey)>,
+    checked_blocks: Vec<(RepoPath, BlockKey)>,
 }
 
 impl ValidationReport {
@@ -314,13 +315,13 @@ impl<'a> SimpleDiagnostic<'a> {
 /// other than the one it started from.
 pub struct ValidationContext {
     /// Blocks with their corresponding source file contents grouped by filename.
-    pub(crate) blocks: HashMap<RepoPath, FileBlocks>,
+    blocks: HashMap<RepoPath, FileBlocks>,
     /// Language parsers per file type, used by validators to parse referenced source files.
-    pub(crate) parsers: LanguageParsers,
+    parsers: LanguageParsers,
     /// Every line change from the diff (if any).
-    pub(crate) line_changes: HashMap<RepoPath, Vec<LineChange>>,
+    line_changes: HashMap<RepoPath, Vec<LineChange>>,
     /// Extension remappings from the command line.
-    pub(crate) extra_file_extensions: HashMap<OsString, OsString>,
+    extra_file_extensions: HashMap<OsString, OsString>,
     /// The declarations of every virtual block in the config file, in its order. Unlike `blocks`,
     /// they are not resolved, and they cover the files the run did not keep too.
     virtual_blocks: Vec<VirtualBlock>,
@@ -344,14 +345,9 @@ impl ValidationContext {
         }
     }
 
-    /// Returns the language parsers available to validators.
-    pub fn parsers(&self) -> &LanguageParsers {
-        &self.parsers
-    }
-
-    /// The extension remappings the run was given.
-    pub(crate) fn extra_file_extensions(&self) -> &HashMap<OsString, OsString> {
-        &self.extra_file_extensions
+    /// The blocks the run validates, with the text of their files, by file.
+    pub(crate) fn blocks(&self) -> &HashMap<RepoPath, FileBlocks> {
+        &self.blocks
     }
 
     /// Reads and parses `file_path` the way the run parses a file it checks: its tags and its
@@ -810,8 +806,8 @@ impl<'a, Fs: FileSystem> TargetFiles<'a, Fs> {
             Entry::Vacant(entry) => {
                 let parser = parser_for_file_path(
                     file.as_path(),
-                    self.context.parsers(),
-                    self.context.extra_file_extensions(),
+                    &self.context.parsers,
+                    &self.context.extra_file_extensions,
                 )
                 .context("file format is unsupported")?;
                 let symbols = parser
@@ -1244,11 +1240,12 @@ mod target_files_tests {
 
 #[cfg(test)]
 mod tests {
-    use crate::blocks::{Block, BlockWithContext, Content, ContentText, Declaration};
+    use crate::blocks::{Block, BlockWithContext, Content, Declaration};
     use crate::fs::FileSystem;
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::{merge_validation_contexts, validation_context};
+    use crate::test_utils::validation_context;
+    use crate::validators::test_utils::merge_validation_contexts;
     use crate::validators::{
         DetectorFactory, ValidationContext, ValidationReport, ValidatorAsync, ValidatorDetector,
         ValidatorSync, ValidatorType, Violation, ViolationRange, detect_validators,
@@ -1262,10 +1259,7 @@ mod tests {
         Block {
             attributes: HashMap::new(),
             start_tag_position_range: Position::new(0, 0)..Position::new(0, 0),
-            content: Content {
-                text: ContentText::Source(0..0),
-                positions: Position::new(0, 0)..Position::new(0, 0),
-            },
+            content: Content::source(0..0, Position::new(0, 0)..Position::new(0, 0)),
             declaration: Declaration::Tags,
         }
     }
@@ -1756,5 +1750,78 @@ print("target")
             ),
             0
         );
+    }
+}
+
+#[cfg(test)]
+mod test_utils {
+    use crate::blocks::FileBlocks;
+    use crate::validators::{ValidationContext, ValidationReport};
+    use crate::virtual_blocks::VirtualBlock;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    /// The start line of every block a validator reported checking, in the order it checked them.
+    pub(super) fn checked_lines(report: &ValidationReport) -> Vec<usize> {
+        report
+            .checked_blocks
+            .iter()
+            .map(|(_, key)| key.start_line())
+            .collect()
+    }
+
+    /// How many violations a validator reported, across every file.
+    pub(super) fn violation_count(report: &ValidationReport) -> usize {
+        report.violations.values().map(Vec::len).sum()
+    }
+
+    /// `context` with `virtual_blocks` as the config file's virtual blocks.
+    pub(super) fn with_virtual_blocks(
+        context: Arc<ValidationContext>,
+        virtual_blocks: Vec<VirtualBlock>,
+    ) -> Arc<ValidationContext> {
+        let context = Arc::into_inner(context).expect("the context is not shared");
+        Arc::new(ValidationContext::new(
+            context.blocks,
+            context.parsers,
+            context.line_changes,
+            context.extra_file_extensions,
+            virtual_blocks,
+        ))
+    }
+
+    /// Combines several single-file contexts into one, so a test can exercise a validator that
+    /// resolves references across files.
+    pub(super) fn merge_validation_contexts(
+        contexts: Vec<Arc<ValidationContext>>,
+    ) -> Arc<ValidationContext> {
+        let parsers = contexts
+            .first()
+            .map(|context| context.parsers.clone())
+            .unwrap_or_default();
+        let mut merged_modified_blocks = HashMap::new();
+        let mut merged_line_changes = HashMap::new();
+        for context in contexts {
+            for (file_path, file_blocks) in &context.blocks {
+                merged_modified_blocks
+                    .entry(file_path.clone())
+                    .or_insert_with(|| FileBlocks {
+                        file_content: file_blocks.file_content.clone(),
+                        blocks_with_context: vec![],
+                    })
+                    .blocks_with_context
+                    .extend(file_blocks.blocks_with_context.clone());
+            }
+            for (file_path, line_changes) in &context.line_changes {
+                merged_line_changes.insert(file_path.clone(), line_changes.to_vec());
+            }
+        }
+        Arc::new(ValidationContext::new(
+            merged_modified_blocks,
+            parsers,
+            merged_line_changes,
+            HashMap::new(),
+            Vec::new(),
+        ))
     }
 }

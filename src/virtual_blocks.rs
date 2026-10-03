@@ -1,5 +1,5 @@
 use crate::Position;
-use crate::blocks::{Block, BlockWithContext, Content, ContentText, Declaration};
+use crate::blocks::{Block, BlockWithContext, Content, Declaration};
 use crate::diff_parser::{self, LineChange};
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
@@ -101,14 +101,11 @@ impl VirtualBlock {
             definition_positions.start.clone()..Position::from_byte_offset(source, first_line_end);
         // The content is what a reference to the symbol reads, so that the two always agree.
         let content = match &symbol.value {
-            Some(value) => Content {
-                text: ContentText::Decoded(value.text.clone()),
-                positions: position_range(source, &value.byte_range),
-            },
-            None => Content {
-                text: ContentText::Source(definition.clone()),
-                positions: definition_positions.clone(),
-            },
+            Some(value) => Content::decoded(
+                value.text.clone(),
+                position_range(source, &value.byte_range),
+            ),
+            None => Content::source(definition.clone(), definition_positions.clone()),
         };
         Ok(BlockWithContext {
             block: Block {

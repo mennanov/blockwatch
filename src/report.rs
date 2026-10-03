@@ -99,7 +99,7 @@ impl RunReport {
         let mut files = BTreeMap::new();
         let mut blocks = 0;
         let mut blocks_unchecked = 0;
-        for (file_path, file_blocks) in &context.blocks {
+        for (file_path, file_blocks) in context.blocks() {
             let checked_in_file = log.checked_blocks.get(file_path);
             let mut listings = file_blocks.to_serializable_report();
             // There is one listing for each block, in the same order.
@@ -125,7 +125,7 @@ impl RunReport {
             summary: ReportSummary {
                 mode,
                 files_scanned: stats.files_scanned,
-                files_with_blocks: context.blocks.len(),
+                files_with_blocks: context.blocks().len(),
                 files_skipped: stats.files_skipped,
                 blocks,
                 blocks_unchecked,
@@ -182,7 +182,7 @@ mod tests {
 
     fn violation(context: &ValidationContext) -> Violation {
         let file_path = RepoPath::from_reference("example.py").expect("a valid repository path");
-        let block = &context.blocks[&file_path].blocks_with_context[0].block;
+        let block = &context.blocks()[&file_path].blocks_with_context[0].block;
         Violation::new(
             ViolationRange::new(Position::new(2, 1), Position::new(2, 8)),
             &file_path,
@@ -206,7 +206,7 @@ mod tests {
         let mut report = ValidationReport::default();
         report.add_all(
             &file_path,
-            &context.blocks[&file_path].blocks_with_context[block_index].block,
+            &context.blocks()[&file_path].blocks_with_context[block_index].block,
             violations,
         );
         let mut log = ValidationLog::default();
@@ -287,7 +287,7 @@ mod tests {
     fn json_describes_every_block_and_the_checks_that_ran() -> anyhow::Result<()> {
         let context = validation_context("example.py", CONTENTS);
         let file_path = RepoPath::from_reference("example.py")?;
-        let blocks = &context.blocks[&file_path].blocks_with_context;
+        let blocks = &context.blocks()[&file_path].blocks_with_context;
         let mut log = ValidationLog::default();
 
         // `keep-sorted` checks the first two blocks and finds one violation; `line-count` checks
@@ -395,7 +395,7 @@ mod tests {
             Vec::new(),
         );
         let mut log = ValidationLog::default();
-        let blocks = &context.blocks[&file_path].blocks_with_context;
+        let blocks = &context.blocks()[&file_path].blocks_with_context;
         for (block_with_context, validator) in blocks.iter().zip(["line-count", "same-as"]) {
             let mut report = ValidationReport::default();
             report.add_all(&file_path, &block_with_context.block, Vec::new());

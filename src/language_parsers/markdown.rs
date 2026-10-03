@@ -190,7 +190,7 @@ fn link_reference_definition_comment_text(comment: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blocks::{Block, Content, ContentText, Declaration};
+    use crate::blocks::{Block, Content, Declaration};
     use crate::{Position, test_utils};
     use std::collections::HashMap;
 
@@ -226,37 +226,31 @@ Some text here 3
                 Block {
                     attributes: HashMap::from([("name".to_string(), "md_block".to_string())]),
                     start_tag_position_range: Position::new(5, 10)..Position::new(5, 33),
-                    content: Content {
-                        text: ContentText::Source(test_utils::substr_range(
-                            content,
-                            "Some text here\n\n"
-                        )),
-                        positions: Position::new(6, 1)..Position::new(8, 1),
-                    },
+                    content: Content::source(
+                        test_utils::substr_range(content, "Some text here\n\n"),
+                        Position::new(6, 1)..Position::new(8, 1),
+                    ),
                     declaration: Declaration::Tags,
                 },
                 Block {
                     attributes: HashMap::from([("name".to_string(), "md_block_2".to_string())]),
                     start_tag_position_range: Position::new(10, 10)..Position::new(10, 35),
-                    content: Content {
-                        text: ContentText::Source(test_utils::substr_range(
+                    content: Content::source(
+                        test_utils::substr_range(
                             content,
                             "Some text here 2\n\n[//]: # (<block name=\"md_block_3\">)\nSome text here 3\n\n[//]: # (</block>)\n"
-                        )),
-                        positions: Position::new(11, 1)..Position::new(17, 1),
-                    },
+                        ),
+                        Position::new(11, 1)..Position::new(17, 1),
+                    ),
                     declaration: Declaration::Tags,
                 },
                 Block {
                     attributes: HashMap::from([("name".to_string(), "md_block_3".to_string())]),
                     start_tag_position_range: Position::new(13, 10)..Position::new(13, 35),
-                    content: Content {
-                        text: ContentText::Source(test_utils::substr_range(
-                            content,
-                            "Some text here 3\n\n"
-                        )),
-                        positions: Position::new(14, 1)..Position::new(16, 1),
-                    },
+                    content: Content::source(
+                        test_utils::substr_range(content, "Some text here 3\n\n"),
+                        Position::new(14, 1)..Position::new(16, 1),
+                    ),
                     declaration: Declaration::Tags,
                 }
             ]
@@ -328,13 +322,10 @@ Inline code `<!-- <block name="ignored"> -->` is not a comment.
             vec![Block {
                 attributes: HashMap::from([("name".to_string(), "inline_block".to_string())]),
                 start_tag_position_range: Position::new(4, 16)..Position::new(4, 43),
-                content: Content {
-                    text: ContentText::Source(test_utils::substr_range(
-                        content,
-                        " and\nmore content here\nending text "
-                    )),
-                    positions: Position::new(4, 47)..Position::new(6, 13),
-                },
+                content: Content::source(
+                    test_utils::substr_range(content, " and\nmore content here\nending text "),
+                    Position::new(4, 47)..Position::new(6, 13),
+                ),
                 declaration: Declaration::Tags,
             }]
         );
@@ -464,49 +455,40 @@ Not wrapped in HTML tags on multiple lines
                 Block {
                     attributes: HashMap::from([("name".to_string(), "html_block".to_string())]),
                     start_tag_position_range: Position::new(5, 6)..Position::new(5, 31),
-                    content: Content {
-                        text: ContentText::Source(test_utils::substr_range(
-                            content,
-                            "\nSome html content\n"
-                        )),
-                        positions: Position::new(5, 35)..Position::new(7, 1),
-                    },
+                    content: Content::source(
+                        test_utils::substr_range(content, "\nSome html content\n"),
+                        Position::new(5, 35)..Position::new(7, 1),
+                    ),
                     declaration: Declaration::Tags,
                 },
                 Block {
                     attributes: HashMap::from([("name".to_string(), "md_block".to_string())]),
                     start_tag_position_range: Position::new(10, 10)..Position::new(10, 33),
-                    content: Content {
-                        text: ContentText::Source(test_utils::substr_range(
-                            content,
-                            "Some markdown content\n\n"
-                        )),
-                        positions: Position::new(11, 1)..Position::new(13, 1),
-                    },
+                    content: Content::source(
+                        test_utils::substr_range(content, "Some markdown content\n\n"),
+                        Position::new(11, 1)..Position::new(13, 1),
+                    ),
                     declaration: Declaration::Tags,
                 },
                 Block {
                     attributes: HashMap::from([("name".to_string(), "html_block2".to_string())]),
                     start_tag_position_range: Position::new(15, 6)..Position::new(15, 32),
-                    content: Content {
-                        text: ContentText::Source(test_utils::substr_range(
-                            content,
-                            "Not wrapped in HTML tags"
-                        )),
-                        positions: Position::new(15, 36)..Position::new(15, 60),
-                    },
+                    content: Content::source(
+                        test_utils::substr_range(content, "Not wrapped in HTML tags"),
+                        Position::new(15, 36)..Position::new(15, 60),
+                    ),
                     declaration: Declaration::Tags,
                 },
                 Block {
                     attributes: HashMap::from([("name".to_string(), "html_block3".to_string())]),
                     start_tag_position_range: Position::new(17, 6)..Position::new(17, 32),
-                    content: Content {
-                        text: ContentText::Source(test_utils::substr_range(
+                    content: Content::source(
+                        test_utils::substr_range(
                             content,
                             "\nNot wrapped in HTML tags on multiple lines\n",
-                        )),
-                        positions: Position::new(17, 36)..Position::new(19, 1),
-                    },
+                        ),
+                        Position::new(17, 36)..Position::new(19, 1),
+                    ),
                     declaration: Declaration::Tags,
                 },
             ]

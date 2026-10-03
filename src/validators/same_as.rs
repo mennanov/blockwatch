@@ -521,9 +521,9 @@ mod validate_tests {
     use crate::repo_path::RepoPath;
     use crate::test_utils::validation_context;
     use crate::test_utils::validation_context_with_changes;
-    use crate::test_utils::{
-        checked_lines, merge_validation_contexts, violation_count, virtual_block,
-        with_virtual_blocks,
+    use crate::test_utils::virtual_block;
+    use crate::validators::test_utils::{
+        checked_lines, merge_validation_contexts, violation_count, with_virtual_blocks,
     };
 
     /// Build a validator with a fake filesystem seeded with `files` (path, contents). Used by every

@@ -215,7 +215,7 @@ pub struct Args {
 
     /// Glob patterns to filter files.
     #[arg(value_name = "GLOBS")]
-    pub globs: Vec<String>,
+    globs: Vec<String>,
 
     /// The subcommand to run, if any. `None` means the default action: validate.
     #[command(subcommand)]

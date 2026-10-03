@@ -45,18 +45,15 @@ impl RawSettings {
 }
 
 /// The validated settings for a run: the config file merged with the flags.
+///
+/// The fields are private, so the only way to get a `Settings` is [`Settings::resolve`], which
+/// checks every value.
 #[derive(Debug)]
 pub struct Settings {
-    /// Files to skip, even if a glob selects them.
-    pub ignored_globs: GlobSet,
-    /// Maps an extension to a supported one. For example, `cxx` to `cpp` makes `.cxx` files
-    /// parse as C++.
-    pub extensions: HashMap<OsString, OsString>,
-    /// Validators to skip. Empty if `enabled_validators` is not.
-    pub disabled_validators: HashSet<&'static str>,
-    /// If not empty, only these validators run. If empty, every validator runs except the
-    /// disabled ones.
-    pub enabled_validators: HashSet<&'static str>,
+    ignored_globs: GlobSet,
+    extensions: HashMap<OsString, OsString>,
+    disabled_validators: HashSet<&'static str>,
+    enabled_validators: HashSet<&'static str>,
 }
 
 impl Settings {
@@ -125,6 +122,28 @@ impl Settings {
             disabled_validators,
             enabled_validators,
         })
+    }
+
+    /// Files to skip, even if a glob selects them.
+    pub fn ignored_globs(&self) -> &GlobSet {
+        &self.ignored_globs
+    }
+
+    /// Maps an extension to a supported one. For example, `cxx` to `cpp` makes `.cxx` files parse
+    /// as C++.
+    pub fn extensions(&self) -> &HashMap<OsString, OsString> {
+        &self.extensions
+    }
+
+    /// Validators to skip. Empty if [`Settings::enabled_validators`] is not.
+    pub fn disabled_validators(&self) -> &HashSet<&'static str> {
+        &self.disabled_validators
+    }
+
+    /// If not empty, only these validators run. If empty, every validator runs except the
+    /// disabled ones.
+    pub fn enabled_validators(&self) -> &HashSet<&'static str> {
+        &self.enabled_validators
     }
 }
 

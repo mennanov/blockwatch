@@ -165,7 +165,8 @@ fn create_violation(
 mod validate_tests {
     use super::*;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::{checked_lines, validation_context, violation_count};
+    use crate::test_utils::validation_context;
+    use crate::validators::test_utils::{checked_lines, violation_count};
     use std::collections::HashMap;
 
     #[test]
