@@ -134,12 +134,15 @@ The whole pipeline is in `src/main.rs`:
 4. Resolve the run's settings. `config::read` reads `blockwatch.toml` from the repository root, or the file given by
    `--config`. `Args::raw_settings` returns the settings given as flags. `settings::Settings::resolve` validates both
    with the same rules and merges them: the ignore globs, the extension mappings and the validator selection.
+   `config::read` also returns the file's virtual blocks: its `[[block]]` entries, each around a symbol.
 5. Walk the repository with the `ignore` crate, which respects `.gitignore`. Keep the files that match the globs from
    the command line and don't match the settings' ignore globs. Pick each file's language by its extension, using the
    settings' extension mappings too.
 6. For each file, the matching `language_parsers::<lang>` (a tree-sitter grammar) finds the comments. `tag_parser` and
-   `block_parser` turn the comment text into `Block` values, with their attributes and their byte and line ranges. The
-   result is a `blocks::FileBlocks` for each file, kept in a `validators::ValidationContext`.
+   `block_parser` turn the comment text into `Block` values, with their attributes and their byte and line ranges.
+   `VirtualBlock::resolve` finds the symbol of each virtual block in the file, and adds it as a `Block` too. A target
+   that does not resolve stops the run. The result is a `blocks::FileBlocks` for each file, kept in a
+   `validators::ValidationContext`.
 7. `validators::detect_validators` passes each block to the `ValidatorDetector`s, one for each validator. A detector
    returns either `ValidatorType::Sync` or `ValidatorType::Async`. Async validators, such as `check-ai`, run on Tokio.
    The Tokio runtime only starts if at least one async validator is needed.
@@ -161,8 +164,13 @@ The main modules:
   the validated and merged result. `RawSettings::validate` is the only place the rules for a setting live, so the
   flags and the config file can't drift apart. Its errors quote the bad value but don't show a line and column.
   Tracking where each value is written would cost more code than it saves the reader.
-- `src/config.rs` — reads the config file into a `RawSettings`, using `toml_edit`'s serde support. Only the errors that
-  `toml_edit` raises itself, such as an unknown key, show a line and column.
+- `src/config.rs` — reads the config file into a `RawSettings` and the virtual blocks, using `toml_edit`'s serde
+  support. Only the errors that `toml_edit` raises itself, such as an unknown key, show a line and column. An error
+  about a `[[block]]` entry shows the line of its header, which `serde_spanned` gives.
+- `src/virtual_blocks.rs` — `VirtualBlock`, a block that the config file declares around a symbol, for a file without
+  comments. It is a block of the file it wraps. Its content is what a reference to the symbol reads: a scalar's decoded
+  value (`ContentText::Decoded`), or else the definition's text. Its `Block::declaration` is the config entry, so every
+  message about it shows that line, through `Block::declared_at`.
 - `src/repo_path.rs` — `RepoPath`, the one way to write a path relative to the repository root. A diff header
   (`b/src/main.rs`), a path found in the walk and a `file:name` attribute all become a `RepoPath`. So the same file is
   always the same map key.
@@ -201,7 +209,8 @@ A block counts as changed only when its content or its start tag overlaps a `Lin
 `--diff --only-changed`, only changed blocks are validated. With `--diff` alone, every block is validated, but rules
 that need a change, such as `affects`, only fire for changed blocks. This is the most common source of surprises. If a
 rule didn't fire, check whether the diff actually touched the block's lines. The same goes for an `affects` target that
-is a symbol. It counts as changed only when the diff touches that symbol's definition, not anything else in its file.
+is a symbol, and for a virtual block. They count as changed only when the diff touches the symbol's definition, not
+anything else in its file.
 
 The `check-ai` validator calls an OpenAI-compatible API. It is configured with `BLOCKWATCH_AI_API_KEY`,
 `BLOCKWATCH_AI_MODEL` and `BLOCKWATCH_AI_API_URL`. The `check-lua` validator embeds Lua 5.4 through `mlua`. The

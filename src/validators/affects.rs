@@ -124,6 +124,7 @@ impl<'a, Fs: FileSystem> TargetIndex<'a, Fs> {
                     every_block,
                     self.context.parsers(),
                     self.context.extra_file_extensions(),
+                    &[],
                 )?
                 .ok_or_else(|| {
                     anyhow!(
@@ -218,10 +219,10 @@ fn parse_references(
 ) -> anyhow::Result<Vec<TargetReference>> {
     validators::parse_target_references(affects).with_context(|| {
         format!(
-            "invalid affects reference on block {}:{} at line {}",
+            "invalid affects reference on block {}:{} at {}",
             file_path,
             block.name_display(),
-            block.start_tag_position_range.start.line,
+            block.declared_at(),
         )
     })
 }
@@ -269,10 +270,10 @@ fn symbol_reference_violation<Fs: FileSystem>(
         Ok(target_modified) => target_modified,
         Err(reason) => {
             let message = format!(
-                "Block {}:{} at line {} references {}: {reason}",
+                "Block {}:{} at {} references {}: {reason}",
                 file_path.display(),
                 block.name_display(),
-                block.start_tag_position_range.start.line,
+                block.declared_at(),
                 target_display(target_file, Some(&target_name)),
             );
             return Ok(Some(affects_violation(
@@ -372,10 +373,10 @@ fn create_violation(
     affected_block_name: Option<&str>,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {}:{} at line {} is modified, but {} is not",
+        "Block {}:{} at {} is modified, but {} is not",
         modified_block_file_path.display(),
         modified_block.name_display(),
-        modified_block.start_tag_position_range.start.line,
+        modified_block.declared_at(),
         target_display(affected_block_file_path, affected_block_name),
     );
     affects_violation(
@@ -397,10 +398,10 @@ fn dangling_reference_violation(
     target_name: Option<&str>,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {}:{} at line {} references {}, which does not exist",
+        "Block {}:{} at {} references {}, which does not exist",
         referencing_block_file_path.display(),
         referencing_block.name_display(),
-        referencing_block.start_tag_position_range.start.line,
+        referencing_block.declared_at(),
         target_display(target_file_path, target_name),
     );
     affects_violation(
@@ -494,6 +495,7 @@ mod validate_tests {
             &crate::fs::test_utils::FakePathChecker::allow_only("source.py"),
             &parsers,
             &HashMap::new(),
+            &[],
         )?;
         assert!(
             !parsed
@@ -1003,6 +1005,7 @@ pass
             &crate::fs::test_utils::FakePathChecker::allow_all(),
             &parsers,
             &HashMap::new(),
+            &[],
         )?;
         Ok(Arc::new(validators::ValidationContext::new(
             parsed.blocks,

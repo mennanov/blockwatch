@@ -1,5 +1,5 @@
 use crate::Position;
-use crate::blocks::Block;
+use crate::blocks::{Block, Content, ContentText, Declaration};
 use crate::language_parsers::{Comment, CommentsParser};
 use crate::tag_parser::{BlockTag, BlockTagParser, MalformedBlockTagError, WinnowBlockTagParser};
 use std::collections::{HashMap, VecDeque};
@@ -299,15 +299,18 @@ impl BlockEnd {
         Block {
             attributes: block_start.attributes,
             start_tag_position_range: block_start.start_tag_position_range,
-            content_bytes_range: content_range,
-            content_position_range: content_start_position..content_end_position,
+            content: Content {
+                text: ContentText::Source(content_range),
+                positions: content_start_position..content_end_position,
+            },
+            declaration: Declaration::Tags,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::blocks::Block;
+    use crate::blocks::{Block, Content, ContentText, Declaration};
     use crate::language_parsers::LanguageParser;
     use crate::{Position, language_parsers, test_utils};
     use std::collections::HashMap;
@@ -345,8 +348,14 @@ mod tests {
             vec![Block {
                 attributes: HashMap::new(),
                 start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
-                content_bytes_range: test_utils::substr_range(contents, " let say = \"hi\"; "),
-                content_position_range: Position::new(1, 14)..Position::new(1, 31),
+                content: Content {
+                    text: ContentText::Source(test_utils::substr_range(
+                        contents,
+                        " let say = \"hi\"; "
+                    )),
+                    positions: Position::new(1, 14)..Position::new(1, 31),
+                },
+                declaration: Declaration::Tags,
             },]
         );
         Ok(())
@@ -362,8 +371,14 @@ mod tests {
             vec![Block {
                 attributes: HashMap::new(),
                 start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
-                content_bytes_range: test_utils::substr_range(contents, "\nlet say = \"hi\";\n"),
-                content_position_range: Position::new(1, 11)..Position::new(3, 1)
+                content: Content {
+                    text: ContentText::Source(test_utils::substr_range(
+                        contents,
+                        "\nlet say = \"hi\";\n"
+                    )),
+                    positions: Position::new(1, 11)..Position::new(3, 1),
+                },
+                declaration: Declaration::Tags,
             },]
         );
         Ok(())
@@ -385,20 +400,26 @@ println!("hello2");
                 Block {
                     attributes: HashMap::new(),
                     start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
-                    content_bytes_range: test_utils::substr_range(
-                        contents,
-                        "\nprintln!(\"hello1\");\n"
-                    ),
-                    content_position_range: Position::new(1, 11)..Position::new(3, 1),
+                    content: Content {
+                        text: ContentText::Source(test_utils::substr_range(
+                            contents,
+                            "\nprintln!(\"hello1\");\n"
+                        )),
+                        positions: Position::new(1, 11)..Position::new(3, 1),
+                    },
+                    declaration: Declaration::Tags,
                 },
                 Block {
                     attributes: HashMap::new(),
                     start_tag_position_range: Position::new(4, 4)..Position::new(4, 11),
-                    content_bytes_range: test_utils::substr_range(
-                        contents,
-                        "\nprintln!(\"hello2\");\n"
-                    ),
-                    content_position_range: Position::new(4, 11)..Position::new(6, 1),
+                    content: Content {
+                        text: ContentText::Source(test_utils::substr_range(
+                            contents,
+                            "\nprintln!(\"hello2\");\n"
+                        )),
+                        positions: Position::new(4, 11)..Position::new(6, 1),
+                    },
+                    declaration: Declaration::Tags,
                 }
             ]
         );
@@ -416,20 +437,26 @@ println!("hello2");
                 Block {
                     attributes: HashMap::new(),
                     start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
-                    content_bytes_range: test_utils::substr_range(
-                        contents,
-                        "println!(\"hello1\");"
-                    ),
-                    content_position_range: Position::new(1, 14)..Position::new(1, 33),
+                    content: Content {
+                        text: ContentText::Source(test_utils::substr_range(
+                            contents,
+                            "println!(\"hello1\");"
+                        )),
+                        positions: Position::new(1, 14)..Position::new(1, 33),
+                    },
+                    declaration: Declaration::Tags,
                 },
                 Block {
                     attributes: HashMap::new(),
                     start_tag_position_range: Position::new(1, 44)..Position::new(1, 51),
-                    content_bytes_range: test_utils::substr_range(
-                        contents,
-                        "println!(\"hello2\");"
-                    ),
-                    content_position_range: Position::new(1, 54)..Position::new(1, 73),
+                    content: Content {
+                        text: ContentText::Source(test_utils::substr_range(
+                            contents,
+                            "println!(\"hello2\");"
+                        )),
+                        positions: Position::new(1, 54)..Position::new(1, 73),
+                    },
+                    declaration: Declaration::Tags,
                 }
             ]
         );
@@ -447,20 +474,26 @@ println!("hello2");
                 Block {
                     attributes: HashMap::new(),
                     start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
-                    content_bytes_range: test_utils::substr_range(
-                        contents,
-                        "\nprintln!(\"hello1\");\n"
-                    ),
-                    content_position_range: Position::new(1, 11)..Position::new(3, 1),
+                    content: Content {
+                        text: ContentText::Source(test_utils::substr_range(
+                            contents,
+                            "\nprintln!(\"hello1\");\n"
+                        )),
+                        positions: Position::new(1, 11)..Position::new(3, 1),
+                    },
+                    declaration: Declaration::Tags,
                 },
                 Block {
                     attributes: HashMap::new(),
                     start_tag_position_range: Position::new(3, 12)..Position::new(3, 19),
-                    content_bytes_range: test_utils::substr_range(
-                        contents,
-                        "\nprintln!(\"hello2\");\n"
-                    ),
-                    content_position_range: Position::new(3, 22)..Position::new(5, 1),
+                    content: Content {
+                        text: ContentText::Source(test_utils::substr_range(
+                            contents,
+                            "\nprintln!(\"hello2\");\n"
+                        )),
+                        positions: Position::new(3, 22)..Position::new(5, 1),
+                    },
+                    declaration: Declaration::Tags,
                 }
             ]
         );
@@ -505,32 +538,47 @@ println!("hello2");
                 Block {
                     attributes: HashMap::from([("name".to_string(), "foo".to_string())]),
                     start_tag_position_range: Position::new(2, 12)..Position::new(2, 30),
-                    content_bytes_range: 30..620,
-                    content_position_range: Position::new(2, 30)..Position::new(25, 9),
+                    content: Content {
+                        text: ContentText::Source(30..620),
+                        positions: Position::new(2, 30)..Position::new(25, 9),
+                    },
+                    declaration: Declaration::Tags,
                 },
                 Block {
                     attributes: HashMap::from([("name".to_string(), "bar".to_string())]),
                     start_tag_position_range: Position::new(7, 16)..Position::new(7, 34),
-                    content_bytes_range: 142..440,
-                    content_position_range: Position::new(7, 34)..Position::new(17, 13),
+                    content: Content {
+                        text: ContentText::Source(142..440),
+                        positions: Position::new(7, 34)..Position::new(17, 13),
+                    },
+                    declaration: Declaration::Tags,
                 },
                 Block {
                     attributes: HashMap::from([("name".to_string(), "bar-bar".to_string())]),
                     start_tag_position_range: Position::new(11, 20)..Position::new(11, 42),
-                    content_bytes_range: 281..415,
-                    content_position_range: Position::new(11, 42)..Position::new(15, 17),
+                    content: Content {
+                        text: ContentText::Source(281..415),
+                        positions: Position::new(11, 42)..Position::new(15, 17),
+                    },
+                    declaration: Declaration::Tags,
                 },
                 Block {
                     attributes: HashMap::from([("name".to_string(), "buzz".to_string())]),
                     start_tag_position_range: Position::new(19, 16)..Position::new(19, 35),
-                    content_bytes_range: 487..599,
-                    content_position_range: Position::new(19, 35)..Position::new(23, 13),
+                    content: Content {
+                        text: ContentText::Source(487..599),
+                        positions: Position::new(19, 35)..Position::new(23, 13),
+                    },
+                    declaration: Declaration::Tags,
                 },
                 Block {
                     attributes: HashMap::from([("name".to_string(), "fizz".to_string())]),
                     start_tag_position_range: Position::new(26, 12)..Position::new(26, 31),
-                    content_bytes_range: 662..671,
-                    content_position_range: Position::new(26, 31)..Position::new(27, 9),
+                    content: Content {
+                        text: ContentText::Source(662..671),
+                        positions: Position::new(26, 31)..Position::new(27, 9),
+                    },
+                    declaration: Declaration::Tags,
                 },
             ]
         );
@@ -574,11 +622,14 @@ println!("hello2");
             vec![Block {
                 attributes: HashMap::from([("name".to_string(), "foo".to_string())]),
                 start_tag_position_range: Position::new(1, 4)..Position::new(1, 22),
-                content_bytes_range: test_utils::substr_range(
-                    contents,
-                    "\n        let word = \"hello\";\n        "
-                ),
-                content_position_range: Position::new(1, 42)..Position::new(3, 9),
+                content: Content {
+                    text: ContentText::Source(test_utils::substr_range(
+                        contents,
+                        "\n        let word = \"hello\";\n        "
+                    )),
+                    positions: Position::new(1, 42)..Position::new(3, 9),
+                },
+                declaration: Declaration::Tags,
             },]
         );
         Ok(())
@@ -590,8 +641,8 @@ println!("hello2");
         let contents = "// <block>\r\nWindows\r\n// </block>\n// <block>\nUnix\n// </block>";
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 2);
-        assert!(blocks[0].content(contents).contains("\r\n"));
-        assert!(blocks[1].content(contents).contains("\n"));
+        assert!(blocks[0].content.text(contents).contains("\r\n"));
+        assert!(blocks[1].content.text(contents).contains("\n"));
         Ok(())
     }
 
@@ -605,8 +656,14 @@ println!("hello2");
             vec![Block {
                 attributes: HashMap::new(),
                 start_tag_position_range: Position::new(1, 4)..Position::new(2, 2),
-                content_bytes_range: test_utils::substr_range(contents, " let say = \"hi\"; "),
-                content_position_range: Position::new(2, 5)..Position::new(2, 22),
+                content: Content {
+                    text: ContentText::Source(test_utils::substr_range(
+                        contents,
+                        " let say = \"hi\"; "
+                    )),
+                    positions: Position::new(2, 5)..Position::new(2, 22),
+                },
+                declaration: Declaration::Tags,
             },]
         );
         Ok(())
@@ -622,8 +679,14 @@ println!("hello2");
             vec![Block {
                 attributes: HashMap::new(),
                 start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
-                content_bytes_range: test_utils::substr_range(contents, " let say = \"hi\"; "),
-                content_position_range: Position::new(1, 14)..Position::new(1, 31),
+                content: Content {
+                    text: ContentText::Source(test_utils::substr_range(
+                        contents,
+                        " let say = \"hi\"; "
+                    )),
+                    positions: Position::new(1, 14)..Position::new(1, 31),
+                },
+                declaration: Declaration::Tags,
             },]
         );
         Ok(())
@@ -639,8 +702,14 @@ println!("hello2");
             vec![Block {
                 attributes: HashMap::new(),
                 start_tag_position_range: Position::new(2, 1)..Position::new(2, 8),
-                content_bytes_range: test_utils::substr_range(contents, "println!(\"hello1\");"),
-                content_position_range: Position::new(2, 11)..Position::new(2, 30),
+                content: Content {
+                    text: ContentText::Source(test_utils::substr_range(
+                        contents,
+                        "println!(\"hello1\");"
+                    )),
+                    positions: Position::new(2, 11)..Position::new(2, 30),
+                },
+                declaration: Declaration::Tags,
             },]
         );
         Ok(())
@@ -656,8 +725,14 @@ println!("hello2");
             vec![Block {
                 attributes: HashMap::new(),
                 start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
-                content_bytes_range: test_utils::substr_range(contents, "println!(\"hello1\");"),
-                content_position_range: Position::new(1, 14)..Position::new(1, 33),
+                content: Content {
+                    text: ContentText::Source(test_utils::substr_range(
+                        contents,
+                        "println!(\"hello1\");"
+                    )),
+                    positions: Position::new(1, 14)..Position::new(1, 33),
+                },
+                declaration: Declaration::Tags,
             },]
         );
         Ok(())
@@ -675,8 +750,14 @@ println!("hello2");
             vec![Block {
                 attributes: HashMap::new(),
                 start_tag_position_range: Position::new(1, 9)..Position::new(1, 16),
-                content_bytes_range: test_utils::substr_range(contents, "\nlet say = \"hi\";\n"),
-                content_position_range: Position::new(1, 16)..Position::new(3, 1)
+                content: Content {
+                    text: ContentText::Source(test_utils::substr_range(
+                        contents,
+                        "\nlet say = \"hi\";\n"
+                    )),
+                    positions: Position::new(1, 16)..Position::new(3, 1),
+                },
+                declaration: Declaration::Tags,
             },]
         );
         Ok(())
@@ -695,8 +776,14 @@ println!("hello2");
             vec![Block {
                 attributes: HashMap::new(),
                 start_tag_position_range: Position::new(2, 9)..Position::new(2, 16),
-                content_bytes_range: test_utils::substr_range(contents, "\nlet say = \"hi\";\n"),
-                content_position_range: Position::new(2, 19)..Position::new(4, 1)
+                content: Content {
+                    text: ContentText::Source(test_utils::substr_range(
+                        contents,
+                        "\nlet say = \"hi\";\n"
+                    )),
+                    positions: Position::new(2, 19)..Position::new(4, 1),
+                },
+                declaration: Declaration::Tags,
             },]
         );
         Ok(())

@@ -157,6 +157,9 @@ disable = ['check-ai']
 cxx = 'cpp'
 ```
 
+A file without comments, such as `package.json`, can get its rules there too, as
+[blocks in the config file](docs/cli.md#blocks-in-the-config-file).
+
 See [docs/cli.md](docs/cli.md) for the run modes in full, CLI flags, the [config file](docs/cli.md#config-file), path
 exclusions, and custom extension mappings.
 
@@ -245,9 +248,9 @@ blockwatch -E cxx=cpp -E hpp=cpp
 - **Deleting a block deletes its rule, quietly.** Remove a file, or just strip the tags out of it, and the links it
   declared are gone. The run passes and nothing tells you a rule disappeared. Blocks still *pointing* at the deleted one
   do fail, as a missing reference.
-- **A file needs comments to hold a block.** Plain JSON, CSV and `.env` files have nowhere to put a tag. Link to such a
-  file as a [whole file](docs/validators/affects.md#whole-files) instead, or, if the file has
-  [symbols](docs/symbols.md), to a single key.
+- **A file needs comments or symbols to hold a block.** CSV and `.env` files have nowhere to put a tag. Link to such a
+  file as a [whole file](docs/validators/affects.md#whole-files) instead. A file with [symbols](docs/symbols.md), such
+  as plain JSON, can get its blocks from the [config file](docs/cli.md#blocks-in-the-config-file).
 - **Unsupported extensions are skipped silently.** A run that read nothing looks exactly like a run that found no
   problems. `blockwatch --verbosity summary` prints how many files were actually read.
 

@@ -127,10 +127,10 @@ fn parse_references(
 ) -> anyhow::Result<Vec<TargetReference>> {
     validators::parse_target_references(same_as).with_context(|| {
         format!(
-            "invalid same-as reference on block {}:{} at line {}",
+            "invalid same-as reference on block {}:{} at {}",
             file_path,
             block.name_display(),
-            block.start_tag_position_range.start.line,
+            block.declared_at(),
         )
     })
 }
@@ -188,7 +188,7 @@ fn reference_violation<Fs: FileSystem>(
 /// Without a pattern, the comparable value is the block's normalized whole content as a single item.
 fn extract_items(block: &Block, file_content: &str) -> anyhow::Result<Vec<String>> {
     extract_items_from(
-        block.content(file_content),
+        block.content.text(file_content),
         block.attributes.get("same-as-pattern"),
     )
 }
@@ -288,6 +288,7 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
                     every_block,
                     self.context.parsers(),
                     self.context.extra_file_extensions(),
+                    &[],
                 )?
                 .ok_or_else(|| {
                     anyhow!(
@@ -466,13 +467,12 @@ fn create_violation(
     target_name: Option<&str>,
     reason: &str,
 ) -> anyhow::Result<Violation> {
-    let line = block.start_tag_position_range.start.line;
     let target = target_display(target_file, target_name);
     let message = format!(
-        "Block {}:{} at line {} disagrees with {target}: {reason}",
+        "Block {}:{} at {} disagrees with {target}: {reason}",
         file_path.display(),
         block.name_display(),
-        line,
+        block.declared_at(),
     );
     Violation::new(
         ViolationRange::new(

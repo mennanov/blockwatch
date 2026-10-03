@@ -54,6 +54,42 @@ fn config_flag_reads_a_path_relative_to_the_working_directory() -> anyhow::Resul
 }
 
 #[test]
+fn virtual_block_violation_is_reported_in_the_file_it_wraps() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = temp.path().join("repo");
+    std::fs::create_dir_all(root.join(".git"))?;
+    std::fs::write(root.join("package.json"), "{\n  \"version\": \"1.2\"\n}\n")?;
+    std::fs::write(
+        root.join("blockwatch.toml"),
+        r#"[[block]]
+target = 'package.json#/version'
+line-pattern = '^\d+\.\d+\.\d+$'
+"#,
+    )?;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.current_dir(&root);
+    let output = cmd.output()?;
+
+    output.clone().assert().failure();
+    let violations: serde_json::Value = serde_json::from_slice(&output.stderr)?;
+    let violation = &violations["package.json"][0];
+    assert_eq!(violation["code"], "line-pattern");
+    // The value starts after the key, at column 14 of line 2.
+    assert_eq!(
+        violation["range"]["start"],
+        serde_json::json!({"line": 2, "character": 14})
+    );
+    // The rule is written in the config file, so the message shows the line there.
+    assert_eq!(
+        violation["message"],
+        "Block package.json:(unnamed) defined at line 1 of \"blockwatch.toml\" has a \
+         non-matching line 2 (pattern: /^\\d+\\.\\d+\\.\\d+$/)"
+    );
+    Ok(())
+}
+
+#[test]
 fn config_with_an_unknown_key_fails_the_run_at_its_position() -> anyhow::Result<()> {
     let temp = tempfile::tempdir()?;
     let root = repo_with_a_generated_violation(temp.path())?;

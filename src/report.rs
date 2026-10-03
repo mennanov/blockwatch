@@ -1,7 +1,6 @@
 //! Builds the report that `--verbosity` prints: the files a run scanned, the blocks it found, and
 //! the validators that checked them.
 
-use crate::Position;
 use crate::blocks::ScanStats;
 use crate::repo_path::RepoPath;
 use crate::validators::{ValidationContext, ValidationLog};
@@ -103,15 +102,13 @@ impl RunReport {
         for (file_path, file_blocks) in &context.blocks {
             let checked_in_file = log.checked_blocks.get(file_path);
             let mut listings = file_blocks.to_serializable_report();
-            for listing in &mut listings {
+            // There is one listing for each block, in the same order.
+            for (block_with_context, listing) in
+                file_blocks.blocks_with_context.iter().zip(&mut listings)
+            {
                 blocks += 1;
-                // The listings are sorted by line, so a block is found by its start position
-                // rather than by its index.
-                let position = Position::new(
-                    listing["line"].as_u64().unwrap_or_default() as usize,
-                    listing["column"].as_u64().unwrap_or_default() as usize,
-                );
-                match checked_in_file.and_then(|blocks| blocks.get(&position)) {
+                let key = block_with_context.block.key();
+                match checked_in_file.and_then(|blocks| blocks.get(&key)) {
                     Some(block_validators) => {
                         listing["checks"] = serde_json::to_value(block_validators)?;
                     }
@@ -165,9 +162,13 @@ impl RunReport {
 mod tests {
     use super::*;
     use crate::Position;
+    use crate::blocks::{ScanMode, parse_blocks};
+    use crate::fs::test_utils::{FakeFileSystem, FakePathChecker};
+    use crate::language_parsers::language_parsers;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::validation_context;
+    use crate::test_utils::{validation_context, virtual_block};
     use crate::validators::{ValidationLog, ValidationReport, Violation, ViolationRange};
+    use std::collections::HashMap;
 
     const CONTENTS: &str = r#"# <block name="both" keep-sorted="asc" line-count="<=2">
 'apple',
@@ -364,6 +365,56 @@ mod tests {
                     ]
                 }
             })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn virtual_blocks_that_start_at_the_same_place_keep_their_own_checks() -> anyhow::Result<()> {
+        // In `a.b = 1`, the symbols `/a` and `/a/b` both start at `b`.
+        let file_path = RepoPath::from_reference("a.toml")?;
+        let mut inner = virtual_block("a.toml#/a/b", &[])?;
+        inner.entry.line = 9;
+        let parsed = parse_blocks(
+            &HashMap::new(),
+            ScanMode::All,
+            &FakeFileSystem::new(HashMap::from([(
+                "a.toml".to_string(),
+                "a.b = 1\n".to_string(),
+            )])),
+            &FakePathChecker::allow_all(),
+            &language_parsers()?,
+            &HashMap::new(),
+            &[virtual_block("a.toml#/a", &[])?, inner],
+        )?;
+        let context = ValidationContext::new(
+            parsed.blocks,
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        );
+        let mut log = ValidationLog::default();
+        let blocks = &context.blocks[&file_path].blocks_with_context;
+        for (block_with_context, validator) in blocks.iter().zip(["line-count", "same-as"]) {
+            let mut report = ValidationReport::default();
+            report.add_all(&file_path, &block_with_context.block, Vec::new());
+            log.add_validation_report(validator, report);
+        }
+
+        let report = RunReport::new(RunMode::All, None, ScanStats::default(), &context, &log)?;
+
+        let checks: Vec<serde_json::Value> = serde_json::to_value(&report)?["files"]["a.toml"]
+            .as_array()
+            .expect("the file is listed")
+            .iter()
+            .map(|listing| listing["checks"].clone())
+            .collect();
+        assert_eq!(
+            checks,
+            vec![
+                serde_json::json!(["line-count"]),
+                serde_json::json!(["same-as"])
+            ]
         );
         Ok(())
     }

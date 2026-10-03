@@ -30,6 +30,8 @@ mod tag_parser;
 pub mod validators;
 /// Unique violation address.
 pub mod violation_address;
+/// Blocks that the config file declares around a symbol, instead of tags in a comment.
+pub mod virtual_blocks;
 
 /// A place in a source file.
 #[derive(Serialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -75,9 +77,12 @@ mod test_utils {
     use crate::fs::test_utils::{FakeFileSystem, FakePathChecker};
     use crate::language_parsers;
     use crate::repo_path::RepoPath;
+    use crate::symbol_path::SymbolPath;
     use crate::validators::ValidationContext;
+    use crate::virtual_blocks::{ConfigEntry, VirtualBlock};
     use std::collections::HashMap;
     use std::ops::Range;
+    use std::path::PathBuf;
     use std::sync::Arc;
 
     /// The start line of every block a validator reported checking, in the order it checked them.
@@ -85,7 +90,7 @@ mod test_utils {
         report
             .checked_blocks
             .iter()
-            .map(|(_, position)| position.line)
+            .map(|(_, key)| key.start.line)
             .collect()
     }
 
@@ -148,6 +153,7 @@ mod test_utils {
                 &FakePathChecker::allow_all(),
                 &parsers,
                 &HashMap::new(),
+                &[],
             )
             .unwrap()
             .blocks,
@@ -155,6 +161,27 @@ mod test_utils {
             line_changes_by_file,
             HashMap::new(),
         ))
+    }
+
+    /// A virtual block around `target`, such as `a.json#/key`, with `attributes`. It is declared
+    /// at line 7 of `blockwatch.toml`.
+    pub(crate) fn virtual_block(
+        target: &str,
+        attributes: &[(&str, &str)],
+    ) -> anyhow::Result<VirtualBlock> {
+        let (file, path) = target.split_once('#').expect("the target has a `#`");
+        Ok(VirtualBlock {
+            file: RepoPath::from_reference(file)?,
+            path: SymbolPath::parse(path)?,
+            attributes: attributes
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.to_string()))
+                .collect(),
+            entry: ConfigEntry {
+                file: PathBuf::from("blockwatch.toml"),
+                line: 7,
+            },
+        })
     }
 
     /// Combines several single-file contexts into one, so a test can exercise a validator that

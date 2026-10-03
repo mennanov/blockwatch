@@ -52,7 +52,8 @@ impl ValidatorSync for KeepUniqueValidator {
                 let mut seen: HashSet<&str> = HashSet::new();
                 for (line_number, line) in block_with_context
                     .block
-                    .content(&file_blocks.file_content)
+                    .content
+                    .text(&file_blocks.file_content)
                     .lines()
                     .enumerate()
                 {
@@ -62,10 +63,10 @@ impl ValidatorSync for KeepUniqueValidator {
                         Some(Err(e)) => {
                             // Invalid regex: return an error for the validator
                             return Err(anyhow::anyhow!(
-                                "Invalid keep-unique regex pattern for block {}:{} defined at line {}: {}",
+                                "Invalid keep-unique regex pattern for block {}:{} defined at {}: {}",
                                 file_path.display(),
                                 block_with_context.block.name_display(),
-                                block_with_context.block.start_tag_position_range.start.line,
+                                block_with_context.block.declared_at(),
                                 e
                             ));
                         }
@@ -78,7 +79,8 @@ impl ValidatorSync for KeepUniqueValidator {
                         // tag's comment ends.
                         let violation_start = block_with_context
                             .block
-                            .content_position(line_number, line_range.start);
+                            .content
+                            .position(line_number, line_range.start);
                         let line_character_end = violation_start.character + line_range.len();
                         block_violations.push(create_violation(
                             file_path,
@@ -137,10 +139,10 @@ fn create_violation(
     violation_character_end: usize,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {}:{} defined at line {} has a duplicated line {}",
+        "Block {}:{} defined at {} has a duplicated line {}",
         block_file_path.display(),
         block.name_display(),
-        block.start_tag_position_range.start.line,
+        block.declared_at(),
         violation_line_number,
     );
     Violation::new(

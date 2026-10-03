@@ -228,7 +228,7 @@ Caused by:
       |
     1 | ignor = ['x']
       | ^^^^^
-    unknown field `ignor`, expected one of `ignore`, `extensions`, `enable`, `disable`
+    unknown field `ignor`, expected one of `ignore`, `extensions`, `enable`, `disable`, `block`
 ```
 
 Everything else stays out of the file:
@@ -238,6 +238,60 @@ Everything else stays out of the file:
 - **The environment variables of `check-ai` and `check-lua`** stay in the environment. Anyone who can open a pull
   request can edit the config file. From there, unsafe Lua could run any code in CI, and an API URL could send the code
   and the API key to any server.
+
+### Blocks in the Config File
+
+A file without comments, such as `package.json`, has no place for a tag. Declare its blocks in the config file instead.
+Each `[[block]]` entry wraps one [symbol](symbols.md). Such a block is a **virtual block**:
+
+```toml
+# When the React version changes, the install guide must change too.
+[[block]]
+target = 'package.json#/dependencies/react'
+name = 'react-version'
+affects = 'docs/install.md:react-version'
+
+# A scalar is checked as its value, without the key and the quotes.
+[[block]]
+target = 'package.json#/version'
+line-pattern = '^\d+\.\d+\.\d+$'
+
+[[block]]
+target = 'package.json#/keywords'
+keep-sorted = true
+keep-sorted-pattern = '^"(?P<value>[^"]+)",?$'
+```
+
+- `target` is required. It is a symbol in a file, such as `package.json#/version`. Any other target, such as a whole
+  file or a named block, is an error.
+- Every other key is an attribute, with the same name and meaning as in a tag. An unknown attribute is an error.
+- A value is a string. `true` stands for an attribute without a value, so `keep-unique = true` is `keep-unique`. An
+  integer counts as its digits, so `check-lua-timeout = 30` works. Any other value is an error.
+- A symbol has at most one block. Put all its attributes in one entry: a second entry for the same symbol is an error.
+
+A virtual block is a block of the file it wraps:
+
+- **Its content is what a reference to the symbol reads.** A scalar gives its value: `1.2.3`, not
+  `"version": "1.2.3"`. An object, a list or a table gives its text, key included.
+- **Its violations are reported in that file.** A violation of the whole block points at the first line of the symbol.
+  A violation inside a scalar points at the start of the value.
+- **Its `name` is a block name in that file.** A name that another block in the file already has is an error.
+- **The run's filters apply to that file.** When the globs, `--ignore` or `.gitignore` leave the file out, its virtual
+  blocks are not checked.
+- **It counts as changed when the diff touches the symbol.** A change elsewhere in the file does not count.
+
+A target that does not resolve stops the run. That is a missing file, a file without symbols or with a syntax error,
+a missing or ambiguous symbol, or a TOML table written in several places. The error shows the entry's line:
+
+```text
+Error: invalid block at line 7 of "blockwatch.toml"
+
+Caused by:
+    0: target package.json#/versoin does not resolve
+    1: symbol not found; did you mean: /version
+```
+
+[`blockwatch list`](#the-list-command) shows a virtual block under the file it wraps.
 
 ## Suppressing a Violation
 
@@ -420,6 +474,9 @@ during non-interactive scripts or pipeline commands (e.g. `blockwatch list "src/
 Each block entry carries an `is_content_modified` boolean field. Without a diff nothing marks a block as changed, so it
 is `false` throughout; under `--diff` it identifies the blocks the diff touched.
 
+A [virtual block](#blocks-in-the-config-file) also has `config_line`: the line of the config file that declares it.
+Its `line` and `column` are where the symbol starts.
+
 Lines and columns are 1-based, with an exclusive end column. A column counts characters rather than bytes, so a
 multi-byte character such as `é` or an emoji advances it by one. The `range` of a violation follows the same
 convention: the start is inclusive and the end is exclusive (`[start, end)`).
@@ -448,6 +505,18 @@ convention: the start is inclusive and the end is exclusive (`[start, end)`).
       "column": 8,
       "is_content_modified": false,
       "line": 40,
+      "name": "(unnamed)"
+    }
+  ],
+  "package.json": [
+    {
+      "attributes": {
+        "line-pattern": "^\\d+\\.\\d+\\.\\d+$"
+      },
+      "column": 3,
+      "config_line": 7,
+      "is_content_modified": false,
+      "line": 3,
       "name": "(unnamed)"
     }
   ]

@@ -413,7 +413,7 @@ fn help_uri(validator: &str) -> String {
 mod tests {
     use super::*;
     use crate::Position;
-    use crate::blocks::Block;
+    use crate::blocks::{Block, Content, ContentText, Declaration};
     use crate::validators::ViolationRange;
     use assert_json_diff::assert_json_include;
     use serde_json::{Value, json};
@@ -433,8 +433,11 @@ mod tests {
         Block {
             attributes,
             start_tag_position_range: Position::new(1, 1)..Position::new(1, 1),
-            content_bytes_range: 0..0,
-            content_position_range: Position::new(1, 1)..Position::new(1, 1),
+            content: Content {
+                text: ContentText::Source(0..0),
+                positions: Position::new(1, 1)..Position::new(1, 1),
+            },
+            declaration: Declaration::Tags,
         }
     }
 

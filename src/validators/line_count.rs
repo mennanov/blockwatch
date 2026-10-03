@@ -42,23 +42,25 @@ impl ValidatorSync for LineCountValidator {
                     continue;
                 };
                 let (op, expected) = parse_constraint(expr).map_err(|e| anyhow!(
-                    "line-count expected a comparator like <N, <=N, ==N, >=N, >N; got \"{}\" in {}:{} at line {} (error: {})",
+                    "line-count expected a comparator like <N, <=N, ==N, >=N, >N; got \"{}\" in {}:{} at {} (error: {})",
                     expr,
                     file_path.display(),
                     block_with_context.block.name_display(),
-                    block_with_context.block.start_tag_position_range.start.line,
+                    block_with_context.block.declared_at(),
                     e
                 ))?;
                 let actual = if block_with_context
                     .block
-                    .content(&file_blocks.file_content)
+                    .content
+                    .text(&file_blocks.file_content)
                     .is_empty()
                 {
                     0
                 } else {
                     block_with_context
                         .block
-                        .content(&file_blocks.file_content)
+                        .content
+                        .text(&file_blocks.file_content)
                         .lines()
                         .filter(|line| !line.trim().is_empty())
                         .count()
@@ -96,10 +98,10 @@ fn create_violation(
     actual: usize,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {}:{} defined at line {} has {} lines, which does not satisfy {}{}",
+        "Block {}:{} defined at {} has {} lines, which does not satisfy {}{}",
         block_file_path.display(),
         block.name_display(),
-        block.start_tag_position_range.start.line,
+        block.declared_at(),
         actual,
         operation.as_str(),
         expected

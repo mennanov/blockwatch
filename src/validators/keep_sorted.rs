@@ -72,11 +72,11 @@ impl ValidatorSync for KeepSortedValidator {
                     };
                     if keep_sorted_normalized != "asc" && keep_sorted_normalized != "desc" {
                         return Err(anyhow!(
-                            "keep-sorted expected values are \"asc\" or \"desc\", got \"{}\" in {}:{} at line {}",
+                            "keep-sorted expected values are \"asc\" or \"desc\", got \"{}\" in {}:{} at {}",
                             keep_sorted,
                             file_path.display(),
                             block_with_context.block.name_display(),
-                            block_with_context.block.start_tag_position_range.start.line
+                            block_with_context.block.declared_at()
                         ));
                     }
                     // Optional regex pattern similar to keep-unique: if provided, we compare extracted matches.
@@ -103,15 +103,11 @@ impl ValidatorSync for KeepSortedValidator {
                     } else {
                         SortFormat::from_str(format_raw).map_err(|_| {
                             anyhow!(
-                                "keep-sorted-format has an unsupported value \"{}\" in {}:{} at line {}",
+                                "keep-sorted-format has an unsupported value \"{}\" in {}:{} at {}",
                                 format_raw,
                                 file_path.display(),
                                 block_with_context.block.name_display(),
-                                block_with_context
-                                    .block
-                                    .start_tag_position_range
-                                    .start
-                                    .line
+                                block_with_context.block.declared_at()
                             )
                         })?
                     };
@@ -126,7 +122,8 @@ impl ValidatorSync for KeepSortedValidator {
                     let mut prev_value: Option<(&str, Range<usize>)> = None;
                     for (line_number, line) in block_with_context
                         .block
-                        .content(&file_blocks.file_content)
+                        .content
+                        .text(&file_blocks.file_content)
                         .lines()
                         .enumerate()
                     {
@@ -136,10 +133,10 @@ impl ValidatorSync for KeepSortedValidator {
                             Some(Ok(regex)) => regex_value(line, regex),
                             Some(Err(e)) => {
                                 return Err(anyhow!(
-                                    "Invalid keep-sorted-pattern expression in block {}:{} defined at line {}: {}",
+                                    "Invalid keep-sorted-pattern expression in block {}:{} defined at {}: {}",
                                     file_path.display(),
                                     block_with_context.block.name_display(),
-                                    block_with_context.block.start_tag_position_range.start.line,
+                                    block_with_context.block.declared_at(),
                                     e
                                 ));
                             }
@@ -150,20 +147,17 @@ impl ValidatorSync for KeepSortedValidator {
                                 let cmp =
                                     sort_format.cmp(prev_val, curr_val).with_context(|| {
                                         format!(
-                                            "in block {}:{} defined at line {}",
+                                            "in block {}:{} defined at {}",
                                             file_path.display(),
                                             block_with_context.block.name_display(),
-                                            block_with_context
-                                                .block
-                                                .start_tag_position_range
-                                                .start
-                                                .line,
+                                            block_with_context.block.declared_at(),
                                         )
                                     })?;
                                 if cmp == violating_ord {
                                     let violation_start = block_with_context
                                         .block
-                                        .content_position(line_number, curr_range.start);
+                                        .content
+                                        .position(line_number, curr_range.start);
                                     let line_character_end =
                                         violation_start.character + curr_range.len();
                                     block_violations.push(create_violation(
@@ -230,10 +224,10 @@ fn create_violation(
     violation_character_end: usize,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {}:{} defined at line {} has an out-of-order line {violation_line_number} ({keep_sorted_value})",
+        "Block {}:{} defined at {} has an out-of-order line {violation_line_number} ({keep_sorted_value})",
         block_file_path.display(),
         block.name_display(),
-        block.start_tag_position_range.start.line,
+        block.declared_at(),
     );
     Violation::new(
         ViolationRange::new(

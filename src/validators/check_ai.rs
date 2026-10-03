@@ -57,10 +57,10 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
                 if let Some(condition) = block_with_context.block.attributes.get("check-ai") {
                     if condition.trim().is_empty() {
                         return Err(anyhow!(
-                            "check-ai requires a non-empty condition in {}:{} at line {}",
+                            "check-ai requires a non-empty condition in {}:{} at {}",
                             file_path.display(),
                             block_with_context.block.name_display(),
-                            block_with_context.block.start_tag_position_range.start.line
+                            block_with_context.block.declared_at()
                         ));
                     };
                 } else {
@@ -145,10 +145,10 @@ fn create_violation(
     ai_message: &str,
 ) -> anyhow::Result<Violation> {
     let error_message = format!(
-        "Block {}:{} defined at line {} failed AI check: {ai_message}",
+        "Block {}:{} defined at {} failed AI check: {ai_message}",
         file_path.display(),
         block.name_display(),
-        block.start_tag_position_range.start.line,
+        block.declared_at(),
     );
     block_violation(
         file_path,
@@ -169,10 +169,10 @@ fn create_pattern_no_match_violation(
     pattern: &str,
 ) -> anyhow::Result<Violation> {
     let error_message = format!(
-        "Block {}:{} defined at line {} was not checked: check-ai-pattern \"{pattern}\" matched nothing in the block",
+        "Block {}:{} defined at {} was not checked: check-ai-pattern \"{pattern}\" matched nothing in the block",
         file_path.display(),
         block.name_display(),
-        block.start_tag_position_range.start.line,
+        block.declared_at(),
     );
     block_violation(
         file_path,
@@ -235,10 +235,10 @@ impl<C: AiClient> CheckAiValidator<C> {
         result: anyhow::Result<Option<String>>,
     ) -> anyhow::Result<Option<Violation>> {
         match result.context(format!(
-            "check-ai API error in {}:{} at line {}",
+            "check-ai API error in {}:{} at {}",
             file_path.display(),
             block_with_context.block.name_display(),
-            block_with_context.block.start_tag_position_range.start.line
+            block_with_context.block.declared_at()
         ))? {
             None => Ok(None),
             Some(msg) => Ok(Some(create_violation(

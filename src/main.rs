@@ -14,6 +14,7 @@ use blockwatch::violation_address::ViolationAddress;
 use blockwatch::fs::FileSystem;
 use blockwatch::settings::Settings;
 use blockwatch::validators::Violation;
+use blockwatch::virtual_blocks::VirtualBlock;
 use clap::Parser;
 use globset::GlobSet;
 use std::collections::HashMap;
@@ -35,10 +36,11 @@ fn run_list(args: &flags::Args) -> anyhow::Result<()> {
     let file_system = blockwatch::fs::FileSystemImpl::new(&repository_root()?)?;
     let (scan_mode, line_changes) = run_inputs(args, &file_system)?;
     let language_parsers = language_parsers::language_parsers()?;
-    let settings = resolve_settings(args, &file_system, &language_parsers)?;
+    let (settings, virtual_blocks) = read_config(args, &file_system, &language_parsers)?;
     let (context, _scan_stats) = build_context(
         args,
         &settings,
+        &virtual_blocks,
         scan_mode,
         line_changes,
         language_parsers,
@@ -53,10 +55,11 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
     let file_system = Arc::new(blockwatch::fs::FileSystemImpl::new(&repository_root()?)?);
     let (scan_mode, line_changes) = run_inputs(args, file_system.as_ref())?;
     let language_parsers = language_parsers::language_parsers()?;
-    let settings = resolve_settings(args, file_system.as_ref(), &language_parsers)?;
+    let (settings, virtual_blocks) = read_config(args, file_system.as_ref(), &language_parsers)?;
     let (context, scan_stats) = build_context(
         args,
         &settings,
+        &virtual_blocks,
         scan_mode,
         line_changes,
         language_parsers,
@@ -183,24 +186,27 @@ fn run_inputs(
     Ok((scan_mode, read_diff_from_stdin(file_system)?))
 }
 
-/// Reads the config file and merges it with the flags into the settings for this run.
-fn resolve_settings(
+/// Reads the config file. Returns the settings for this run, which merge the file's with the
+/// flags, and the file's virtual blocks.
+fn read_config(
     args: &flags::Args,
     file_system: &impl FileSystem,
     language_parsers: &language_parsers::LanguageParsers,
-) -> anyhow::Result<Settings> {
-    let config_file = config::read(args.config.as_deref(), file_system)?;
-    Settings::resolve(
+) -> anyhow::Result<(Settings, Vec<VirtualBlock>)> {
+    let config = config::read(args.config.as_deref(), file_system)?;
+    let settings = Settings::resolve(
         args.raw_settings(),
-        config_file,
+        config.settings,
         &language_parsers.keys().collect(),
-    )
+    )?;
+    Ok((settings, config.blocks))
 }
 
 /// Parses every block the run should consider into a `ValidationContext`.
 fn build_context(
     args: &flags::Args,
     settings: &Settings,
+    virtual_blocks: &[VirtualBlock],
     scan_mode: blocks::ScanMode,
     modified_lines_by_file: HashMap<RepoPath, Vec<diff_parser::LineChange>>,
     language_parsers: language_parsers::LanguageParsers,
@@ -226,6 +232,7 @@ fn build_context(
         &path_checker,
         &language_parsers,
         &settings.extensions,
+        virtual_blocks,
     )?;
     Ok((
         validators::ValidationContext::new(

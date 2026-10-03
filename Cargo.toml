@@ -37,6 +37,7 @@ secrecy = "0.10"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0"
 serde_repr = "0.1"
+serde_spanned = "1.1"
 similar = { version = "3.1" }
 strsim = "0.11"
 strum = "0.28"

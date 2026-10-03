@@ -87,6 +87,36 @@ pub(crate) enum ResolveError<'a> {
     Ambiguous { candidates: Vec<&'a Symbol> },
 }
 
+impl ResolveError<'_> {
+    /// Why the path did not resolve, as a short phrase such as
+    /// `symbol not found; did you mean: /version`. The phrase does not include the path itself.
+    ///
+    /// `source` is the text of the file the symbols come from. It places each ambiguous candidate
+    /// at its line and column.
+    pub(crate) fn reason(&self, source: &str) -> String {
+        match self {
+            ResolveError::NotFound { hints } if hints.is_empty() => "symbol not found".to_string(),
+            ResolveError::NotFound { hints } => {
+                let hints: Vec<String> = hints.iter().map(|hint| hint.to_string()).collect();
+                format!("symbol not found; did you mean: {}", hints.join(", "))
+            }
+            ResolveError::Ambiguous { candidates } => {
+                // The candidates share one path, and can share a line too, so only a line and a
+                // column tell them apart. Where a candidate is written first is enough for that.
+                let positions: Vec<String> = candidates
+                    .iter()
+                    .map(|candidate| {
+                        let ranges = candidate.position_ranges(source);
+                        let start = &ranges[0].start;
+                        format!("{}:{}", start.line, start.character)
+                    })
+                    .collect();
+                format!("ambiguous symbol, defined at {}", positions.join(", "))
+            }
+        }
+    }
+}
+
 /// The most hints a path that does not resolve gets.
 const MAX_HINTS: usize = 3;
 
@@ -848,6 +878,43 @@ mod resolve_tests {
                 hints: vec![&symbols[0].path]
             })
         );
+    }
+
+    #[test]
+    fn duplicate_keys_on_one_line_reason_lists_each_line_and_column() {
+        let source = r#"{"v": 1, "v": 2}"#;
+        let symbols = [symbol("/v", 1), symbol("/v", 9)];
+        let error = ResolveError::Ambiguous {
+            candidates: vec![&symbols[0], &symbols[1]],
+        };
+
+        assert_eq!(
+            error.reason(source),
+            "ambiguous symbol, defined at 1:2, 1:10"
+        );
+    }
+
+    #[test]
+    fn missing_path_with_hints_reason_lists_them_as_written() {
+        let hints = [
+            path("/dependencies/@types~1node"),
+            path("/dependencies/zod"),
+        ];
+        let error = ResolveError::NotFound {
+            hints: vec![&hints[0], &hints[1]],
+        };
+
+        assert_eq!(
+            error.reason(""),
+            "symbol not found; did you mean: /dependencies/@types~1node, /dependencies/zod"
+        );
+    }
+
+    #[test]
+    fn missing_path_without_hints_reason_says_only_that() {
+        let error = ResolveError::NotFound { hints: vec![] };
+
+        assert_eq!(error.reason(""), "symbol not found");
     }
 }
 

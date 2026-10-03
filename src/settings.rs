@@ -1,7 +1,6 @@
 use crate::validators;
 use anyhow::{Context, bail};
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 
@@ -9,20 +8,15 @@ use std::ffi::OsString;
 ///
 /// Can be constructed from a config file or the command line.
 /// The values are not guaranteed to be valid. The [`RawSettings::validate`] method validates them.
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Default)]
 pub struct RawSettings {
     /// Glob patterns of files to leave out.
-    #[serde(default)]
     pub ignore: Vec<String>,
     /// Extra file extension mappings.
-    #[serde(default)]
     pub extensions: HashMap<String, String>,
     /// The only validators to run.
-    #[serde(default)]
     pub enable: Vec<String>,
     /// Validators to leave out.
-    #[serde(default)]
     pub disable: Vec<String>,
 }
 

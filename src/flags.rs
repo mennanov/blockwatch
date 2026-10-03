@@ -51,7 +51,7 @@ impl std::fmt::Display for Verbosity {
 By default it scans every file in the repository. Pass --diff to additionally read a unified diff from stdin, which marks the blocks the diff changed; rules that only fire on changed content, such as `affects`, need it.
 Add --only-changed to narrow the run down to those blocks, which is what a pre-commit hook or a per-pull-request check usually wants.
 
-You can put project-wide settings (--ignore, -E, --enable, --disable) in blockwatch.toml at the repository root.",
+You can put project-wide settings (--ignore, -E, --enable, --disable) in blockwatch.toml at the repository root. It can also declare blocks for files without comments.",
     after_help = r"EXAMPLES:
     # Check every block in the repository
     blockwatch

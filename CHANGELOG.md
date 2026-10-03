@@ -19,6 +19,13 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   add to the flags', and a flag wins for the same extension. `--enable` or `--disable` on the command line replaces
   the file's selection. An unknown key or a bad value fails the run, and the error quotes it. `--config FILE` reads
   another file instead. See [Config File](docs/cli.md#config-file).
+- Blocks in the config file. A `[[block]]` entry in `blockwatch.toml` declares a block around a symbol, such as
+  `target = 'package.json#/version'`, with the attributes a tag would have. So a file without comments, such as
+  `package.json`, can have rules. A symbol can have one such block. Its content is what a reference to the symbol
+  reads: a scalar's value, or the text of an object, a list or a table. Its violations are reported in that file, and
+  it counts as changed when the diff touches the symbol. `blockwatch list` shows the config line that declares it, as
+  `config_line`. A target that does not resolve fails the run, and the error shows the entry's line. See
+  [Blocks in the Config File](docs/cli.md#blocks-in-the-config-file).
 
 ## [0.7.0] - 2026-09-28
 

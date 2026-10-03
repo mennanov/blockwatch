@@ -88,10 +88,10 @@ impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
                 if let Some(script_path) = block_with_context.block.attributes.get("check-lua") {
                     if script_path.trim().is_empty() {
                         return Err(anyhow!(
-                            "check-lua requires a non-empty script path in {}:{} at line {}",
+                            "check-lua requires a non-empty script path in {}:{} at {}",
                             file_path.display(),
                             block_with_context.block.name_display(),
-                            block_with_context.block.start_tag_position_range.start.line
+                            block_with_context.block.declared_at()
                         ));
                     };
                 } else {
@@ -137,10 +137,10 @@ impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
                     .await;
 
                     let block_violations = match result.context(format!(
-                        "check-lua script error in {}:{} at line {}",
+                        "check-lua script error in {}:{} at {}",
                         file_path.display(),
                         block_with_context.block.name_display(),
-                        block_with_context.block.start_tag_position_range.start.line
+                        block_with_context.block.declared_at()
                     ))? {
                         None => Vec::new(),
                         Some(msg) => vec![create_violation(
@@ -431,10 +431,10 @@ fn create_violation(
     })
     .context("failed to serialize CheckLuaDetails")?;
     let message = format!(
-        "Block {}:{} defined at line {} failed Lua check: {error_message}",
+        "Block {}:{} defined at {} failed Lua check: {error_message}",
         file_path.display(),
         block.name_display(),
-        block.start_tag_position_range.start.line,
+        block.declared_at(),
     );
     Violation::new(
         ViolationRange::new(
@@ -481,10 +481,10 @@ fn resolve_affected_targets<Fs: FileSystem>(
     };
     let references = parse_target_references(affects).with_context(|| {
         format!(
-            "invalid affects reference on block {}:{} at line {}",
+            "invalid affects reference on block {}:{} at {}",
             current_file_path,
             block.name_display(),
-            block.start_tag_position_range.start.line,
+            block.declared_at(),
         )
     })?;
     let mut files = TargetFiles::new(context, file_system);
@@ -502,7 +502,8 @@ fn resolve_affected_targets<Fs: FileSystem>(
                             name: Some(name.clone()),
                             content: block_with_context
                                 .block
-                                .content(&file_blocks.file_content)
+                                .content
+                                .text(&file_blocks.file_content)
                                 .trim()
                                 .to_string(),
                         });

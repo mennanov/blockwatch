@@ -8,13 +8,15 @@ mod line_pattern;
 mod same_as;
 
 use crate::Position;
-use crate::blocks::{Block, BlockSeverity, BlockWithContext, FileBlocks, parser_for_file_path};
+use crate::blocks::{
+    Block, BlockKey, BlockSeverity, BlockWithContext, FileBlocks, parser_for_file_path,
+};
 use crate::diff_parser::LineChange;
 use crate::fs::FileSystem;
 use crate::language_parsers::LanguageParsers;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
-use crate::symbols::{ResolveError, Symbol, resolve};
+use crate::symbols::{Symbol, resolve};
 use crate::validators::affects::AffectsValidatorDetector;
 use crate::validators::check_ai::CheckAiValidatorDetector;
 use crate::validators::check_lua::CheckLuaValidatorDetector;
@@ -143,14 +145,13 @@ impl Violation {
 
 /// What a single validator found, and which blocks it looked at.
 ///
-/// A block is identified by the position of its start tag, because a block may have no name and
-/// the position is unique within a file.
+/// A block is identified by its [`BlockKey`], because a block may have no name.
 #[derive(Debug, Default)]
 pub struct ValidationReport {
     /// Violations grouped by the file they were found in.
     pub violations: HashMap<RepoPath, Vec<Violation>>,
-    /// The start position of every block this validator checked.
-    pub checked_blocks: Vec<(RepoPath, Position)>,
+    /// The key of every block this validator checked.
+    pub checked_blocks: Vec<(RepoPath, BlockKey)>,
 }
 
 impl ValidationReport {
@@ -162,8 +163,7 @@ impl ValidationReport {
 
     /// Adds `block` in `file` to the blocks this validator checked.
     pub fn add_checked_block(&mut self, file: &RepoPath, block: &Block) {
-        self.checked_blocks
-            .push((file.clone(), block.start_tag_position_range.start.clone()));
+        self.checked_blocks.push((file.clone(), block.key()));
     }
 
     /// Stores violations found in `file`.
@@ -179,7 +179,7 @@ impl ValidationReport {
 
 /// What a whole run found: which validators checked which blocks, and every violation.
 ///
-/// Checked blocks are keyed by file, then by the start position of the block, then by the names of
+/// Checked blocks are keyed by file, then by the [`BlockKey`] of the block, then by the names of
 /// the validators that checked it.
 #[derive(Debug, Default)]
 pub struct ValidationLog {
@@ -187,17 +187,17 @@ pub struct ValidationLog {
     pub violations: HashMap<RepoPath, Vec<Violation>>,
     /// Every block that was examined, and by which validators. BTreeMap is used so the
     /// `--verbosity` report comes out in a stable order regardless of the validators order.
-    pub checked_blocks: BTreeMap<RepoPath, BTreeMap<Position, BTreeSet<&'static str>>>,
+    pub checked_blocks: BTreeMap<RepoPath, BTreeMap<BlockKey, BTreeSet<&'static str>>>,
 }
 
 impl ValidationLog {
     /// Adds one validator's `report` for the corresponding `validator` name.
     pub fn add_validation_report(&mut self, validator: &'static str, report: ValidationReport) {
-        for (file, position) in report.checked_blocks {
+        for (file, key) in report.checked_blocks {
             self.checked_blocks
                 .entry(file)
                 .or_default()
-                .entry(position)
+                .entry(key)
                 .or_default()
                 .insert(validator);
         }
@@ -210,11 +210,8 @@ impl ValidationLog {
     pub fn merge(&mut self, other: ValidationLog) {
         for (file, blocks) in other.checked_blocks {
             let checked_in_file = self.checked_blocks.entry(file).or_default();
-            for (position, validators) in blocks {
-                checked_in_file
-                    .entry(position)
-                    .or_default()
-                    .extend(validators);
+            for (key, validators) in blocks {
+                checked_in_file.entry(key).or_default().extend(validators);
             }
         }
         for (file, violations) in other.violations {
@@ -590,7 +587,7 @@ pub fn detect_validators<Fs: FileSystem + 'static>(
 
 /// One target named by a reference-based validator's attribute (`affects`, `check-lua`, `same-as`).
 #[derive(Debug, PartialEq, Eq)]
-pub(in crate::validators) enum TargetReference {
+pub(crate) enum TargetReference {
     /// A named block, in `file` or — when `file` is `None` — in the referencing file itself.
     Block {
         file: Option<RepoPath>,
@@ -627,7 +624,7 @@ pub(in crate::validators) fn parse_target_references(
 }
 
 /// Parses a single target reference string into a [`TargetReference`].
-fn parse_single_reference(raw: &str) -> anyhow::Result<TargetReference> {
+pub(crate) fn parse_single_reference(raw: &str) -> anyhow::Result<TargetReference> {
     let reference = raw.trim();
     if reference.is_empty() {
         bail!("Invalid target reference: \"{reference}\"");
@@ -713,34 +710,6 @@ pub(in crate::validators) fn target_display(file: &RepoPath, name: Option<&str>)
     }
 }
 
-/// Why a symbol reference does not resolve to exactly one symbol, as a short phrase such as
-/// "symbol not found; did you mean: /version". The phrase does not include the reference itself.
-///
-/// `source` is the text of the file the symbols were derived from. It places each ambiguous
-/// candidate at its line and column.
-fn resolve_error_reason(error: &ResolveError, source: &str) -> String {
-    match error {
-        ResolveError::NotFound { hints } if hints.is_empty() => "symbol not found".to_string(),
-        ResolveError::NotFound { hints } => {
-            let hints: Vec<String> = hints.iter().map(|hint| hint.to_string()).collect();
-            format!("symbol not found; did you mean: {}", hints.join(", "))
-        }
-        ResolveError::Ambiguous { candidates } => {
-            // The candidates share one path, and can share a line too, so only a line and a
-            // column tell them apart. Where a candidate is written first is enough for that.
-            let positions: Vec<String> = candidates
-                .iter()
-                .map(|candidate| {
-                    let ranges = candidate.position_ranges(source);
-                    let start = &ranges[0].start;
-                    format!("{}:{}", start.line, start.character)
-                })
-                .collect();
-            format!("ambiguous symbol, defined at {}", positions.join(", "))
-        }
-    }
-}
-
 /// What a reference's target resolves to, or the reason it does not resolve, such as a missing
 /// block or a missing symbol. The reason is reported as the reference's violation. A failure that
 /// ends the run is the `Err` of an enclosing `anyhow::Result` instead.
@@ -794,8 +763,7 @@ impl<'a, Fs: FileSystem> TargetFiles<'a, Fs> {
                 file.display()
             )
         })?;
-        let resolution =
-            resolve(symbols, path).map_err(|error| resolve_error_reason(&error, content));
+        let resolution = resolve(symbols, path).map_err(|error| error.reason(content));
         Ok((content, resolution))
     }
 
@@ -902,11 +870,11 @@ pub(in crate::validators) enum PatternContent<'c> {
 
 /// Returns the content for the `*-pattern` attribute, e.g. `check-ai-pattern` for `check-ai`.
 pub(in crate::validators) fn block_content_for_pattern<'c>(
-    block_with_context: &BlockWithContext,
+    block_with_context: &'c BlockWithContext,
     file_content: &'c str,
     pattern_attribute: &str,
 ) -> anyhow::Result<PatternContent<'c>> {
-    let content = block_with_context.block.content(file_content);
+    let content = block_with_context.block.content.text(file_content);
     let Some(pattern) = block_with_context.block.attributes.get(pattern_attribute) else {
         return Ok(PatternContent::Whole(content.trim()));
     };
@@ -1200,62 +1168,6 @@ mod parse_target_references_tests {
 }
 
 #[cfg(test)]
-mod resolve_error_reason_tests {
-    use super::*;
-    use crate::symbols::Symbol;
-
-    fn path(text: &str) -> SymbolPath {
-        SymbolPath::parse(text).expect("the path is valid")
-    }
-
-    /// A symbol at `path_text` written once, at `def_byte_range` of its source.
-    fn symbol(path_text: &str, def_byte_range: Range<usize>) -> Symbol {
-        Symbol {
-            path: path(path_text),
-            def_byte_ranges: vec![def_byte_range],
-            value: None,
-        }
-    }
-
-    #[test]
-    fn duplicate_keys_on_one_line_lists_each_line_and_column() {
-        let source = r#"{"v": 1, "v": 2}"#;
-        let symbols = [symbol("/v", 1..7), symbol("/v", 9..15)];
-        let error = ResolveError::Ambiguous {
-            candidates: vec![&symbols[0], &symbols[1]],
-        };
-
-        assert_eq!(
-            resolve_error_reason(&error, source),
-            "ambiguous symbol, defined at 1:2, 1:10"
-        );
-    }
-
-    #[test]
-    fn missing_path_with_hints_lists_them_as_written() {
-        let hints = [
-            path("/dependencies/@types~1node"),
-            path("/dependencies/zod"),
-        ];
-        let error = ResolveError::NotFound {
-            hints: vec![&hints[0], &hints[1]],
-        };
-
-        assert_eq!(
-            resolve_error_reason(&error, ""),
-            "symbol not found; did you mean: /dependencies/@types~1node, /dependencies/zod"
-        );
-    }
-
-    #[test]
-    fn missing_path_without_hints_says_only_that() {
-        let error = ResolveError::NotFound { hints: vec![] };
-
-        assert_eq!(resolve_error_reason(&error, ""), "symbol not found");
-    }
-}
-
-#[cfg(test)]
 mod target_files_tests {
     use super::*;
     use crate::fs::test_utils::FakeFileSystem;
@@ -1297,7 +1209,7 @@ mod target_files_tests {
 
 #[cfg(test)]
 mod tests {
-    use crate::blocks::{Block, BlockWithContext};
+    use crate::blocks::{Block, BlockWithContext, Content, ContentText, Declaration};
     use crate::fs::FileSystem;
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
@@ -1315,8 +1227,11 @@ mod tests {
         Block {
             attributes: HashMap::new(),
             start_tag_position_range: Position::new(0, 0)..Position::new(0, 0),
-            content_bytes_range: 0..0,
-            content_position_range: Position::new(0, 0)..Position::new(0, 0),
+            content: Content {
+                text: ContentText::Source(0..0),
+                positions: Position::new(0, 0)..Position::new(0, 0),
+            },
+            declaration: Declaration::Tags,
         }
     }
 

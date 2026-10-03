@@ -3,6 +3,7 @@ use crate::diff_parser::{self, LineChange, LineChangeKind};
 use crate::fs::{FileSystem, PathChecker};
 use crate::language_parsers::{LanguageParsers, SharedLanguageParser};
 use crate::repo_path::RepoPath;
+use crate::virtual_blocks::{ConfigEntry, VirtualBlock};
 use anyhow::{Context, anyhow, bail};
 use serde_repr::Serialize_repr;
 use std::cmp::Ordering;
@@ -16,22 +17,66 @@ use strum_macros::EnumString;
 
 const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
 
-/// Represents a `block` tag parsed from the source file comments.
+/// A block: a part of a file that its attributes set rules for.
+///
+/// A pair of tags in the file's comments declares a block. So does a `[[block]]` entry of the
+/// config file, around a symbol of the file. That is a virtual block.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Block {
-    /// Optional attributes in the `block` tag. Their names are what selects the validators that
-    /// will check this block (`affects`, `keep-sorted`, …).
+    /// Optional attributes in the `block` tag, or in the `[[block]]` entry of a virtual block.
+    /// Their names are what selects the validators that will check this block (`affects`,
+    /// `keep-sorted`, …).
     pub(crate) attributes: HashMap<String, String>,
     /// Block's start tag position range, half-open: it starts at the `<` symbol and ends one column
-    /// past the `>` symbol. Doubles as the block's identity in reports, since a block need not have
-    /// a `name`.
+    /// past the `>` symbol. A virtual block has no tag, so it has the first line of the symbol's
+    /// definition.
     pub(crate) start_tag_position_range: Range<Position>,
-    /// Block's content substring range in the original source code.
-    pub(crate) content_bytes_range: Range<usize>,
-    /// Block's content position range in the original source code (from the end of the comment with
-    /// the start tag to the beginning of the comment with the end tag). Compared against the diff's
-    /// line changes to decide whether the block was touched.
-    pub(crate) content_position_range: Range<Position>,
+    /// The block's content.
+    pub(crate) content: Content,
+    /// Where the block's attributes are written.
+    pub(crate) declaration: Declaration,
+}
+
+/// The content of a [`Block`]: its text, and where the block's file writes it.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub(crate) struct Content {
+    /// The content's text.
+    pub(crate) text: ContentText,
+    /// Where the content is written in the block's file. For a block with tags, it runs from the
+    /// end of the comment with the start tag to the start of the comment with the end tag. For a
+    /// virtual block, it is where the symbol's value or definition is written.
+    pub(crate) positions: Range<Position>,
+}
+
+/// The text of a block's [`Content`].
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub(crate) enum ContentText {
+    /// The source text in this byte range: the lines between the block's tags, or the definition
+    /// of the object, list or table that a virtual block wraps.
+    Source(Range<usize>),
+    /// The decoded value of the scalar that a virtual block wraps. Its quotes and escapes are
+    /// gone, so it is not a part of the source text.
+    Decoded(String),
+}
+
+/// Where the attributes of a [`Block`] are written.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub(crate) enum Declaration {
+    /// In the block's start tag, at its `start_tag_position_range`.
+    Tags,
+    /// In a `[[block]]` entry of the config file.
+    ConfigEntry(ConfigEntry),
+}
+
+/// What tells a block apart from the other blocks of its file.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct BlockKey {
+    /// Where the block starts. Two blocks with tags never start at the same place.
+    pub(crate) start: Position,
+    /// The config line of a virtual block, or `None` for a block with tags. Two virtual blocks
+    /// can start at the same place, such as TOML's `/a` and `/a/b` in `a.b = 1`, but they never
+    /// share a config line.
+    pub(crate) config_line: Option<usize>,
 }
 
 impl PartialOrd for Block {
@@ -48,20 +93,52 @@ impl Ord for Block {
     }
 }
 
-impl Block {
-    /// Whether the `Block`'s content intersects with any of the **ordered** `line_changes`.
-    fn content_intersects_with_any(&self, line_changes: &[LineChange]) -> bool {
-        diff_parser::changes_on_lines(
-            line_changes,
-            self.content_position_range.start.line,
-            self.content_position_range.end.line,
-        )
-        .any(|line_change| self.content_intersects_with(line_change))
+impl Content {
+    /// Returns the content's text. `source` must be the text of the block's file.
+    pub(crate) fn text<'a>(&'a self, source: &'a str) -> &'a str {
+        match &self.text {
+            ContentText::Source(range) => &source[range.clone()],
+            ContentText::Decoded(text) => text,
+        }
     }
 
-    /// Whether the block's content intersects with the given `line_change`, which has to fall on
-    /// one of the lines the content spans.
-    fn content_intersects_with(&self, line_change: &LineChange) -> bool {
+    /// Maps a position inside the content onto the position in the block's file.
+    ///
+    /// `line_idx` is the 0-based index of a line of [`Self::text`],
+    /// `column_offset` is the 0-based offset within that line.
+    pub(crate) fn position(&self, line_idx: usize, column_offset: usize) -> Position {
+        match self.text {
+            ContentText::Source(_) => {
+                let line_start_column = if line_idx == 0 {
+                    self.positions.start.character
+                } else {
+                    1
+                };
+                Position::new(
+                    self.positions.start.line + line_idx,
+                    line_start_column + column_offset,
+                )
+            }
+            // Quotes, escapes and joined lines make a decoded value differ from the source text,
+            // so a position inside it has no exact place in the source. The start of the value is
+            // the closest one.
+            ContentText::Decoded(_) => self.positions.start.clone(),
+        }
+    }
+
+    /// Whether any of the **ordered** `line_changes` touch where the content is written.
+    fn intersects_any(&self, line_changes: &[LineChange]) -> bool {
+        diff_parser::changes_on_lines(
+            line_changes,
+            self.positions.start.line,
+            self.positions.end.line,
+        )
+        .any(|line_change| self.intersects(line_change))
+    }
+
+    /// Whether `line_change`, which has to fall on one of the lines the content spans, touches
+    /// where the content is written.
+    fn intersects(&self, line_change: &LineChange) -> bool {
         match &line_change.kind {
             LineChangeKind::Deleted => {
                 let point = diff_parser::deletion_point(line_change.line);
@@ -69,30 +146,31 @@ impl Block {
                 // the range's exclusive end is where the range's last character used to be. A
                 // whole-line deletion never lands there, since its gap is always at column 1, so
                 // this bound only bites if deletion points ever get finer-grained than a line.
-                self.content_position_range.start <= point
-                    && point <= self.content_position_range.end
+                self.positions.start <= point && point <= self.positions.end
             }
             // An insertion moves the line breaks around the line, not just the characters on it,
             // so there is nothing to compare column by column. Every position on the line counts
             // as changed.
             LineChangeKind::Added => true,
             LineChangeKind::Modified(ranges) => {
-                let start_col = if line_change.line == self.content_position_range.start.line {
-                    self.content_position_range.start.character
+                let start_col = if line_change.line == self.positions.start.line {
+                    self.positions.start.character
                 } else {
                     1
                 };
-                let end_col = if line_change.line < self.content_position_range.end.line {
+                let end_col = if line_change.line < self.positions.end.line {
                     usize::MAX
                 } else {
-                    self.content_position_range.end.character
+                    self.positions.end.character
                 };
 
                 diff_parser::intersects_columns(ranges, start_col, end_col)
             }
         }
     }
+}
 
+impl Block {
     /// Returns the optional value of the `name` attribute for this block.
     pub(crate) fn name(&self) -> Option<&str> {
         self.attributes.get("name").map(String::as_str)
@@ -103,29 +181,25 @@ impl Block {
         self.name().unwrap_or(UNNAMED_BLOCK_LABEL)
     }
 
-    /// Returns the block's content from the given `source`.
-    pub(crate) fn content<'source>(&self, source: &'source str) -> &'source str {
-        &source[self.content_bytes_range.clone()]
+    /// Where the block's attributes are written, as messages show it: `line 3` for a block with
+    /// tags, or `line 7 of "blockwatch.toml"` for a virtual block.
+    pub(crate) fn declared_at(&self) -> String {
+        match &self.declaration {
+            // A message shows the block's file before this, so the line is enough.
+            Declaration::Tags => format!("line {}", self.start_tag_position_range.start.line),
+            Declaration::ConfigEntry(entry) => entry.to_string(),
+        }
     }
 
-    /// Maps a position inside the block's content onto the position in the original source.
-    ///
-    /// `content_line_idx` is the 0-based index of a line of [`Self::content`],
-    /// `column_offset` is the 0-based offset within that line.
-    pub(crate) fn content_position(
-        &self,
-        content_line_idx: usize,
-        column_offset: usize,
-    ) -> Position {
-        let line_start_column = if content_line_idx == 0 {
-            self.content_position_range.start.character
-        } else {
-            1
-        };
-        Position::new(
-            self.content_position_range.start.line + content_line_idx,
-            line_start_column + column_offset,
-        )
+    /// What tells the block apart from the other blocks of its file.
+    pub(crate) fn key(&self) -> BlockKey {
+        BlockKey {
+            start: self.start_tag_position_range.start.clone(),
+            config_line: match &self.declaration {
+                Declaration::Tags => None,
+                Declaration::ConfigEntry(entry) => Some(entry.line),
+            },
+        }
     }
 
     /// Returns the block's severity.
@@ -174,21 +248,26 @@ impl FileBlocks {
 
     /// Converts the file blocks to a serializable report.
     ///
-    /// The listing is already deterministic without a sorting pass: the parser yields blocks in
-    /// start-tag order, and filtering preserves it.
+    /// The listing is already deterministic without a sorting pass: [`parse_file`] keeps the
+    /// blocks in source order.
     pub(crate) fn to_serializable_report(&self) -> Vec<serde_json::Value> {
         self.blocks_with_context
             .iter()
             .map(|block| {
-                serde_json::json!({
-                    // <block affects="docs/cli.md:list-output-example">
+                // <block affects="docs/cli.md:list-output-example">
+                let mut listing = serde_json::json!({
                     "name": block.block.name_display(),
                     "line": block.block.start_tag_position_range.start.line,
                     "column": block.block.start_tag_position_range.start.character,
                     "is_content_modified": block.is_content_modified,
                     "attributes": block.block.attributes,
-                    // </block>
-                })
+                });
+                match &block.block.declaration {
+                    Declaration::Tags => {}
+                    Declaration::ConfigEntry(entry) => listing["config_line"] = entry.line.into(),
+                }
+                // </block>
+                listing
             })
             .collect()
     }
@@ -197,7 +276,7 @@ impl FileBlocks {
 /// Represents a block with its corresponding validation context.
 #[derive(Debug, Clone)]
 pub struct BlockWithContext {
-    /// The block itself, as parsed from the source comment.
+    /// The block itself, as parsed from the source comment or the config file.
     pub(crate) block: Block,
     /// Whether the block's start tag is modified (computed from the input diff).
     pub(crate) is_start_tag_modified: bool,
@@ -243,10 +322,14 @@ pub enum ScanMode {
 /// - `file_system` provides access to file contents within a root path.
 /// - `parsers` maps file extensions to language-specific block parsers.
 /// - `extra_file_extensions` allows remapping unknown extensions to supported ones (e.g., "cxx" -> "cpp").
+/// - `virtual_blocks` are the blocks the config file declares. Each joins the blocks of the file
+///   it wraps, when that file is read.
 ///
 /// In either mode a file is read only if it passes the allow globs and is not ignored.
 ///
-/// Fails if `line_changes_by_file` is invalid, e.g. it refers to files that do not exist.
+/// Fails if `line_changes_by_file` is invalid, e.g. it refers to files that do not exist. Also
+/// fails if a virtual block's target does not resolve in a file that is read, or, in
+/// [`ScanMode::All`], if its file passes the filters but does not exist.
 pub fn parse_blocks(
     line_changes_by_file: &HashMap<RepoPath, Vec<LineChange>>,
     scan_mode: ScanMode,
@@ -254,6 +337,7 @@ pub fn parse_blocks(
     path_checker: &impl PathChecker,
     parsers: &LanguageParsers,
     extra_file_extensions: &HashMap<OsString, OsString>,
+    virtual_blocks: &[VirtualBlock],
 ) -> anyhow::Result<ParsedBlocks> {
     ensure_diff_has_valid_paths(
         line_changes_by_file,
@@ -262,22 +346,52 @@ pub fn parse_blocks(
         parsers,
         extra_file_extensions,
     )?;
+    let mut virtual_blocks_by_file: HashMap<&RepoPath, Vec<&VirtualBlock>> = HashMap::new();
+    for virtual_block in virtual_blocks {
+        virtual_blocks_by_file
+            .entry(&virtual_block.file)
+            .or_default()
+            .push(virtual_block);
+    }
     match scan_mode {
-        ScanMode::All => parse_all_files(
-            line_changes_by_file,
-            file_system,
-            path_checker,
-            parsers,
-            extra_file_extensions,
-        ),
+        ScanMode::All => {
+            ensure_target_files_exist(virtual_blocks, file_system, path_checker)?;
+            parse_all_files(
+                line_changes_by_file,
+                file_system,
+                path_checker,
+                parsers,
+                extra_file_extensions,
+                &virtual_blocks_by_file,
+            )
+        }
         ScanMode::OnlyChanged => parse_changed_files(
             line_changes_by_file,
             file_system,
             path_checker,
             parsers,
             extra_file_extensions,
+            &virtual_blocks_by_file,
         ),
     }
+}
+
+/// Rejects a virtual block whose file is allowed by `path_checker` but does not exist.
+fn ensure_target_files_exist(
+    virtual_blocks: &[VirtualBlock],
+    file_system: &impl FileSystem,
+    path_checker: &impl PathChecker,
+) -> anyhow::Result<()> {
+    for virtual_block in virtual_blocks {
+        let file = &virtual_block.file;
+        if path_checker.should_allow(file)
+            && !path_checker.should_ignore(file)
+            && !file_system.exists(file.as_path())
+        {
+            return Err(virtual_block.unresolved(anyhow!("file does not exist")));
+        }
+    }
+    Ok(())
 }
 
 /// Rejects a diff with no valid file paths.
@@ -326,6 +440,7 @@ fn parse_all_files(
     path_checker: &impl PathChecker,
     parsers: &LanguageParsers,
     extra_file_extensions: &HashMap<OsString, OsString>,
+    virtual_blocks_by_file: &HashMap<&RepoPath, Vec<&VirtualBlock>>,
 ) -> anyhow::Result<ParsedBlocks> {
     let mut parsed = ParsedBlocks::default();
     for repo_path_result in file_system.walk() {
@@ -344,6 +459,9 @@ fn parse_all_files(
             every_block,
             parsers,
             extra_file_extensions,
+            virtual_blocks_by_file
+                .get(&file_path)
+                .map_or(&[][..], Vec::as_slice),
         )?;
         record_parsed_file(&mut parsed, file_path, file_blocks);
     }
@@ -357,6 +475,7 @@ fn parse_changed_files(
     path_checker: &impl PathChecker,
     parsers: &LanguageParsers,
     extra_file_extensions: &HashMap<OsString, OsString>,
+    virtual_blocks_by_file: &HashMap<&RepoPath, Vec<&VirtualBlock>>,
 ) -> anyhow::Result<ParsedBlocks> {
     let mut parsed = ParsedBlocks::default();
     for (file_path, line_changes) in line_changes_by_file {
@@ -370,6 +489,9 @@ fn parse_changed_files(
             modified_blocks,
             parsers,
             extra_file_extensions,
+            virtual_blocks_by_file
+                .get(file_path)
+                .map_or(&[][..], Vec::as_slice),
         )
         .map_err(|error| {
             // Only a file this run validates reaches a read: filtered-out paths are skipped above,
@@ -418,7 +540,12 @@ pub fn modified_blocks(block: &BlockWithContext) -> bool {
 }
 
 /// Parses the blocks of one file, marking the ones `line_changes` touched and keeping those
-/// `block_predicate` selects. Returns `None` for unsupported file extensions.
+/// `block_predicate` selects. The blocks come in source order, the `virtual_blocks` of the file
+/// among its tags. Returns `None` for unsupported file extensions.
+///
+/// # Errors
+/// Returns an error if a tag is malformed or a name is used twice, or if a virtual block's target
+/// does not resolve in the file.
 pub fn parse_file(
     file_system: &impl FileSystem,
     file_path: &Path,
@@ -426,49 +553,128 @@ pub fn parse_file(
     block_predicate: impl Fn(&BlockWithContext) -> bool,
     parsers: &LanguageParsers,
     extra_file_extensions: &HashMap<OsString, OsString>,
+    virtual_blocks: &[&VirtualBlock],
 ) -> anyhow::Result<Option<FileBlocks>> {
-    let parser = match parser_for_file_path(file_path, parsers, extra_file_extensions) {
-        None => return Ok(None),
-        Some(p) => p,
+    let parser = match (
+        parser_for_file_path(file_path, parsers, extra_file_extensions),
+        virtual_blocks,
+    ) {
+        (Some(parser), _) => parser,
+        (None, []) => return Ok(None),
+        // A virtual block needs the symbols of its file, and a file without a parser has none.
+        (None, [virtual_block, ..]) => {
+            return Err(virtual_block.unresolved(anyhow!("file format is unsupported")));
+        }
     };
     let source_code = file_system.read_to_string(file_path)?;
-    // Tracks each named block's first position in this file, to reject duplicate blocks.
-    let mut names_seen: HashMap<String, Position> = HashMap::new();
+    // Tracks where each name in this file is first declared, to reject duplicate blocks.
+    let mut names_seen = HashMap::new();
+    let mut blocks_with_context = tag_blocks(
+        parser,
+        file_path,
+        &source_code,
+        line_changes,
+        &block_predicate,
+        &mut names_seen,
+    )?;
+    blocks_with_context.extend(virtual_blocks_in_file(
+        virtual_blocks,
+        parser,
+        file_path,
+        &source_code,
+        line_changes,
+        &block_predicate,
+        &mut names_seen,
+    )?);
+    // The tags come in source order. The virtual blocks join them there.
+    blocks_with_context.sort_by(|a, b| a.block.cmp(&b.block));
+    Ok(Some(FileBlocks {
+        file_content: source_code,
+        blocks_with_context,
+    }))
+}
+
+/// The blocks that tags declare in `source`, the text of `file_path`, with what `line_changes`
+/// touched in each. Keeps those `block_predicate` selects, in source order, and records every
+/// block's name in `names_seen`.
+///
+/// # Errors
+/// Returns an error if a tag is malformed or not closed, has an unknown attribute or severity, or
+/// has a name that `names_seen` already holds. The error shows the file.
+fn tag_blocks(
+    parser: &SharedLanguageParser,
+    file_path: &Path,
+    source: &str,
+    line_changes: &[LineChange],
+    block_predicate: &impl Fn(&BlockWithContext) -> bool,
+    names_seen: &mut HashMap<String, String>,
+) -> anyhow::Result<Vec<BlockWithContext>> {
     // Blocks are filtered as the parser yields them, so only the ones this run will validate are
     // ever held. The parser's lock lives until the end of the statement, which is as long as the
     // iterator borrowing it does.
-    let blocks_with_context = parser
+    parser
         .lock()
         .expect("no active locks")
-        .parse_blocks(&source_code)
-        .filter_map(|block| {
-            let block = match block {
-                Ok(block) => block,
-                Err(error) => return Some(Err(error)),
-            };
-            if let Err(err) = validate_block_syntax(&block, file_path) {
-                return Some(Err(err));
-            }
-            if let Err(err) = reject_duplicate_name(&block, file_path, &mut names_seen) {
-                return Some(Err(err));
-            }
-            let block_with_context = BlockWithContext {
-                is_content_modified: block.content_intersects_with_any(line_changes),
+        .parse_blocks(source)
+        .map(|block| {
+            let block = block?;
+            validate_block_syntax(&block, file_path)?;
+            reject_duplicate_name(&block, file_path, names_seen)?;
+            Ok(BlockWithContext {
+                is_content_modified: block.content.intersects_any(line_changes),
                 is_start_tag_modified: diff_parser::range_intersects_any(
                     &block.start_tag_position_range,
                     line_changes,
                 ),
                 block,
-            };
-            block_predicate(&block_with_context).then_some(Ok(block_with_context))
+            })
+        })
+        .filter(|result| match result {
+            Ok(block_with_context) => block_predicate(block_with_context),
+            // An error is kept, so that collecting the blocks stops at it.
+            Err(_) => true,
         })
         .collect::<anyhow::Result<Vec<_>>>()
-        .context(format!("Failed to parse file {file_path:?}"))?;
+        .with_context(|| format!("Failed to parse file {file_path:?}"))
+}
 
-    Ok(Some(FileBlocks {
-        file_content: source_code,
-        blocks_with_context,
-    }))
+/// The blocks that `virtual_blocks` declare in `source`, the text of `file_path`, with what
+/// `line_changes` touched in each. Keeps those `block_predicate` selects, in the order of
+/// `virtual_blocks`, and records every block's name in `names_seen`.
+///
+/// # Errors
+/// Returns an error if the file has no symbols or a syntax error, if a target does not resolve,
+/// or if a block has a name that `names_seen` already holds.
+fn virtual_blocks_in_file(
+    virtual_blocks: &[&VirtualBlock],
+    parser: &SharedLanguageParser,
+    file_path: &Path,
+    source: &str,
+    line_changes: &[LineChange],
+    block_predicate: &impl Fn(&BlockWithContext) -> bool,
+    names_seen: &mut HashMap<String, String>,
+) -> anyhow::Result<Vec<BlockWithContext>> {
+    // Without virtual blocks the file's symbols are not needed, and a language that has none
+    // must not fail.
+    let [first, ..] = virtual_blocks else {
+        return Ok(Vec::new());
+    };
+    // The file's symbols are the same for each of its virtual blocks. So is the error when they
+    // can't be found, which then shows the first block.
+    let symbols = parser
+        .lock()
+        .expect("no active locks")
+        .parse_symbols(source)
+        .map_err(|error| first.unresolved(error))?;
+    let mut blocks_with_context = Vec::new();
+    for virtual_block in virtual_blocks {
+        let block_with_context = virtual_block.resolve(&symbols, source, line_changes)?;
+        reject_duplicate_name(&block_with_context.block, file_path, names_seen)?;
+        if block_predicate(&block_with_context) {
+            blocks_with_context.push(block_with_context);
+        }
+    }
+    Ok(blocks_with_context)
 }
 
 const RECOGNIZED_ATTRIBUTES: &[&str] = &[
@@ -495,58 +701,68 @@ const RECOGNIZED_ATTRIBUTES: &[&str] = &[
     // </block>
 ];
 
-/// Validates syntax for the given `block` and `file_path`.
-fn validate_block_syntax(block: &Block, file_path: &Path) -> anyhow::Result<()> {
-    for attr in block.attributes.keys() {
-        if !RECOGNIZED_ATTRIBUTES.contains(&attr.as_str()) {
-            bail!(
-                "Block {}:{} at line {}, column {} contains unrecognized attribute `{}`",
-                file_path.display(),
-                block.name_display(),
-                block.start_tag_position_range.start.line,
-                block.start_tag_position_range.start.character,
-                attr,
-            );
-        }
+/// Checks a block's attributes: each one must be recognized, and `severity` must have a valid
+/// value.
+///
+/// # Errors
+/// Returns an error that quotes an attribute or a value that is not valid, such as
+/// ``unrecognized attribute `keep-sortd` ``.
+pub(crate) fn validate_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<()> {
+    if let Some(name) = attributes
+        .keys()
+        .find(|name| !RECOGNIZED_ATTRIBUTES.contains(&name.as_str()))
+    {
+        bail!("unrecognized attribute `{name}`");
     }
-    // Validate the `severity` attribute value.
-    block.severity().map(|_| ()).context(format!(
-        "Block {}:{} at line {}, column {} contains unrecognized severity value",
-        file_path.display(),
-        block.name_display(),
-        block.start_tag_position_range.start.line,
-        block.start_tag_position_range.start.character,
-    ))
+    if let Some(value) = attributes.get("severity")
+        && BlockSeverity::from_str(value).is_err()
+    {
+        bail!("unrecognized severity value `{value}`");
+    }
+    Ok(())
 }
 
-/// Rejects a block whose `name` was already used earlier in the same file, recording it in
-/// `names_seen` otherwise. A block with no `name` is not a reference target and is ignored.
+/// Checks the attributes of `block`, which is in `file_path`, with [`validate_attributes`].
+///
+/// # Errors
+/// Returns an error that shows the block and what is not valid.
+fn validate_block_syntax(block: &Block, file_path: &Path) -> anyhow::Result<()> {
+    validate_attributes(&block.attributes).map_err(|error| {
+        anyhow!(
+            "Block {}:{} at {} contains {error}",
+            file_path.display(),
+            block.name_display(),
+            block.declared_at(),
+        )
+    })
+}
+
+/// Rejects a block whose `name` was already used earlier in the same file. Otherwise records in
+/// `names_seen` where the block is declared. A block with no `name` is not a reference target
+/// and is ignored.
 ///
 /// Two blocks sharing a name make every `affects`/`same-as` reference to it ambiguous, silently
 /// binding to whichever block the parser happens to reach first.
 fn reject_duplicate_name(
     block: &Block,
     file_path: &Path,
-    names_seen: &mut HashMap<String, Position>,
+    names_seen: &mut HashMap<String, String>,
 ) -> anyhow::Result<()> {
     let Some(name) = block.name() else {
         return Ok(());
     };
-    let position = &block.start_tag_position_range.start;
     match names_seen.entry(name.to_string()) {
         Entry::Occupied(entry) => {
             bail!(
-                "Block {}:{} at line {}, column {} duplicates the name of the block at line {}, column {}",
+                "Block {}:{} at {} duplicates the name of the block at {}",
                 file_path.display(),
                 name,
-                position.line,
-                position.character,
-                entry.get().line,
-                entry.get().character,
+                block.declared_at(),
+                entry.get(),
             )
         }
         Entry::Vacant(entry) => {
-            entry.insert(position.clone());
+            entry.insert(block.declared_at());
             Ok(())
         }
     }
@@ -590,7 +806,7 @@ fn try_parser_for_extension<'p>(
 #[cfg(test)]
 mod block_severity_from_str_tests {
     use crate::Position;
-    use crate::blocks::{Block, BlockSeverity};
+    use crate::blocks::{Block, BlockSeverity, Content, ContentText, Declaration};
     use std::collections::HashMap;
 
     /// Builds a contentless block carrying only a `severity` attribute to test how that attribute
@@ -599,8 +815,11 @@ mod block_severity_from_str_tests {
         Block {
             attributes: HashMap::from([("severity".into(), severity.into())]),
             start_tag_position_range: Position::new(0, 0)..Position::new(0, 0),
-            content_bytes_range: 0..0,
-            content_position_range: Position::new(0, 0)..Position::new(0, 0),
+            content: Content {
+                text: ContentText::Source(0..0),
+                positions: Position::new(0, 0)..Position::new(0, 0),
+            },
+            declaration: Declaration::Tags,
         }
     }
 
@@ -623,8 +842,11 @@ mod block_severity_from_str_tests {
         let block = Block {
             attributes: HashMap::new(),
             start_tag_position_range: Position::new(0, 0)..Position::new(0, 0),
-            content_bytes_range: 0..0,
-            content_position_range: Position::new(0, 0)..Position::new(0, 0),
+            content: Content {
+                text: ContentText::Source(0..0),
+                positions: Position::new(0, 0)..Position::new(0, 0),
+            },
+            declaration: Declaration::Tags,
         };
 
         assert_eq!(block.severity().unwrap(), BlockSeverity::Error);
@@ -698,6 +920,7 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &parsers,
             &HashMap::new(),
+            &[],
         )?;
 
         // The file without blocks is not kept, but it was parsed, so it counts as scanned. The
@@ -878,6 +1101,7 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &parsers,
             &HashMap::new(),
+            &[],
         )?
         .blocks;
 
@@ -946,6 +1170,7 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &language_parsers()?,
             &HashMap::new(),
+            &[],
         )?
         .blocks;
 
@@ -1238,6 +1463,7 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &parsers,
             &HashMap::new(),
+            &[],
         )?
         .blocks;
 
@@ -1301,6 +1527,7 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &parsers,
             &HashMap::new(),
+            &[],
         )?
         .blocks;
 
@@ -1349,6 +1576,7 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &parsers,
             &HashMap::new(),
+            &[],
         )?
         .blocks;
 
@@ -1376,6 +1604,7 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &parsers,
             &HashMap::from([("rust".into(), "rs".into())]),
+            &[],
         )?
         .blocks;
 
@@ -1400,6 +1629,7 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &HashMap::new(),
             &HashMap::new(),
+            &[],
         )?
         .blocks;
 
@@ -1440,6 +1670,7 @@ mod parse_blocks_tests {
             &path_checker,
             &language_parsers()?,
             &HashMap::new(),
+            &[],
         )?
         .blocks;
 
@@ -1476,6 +1707,7 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_only("src/**"),
             &language_parsers()?,
             &HashMap::new(),
+            &[],
         )?
         .blocks;
 
@@ -1504,6 +1736,7 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &language_parsers()?,
             &HashMap::new(),
+            &[],
         )?;
 
         assert_eq!(parsed.blocks.len(), 1);
@@ -1533,6 +1766,7 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &language_parsers()?,
             &HashMap::new(),
+            &[],
         )
         .unwrap_err();
         let message = format!("{error:#}");
@@ -1555,6 +1789,7 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &language_parsers()?,
             &HashMap::new(),
+            &[],
         )
         .unwrap_err();
         let message = format!("{error:#}");
@@ -1580,6 +1815,7 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_only("src/**"),
             &language_parsers()?,
             &HashMap::new(),
+            &[],
         )?
         .blocks;
 
@@ -1605,6 +1841,7 @@ mod parse_blocks_tests {
             &FakePathChecker::with_ignored_paths(HashSet::from(["vendor/gone.py".to_string()])),
             &language_parsers()?,
             &HashMap::new(),
+            &[],
         )?
         .blocks;
         assert!(blocks.is_empty());
@@ -1629,6 +1866,7 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &language_parsers()?,
             &HashMap::new(),
+            &[],
         )?
         .blocks;
         assert!(blocks.is_empty());
@@ -1645,6 +1883,7 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &HashMap::new(),
             &HashMap::new(),
+            &[],
         )?
         .blocks;
 
@@ -1666,6 +1905,7 @@ mod parse_blocks_tests {
             every_block,
             &parsers,
             &HashMap::new(),
+            &[],
         )?
         .expect("python is supported");
         assert_eq!(file_blocks.blocks_with_context.len(), 2);
@@ -1686,12 +1926,13 @@ mod parse_blocks_tests {
             every_block,
             &parsers,
             &HashMap::new(),
+            &[],
         );
 
         assert!(file_blocks.is_err());
         assert_eq!(
             file_blocks.unwrap_err().source().unwrap().to_string(),
-            "Block a.py:x at line 1, column 3 contains unrecognized attribute `unknown-attr`"
+            "Block a.py:x at line 1 contains unrecognized attribute `unknown-attr`"
         );
         Ok(())
     }
@@ -1710,12 +1951,13 @@ mod parse_blocks_tests {
             every_block,
             &parsers,
             &HashMap::new(),
+            &[],
         );
 
         assert!(file_blocks.is_err());
         assert_eq!(
             file_blocks.unwrap_err().source().unwrap().to_string(),
-            "Block a.py:(unnamed) at line 1, column 3 contains unrecognized severity value"
+            "Block a.py:(unnamed) at line 1 contains unrecognized severity value `invalid-severity`"
         );
         Ok(())
     }
@@ -1734,12 +1976,13 @@ mod parse_blocks_tests {
             every_block,
             &parsers,
             &HashMap::new(),
+            &[],
         );
 
         assert!(file_blocks.is_err());
         assert_eq!(
             file_blocks.unwrap_err().source().unwrap().to_string(),
-            "Block a.py:x at line 4, column 3 duplicates the name of the block at line 1, column 3"
+            "Block a.py:x at line 4 duplicates the name of the block at line 1"
         );
         Ok(())
     }
@@ -1765,10 +2008,212 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &parsers,
             &HashMap::new(),
+            &[],
         )?
         .blocks;
 
         assert_eq!(blocks.len(), 2);
+        Ok(())
+    }
+
+    /// The blocks of a run over `files` whose config file declares `virtual_blocks`, with no
+    /// diff.
+    fn parse_with_virtual_blocks(
+        files: &[(&str, &str)],
+        path_checker: &FakePathChecker,
+        virtual_blocks: &[VirtualBlock],
+    ) -> anyhow::Result<HashMap<RepoPath, FileBlocks>> {
+        let files = files
+            .iter()
+            .map(|(path, content)| (path.to_string(), content.to_string()))
+            .collect();
+        Ok(parse_blocks(
+            &HashMap::new(),
+            ScanMode::All,
+            &FakeFileSystem::new(files),
+            path_checker,
+            &language_parsers()?,
+            &HashMap::new(),
+            virtual_blocks,
+        )?
+        .blocks)
+    }
+
+    #[test]
+    fn virtual_block_parse_blocks_lists_it_in_source_order_with_its_config_line()
+    -> anyhow::Result<()> {
+        let source = "{\n  \"a\": 1,\n  // <block name=\"tag\">\n  \"b\": 2\n  // </block>\n}\n";
+        let virtual_blocks = [test_utils::virtual_block(
+            "a.json#/a",
+            &[("name", "virtual")],
+        )?];
+
+        let blocks = parse_with_virtual_blocks(
+            &[("a.json", source)],
+            &FakePathChecker::allow_all(),
+            &virtual_blocks,
+        )?;
+
+        let listed: Vec<(serde_json::Value, Option<serde_json::Value>)> = blocks
+            [&RepoPath::from_reference("a.json")?]
+            .to_serializable_report()
+            .into_iter()
+            .map(|listing| (listing["name"].clone(), listing.get("config_line").cloned()))
+            .collect();
+        assert_eq!(
+            listed,
+            vec![
+                (serde_json::json!("virtual"), Some(serde_json::json!(7))),
+                (serde_json::json!("tag"), None),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn only_changed_parse_blocks_keeps_the_virtual_blocks_the_diff_touched() -> anyhow::Result<()> {
+        let file_system = FakeFileSystem::new(HashMap::from([(
+            "a.json".to_string(),
+            "{\n  \"a\": 1,\n  \"b\": 2\n}\n".to_string(),
+        )]));
+        // The diff does not touch `gone.json`, so it is not read, and that it is missing is not an
+        // error.
+        let virtual_blocks = [
+            test_utils::virtual_block("a.json#/a", &[("name", "a")])?,
+            test_utils::virtual_block("a.json#/b", &[("name", "b")])?,
+            test_utils::virtual_block("gone.json#/x", &[])?,
+        ];
+        let line_changes = HashMap::from([(RepoPath::from_reference("a.json")?, vec![added(3)])]);
+
+        let blocks = parse_blocks(
+            &line_changes,
+            ScanMode::OnlyChanged,
+            &file_system,
+            &FakePathChecker::allow_all(),
+            &language_parsers()?,
+            &HashMap::new(),
+            &virtual_blocks,
+        )?
+        .blocks;
+
+        let names: Vec<Option<&str>> = blocks[&RepoPath::from_reference("a.json")?]
+            .blocks_with_context
+            .iter()
+            .map(|block_with_context| block_with_context.block.name())
+            .collect();
+        assert_eq!(names, vec![Some("b")]);
+        Ok(())
+    }
+
+    #[test]
+    fn target_file_outside_the_globs_parse_blocks_skips_its_virtual_blocks() -> anyhow::Result<()> {
+        // Neither target resolves: one symbol is missing, and the other file is.
+        let virtual_blocks = [
+            test_utils::virtual_block("vendor/a.json#/missing", &[])?,
+            test_utils::virtual_block("vendor/gone.json#/x", &[])?,
+        ];
+
+        let blocks = parse_with_virtual_blocks(
+            &[("vendor/a.json", "{}")],
+            &FakePathChecker::allow_only("src/**"),
+            &virtual_blocks,
+        )?;
+
+        assert!(blocks.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn ignored_target_file_parse_blocks_skips_its_virtual_blocks() -> anyhow::Result<()> {
+        // Neither target resolves: one symbol is missing, and the other file is.
+        let virtual_blocks = [
+            test_utils::virtual_block("vendor/a.json#/missing", &[])?,
+            test_utils::virtual_block("vendor/gone.json#/x", &[])?,
+        ];
+
+        let blocks = parse_with_virtual_blocks(
+            &[("vendor/a.json", "{}")],
+            &FakePathChecker::with_ignored_paths(HashSet::from([
+                "vendor/a.json".to_string(),
+                "vendor/gone.json".to_string(),
+            ])),
+            &virtual_blocks,
+        )?;
+
+        assert!(blocks.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn missing_target_file_parse_blocks_returns_error() -> anyhow::Result<()> {
+        let virtual_blocks = [test_utils::virtual_block("gone.json#/x", &[])?];
+
+        let error = parse_with_virtual_blocks(&[], &FakePathChecker::allow_all(), &virtual_blocks)
+            .unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "invalid block at line 7 of \"blockwatch.toml\": target gone.json#/x does not \
+             resolve: file does not exist"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn target_file_without_a_parser_parse_blocks_returns_error() -> anyhow::Result<()> {
+        let virtual_blocks = [test_utils::virtual_block("notes.txt#/x", &[])?];
+
+        let error = parse_with_virtual_blocks(
+            &[("notes.txt", "x")],
+            &FakePathChecker::allow_all(),
+            &virtual_blocks,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "invalid block at line 7 of \"blockwatch.toml\": target notes.txt#/x does not \
+             resolve: file format is unsupported"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn target_file_without_symbols_parse_blocks_returns_error() -> anyhow::Result<()> {
+        let virtual_blocks = [test_utils::virtual_block("a.py#/x", &[])?];
+
+        let error = parse_with_virtual_blocks(
+            &[("a.py", "x = 1\n")],
+            &FakePathChecker::allow_all(),
+            &virtual_blocks,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "invalid block at line 7 of \"blockwatch.toml\": target a.py#/x does not resolve: \
+             symbols are not supported for this language"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn virtual_block_with_the_name_of_a_tag_parse_blocks_returns_error() -> anyhow::Result<()> {
+        let source = "{\n  \"a\": 1,\n  // <block name=\"n\">\n  \"b\": 2\n  // </block>\n}\n";
+        let virtual_blocks = [test_utils::virtual_block("a.json#/a", &[("name", "n")])?];
+
+        let error = parse_with_virtual_blocks(
+            &[("a.json", source)],
+            &FakePathChecker::allow_all(),
+            &virtual_blocks,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "Block a.json:n at line 7 of \"blockwatch.toml\" duplicates the name of the block at \
+             line 3"
+        );
         Ok(())
     }
 }
@@ -2076,6 +2521,7 @@ mod supported_languages_tests {
             &FakePathChecker::allow_all(),
             &parsers,
             &HashMap::new(),
+            &[],
         )?
         .blocks;
 

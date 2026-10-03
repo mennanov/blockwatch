@@ -42,18 +42,19 @@ impl ValidatorSync for LinePatternValidator {
                 // Compile regex and ensure it anchors to entire line. Users may pass unanchored; we enforce full-line.
                 let re = Regex::new(pattern).map_err(|e| {
                     anyhow!(
-                        "line-pattern expected a valid regular expression, got \"{}\" in {}:{} at line {} (error: {})",
+                        "line-pattern expected a valid regular expression, got \"{}\" in {}:{} at {} (error: {})",
                         pattern,
                         file_path.display(),
                         block_with_context.block.name_display(),
-                        block_with_context.block.start_tag_position_range.start.line,
+                        block_with_context.block.declared_at(),
                         e
                     )
                 })?;
                 let mut block_violations = Vec::new();
                 for (line_idx, line) in block_with_context
                     .block
-                    .content(&file_blocks.file_content)
+                    .content
+                    .text(&file_blocks.file_content)
                     .lines()
                     .enumerate()
                 {
@@ -66,7 +67,8 @@ impl ValidatorSync for LinePatternValidator {
                         let column_offset = line[..byte_offset].chars().count();
                         let violation_start = block_with_context
                             .block
-                            .content_position(line_idx, column_offset);
+                            .content
+                            .position(line_idx, column_offset);
                         let line_character_end =
                             violation_start.character + trimmed_line.chars().count();
                         block_violations.push(create_violation(
@@ -128,10 +130,10 @@ fn create_violation(
     violation_character_end: usize,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {}:{} defined at line {} has a non-matching line {} (pattern: /{}/)",
+        "Block {}:{} defined at {} has a non-matching line {} (pattern: /{}/)",
         block_file_path.display(),
         block.name_display(),
-        block.start_tag_position_range.start.line,
+        block.declared_at(),
         violation_line_number,
         pattern
     );
