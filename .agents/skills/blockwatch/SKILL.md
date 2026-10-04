@@ -34,8 +34,7 @@ for the syntax.
 Introduce a list that should stay ordered → wrap it in `keep-sorted` in the same edit. Add a fact that also lives in the
 docs or config → add `affects` in the same edit. Retrofitting later is exactly the cost this avoids.
 
-Then run `git diff --patch | blockwatch --diff --only-changed` to confirm the new tags pass (see *Running and
-verifying*).
+Then run `git diff --patch | blockwatch --diff` to confirm the new tags pass (see *Running and verifying*).
 
 ## Annotating a new project
 
@@ -288,9 +287,9 @@ You can run the `blockwatch` command directly in the shell:
 
 ```bash
 blockwatch                                                   # validate every block in the tree
-git diff --patch | blockwatch --diff --only-changed          # only blocks your changes touched (fast)
-git diff --cached --patch | blockwatch --diff --only-changed # staged changes only
-git diff --patch | blockwatch --diff                         # whole tree, with `affects` enforced
+git diff --patch | blockwatch --diff                         # every block, with `affects` enforced on your changes
+git diff --cached --patch | blockwatch --diff                # the same, for staged changes
+git diff --patch | blockwatch --diff --only-changed          # only the blocks your changes touched
 blockwatch list                                              # JSON dump of every block found (audit / debug)
 blockwatch "src/**/*.rs" "**/*.md"                           # restrict to globs (quote them)
 blockwatch --ignore "**/generated/**"                        # exclude paths for this run
@@ -302,14 +301,16 @@ not in each command.
 Stdin is read **only** with `--diff`; piping a diff without it is silently ignored and the whole tree is scanned
 instead. `--only-changed` narrows the run to the blocks the diff touched and requires `--diff`.
 
-After editing annotated files, run `git diff --patch | blockwatch --diff --only-changed`. If it fails, read the message,
-fix the sorting/duplication/pattern/sync issue, and re-run until it passes. Use `blockwatch list` to confirm a tag you
+After editing annotated files, run `git diff --patch | blockwatch --diff`. If it fails, read the message, fix the
+sorting/duplication/pattern/sync issue, and re-run until it passes. A violation in a block you didn't edit is yours to
+fix only if your change caused it, for example when you changed one side of a `same-as` or renamed a block that another
+one points at. Otherwise leave it, and tell the user about it. Use `blockwatch list` to confirm a tag you
 just added is parsed and seen.
 
 The piped diff must carry Git's standard path prefixes, which a plain `git diff` produces. If BlockWatch reports that a
 diff target has no recognized prefix or does not exist, the repository sets `diff.noprefix`, a custom `diff.srcPrefix`,
 or `diff.relative`; re-run as
-`git diff --patch --default-prefix --no-relative | blockwatch --diff --only-changed`. Under `--diff`, stdin that is
+`git diff --patch --default-prefix --no-relative | blockwatch --diff`. Under `--diff`, stdin that is
 empty, ANSI-colorized, or not a diff is an error rather than "nothing changed".
 
 If `blockwatch` is not on `PATH`, install it with `cargo install blockwatch` or
@@ -317,7 +318,8 @@ If `blockwatch` is not on `PATH`, install it with `cargo install blockwatch` or
 
 ## Wiring into hooks and CI (do this once, after annotating)
 
-Validating only the changed blocks keeps these near-instant.
+The hook and the GitHub Action below check every block in the repository, and enforce `affects` on the diff. A file
+without a block tag is not parsed, so this stays fast.
 
 **pre-commit** (`.pre-commit-config.yaml`):
 
@@ -326,13 +328,15 @@ Validating only the changed blocks keeps these near-instant.
   hooks:
     - id: blockwatch
       name: blockwatch
-      entry: bash -c 'set -o pipefail; git diff --patch --cached --unified=0 | blockwatch --diff --only-changed'
+      entry: bash -c 'diff=$(git diff --patch --cached --unified=0) || exit; if [ -z "$diff" ]; then exec blockwatch; fi; printf "%s\n" "$diff" | blockwatch --diff'
       language: system
       stages: [ pre-commit ]
       pass_filenames: false
 ```
 
-Without the pre-commit framework, put the same `entry` command in `.git/hooks/pre-commit` and `chmod +x` it.
+Without the pre-commit framework, put the same `entry` command in `.git/hooks/pre-commit` and `chmod +x` it. If the
+project has `check-ai` blocks, add `--only-changed` after `--diff`: a full scan sends every one of them to the model on
+every commit.
 
 **GitHub Actions** (`.github/workflows/blockwatch.yml`):
 

@@ -85,8 +85,9 @@ git diff --patch | blockwatch --diff --only-changed "src/**/*.rs" "**/*.md"
 A block counts as changed when the diff overlaps its line range or its start tag. To inspect which blocks a diff
 touches, use `blockwatch list --diff`.
 
-`--only-changed` is what keeps pre-commit hooks and per-pull-request CI runs fast (see [CI Integration](ci.md)).
-`--diff` on its own audits the whole repository while still enforcing the rules that fire only on changed content.
+The hooks and the GitHub Action run `--diff` on its own. It checks the whole repository and still enforces the rules that
+fire only on changed content. `--only-changed` cuts a run down to the changed blocks, for when a full scan costs too
+much — see [Checking Only Changed Blocks](ci.md#checking-only-changed-blocks).
 
 ### Rules of the Modes
 
@@ -358,7 +359,7 @@ message is valid input:
 
 ```shell
 # commit-msg hook, where $1 is the message being written
-git diff --cached --patch | blockwatch --diff --only-changed --suppress-from "$1"
+git diff --cached --patch | blockwatch --diff --suppress-from "$1"
 
 # CI, over the range of a pull request
 git log --format=%B "$BASE..$HEAD" > msgs

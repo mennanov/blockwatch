@@ -1,17 +1,21 @@
 - id: blockwatch
   name: blockwatch
-  description: Validate <block> rules on staged changes (pipes the staged diff into blockwatch).
-  entry: bash -c 'set -o pipefail; git diff --cached --patch --unified=0 | blockwatch --diff --only-changed'
+  description: Validate every <block> rule in the repository, and enforce `affects` on the staged changes.
+  # The diff is saved first, so that a failing `git diff` fails the hook. An empty diff, as under
+  # `pre-commit run --all-files`, runs blockwatch without `--diff`, which would reject it. With
+  # nothing staged, `affects` has nothing to check anyway.
+  entry: bash -c 'diff=$(git diff --cached --patch --unified=0) || exit; if [ -z "$diff" ]; then exec blockwatch; fi; printf "%s\n" "$diff" | blockwatch --diff'
   language: rust
   pass_filenames: false
   stages: [ pre-commit ]
 
 - id: blockwatch-commit-msg
   name: blockwatch (commit-msg)
-  description: Validate <block> rules on staged changes, reading Blockwatch-suppress trailers from the commit message.
-  # The trailing `--` is necessary: pre-commit appends the message file to this argv, and
-  # `bash -c SCRIPT FILE` binds FILE to $0 rather than $1. The sentinel takes the $0 slot instead.
-  entry: bash -c 'set -o pipefail; git diff --cached --patch --unified=0 | blockwatch --diff --only-changed --suppress-from "$1"' --
+  description: Validate every <block> rule in the repository, enforce `affects` on the staged changes, and read Blockwatch-suppress trailers from the commit message.
+  # The same command as the `blockwatch` hook, plus `--suppress-from`. The trailing `--` is
+  # necessary: pre-commit appends the message file to this argv, and `bash -c SCRIPT FILE` binds
+  # FILE to $0 rather than $1. The sentinel takes the $0 slot instead.
+  entry: bash -c 'diff=$(git diff --cached --patch --unified=0) || exit; if [ -z "$diff" ]; then exec blockwatch --suppress-from "$1"; fi; printf "%s\n" "$diff" | blockwatch --diff --suppress-from "$1"' --
   language: rust
   pass_filenames: true
   stages: [ commit-msg ]

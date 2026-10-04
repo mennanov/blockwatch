@@ -1,8 +1,10 @@
 # CI & Git Hooks Integration
 
-Checking only the blocks a diff modified keeps validation fast and allows incremental adoption. That is what
-`--diff --only-changed` does: `--diff` supplies the diff on stdin, and `--only-changed` narrows the run to the blocks it
-touched. See [Run Modes](cli.md#run-modes).
+The hooks and the GitHub Action check every block in the repository. They pass the diff with `--diff`, so that the rules
+about changes, such as [`affects`](validators/affects.md), can fire. A change can break a block in a file it never
+touched: the other side of a `same-as`, or a block that points at one the change renamed. Only a full scan sees that.
+It stays fast, because a file without a block tag is not parsed. To check only the blocks the diff changed, see
+[Checking Only Changed Blocks](#checking-only-changed-blocks).
 
 ## Pre-commit Framework
 
@@ -29,18 +31,20 @@ source:
   hooks:
     - id: blockwatch
       name: blockwatch
-      entry: bash -c 'set -o pipefail; git diff --patch --cached --unified=0 | blockwatch --diff --only-changed'
+      entry: bash -c 'diff=$(git diff --patch --cached --unified=0) || exit; if [ -z "$diff" ]; then exec blockwatch; fi; printf "%s\n" "$diff" | blockwatch --diff'
       language: system
       stages: [ pre-commit ]
       pass_filenames: false
 ```
 
-The `--unified=0` flag minimizes diff context lines so unchanged adjacent blocks aren't included in the check.
+The command saves the diff before it runs `blockwatch`:
 
-`set -o pipefail` makes the pipeline report the diff command's failure instead of only `blockwatch`'s exit code. A diff
-command that fails without writing anything is already caught — `blockwatch` rejects empty stdin under `--diff` — but
-one that dies partway through writing leaves a shorter, still well-formed diff, which would otherwise pass as a clean
-run over a change set that was never fully read.
+- A `git diff` that fails stops the hook, even one that dies partway through writing. Piped straight into `blockwatch`,
+  such a diff would be shorter but still well-formed, and the run would pass.
+- When nothing is staged, as under `pre-commit run --all-files`, the diff is empty, and `--diff` rejects empty input. So
+  the hook runs `blockwatch` without `--diff`. With no changes, `affects` has nothing to check anyway.
+
+`--unified=0` leaves out the unchanged lines around each change, which keeps the diff small.
 
 ### Reading Suppressions From the Commit Message
 
@@ -81,22 +85,25 @@ reused with `git commit -e -F .git/COMMIT_EDITMSG` instead of being retyped.
 
 ## Plain Git Hook
 
-Without pre-commit, add the diff pipe directly to `.git/hooks/pre-commit` and make it executable (`chmod +x`):
+Without pre-commit, write the same steps to `.git/hooks/pre-commit` and make it executable (`chmod +x`):
 
 ```bash
 #!/bin/sh
-git diff --patch --cached --unified=0 | blockwatch --diff --only-changed
+diff=$(git diff --patch --cached --unified=0) || exit
+if [ -z "$diff" ]; then exec blockwatch; fi
+printf '%s\n' "$diff" | blockwatch --diff
 ```
 
-`set -o pipefail` is deliberately absent here — `/bin/sh` does not portably support it. Under `--diff` an empty stdin is
-rejected outright, so a failing diff command still fails the hook rather than passing silently.
+Here the diff is empty after `git commit --amend` with nothing new staged.
 
-To read suppressions from the message instead, write the same pipe to `.git/hooks/commit-msg`, where Git passes the
+To read suppressions from the message instead, write the same steps to `.git/hooks/commit-msg`, where Git passes the
 message file as the first argument:
 
 ```bash
 #!/bin/sh
-git diff --patch --cached --unified=0 | blockwatch --diff --only-changed --suppress-from "$1"
+diff=$(git diff --patch --cached --unified=0) || exit
+if [ -z "$diff" ]; then exec blockwatch --suppress-from "$1"; fi
+printf '%s\n' "$diff" | blockwatch --diff --suppress-from "$1"
 ```
 
 ## GitHub Actions
@@ -119,6 +126,9 @@ jobs:
         # env: { BLOCKWATCH_AI_API_KEY: ${{ secrets.BLOCKWATCH_AI_API_KEY }} }
 ```
 
+The action checks every block, and passes the diff of the pull request or the push. Its `only_changed: 'true'` input
+adds `--only-changed`.
+
 ## Diff Input
 
 Under `--diff` the piped diff must carry Git's path prefixes and be repository-relative. A normal `git diff`
@@ -130,27 +140,26 @@ Diffs produced with `--no-prefix`, `diff.noprefix`, a custom `diff.srcPrefix` / 
 of these globally, pin the output:
 
 ```shell
-git diff --patch --unified=0 --default-prefix --no-relative | blockwatch --diff --only-changed
+git diff --patch --unified=0 --default-prefix --no-relative | blockwatch --diff
 ```
 
 See [Supported Diff Input](cli.md#supported-diff-input) for details.
 
-## Full-Tree Runs
+## Checking Only Changed Blocks
 
-`blockwatch` on its own scans every block in the repository — no diff, no flags. That is the run to schedule
-periodically on the main branch: [`same-as`](validators/same-as.md), `keep-sorted` and the other deterministic
-validators catch copies that drifted apart in files no recent diff happened to touch.
+A full scan checks every block on every commit. Add `--only-changed` to the hook's `blockwatch --diff` when that costs
+too much:
 
-One rule is missing from it. [`affects`](validators/affects.md) asks whether two blocks were edited *together*, which
-only a diff can answer, so a bare run does not check it at all. To audit the whole tree and still enforce `affects`,
-pass `--diff` without `--only-changed`:
+- **[`check-ai`](validators/check-ai.md)** sends every block in scope to the model: one paid API call per block, on
+  every commit.
+- **[`check-lua`](validators/check-lua.md) scripts that do I/O**, such as a network call, run for every block too.
+- **A huge repository with many blocks.**
 
-```shell
-git diff --patch <base>..<head> | blockwatch --diff
-```
+`--only-changed` checks only the blocks the diff changed, so it misses a block that a change broke elsewhere. To keep
+the full scan for every other validator, run twice: once with `-d check-ai`, and once with `--only-changed -e check-ai`.
 
-`--verbosity summary` reports how many blocks carry a rule that needs a diff, so a run says plainly what it could not
-check.
+A bare `blockwatch`, with no diff, also checks every block. It can't check [`affects`](validators/affects.md), which
+asks whether two blocks were edited together. `--verbosity summary` reports how many blocks carry such a rule.
 
 ## Suppressing Violations From a Job
 

@@ -32,12 +32,18 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Changed
 
+- **Breaking:** the pre-commit hooks `blockwatch` and `blockwatch-commit-msg` check every block in the repository, not
+  only the blocks the staged diff touched. `affects` still checks the staged diff. A violation anywhere in the
+  repository now fails the commit, so run `blockwatch` once before you bump `rev`. To check only the changed blocks, see
+  [Checking Only Changed Blocks](docs/ci.md#checking-only-changed-blocks).
 - A run over the whole repository is much faster. A file is parsed only when it contains `<block` or `</block`, and
   most files contain neither. On the kubernetes repository, a run takes about 1 s instead of 15 s. As a result, in a
   file without a start tag, an end tag with a space in it, such as `</ block>`, is no longer reported.
 
 ### Fixed
 
+- The pre-commit hooks no longer fail when nothing is staged, as under `pre-commit run --all-files` or
+  `git commit --amend`. They run `blockwatch` without `--diff` then.
 - A comment such as `// only <block, filesystem> is tested` no longer fails the run with `Malformed block tag`.
   `<block` and `</block` start a tag only when whitespace follows them or the comment ends there.
 
