@@ -4,7 +4,8 @@ Every rule is declared as an attribute on a `<block>` tag inside a comment. One 
 once.
 
 A start or end tag that fails to parse — most commonly a missing closing `>` — fails the whole run with `Malformed
-block tag at line N, column N`, rather than being silently ignored.
+block tag at line N, column N`, rather than being silently ignored. Text counts as a tag only when whitespace follows
+`<block` or `</block`, or the comment ends there. So prose such as `<block, filesystem>` or `<blockquote>` is ignored.
 
 ## Which validator do I want?
 

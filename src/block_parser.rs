@@ -836,6 +836,38 @@ println!("hello2");
     }
 
     #[test]
+    fn punctuation_after_the_block_prefix_is_not_treated_as_a_tag_attempt() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        // A real tag has whitespace after "block", or the comment ends there. Prose can have a
+        // comma there instead.
+        let contents = "// only <block, filesystem> is tested\nfn foo() {}\n";
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(blocks, vec![]);
+        Ok(())
+    }
+
+    #[test]
+    fn punctuation_after_the_end_tag_prefix_is_not_treated_as_a_tag_attempt() -> anyhow::Result<()>
+    {
+        let mut parser = create_parser();
+        let contents = "// a block ends at </block, as in HTML\nfn foo() {}\n";
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(blocks, vec![]);
+        Ok(())
+    }
+
+    #[test]
+    fn non_breaking_space_after_the_block_prefix_returns_error() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        // An editor can type a non-breaking space by accident. The tag must then fail the run,
+        // rather than be skipped as prose.
+        let contents = "// <block\u{a0}name=\"foo\">\nfn foo() {}\n";
+        let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
+        assert_eq!(error_message, "Malformed block tag at line 1, column 4");
+        Ok(())
+    }
+
+    #[test]
     fn block_closed_before_an_unclosed_one_is_returned_ahead_of_the_error() {
         let mut parser = create_parser();
         let contents = "// <block name=\"closed\">\n// </block>\n// <block name=\"open\">";

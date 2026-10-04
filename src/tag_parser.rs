@@ -135,9 +135,10 @@ fn is_attribute_char(c: char) -> bool {
 
 /// Whether `input`, which starts with `<`, looks like an attempt at a block start or end tag.
 ///
-/// The text right after continues as `block` (an end tag's optional `/` and whitespace aside) and
-/// stops at a word boundary there, rather than running on into an unrelated word such as
-/// `blockquote` or a generic type parameter such as `Vec<blockstart>`.
+/// The text right after continues as `block` (an end tag's optional `/` and whitespace aside),
+/// followed by whitespace or the end of `input`, as in a real tag. Anything else there means
+/// prose: a letter, as in `blockquote` or the generic type parameter `Vec<blockstart>`, or
+/// punctuation, as in a comment that puts a comma right after the word.
 fn looks_like_tag_attempt(input: &str) -> bool {
     let after_marker = input.strip_prefix("<block").or_else(|| {
         // Not a start-tag attempt; try an end-tag one instead.
@@ -149,9 +150,7 @@ fn looks_like_tag_attempt(input: &str) -> bool {
             .and_then(|rest| rest.strip_prefix("block"))
     });
     match after_marker {
-        // A word character right after `block` means it's just a longer word (e.g. `blockquote`),
-        // not a tag attempt.
-        Some(rest) => !rest.starts_with(is_attribute_char),
+        Some(rest) => rest.is_empty() || rest.starts_with(char::is_whitespace),
         None => false,
     }
 }

@@ -36,6 +36,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   most files contain neither. On the kubernetes repository, a run takes about 1 s instead of 15 s. As a result, in a
   file without a start tag, an end tag with a space in it, such as `</ block>`, is no longer reported.
 
+### Fixed
+
+- A comment such as `// only <block, filesystem> is tested` no longer fails the run with `Malformed block tag`.
+  `<block` and `</block` start a tag only when whitespace follows them or the comment ends there.
+
 ## [0.7.0] - 2026-09-28
 
 ### Added
