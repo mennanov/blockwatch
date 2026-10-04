@@ -115,11 +115,19 @@ The goal is a test suite that fails when behavior changes. Running every line is
 
 ## The repository lints itself
 
-Source files here contain real `<block ...>` tags. The `commit-msg` hook builds the linter from the working tree and
-runs it on the staged diff. This means:
+Source files here contain real `<block ...>` tags. Three runs check them:
 
-- A comment that writes out a block tag *becomes* a block. To write about the tag syntax in a comment or in Markdown,
-  put it in a code span, so that it isn't read as a rule.
+- The `commit-msg` hook builds the linter from the working tree and runs it on the staged diff.
+- `tests/general.rs` runs the linter from the working tree on the whole repository.
+- CI runs the release that `mennanov/blockwatch-action` pins on the whole repository. That release can be older than
+  the code here.
+
+This means:
+
+- In a source comment, tag text counts even inside a code span. A full tag becomes a block, and a partial one can fail
+  the run as a malformed tag. Describe a tag in words instead, such as "the start tag" or "an end tag with a space
+  before its slash". Tag text is safe in a Rust string literal. In Markdown, it is safe outside `<!-- -->` and
+  `[//]: #` comments.
 - When a commit fails, it is usually the linter reporting a rule that the change broke. The hook itself is usually
   fine. Read the violation before you work around it.
 
