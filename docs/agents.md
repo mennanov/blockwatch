@@ -13,7 +13,31 @@ value, how tag parameters work, and how to test the resulting blocks.
 Make sure the `blockwatch` binary is installed locally so your agent can verify its work.
 See [Installation](../README.md#installation).
 
-## 2. Install the Skill
+## 2. Run the Agent
+
+Paste this prompt into your agent. The agent installs the skill in your project and uses it to add blocks:
+
+<!-- <block same-as="README.md:agent-prompt"> -->
+
+```text
+Install the BlockWatch skill from
+https://raw.githubusercontent.com/mennanov/blockwatch/main/.agents/skills/blockwatch/SKILL.md
+in this project. Then use it to annotate the project and add `blockwatch.toml` if needed. List each block you
+added and the mistake it catches.
+```
+
+<!-- </block> -->
+
+The skill stays in the project, so agents that work on it later know the rules too. Always inspect the generated diff
+before committing to ensure the added blocks are necessary and accurate.
+
+## 3. Enable Automated Checks
+
+Set up pre-commit hooks or CI workflows to enforce rules on future changes. See [CI Integration](ci.md).
+
+## Other Ways to Install the Skill
+
+Install the skill in one of these ways, then leave the first sentence out of the prompt.
 
 ### Claude Code
 
@@ -42,20 +66,6 @@ mkdir -p .claude/skills/blockwatch
 curl -sL https://raw.githubusercontent.com/mennanov/blockwatch/main/.agents/skills/blockwatch/SKILL.md \
   -o .claude/skills/blockwatch/SKILL.md
 ```
-
-## 3. Run the Agent
-
-Prompt your agent to scan the repository and add rules:
-
-> Using the BlockWatch skill, annotate this repository with `<block>` tags. Focus on lists that must remain sorted or
-> unique, and on code that should stay in sync with docs or config. Only add high-value blocks, then run `blockwatch` to
-> verify everything passes.
-
-Always inspect the generated diff before committing to ensure the added blocks are necessary and accurate.
-
-## 4. Enable Automated Checks
-
-Set up pre-commit hooks or CI workflows to enforce rules on future changes. See [CI Integration](ci.md).
 
 ---
 

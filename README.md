@@ -6,32 +6,61 @@
 [![Downloads](https://img.shields.io/crates/d/blockwatch)](https://crates.io/crates/blockwatch)
 
 [//]: # (<block name="pitch">)
-Some parts of your codebase must change together: a function and its docs, a value across config files, etc. Blockwatch
-makes these relationships explicit and fails a CI run or a pre-commit hook if they drift.
+Some parts of a codebase have to change together: a function and its docs, or a value duplicated across configs.
+BlockWatch lets you write those rules in comments, right next to the code. If they fall out of sync, your pre-commit
+hook or CI run fails.
 
-Supports 34 languages.
+Supports [34 languages](#supported-languages).
 
 [//]: # (</block>)
 
 ## Quick Start
 
-Wrap the code in a block and point it at the docs.
+Install BlockWatch:
+
+```shell
+brew install mennanov/blockwatch/blockwatch
+```
+
+For Windows and other ways to install, see [Installation](#installation).
+
+Then paste this prompt into your AI coding agent:
+
+<!-- <block name="agent-prompt"> -->
+
+```text
+Install the BlockWatch skill from
+https://raw.githubusercontent.com/mennanov/blockwatch/main/.agents/skills/blockwatch/SKILL.md
+in this project. Then use it to annotate the project and add `blockwatch.toml` if needed. List each block you
+added and the mistake it catches.
+```
+
+<!-- </block> -->
+
+Review the suggested blocks and commit them. The skill stays in the project, so agents working on it later know
+the rules too. To check every future change, add BlockWatch to your [pre-commit hook or CI](#ci-integration).
+
+## How it works
+
+A block is a pair of tags inside comments around some lines of code. The rules go in the start tag. In this example, the
+enum variants must match the list in `README.md`. Each block uses `same-as-pattern` to pick the values to compare. Here,
+`\w+` matches each word, so commas and dashes don't count:
 
 **src/lib.rs**:
 
 ```rust
-// <block name="languages" affects="README.md:supported-languages">
 pub enum Language {
+    // <block name="languages" same-as="README.md:supported-languages" same-as-pattern="\w+">
     Rust,
     Python,
+    // </block>
 }
-// </block>
 ```
 
 **README.md**:
 
 ```markdown
-<!-- <block name="supported-languages"> -->
+<!-- <block name="supported-languages" same-as-pattern="\w+"> -->
 
 - Rust
 - Python
@@ -39,37 +68,29 @@ pub enum Language {
 <!-- </block> -->
 ```
 
-Now add a `Go` variant to the enum in the Rust code and pass the diff to `blockwatch --diff`:
+If you add a `Go` variant to the enum without updating `README.md`, `blockwatch` fails with exit code 1 and this
+message:
 
-```console
-$ git diff --patch | blockwatch --diff
-{
-  "src/lib.rs": [
-    {
-      "code": "affects",
-      "data": {
-        "affected_block_file_path": "README.md",
-        "affected_block_name": "supported-languages"
-      },
-      "message": "Block src/lib.rs:languages at line 1 is modified, but README.md:supported-languages is not",
-      "range": {
-        "end": {"character": 68, "line": 1},
-        "start": {"character": 4, "line": 1}
-      },
-      "severity": 1
-    }
-  ]
-}
+```text
+Block src/lib.rs:languages at line 2 disagrees with README.md:supported-languages: ["Rust", "Python", "Go"] != ["Rust", "Python"]
 ```
 
-Update the contents of the block in `README.md` and it will pass the check.
+The output shows the values on each side. Add `Go` to `README.md` too, and the run passes.
+
+Because `same-as` compares block contents directly, it doesn't need a diff. Running `blockwatch` on its own finds
+mismatches anywhere in the repository. The [other validators](#validators) make code and docs change together, keep
+lists sorted, and more.
 
 ## Validators
 
-`affects` and `same-as` are the two that work across files: one forces a co-edit, the other compares the actual values
-and needs no diff to do it. Both can point at a block, a whole file, or one value inside a file, such as
-`package.json#/version` (see [Symbols](docs/symbols.md)). The rest check a single block on its own, and are the things
-you'd otherwise nitpick in code review.
+Two validators work across files:
+
+- `affects` fails when a diff touches a block without also changing what it points to.
+- `same-as` fails when a block and its target hold different values. It needs no diff.
+
+Both can point to a block, a whole file, or a specific value in a file like `package.json#/version`
+(see [Symbols](docs/symbols.md)). The other validators check a single block on their own: the things you'd otherwise
+have to nitpick in code review.
 
 <!-- <block name="available-validators"
      same-as="src/validators/mod.rs:validator-registry, docs/validators/README.md:validators-index"
@@ -88,43 +109,47 @@ you'd otherwise nitpick in code review.
 
 <!-- </block> -->
 
-Blocks can have a `name`, so other blocks can point at it, and [`severity`](docs/validators/README.md#severity). The
-`error` severity fails with a non-zero exit code.
-
-Violations can be kept out of the exit code without editing the source:
-`blockwatch --suppress FILE[:BLOCK[:VALIDATOR[:HASH]]]` keeps them in the output and stops them failing the run. The
-shorter the address, the more it covers: from a single violation up to every violation in a file. Only named blocks can
-be addressed below the file level — see [Suppressing a Violation](docs/cli.md#suppressing-a-violation).
+Every block can also take an optional `name` so other blocks can point to it, and a
+[`severity`](docs/validators/README.md#severity). Only `error`, the default, fails the run.
 
 See the [Validators Reference](docs/validators/README.md) for full details.
 
 ## Installation
 
 ```shell
-brew install mennanov/blockwatch/blockwatch   # macOS / Linux
-cargo install blockwatch                      # from source
+# macOS and Linux, with Homebrew
+brew install mennanov/blockwatch/blockwatch
+
+# macOS and Linux, without Homebrew
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/mennanov/blockwatch/releases/latest/download/blockwatch-installer.sh | sh
+
+# Windows
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/mennanov/blockwatch/releases/latest/download/blockwatch-installer.ps1 | iex"
+
+# From source, with Rust
+cargo install blockwatch
 ```
 
 Prebuilt binaries are on the [Releases](https://github.com/mennanov/blockwatch/releases) page.
 
-## Let an agent integrate this tool
+## AI Agents
 
-This repository ships a [skill](.agents/skills/blockwatch/SKILL.md) that tells an agent which blocks are worth linking
-and how to verify its own edits.
-
-For **Claude Code**:
+The [skill](.agents/skills/blockwatch/SKILL.md) tells an agent where blocks make sense, how to format them, and how to
+check its own work. The [Quick Start](#quick-start) prompt sets it up in a single project. To install it globally for
+every project in Claude Code instead:
 
 ```text
 /plugin marketplace add mennanov/blockwatch
 /plugin install blockwatch@blockwatch
 ```
 
-For Cursor, Copilot, Codex, and other setup options, see [docs/agents.md](docs/agents.md).
+See [docs/agents.md](docs/agents.md) for Cursor, Copilot, Codex, and other agent setups.
 
 ## Usage
 
-A bare run checks every block in the repository. Pass `--diff` to read a unified diff from stdin, which marks the blocks
-the diff changed, and add `--only-changed` to narrow the run down to those blocks:
+Running `blockwatch` on its own checks every block in the repository. With `--diff`, BlockWatch reads a unified diff
+from stdin to enforce rules that need one, like `affects`. Adding `--only-changed` limits the check to only the blocks
+touched by that diff:
 
 ```shell
 # Check every block in the repository
@@ -146,8 +171,8 @@ git diff --cached --patch | blockwatch --diff --only-changed
 blockwatch list
 ```
 
-Rules live in comments, next to the code they describe. Settings that stay the same for a project, such as ignored
-paths, extension mappings and the validators to run, can live in `blockwatch.toml` at the repository root:
+Rules live in comments, next to the code they describe. Settings that apply to the whole project, such as ignored
+paths, extension mappings, and disabled validators, go into `blockwatch.toml` at the repository root:
 
 ```toml
 ignore = ['**/generated/**']
@@ -157,10 +182,20 @@ disable = ['check-ai']
 cxx = 'cpp'
 ```
 
-The config file can also declare [blocks around a key](docs/cli.md#blocks-in-the-config-file) of a JSON, TOML or YAML
-file, instead of tags. That is how a file without comments, such as `package.json`, gets rules.
+The config file can also declare [blocks around a key](docs/cli.md#blocks-in-the-config-file) in a JSON, TOML, or YAML
+file instead of using comment tags. That is how files without comment support, such as `package.json`, get rules.
 
-See [docs/cli.md](docs/cli.md) for the run modes in full, CLI flags, the [config file](docs/cli.md#config-file), path
+To keep a known violation from failing the run without editing the source, pass its `address` from the output to
+`--suppress`. The violation is still reported. For the failure in [How it works](#how-it-works):
+
+```shell
+blockwatch --suppress src/lib.rs:languages:same-as:270d21b4
+```
+
+A shorter address like `src/lib.rs` covers more violations. See
+[Suppressing a Violation](docs/cli.md#suppressing-a-violation).
+
+See [docs/cli.md](docs/cli.md) for all CLI flags, execution modes, the [config file](docs/cli.md#config-file), path
 exclusions, and custom extension mappings.
 
 ## CI Integration
@@ -185,14 +220,14 @@ exclusions, and custom extension mappings.
 - uses: mennanov/blockwatch-action@v1
 ```
 
-BlockWatch exits `1` when it finds at least one `error` severity violation, and `0` otherwise. Warnings, info, and hints
-are printed but don't fail the run.
+BlockWatch exits with `1` when it finds at least one `error` violation, and `0` otherwise. Warnings, info, and hints
+are printed, but won't fail the run.
 
-`blockwatch --format sarif` writes the violations as a SARIF log instead of the JSON diagnostics, for GitHub code
-scanning and anything else that reads the format — see [SARIF Output](docs/cli.md#sarif-output).
+For GitHub code scanning, `blockwatch --format sarif` writes violations as a SARIF log instead of JSON. See
+[SARIF Output](docs/cli.md#sarif-output).
 
-For plain git hooks, local pre-commit setups, and sandboxing untrusted Lua scripts in fork pull requests,
-see [docs/ci.md](docs/ci.md).
+For plain git hooks, local pre-commit setups, and sandboxing untrusted Lua scripts in fork pull requests, see
+[docs/ci.md](docs/ci.md).
 
 ## Supported Languages
 
@@ -235,9 +270,9 @@ see [docs/ci.md](docs/ci.md).
 
 [//]: # (</block>)
 
-Only the extensions listed above are recognized. Anything else is ignored, including spellings a grammar would otherwise
-handle, `.hpp`, `.hxx` and `.cxx` among them. Map those to a supported syntax with `-E`, or with the `extensions` table
-of the config file:
+BlockWatch only inspects files with the extensions listed above and skips everything else, even `.hpp`, `.hxx`, or
+`.cxx`. To check those too, map them to a supported extension with `-E` or in the `extensions` table of
+`blockwatch.toml`:
 
 ```shell
 blockwatch -E cxx=cpp -E hpp=cpp
@@ -245,19 +280,19 @@ blockwatch -E cxx=cpp -E hpp=cpp
 
 ## Known Limitations
 
-- **Deleting a block deletes its rule, quietly.** Remove a file, or just strip the tags out of it, and the links it
-  declared are gone. The run passes and nothing tells you a rule disappeared. Blocks still *pointing* at the deleted one
-  do fail, as a missing reference.
-- **A file needs comments or symbols to hold a block.** CSV and `.env` files have nowhere to put a tag. Link to such a
-  file as a [whole file](docs/validators/affects.md#whole-files) instead. A file with [symbols](docs/symbols.md), such
-  as plain JSON, can get its blocks from the [config file](docs/cli.md#blocks-in-the-config-file).
-- **Unsupported extensions are skipped silently.** A run that read nothing looks exactly like a run that found no
-  problems. `blockwatch --verbosity summary` prints how many files were actually read.
+- **Deleting a block deletes its rule, quietly.** If you delete a file or strip its tags, its rules are gone. The run
+  passes without warning you that a rule disappeared. Blocks still *pointing* at the deleted one do fail, as a missing
+  reference.
+- **A file needs comments or symbols to hold a block.** Files like CSV and `.env` have nowhere to put a tag. Link to
+  such a file as a [whole file](docs/validators/affects.md#whole-files) instead. For files with
+  [symbols](docs/symbols.md), like plain JSON, you can define blocks in the
+  [config file](docs/cli.md#blocks-in-the-config-file).
+- **Unsupported extensions are skipped silently.** A run that read nothing looks identical to a run that found no
+  problems. Run `blockwatch --verbosity summary` to see how many files were actually checked.
 
 ## Contributing
 
-Contributions are welcome. A great first issue
-is [adding support for a new grammar](https://github.com/mennanov/blockwatch/pull/2).
+PRs and issues are welcome!
 
 To run tests locally:
 
