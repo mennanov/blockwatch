@@ -96,7 +96,7 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
         )
     });
     write_report(
-        args.verbosity,
+        args.validation.verbosity,
         report::RunMode::new(args.diff, args.only_changed),
         blocks_needing_diff,
         scan_stats,

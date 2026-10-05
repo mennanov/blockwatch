@@ -16,6 +16,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 - `check-ai` uses `gpt-5.4-nano` by default, instead of `gpt-5-nano`. It costs more per token. To keep the old model,
   set `BLOCKWATCH_AI_MODEL=gpt-5-nano`.
+- `blockwatch list --help` shows only the flags `list` takes: `--diff`, `--only-changed`, `--config`, `-E` and
+  `--ignore`. `list` now rejects `--enable` and `--disable`, which it used to ignore.
 
 ## [0.8.0] - 2026-10-05
 

@@ -10,7 +10,8 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
 - **Read a Diff**: `git diff --patch | blockwatch --diff` marks which blocks the diff changed.
 - **Only Changed Blocks**: `git diff --patch | blockwatch --diff --only-changed` narrows the run to them, instead of
   every block in the repository.
-- **List Blocks**: `blockwatch list` outputs a JSON report of all discovered blocks.
+- **List Blocks**: `blockwatch list` outputs a JSON report of all discovered blocks. It takes `--diff`,
+  `--only-changed`, `--config`, `-E` and `--ignore`.
 - **Config File**: `blockwatch --config FILE` reads the project's settings from FILE instead of `blockwatch.toml`
 - **Custom Extensions**: Map custom file extensions: `blockwatch -E cxx=cpp` (config key: `extensions`)
 - **Disable Validators**: `blockwatch -d check-ai` (config key: `disable`)

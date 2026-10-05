@@ -418,8 +418,7 @@ fn verbosity_with_the_list_subcommand_fails() {
     cmd.arg("list").arg("--verbosity").arg("full");
     let output = cmd.output().unwrap();
 
-    output
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("`list` subcommand"));
+    output.assert().failure().stderr(predicate::str::contains(
+        "unexpected argument '--verbosity'",
+    ));
 }

@@ -39,8 +39,9 @@ impl std::fmt::Display for Verbosity {
 /// The parsed command line.
 ///
 /// The fields hold the values as clap parsed them. The methods below turn them into what the rest
-/// of the program uses, such as glob sets and [`RawSettings`]. Flags are `global`, so they can go
-/// before or after a subcommand.
+/// of the program uses, such as glob sets and [`RawSettings`]. The flags here are `global`, so
+/// they can go before or after `list`. The flags that only validation uses are in
+/// [`ValidationFlags`].
 #[derive(Parser, Debug)]
 #[command(
     author,
@@ -129,28 +130,6 @@ pub(crate) struct Args {
     )]
     extensions: Vec<(String, String)>,
 
-    /// Disable a validator, e.g. -d check-ai -d line-count
-    #[arg(
-        short = 'd',
-        long = "disable",
-        value_name = "VALIDATOR",
-        action = clap::ArgAction::Append,
-        value_parser = ValueParser::new(parse_validator),
-        global = true,
-    )]
-    disabled_validators: Vec<&'static str>,
-
-    /// Enable a validator, e.g. -e check-ai -e line-count
-    #[arg(
-        short = 'e',
-        long = "enable",
-        value_name = "VALIDATOR",
-        action = clap::ArgAction::Append,
-        value_parser = ValueParser::new(parse_validator),
-        global = true,
-    )]
-    enabled_validators: Vec<&'static str>,
-
     /// Glob patterns to ignore files.
     #[arg(
         long = "ignore",
@@ -167,13 +146,52 @@ pub(crate) struct Args {
     #[arg(long = "config", value_name = "FILE", global = true)]
     pub(crate) config: Option<PathBuf>,
 
+    // Not `global`, so that `list --help` doesn't show these flags and `list` rejects them after
+    // it. clap still accepts them before `list`, so `validate` rejects them there.
+    #[command(flatten)]
+    pub(crate) validation: ValidationFlags,
+
+    /// Glob patterns to filter files.
+    #[arg(value_name = "GLOBS")]
+    globs: Vec<String>,
+
+    /// The subcommand to run, if any. `None` means the default action: validate.
+    #[command(subcommand)]
+    pub(crate) command: Option<SubCommand>,
+}
+
+/// The flags that only the default command takes. They choose the validators, report what they
+/// checked, or suppress what they found, and `list` runs no validators.
+///
+/// The default value is what a command line without any of these flags parses to.
+#[derive(clap::Args, Debug, Default, PartialEq)]
+pub(crate) struct ValidationFlags {
+    /// Disable a validator, e.g. -d check-ai -d line-count
+    #[arg(
+        short = 'd',
+        long = "disable",
+        value_name = "VALIDATOR",
+        action = clap::ArgAction::Append,
+        value_parser = ValueParser::new(parse_validator),
+    )]
+    disabled_validators: Vec<&'static str>,
+
+    /// Enable a validator, e.g. -e check-ai -e line-count
+    #[arg(
+        short = 'e',
+        long = "enable",
+        value_name = "VALIDATOR",
+        action = clap::ArgAction::Append,
+        value_parser = ValueParser::new(parse_validator),
+    )]
+    enabled_validators: Vec<&'static str>,
+
     /// How much to report about what the run checked. Printed to stdout.
     #[arg(
         long = "verbosity",
         value_name = "LEVEL",
         value_enum,
         default_value_t = Verbosity::None,
-        global = true,
     )]
     pub(crate) verbosity: Verbosity,
 
@@ -182,7 +200,7 @@ pub(crate) struct Args {
     /// `sarif` writes a SARIF 2.1.0 log in place of the JSON diagnostics, for code-scanning
     /// services that read it. Unlike the JSON diagnostics, a SARIF log is written even when the run
     /// found nothing, because such a service expects a log from every run.
-    #[arg(long = "format", value_name = "FORMAT", value_enum, global = true)]
+    #[arg(long = "format", value_name = "FORMAT", value_enum)]
     format: Option<OutputFormat>,
 
     /// Suppress reported violations so they no longer fail the run, e.g.
@@ -196,7 +214,6 @@ pub(crate) struct Args {
         value_name = "ADDRESS",
         action = clap::ArgAction::Append,
         value_parser = ValueParser::new(ViolationAddress::parse),
-        global = true,
     )]
     suppressed_addresses: Vec<ViolationAddress>,
 
@@ -209,17 +226,8 @@ pub(crate) struct Args {
         long = "suppress-from",
         value_name = "FILE",
         action = clap::ArgAction::Append,
-        global = true,
     )]
     suppress_from: Vec<PathBuf>,
-
-    /// Glob patterns to filter files.
-    #[arg(value_name = "GLOBS")]
-    globs: Vec<String>,
-
-    /// The subcommand to run, if any. `None` means the default action: validate.
-    #[command(subcommand)]
-    pub(crate) command: Option<SubCommand>,
     // </block>
 }
 
@@ -228,6 +236,7 @@ pub(crate) struct Args {
 pub(crate) enum SubCommand {
     /// List all blocks found in the scanned files.
     List {
+        /// Glob patterns to filter files.
         #[arg(value_name = "GLOBS")]
         globs: Vec<String>,
     },
@@ -240,11 +249,13 @@ impl Args {
             ignore: self.ignore.clone(),
             extensions: self.extensions.iter().cloned().collect(),
             enable: self
+                .validation
                 .enabled_validators
                 .iter()
                 .map(|name| name.to_string())
                 .collect(),
             disable: self
+                .validation
                 .disabled_validators
                 .iter()
                 .map(|name| name.to_string())
@@ -254,7 +265,7 @@ impl Args {
 
     /// The format to write the violations in.
     pub(crate) fn output_format(&self) -> OutputFormat {
-        self.format.unwrap_or_default()
+        self.validation.format.unwrap_or_default()
     }
 
     /// Where the violations the run was told to suppress sit.
@@ -263,8 +274,8 @@ impl Args {
     /// passed via `--suppress-from`. Errors when such a file cannot be read or holds an address
     /// that does not parse.
     pub(crate) fn suppressed_addresses(&self) -> anyhow::Result<Vec<ViolationAddress>> {
-        let mut addresses = self.suppressed_addresses.clone();
-        for path in &self.suppress_from {
+        let mut addresses = self.validation.suppressed_addresses.clone();
+        for path in &self.validation.suppress_from {
             addresses.extend(parse_suppressions_from_file(path)?);
         }
         Ok(addresses)
@@ -288,35 +299,16 @@ impl Args {
 
     /// Validates the flags that are not settings, such as `--format` and `--suppress`.
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
-        // `list` already prints JSON to stdout. Two JSON documents on one stream cannot be parsed.
-        if self.command.is_some() && self.verbosity != Verbosity::None {
-            anyhow::bail!(
-                "--verbosity is not supported by the `list` subcommand; `list` already reports \
-                 every block it found"
-            );
+        match self.command {
+            Some(SubCommand::List { .. }) => {
+                if self.validation != ValidationFlags::default() {
+                    anyhow::bail!("the `list` subcommand doesn't take flags meant for validation");
+                }
+            }
+            None => {
+                self.suppressed_addresses()?;
+            }
         }
-        if self.command.is_some() && self.format.is_some() {
-            anyhow::bail!(
-                "--format is not supported by the `list` subcommand; it chooses the shape of the \
-                 violations, which `list` does not report"
-            );
-        }
-        if self.command.is_some() && !self.suppressed_addresses.is_empty() {
-            anyhow::bail!(
-                "--suppress is not supported by the `list` subcommand; `list` reports blocks rather \
-                 than validating them"
-            );
-        }
-        if self.command.is_some() && !self.suppress_from.is_empty() {
-            anyhow::bail!(
-                "--suppress-from is not supported by the `list` subcommand; `list` reports blocks rather \
-                 than validating them"
-            );
-        }
-        if self.command.is_none() {
-            self.suppressed_addresses()?;
-        }
-
         Ok(())
     }
 }
@@ -420,6 +412,59 @@ mod tests {
     }
 
     #[test]
+    fn list_help_shows_only_the_flags_list_takes() {
+        let help = parse(&["blockwatch", "list", "--help"])
+            .expect_err("--help prints the help instead of returning the flags")
+            .to_string();
+        for flag in [
+            "--diff",
+            "--only-changed",
+            "--extension",
+            "--ignore",
+            "--config",
+        ] {
+            assert!(
+                help.contains(flag),
+                "`list --help` must show {flag}: {help}"
+            );
+        }
+        for flag in [
+            "--enable",
+            "--disable",
+            "--verbosity",
+            "--format",
+            "--suppress",
+            "--suppress-from",
+        ] {
+            assert!(
+                !help.contains(flag),
+                "`list --help` must not show {flag}: {help}"
+            );
+        }
+    }
+
+    #[test]
+    fn validation_flag_before_list_is_rejected() -> anyhow::Result<()> {
+        for argv in [
+            ["blockwatch", "--enable", "check-ai", "list"],
+            ["blockwatch", "--disable", "check-ai", "list"],
+            ["blockwatch", "--verbosity", "full", "list"],
+            ["blockwatch", "--format", "sarif", "list"],
+            ["blockwatch", "--suppress", "a.md:n:keep-sorted", "list"],
+            ["blockwatch", "--suppress-from", "msg.txt", "list"],
+        ] {
+            let error = parse(&argv)?
+                .validate()
+                .expect_err("`list` must reject a flag it doesn't take");
+            assert!(
+                error.to_string().contains("`list` subcommand"),
+                "unexpected error for {argv:?}: {error}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn unknown_validator_is_rejected() {
         let error = parse(&["blockwatch", "--disable", "keep-tidy"])
             .expect_err("a validator that does not exist must be rejected");
@@ -427,19 +472,6 @@ mod tests {
             error.to_string().contains("keep-tidy"),
             "the error must quote the offending name: {error}"
         );
-    }
-
-    #[test]
-    fn verbosity_is_rejected_with_the_list_subcommand() -> anyhow::Result<()> {
-        let args = parse(&["blockwatch", "list", "--verbosity", "full"])?;
-        let error = args
-            .validate()
-            .expect_err("--verbosity must not be accepted alongside `list`");
-        assert!(
-            error.to_string().contains("`list` subcommand"),
-            "unexpected error: {error}"
-        );
-        Ok(())
     }
 
     #[test]
@@ -460,19 +492,6 @@ mod tests {
             error.to_string().contains("xml"),
             "the error must quote the offending value: {error}"
         );
-    }
-
-    #[test]
-    fn format_is_rejected_with_the_list_subcommand() -> anyhow::Result<()> {
-        let args = parse(&["blockwatch", "list", "--format", "sarif"])?;
-        let error = args
-            .validate()
-            .expect_err("--format must not be accepted alongside `list`");
-        assert!(
-            error.to_string().contains("`list` subcommand"),
-            "unexpected error: {error}"
-        );
-        Ok(())
     }
 
     #[test]
@@ -508,32 +527,6 @@ mod tests {
     }
 
     #[test]
-    fn suppress_is_rejected_after_the_list_subcommand() -> anyhow::Result<()> {
-        let args = parse(&["blockwatch", "list", "--suppress", "a.md:n:keep-sorted"])?;
-        let error = args
-            .validate()
-            .expect_err("--suppress must not be accepted alongside `list`");
-        assert!(
-            error.to_string().contains("`list` subcommand"),
-            "unexpected error: {error}"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn suppress_is_rejected_before_the_list_subcommand() -> anyhow::Result<()> {
-        let args = parse(&["blockwatch", "--suppress", "a.md:n:keep-sorted", "list"])?;
-        let error = args
-            .validate()
-            .expect_err("--suppress must not be accepted alongside `list`");
-        assert!(
-            error.to_string().contains("`list` subcommand"),
-            "unexpected error: {error}"
-        );
-        Ok(())
-    }
-
-    #[test]
     fn trailers_are_collected_and_every_other_line_is_ignored() -> anyhow::Result<()> {
         let content = "feat: update documentation\n\
              \n\
@@ -552,19 +545,6 @@ mod tests {
                 "docs/cli.md:cli-docs:keep-sorted".to_string(),
                 "src/lib.rs:languages:line-count".to_string(),
             ]
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn suppress_from_is_rejected_with_the_list_subcommand() -> anyhow::Result<()> {
-        let args = parse(&["blockwatch", "list", "--suppress-from", "msg.txt"])?;
-        let error = args
-            .validate()
-            .expect_err("--suppress-from must not be accepted alongside `list`");
-        assert!(
-            error.to_string().contains("`list` subcommand"),
-            "unexpected error: {error}"
         );
         Ok(())
     }
