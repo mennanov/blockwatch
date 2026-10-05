@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.8.0] - 2026-10-05
+
 ### Added
 
 - A config file. `blockwatch.toml` at the repository root holds the settings that stay the same for a project:
