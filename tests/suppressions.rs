@@ -1,7 +1,9 @@
 use assert_cmd::assert::OutputAssertExt;
-use assert_cmd::cargo_bin_cmd;
+use common::cargo_bin_cmd;
 use predicates::prelude::{PredicateBooleanExt, predicate};
 use serde_json::Value;
+
+mod common;
 
 /// One named block whose lines are out of order: a single `keep-sorted` violation.
 const SORTED: &str = "tests/testdata/suppressions/sorted.py";

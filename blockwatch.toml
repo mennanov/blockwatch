@@ -1,0 +1,6 @@
+# The test fixtures break the rules on purpose.
+ignore = ['tests/testdata/**']
+
+# The check-lua blocks here need the network and BLOCKWATCH_LUA_MODE=safe, which a pull request
+# from a fork must not get. .github/workflows/trusted-checks.yml runs them on a schedule.
+disable = ['check-lua']

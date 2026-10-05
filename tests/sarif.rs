@@ -1,7 +1,9 @@
 use assert_cmd::assert::OutputAssertExt;
-use assert_cmd::cargo_bin_cmd;
 use assert_json_diff::assert_json_include;
+use common::cargo_bin_cmd;
 use serde_json::{Value, json};
+
+mod common;
 
 /// One named block whose lines are out of order: a single error-severity `keep-sorted` violation.
 const SORTED: &str = "tests/testdata/sarif/sorted.py";

@@ -1,9 +1,11 @@
 use assert_cmd::assert::OutputAssertExt;
 use assert_cmd::cargo::CommandCargoExt;
-use assert_cmd::cargo_bin_cmd;
+use common::cargo_bin_cmd;
 use serde_json::{Value, json};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+
+mod common;
 
 #[test]
 fn list_subcommand_with_specific_file_returns_correct_json_from_that_file_only() {
@@ -295,7 +297,12 @@ fn list_subcommand_finishes_without_waiting_for_stdin() {
     // read it, the process would never exit and the deadline below would trip.
     let mut child = Command::cargo_bin("blockwatch")
         .expect("blockwatch binary should be built")
-        .args(["list", "tests/testdata/list/**"])
+        .args([
+            "--config",
+            common::EMPTY_CONFIG,
+            "list",
+            "tests/testdata/list/**",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

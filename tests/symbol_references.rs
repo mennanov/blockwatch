@@ -7,7 +7,9 @@
 //! which call its parser directly and so cannot tell whether an extension reaches that parser.
 
 use assert_cmd::assert::OutputAssertExt;
-use assert_cmd::cargo_bin_cmd;
+use common::cargo_bin_cmd;
+
+mod common;
 
 #[test]
 fn symbol_paths_with_escapes_resolve() {

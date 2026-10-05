@@ -1,7 +1,9 @@
 use assert_cmd::assert::OutputAssertExt;
-use assert_cmd::cargo_bin_cmd;
+use common::cargo_bin_cmd;
 use predicates::prelude::predicate;
 use serde_json::json;
+
+mod common;
 
 #[test]
 fn diff_with_unsatisfied_blocks_fails() {

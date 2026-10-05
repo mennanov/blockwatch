@@ -1,0 +1,5 @@
+# The integration tests run inside this repository, so a run would read its blockwatch.toml, which
+# skips tests/testdata.
+disallowed-macros = [
+    { path = "assert_cmd::cargo_bin_cmd", reason = "use common::cargo_bin_cmd!, which passes an empty config" },
+]

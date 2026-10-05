@@ -22,7 +22,9 @@ pre-commit run --all-files                 # run every hook the repository insta
 Fuzzing lives in `fuzz/`. It needs the nightly toolchain and `cargo-afl`. See `fuzz/README.md`.
 
 Integration tests use `assert_cmd` to run the built binary on the fixtures in `tests/testdata/`. Many of them also pipe
-a made-up diff into stdin. When you add a test, follow the pattern in `tests/<validator>.rs`.
+a made-up diff into stdin. When you add a test, follow the pattern in `tests/<validator>.rs`. Build the command with
+`common::cargo_bin_cmd!`. It passes an empty config, because this repository's `blockwatch.toml` skips
+`tests/testdata/`. Clippy rejects `assert_cmd::cargo_bin_cmd!`, so a test can't read that file by mistake.
 
 ## Rules for agents
 
@@ -121,6 +123,10 @@ Source files here contain real `<block ...>` tags. Three runs check them:
 - `tests/general.rs` runs the linter from the working tree on the whole repository.
 - CI runs the release that `mennanov/blockwatch-action` pins on the whole repository. That release can be older than
   the code here.
+
+The hook and CI read `blockwatch.toml`. It skips `tests/testdata/`, where the fixtures break rules on purpose. It also
+turns off `check-lua`, because the `check-lua` block here needs the network. `.github/workflows/trusted-checks.yml`
+runs that block on a schedule.
 
 This means:
 

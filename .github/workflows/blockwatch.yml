@@ -22,7 +22,3 @@ jobs:
         env:
           # Untrusted (fork) PRs are still linted, but without any secrets.
           BLOCKWATCH_AI_API_KEY: ${{ env.TRUSTED == 'true' && secrets.BLOCKWATCH_AI_API_KEY || '' }}
-        with:
-          ignore: "tests/testdata/**"
-          # trusted-checks.yml runs it on a schedule. That file says why.
-          disable: check-lua

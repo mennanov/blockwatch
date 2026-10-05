@@ -1,6 +1,6 @@
 use assert_cmd::assert::OutputAssertExt;
 use assert_cmd::cargo::CommandCargoExt;
-use assert_cmd::cargo_bin_cmd;
+use common::cargo_bin_cmd;
 use predicates::prelude::{PredicateBooleanExt, predicate};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -261,7 +261,11 @@ fn no_diff_flag_provided_run_finishes_without_waiting_for_stdin() {
     // a run that tried to read it would block forever and trip the deadline below.
     let mut child = Command::cargo_bin("blockwatch")
         .expect("blockwatch binary should be built")
-        .args(["tests/testdata/general/paths/valid.py"])
+        .args([
+            "--config",
+            common::EMPTY_CONFIG,
+            "tests/testdata/general/paths/valid.py",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

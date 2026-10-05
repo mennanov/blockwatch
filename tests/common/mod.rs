@@ -1,9 +1,41 @@
 //! Shared helpers for integration tests.
 
-/// Runs the `blockwatch` binary with `args`, giving the child process a real
-/// pseudo-terminal on stdin so that `stdin().is_terminal()` returns true (i.e. the
-/// program behaves as if no diff is being piped in). `stdout`/`stderr` are captured
-/// as pipes so callers can assert on them.
+// Each test file compiles this module on its own, and no file uses every helper.
+#![allow(dead_code)]
+
+/// The path of an empty config file. With `--config`, it makes a run use the flags alone.
+///
+/// The tests run inside this repository, so a run would read its `blockwatch.toml`. That file
+/// ignores `tests/testdata`, so every fixture would be skipped, and a test that expects a clean run
+/// would pass without checking anything.
+pub(super) const EMPTY_CONFIG: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/common/empty.toml");
+
+/// Returns a command that runs the `blockwatch` binary with `--config` set to [`EMPTY_CONFIG`].
+// This is where the empty config gets added, so it has to start from the command without it.
+#[allow(clippy::disallowed_macros)]
+pub(super) fn command() -> assert_cmd::Command {
+    let mut command = assert_cmd::cargo_bin_cmd!();
+    command.args(["--config", EMPTY_CONFIG]);
+    command
+}
+
+/// Returns a command that runs the `blockwatch` binary with `--config` set to [`EMPTY_CONFIG`].
+///
+/// It has the name of `assert_cmd::cargo_bin_cmd!` on purpose: a test file switches to it by
+/// changing one import. `clippy.toml` rejects the `assert_cmd` macro, so a test can't use it by
+/// mistake.
+macro_rules! cargo_bin_cmd {
+    () => {
+        $crate::common::command()
+    };
+}
+pub(super) use cargo_bin_cmd;
+
+/// Runs the `blockwatch` binary with `args` and with `--config` set to [`EMPTY_CONFIG`], giving the
+/// child process a real pseudo-terminal on stdin so that `stdin().is_terminal()` returns true
+/// (i.e. the program behaves as if no diff is being piped in). `stdout`/`stderr` are captured as
+/// pipes so callers can assert on them.
 ///
 /// Unix only: it relies on `openpty(3)`.
 #[cfg(unix)]
@@ -40,6 +72,7 @@ pub fn run_with_tty_stdin(args: &[&str], current_dir: Option<&str>) -> std::proc
         command.current_dir(dir);
     }
     let child = command
+        .args(["--config", EMPTY_CONFIG])
         .args(args)
         .stdin(stdin)
         .stdout(Stdio::piped())

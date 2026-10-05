@@ -1,5 +1,9 @@
 //! Tests that the config file is found and that its settings are used.
 
+// These tests check how a run reads its config file, so they can't use `common::cargo_bin_cmd!`,
+// which replaces that file with an empty one.
+#![allow(clippy::disallowed_macros)]
+
 use assert_cmd::assert::OutputAssertExt;
 use assert_cmd::cargo_bin_cmd;
 use predicates::prelude::predicate;

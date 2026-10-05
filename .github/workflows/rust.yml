@@ -32,7 +32,7 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
       - name: Run Clippy lint
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
       - name: Run tests
         run: cargo llvm-cov --lcov --output-path coverage.lcov
       - name: Upload coverage report to Codecov

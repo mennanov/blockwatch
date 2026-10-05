@@ -1,7 +1,9 @@
 use assert_cmd::assert::OutputAssertExt;
-use assert_cmd::cargo_bin_cmd;
+use common::cargo_bin_cmd;
 use predicates::prelude::predicate;
 use serde_json::Value;
+
+mod common;
 
 /// Matches three files with one block each, plus one file whose extension has no parser.
 const CLEAN_GLOB: &str = "tests/testdata/verbosity/clean/**";

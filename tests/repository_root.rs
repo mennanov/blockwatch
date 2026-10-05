@@ -1,10 +1,12 @@
 //! Repository root discovery: which directory a run treats as "the repository".
 
 use assert_cmd::assert::OutputAssertExt;
-use assert_cmd::cargo_bin_cmd;
+use common::cargo_bin_cmd;
 use predicates::prelude::predicate;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+
+mod common;
 
 /// A Markdown file holding one named block, ready to be found by `blockwatch list`.
 fn block_file(name: &str) -> String {
