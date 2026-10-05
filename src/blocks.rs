@@ -328,6 +328,8 @@ pub(crate) struct ParsedBlocks {
     /// File counts for the run report; carried alongside the blocks because only the scan knows
     /// how many files it looked at but produced no blocks for.
     pub(crate) stats: ScanStats,
+    /// The files that were read and parsed for blocks, in the order they were read.
+    pub(crate) scanned_files: Vec<RepoPath>,
 }
 
 /// How a run decides which files it reads.
@@ -506,6 +508,25 @@ fn parse_all_files(
     Ok(parsed)
 }
 
+/// The files of the walk that a run can check, in walk order: those that `path_checker` doesn't
+/// ignore and that have a parser. The allow globs are not applied, and no file is read. An error
+/// from the walk comes through as an `Err` item.
+pub(crate) fn checkable_files<'a>(
+    file_system: &'a impl FileSystem,
+    path_checker: &'a impl PathChecker,
+    parsers: &'a LanguageParsers,
+    extra_file_extensions: &'a HashMap<OsString, OsString>,
+) -> impl Iterator<Item = anyhow::Result<RepoPath>> + 'a {
+    file_system.walk().filter(move |file_path| match file_path {
+        Ok(file_path) => {
+            !path_checker.should_ignore(file_path)
+                && parser_for_file_path(file_path.as_path(), parsers, extra_file_extensions)
+                    .is_some()
+        }
+        Err(_) => true,
+    })
+}
+
 /// Parses only the files in the diff, and the files of the virtual blocks whose entry it modified.
 /// Keeps the blocks whose start tag or content it modified.
 fn parse_changed_files(
@@ -570,6 +591,7 @@ fn record_parsed_file(
     match file_blocks {
         Some(file_blocks) => {
             parsed.stats.files_scanned += 1;
+            parsed.scanned_files.push(file_path.clone());
             // A file that parsed cleanly but declares no blocks still counts as scanned; it is
             // simply nothing for the validators to work on.
             if !file_blocks.is_empty() {
@@ -982,6 +1004,48 @@ mod parse_blocks_tests {
         assert_eq!(parsed.blocks.len(), 1);
         assert_eq!(parsed.stats.files_scanned, 2);
         assert_eq!(parsed.stats.files_skipped, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn ignored_file_and_file_without_parser_checkable_files_skips_them() -> anyhow::Result<()> {
+        let file_system = FakeFileSystem::new(HashMap::from([
+            ("kept.py".to_string(), String::new()),
+            ("ignored.py".to_string(), String::new()),
+            ("notes.unknown".to_string(), String::new()),
+        ]));
+        let path_checker =
+            FakePathChecker::with_ignored_paths(HashSet::from(["ignored.py".to_string()]));
+
+        let files = checkable_files(
+            &file_system,
+            &path_checker,
+            &language_parsers()?,
+            &HashMap::new(),
+        )
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+        assert_eq!(files, [RepoPath::from_reference("kept.py")?]);
+        Ok(())
+    }
+
+    #[test]
+    fn walk_error_checkable_files_returns_it() -> anyhow::Result<()> {
+        // The fake walk fails on a path that escapes the repository.
+        let file_system = FakeFileSystem::new(HashMap::from([(
+            "../outside.py".to_string(),
+            String::new(),
+        )]));
+
+        let files = checkable_files(
+            &file_system,
+            &FakePathChecker::allow_all(),
+            &language_parsers()?,
+            &HashMap::new(),
+        )
+        .collect::<anyhow::Result<Vec<_>>>();
+
+        assert!(files.is_err(), "the walk error was dropped: {files:?}");
         Ok(())
     }
 

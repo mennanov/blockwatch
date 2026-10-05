@@ -21,6 +21,8 @@ mod flags;
 mod fs;
 /// One tree-sitter-backed comment parser per supported language, keyed by file extension.
 mod language_parsers;
+/// The paths and globs given on the command line, and the check that each selects a file.
+mod path_arguments;
 /// `RepoPath`: the single spelling of a repository-relative file path used as a map key.
 mod repo_path;
 /// Renders the end-of-run report describing what was scanned and checked.

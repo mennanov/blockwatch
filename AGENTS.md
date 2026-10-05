@@ -12,7 +12,7 @@ only the lines changed in a unified diff piped into it.
 ## Common commands
 
 ```shell
-cargo run -- list '<glob>'                 # print the blocks parsed from matching files, as JSON
+cargo run -- list '<path or glob>'         # print the blocks parsed from matching files, as JSON
 cargo llvm-cov                             # run the tests and report coverage
 cargo clippy --all-targets -- -D warnings  # lint
 markdownlint-cli2                          # lint Markdown (config: .markdownlint-cli2.yaml)
@@ -154,15 +154,17 @@ The whole pipeline is in `src/cli.rs`. `src/main.rs` only calls `blockwatch::run
    with the same rules and merges them: the ignore globs, the extension mappings and the validator selection.
    `config::read` also returns the file's virtual blocks: its `[[block]]` entries, each around a symbol. It marks the
    ones whose entry the diff touches.
-5. Walk the repository with the `ignore` crate, which respects `.gitignore`. Keep the files that match the globs from
-   the command line and don't match the settings' ignore globs. Pick each file's language by its extension, using the
-   settings' extension mappings too.
+5. Walk the repository with the `ignore` crate, which respects `.gitignore`. Keep the files that the paths and globs
+   from the command line select, and that don't match the settings' ignore globs. `PathArguments::resolve` turns an
+   existing file or directory into a glob first, so `src` selects `src/**`. Pick each file's language by its
+   extension, using the settings' extension mappings too.
 6. For each file, the matching `language_parsers::<lang>` (a tree-sitter grammar) finds the comments. `tag_parser` and
    `block_parser` turn the comment text into `Block` values, with their attributes and their byte and line ranges.
    `VirtualBlock::resolve` finds the symbol of each virtual block in the file, and adds it as a `Block` too. A target
    that does not resolve stops the run. `--only-changed` also parses the file of a virtual block whose entry the diff
    touches, even when the diff does not touch that file. The result is a `blocks::FileBlocks` for each file, kept in a
-   `validators::ValidationContext`.
+   `validators::ValidationContext`. Each path or glob argument must select at least one parsed file, or the run
+   stops. Under `--only-changed`, an argument that selects no file in the diff is checked against a walk of the tree.
 7. `validators::detect_validators` passes each block to the `ValidatorDetector`s, one for each validator. A detector
    returns either `ValidatorType::Sync` or `ValidatorType::Async`. Async validators, such as `check-ai`, run on Tokio.
    The Tokio runtime only starts if at least one async validator is needed.

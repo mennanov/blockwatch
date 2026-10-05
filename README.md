@@ -155,8 +155,8 @@ touched by that diff:
 # Check every block in the repository
 blockwatch
 
-# Check specific globs
-blockwatch "src/**/*.rs" "**/*.md"
+# Check specific files, directories or globs
+blockwatch src/main.rs docs "**/*.md"
 
 # Check every block, and enforce the rules that need a diff, such as `affects`
 git diff --patch | blockwatch --diff

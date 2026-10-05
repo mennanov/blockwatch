@@ -7,6 +7,8 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
 <!-- <block name="cli-docs" same-as="src/flags.rs:cli-flags" same-as-mode="subset"
      same-as-pattern='blockwatch --(?P<value>[a-z-]+)'> -->
 
+- **Select Files**: `blockwatch src/main.rs docs "**/*.md"` checks only those files, directories and globs. An
+  argument that selects no file to check fails the run.
 - **Read a Diff**: `git diff --patch | blockwatch --diff` marks which blocks the diff changed.
 - **Only Changed Blocks**: `git diff --patch | blockwatch --diff --only-changed` narrows the run to them, instead of
   every block in the repository.
@@ -37,6 +39,9 @@ VCS directories like `.git`, `.hg`, `.jj` and `.svn` are skipped.
 # Check everything in the repository
 blockwatch
 
+# Check one file and one directory
+blockwatch src/main.rs docs
+
 # Restrict checks to specific glob patterns
 blockwatch "src/**/*.rs" "**/*.md"
 
@@ -46,15 +51,28 @@ blockwatch "**/*.rs" --ignore "**/generated/**"
 
 Note: Quote glob patterns to prevent shell expansion before passing arguments to `blockwatch`.
 
+Each argument is a path or a glob:
+
+- A path to a file checks that file, even when its name is also a glob, such as `app/[id].tsx`.
+- A path to a directory checks every file under it. `.` checks the whole repository.
+- Anything else is a glob.
+
+Paths and globs start from the repository root, whichever directory you run from. So from `src/`, write `src/main.rs`,
+not `main.rs`. An absolute path works too.
+
+An argument that selects no file to check fails the run. A file is not checked if `.gitignore`, `--ignore` or the
+`ignore` key in the config file leaves it out, or if its extension is not supported. With `--only-changed`, an
+argument only has to select a file in the repository, not a changed one.
+
 Exclusions that hold for the whole project belong in the `ignore` key of the [config file](#config-file).
 
-Globs **intersect** with whatever the run mode selected, in every mode. They only ever narrow a run: passing
-`"src/**/*.rs"` alongside a diff checks the changed blocks under `src/`, and never adds an unchanged file back.
+Paths and globs **intersect** with whatever the run mode selected, in every mode. They only ever narrow a run:
+passing `"src/**/*.rs"` alongside a diff checks the changed blocks under `src/`, and never adds an unchanged file back.
 
-Globs choose which blocks are **validated**, not which files a rule may **resolve a reference against**. A rule such as
-[`affects`](validators/affects.md) still finds its target in a file the globs left out, so narrowing a run to one
-language does not turn every cross-language rule into a failure. An excluded file is read to answer the reference and
-for nothing else: it is never validated, and never appears in a run report.
+Paths and globs choose which blocks are **validated**, not which files a rule may **resolve a reference against**. A
+rule such as [`affects`](validators/affects.md) still finds its target in a file they leave out, so narrowing a run
+to one language does not turn every cross-language rule into a failure. An excluded file is read to answer the
+reference and for nothing else: it is never validated, and never appears in a run report.
 
 ## Run Modes
 
@@ -79,8 +97,8 @@ git diff --patch --unified=0 | blockwatch --diff --only-changed
 # The same, for staged changes
 git diff --cached --patch --unified=0 | blockwatch --diff --only-changed
 
-# Changed blocks under specific globs only
-git diff --patch | blockwatch --diff --only-changed "src/**/*.rs" "**/*.md"
+# Changed blocks under specific paths or globs only
+git diff --patch | blockwatch --diff --only-changed src "**/*.md"
 ```
 
 A block counts as changed when the diff overlaps its line range or its start tag. To inspect which blocks a diff
@@ -235,7 +253,8 @@ Caused by:
 
 Everything else stays out of the file:
 
-- **The globs, `--diff`, `--only-changed`, `--suppress` and `--suppress-from`** describe one run, not the project.
+- **The paths and globs, `--diff`, `--only-changed`, `--suppress` and `--suppress-from`** describe one run, not the
+  project.
 - **`--format` and `--verbosity`** depend on who reads the output.
 - **The environment variables of `check-ai` and `check-lua`** stay in the environment. Anyone who can open a pull
   request can edit the config file. From there, unsafe Lua could run any code in CI, and an API URL could send the code
@@ -285,8 +304,8 @@ A virtual block is a block of the file it wraps:
   A violation inside a scalar points at the start of the value.
 - **Its `name` is a block name in that file.** A name that another block in the file already has is an error. A
   reference such as `affects="package.json:react-version"` finds the block, as it finds a tag.
-- **The run's filters apply to that file.** When the globs, `--ignore` or `.gitignore` leave the file out, its virtual
-  blocks are not checked. A reference to one of them still finds it.
+- **The run's filters apply to that file.** When the paths and globs, `--ignore` or `.gitignore` leave the file out,
+  its virtual blocks are not checked. A reference to one of them still finds it.
 - **It counts as changed when the diff touches the symbol or the entry.** A change elsewhere in either file does not
   count. The entry plays the part of the start tag. So when you edit an entry, `--diff --only-changed` checks its
   block, even if the diff does not touch the file the block wraps.
@@ -467,11 +486,11 @@ The `list` command outputs details on all discovered blocks in JSON format witho
 [run modes](#run-modes) exactly, so `list` and the default command always agree on which blocks exist.
 
 ```shell
-# List all blocks under the current directory
+# List all blocks in the repository
 blockwatch list
 
-# Restrict block listing to specific globs
-blockwatch list "src/**/*.rs" "**/*.md"
+# Restrict block listing to specific paths or globs
+blockwatch list src "**/*.md"
 
 # List all blocks, marking the ones the diff changed
 git diff --patch | blockwatch list --diff

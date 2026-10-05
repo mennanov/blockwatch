@@ -631,6 +631,10 @@ mod tests {
             unimplemented!("diff parsing never maps a path to the repository")
         }
 
+        fn entry(&self, _path: &Path) -> Option<crate::fs::Entry> {
+            unimplemented!("diff parsing never resolves a path argument")
+        }
+
         fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>> {
             std::iter::empty()
         }

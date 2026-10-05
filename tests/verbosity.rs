@@ -70,9 +70,12 @@ fn summary_level_prints_one_line_of_counts() {
 }
 
 #[test]
-fn summary_level_with_no_matching_files_reports_zeroes() {
+fn summary_level_with_no_file_to_check_reports_zeroes() {
+    // Only an argument must select a file to check. A run without arguments that checks nothing
+    // still passes.
     let mut cmd = cargo_bin_cmd!();
-    cmd.arg("tests/testdata/no_such_directory/**")
+    cmd.arg("--ignore")
+        .arg("**")
         .arg("--verbosity")
         .arg("summary");
     let output = cmd.output().unwrap();

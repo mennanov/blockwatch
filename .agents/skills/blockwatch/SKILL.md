@@ -291,7 +291,7 @@ git diff --patch | blockwatch --diff                         # every block, with
 git diff --cached --patch | blockwatch --diff                # the same, for staged changes
 git diff --patch | blockwatch --diff --only-changed          # only the blocks your changes touched
 blockwatch list                                              # JSON dump of every block found (audit / debug)
-blockwatch "src/**/*.rs" "**/*.md"                           # restrict to globs (quote them)
+blockwatch src/main.rs "**/*.md"                             # restrict to paths or globs (quote globs)
 blockwatch --ignore "**/generated/**"                        # exclude paths for this run
 ```
 

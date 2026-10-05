@@ -5,6 +5,7 @@ use crate::diff_parser;
 use crate::flags;
 use crate::fs::FileSystem;
 use crate::language_parsers;
+use crate::path_arguments::PathArguments;
 use crate::repo_path::RepoPath;
 use crate::report;
 use crate::sarif;
@@ -15,7 +16,6 @@ use crate::violation_address::ViolationAddress;
 use crate::virtual_blocks::VirtualBlock;
 use anyhow::Context;
 use clap::Parser;
-use globset::GlobSet;
 use std::collections::HashMap;
 use std::io::{IsTerminal, Read, Write};
 use std::path::PathBuf;
@@ -224,15 +224,11 @@ fn build_context(
 ) -> anyhow::Result<(validators::ValidationContext, blocks::ScanStats)> {
     args.validate()?;
 
-    let mut glob_set = args.globs()?;
-    // An empty glob set matches nothing, so "the caller named no files" has to be spelled out as
-    // "every file". It applies in every mode, because the globs narrow whichever set of files the
-    // scan mode selected — including the files in a diff.
-    if glob_set.is_empty() {
-        glob_set = GlobSet::new([globset::Glob::new("**")?])?;
-    }
-
-    let path_checker = crate::fs::PathCheckerImpl::new(glob_set, settings.ignored_globs().clone());
+    let path_arguments = PathArguments::resolve(args.path_arguments(), file_system)?;
+    let path_checker = crate::fs::PathCheckerImpl::new(
+        path_arguments.allowed_globs()?,
+        settings.ignored_globs().clone(),
+    );
 
     let parsed = blocks::parse_blocks(
         &modified_lines_by_file,
@@ -243,6 +239,20 @@ fn build_context(
         settings.extensions(),
         &virtual_blocks,
     )?;
+    let scanned_files = parsed.scanned_files.iter().cloned().map(Ok);
+    match scan_mode {
+        blocks::ScanMode::All => path_arguments.ensure_each_matches(scanned_files)?,
+        // The scan read only the files in the diff. An argument that selects none of them still
+        // passes when it selects a file that the diff doesn't touch.
+        blocks::ScanMode::OnlyChanged => {
+            path_arguments.ensure_each_matches(scanned_files.chain(blocks::checkable_files(
+                file_system,
+                &path_checker,
+                &language_parsers,
+                settings.extensions(),
+            )))?
+        }
+    }
     Ok((
         validators::ValidationContext::new(
             parsed.blocks,

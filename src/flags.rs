@@ -2,7 +2,6 @@ use crate::settings::{RawSettings, parse_validator};
 use crate::violation_address::ViolationAddress;
 use anyhow::Context;
 use clap::{Parser, builder::ValueParser, crate_version};
-use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::path::{Path, PathBuf};
 
 /// How much a run reports about what it checked.
@@ -39,8 +38,8 @@ impl std::fmt::Display for Verbosity {
 /// The parsed command line.
 ///
 /// The fields hold the values as clap parsed them. The methods below turn them into what the rest
-/// of the program uses, such as glob sets and [`RawSettings`]. The flags here are `global`, so
-/// they can go before or after `list`. The flags that only validation uses are in
+/// of the program uses, such as [`RawSettings`] and suppression addresses. The flags here are
+/// `global`, so they can go before or after `list`. The flags that only validation uses are in
 /// [`ValidationFlags`].
 #[derive(Parser, Debug)]
 #[command(
@@ -56,6 +55,9 @@ You can put project-wide settings (--ignore, -E, --enable, --disable) in blockwa
     after_help = r"EXAMPLES:
     # Check every block in the repository
     blockwatch
+
+    # Check one file and one directory
+    blockwatch src/main.rs docs
 
     # Filter files using glob patterns
     blockwatch 'src/**/*.rs' '**/*.md'
@@ -151,9 +153,11 @@ pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) validation: ValidationFlags,
 
-    /// Glob patterns to filter files.
-    #[arg(value_name = "GLOBS")]
-    globs: Vec<String>,
+    /// Files, directories or glob patterns to check, starting from the repository root.
+    ///
+    /// An argument that selects no file to check fails the run.
+    #[arg(value_name = "PATHS")]
+    paths: Vec<String>,
 
     /// The subcommand to run, if any. `None` means the default action: validate.
     #[command(subcommand)]
@@ -236,9 +240,12 @@ pub(crate) struct ValidationFlags {
 pub(crate) enum SubCommand {
     /// List all blocks found in the scanned files.
     List {
-        /// Glob patterns to filter files.
-        #[arg(value_name = "GLOBS")]
-        globs: Vec<String>,
+        /// Files, directories or glob patterns to list the blocks of, starting from the repository
+        /// root.
+        ///
+        /// An argument that selects no file to check fails the run.
+        #[arg(value_name = "PATHS")]
+        paths: Vec<String>,
     },
 }
 
@@ -281,20 +288,14 @@ impl Args {
         Ok(addresses)
     }
 
-    /// Returns a compiled GlobSet from the provided glob patterns.
-    pub(crate) fn globs(&self) -> anyhow::Result<GlobSet> {
-        let mut builder = GlobSetBuilder::new();
-        let mut globs = self.globs.clone();
-        if let Some(SubCommand::List { globs: list_globs }) = &self.command {
-            globs.extend(list_globs.clone());
+    /// The path and glob arguments as written: those before `list`, then those after it.
+    pub(crate) fn path_arguments(&self) -> Vec<String> {
+        let mut arguments = self.paths.clone();
+        match &self.command {
+            Some(SubCommand::List { paths }) => arguments.extend(paths.iter().cloned()),
+            None => {}
         }
-
-        for glob_str in &globs {
-            let glob = Glob::new(glob_str)
-                .with_context(|| format!("Invalid glob pattern: {}", glob_str))?;
-            builder.add(glob);
-        }
-        builder.build().context("Failed to build glob set")
+        arguments
     }
 
     /// Validates the flags that are not settings, such as `--format` and `--suppress`.
@@ -389,7 +390,7 @@ mod tests {
         let args = parse(&["blockwatch", "--diff", "--only-changed", "src/**/*.rs"])?;
         assert!(args.diff);
         assert!(args.only_changed);
-        assert_eq!(args.globs, vec!["src/**/*.rs".to_string()]);
+        assert_eq!(args.paths, vec!["src/**/*.rs".to_string()]);
         Ok(())
     }
 

@@ -12,6 +12,19 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Changed
+
+- An argument that selects no file to check fails the run. Before, it checked nothing and passed. This happened with
+  a typo such as `'scr/**/*.py'`, with `notes.txt`, whose extension is not supported, and with a file that
+  `.gitignore` or `--ignore` leaves out. With `--only-changed`, an argument only has to select a file in the
+  repository, not a changed one.
+
+### Fixed
+
+- A path argument selects the file or directory it points at. `./src/x.py`, `src`, `src/`, `.` and an absolute path
+  used to match no file. A file whose name is also a glob, such as `app/[id].tsx`, is now checked itself, instead of
+  `app/i.tsx`. Paths and globs still start from the repository root, from any directory.
+
 ## [0.8.1] - 2026-10-05
 
 ### Changed

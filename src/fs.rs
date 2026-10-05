@@ -25,8 +25,26 @@ pub(crate) trait FileSystem: Send + Sync {
     /// does not exist or is outside the repository.
     fn repo_path(&self, path: &Path) -> Option<RepoPath>;
 
+    /// What `path` points at inside the repository. A relative `path` starts from the repository
+    /// root. Symlinks are followed, so a path through a symlink gives the path of its target.
+    ///
+    /// Returns `None` if nothing exists at `path`, if it resolves to a place outside the
+    /// repository, or if its path is not valid UTF-8.
+    fn entry(&self, path: &Path) -> Option<Entry>;
+
     /// Walks the directory tree rooted at the file system's root path, returning an iterator over the paths of all files.
     fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>>;
+}
+
+/// What a path points at inside the repository.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Entry {
+    /// The repository root itself.
+    Root,
+    /// A directory below the root.
+    Directory(RepoPath),
+    /// Anything that is not a directory, such as a file.
+    File(RepoPath),
 }
 
 /// Checks whether a path should be allowed or ignored when parsing blocks from files.
@@ -109,6 +127,20 @@ impl FileSystem for FileSystemImpl {
         RepoPath::from_relative(resolved.strip_prefix(&self.root_path).ok()?).ok()
     }
 
+    fn entry(&self, path: &Path) -> Option<Entry> {
+        let resolved = self.resolve_within_root(path).ok()?;
+        let relative = resolved.strip_prefix(&self.root_path).ok()?;
+        if relative.as_os_str().is_empty() {
+            return Some(Entry::Root);
+        }
+        let repo_path = RepoPath::from_relative(relative).ok()?;
+        if resolved.is_dir() {
+            Some(Entry::Directory(repo_path))
+        } else {
+            Some(Entry::File(repo_path))
+        }
+    }
+
     fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>> {
         // Clone root_path for the closure.
         let root_path = self.root_path.clone();
@@ -169,7 +201,7 @@ impl PathChecker for PathCheckerImpl {
 
 #[cfg(test)]
 mod file_system_impl_tests {
-    use crate::fs::{FileSystem, FileSystemImpl};
+    use crate::fs::{Entry, FileSystem, FileSystemImpl};
     use crate::repo_path::RepoPath;
     use std::path::{Path, PathBuf};
 
@@ -334,6 +366,54 @@ mod file_system_impl_tests {
         Ok(())
     }
 
+    #[test]
+    fn dot_entry_returns_the_root() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let file_system = FileSystemImpl::new(root.path())?;
+
+        assert_eq!(file_system.entry(Path::new(".")), Some(Entry::Root));
+        Ok(())
+    }
+
+    #[test]
+    fn directory_with_trailing_slash_entry_returns_the_directory() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        write_file(root.path(), "src/a.txt", "hello");
+        let file_system = FileSystemImpl::new(root.path())?;
+
+        assert_eq!(
+            file_system.entry(Path::new("src/")),
+            Some(Entry::Directory(RepoPath::from_reference("src")?))
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn absolute_path_through_a_symlink_entry_returns_the_file_from_the_root() -> anyhow::Result<()>
+    {
+        let parent = tempfile::tempdir()?;
+        let root = parent.path().join("repo");
+        write_file(&root, "src/a.txt", "hello");
+        std::os::unix::fs::symlink(&root, parent.path().join("link"))?;
+        let file_system = FileSystemImpl::new(&root)?;
+
+        assert_eq!(
+            file_system.entry(&parent.path().join("link/src/a.txt")),
+            Some(Entry::File(RepoPath::from_reference("src/a.txt")?))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn missing_path_entry_returns_none() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let file_system = FileSystemImpl::new(root.path())?;
+
+        assert_eq!(file_system.entry(Path::new("src/a.txt")), None);
+        Ok(())
+    }
+
     #[cfg(unix)]
     #[test]
     fn read_to_string_rejects_symlink_escaping_root() -> anyhow::Result<()> {
@@ -360,11 +440,11 @@ mod file_system_impl_tests {
 /// tree as a map of strings instead of creating temporary directories.
 #[cfg(test)]
 pub(crate) mod test_utils {
-    use crate::fs::{FileSystem, PathChecker};
+    use crate::fs::{Entry, FileSystem, PathChecker};
     use crate::repo_path::RepoPath;
     use globset::GlobSet;
     use std::collections::{HashMap, HashSet};
-    use std::path::Path;
+    use std::path::{Component, Path};
 
     /// A source tree held in memory, keyed by path exactly as it is spelled by the caller.
     ///
@@ -399,6 +479,34 @@ pub(crate) mod test_utils {
             RepoPath::from_relative(path)
                 .ok()
                 .filter(|repo_path| self.exists(repo_path.as_path()))
+        }
+
+        fn entry(&self, path: &Path) -> Option<Entry> {
+            if path
+                .components()
+                .all(|component| component == Component::CurDir)
+            {
+                return Some(Entry::Root);
+            }
+            // The fake has no place on disk, so an absolute path points at nothing.
+            let repo_path = RepoPath::from_relative(path).ok()?;
+            let files: Vec<RepoPath> = self
+                .files
+                .keys()
+                .filter_map(|file| RepoPath::from_reference(file).ok())
+                .collect();
+            // There are no empty directories: a directory exists when a file is under it.
+            let directory_prefix = format!("{}/", repo_path.as_str());
+            if files.contains(&repo_path) {
+                Some(Entry::File(repo_path))
+            } else if files
+                .iter()
+                .any(|file| file.as_str().starts_with(&directory_prefix))
+            {
+                Some(Entry::Directory(repo_path))
+            } else {
+                None
+            }
         }
 
         fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>> {

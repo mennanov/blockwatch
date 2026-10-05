@@ -117,9 +117,9 @@ give both blocks a name and point each one at the other:
   missing or repeated key. A target *file* that doesn't exist stops the run.
 - **Targets are checked but not listed.** Under `--only-changed`, a target the diff did not touch is still checked, but
   it does not appear in the `--verbosity` report. See [Reports Under a Diff](../cli.md#reports-under-a-diff).
-- **Globs don't limit targets.** `blockwatch --diff --only-changed "src/**/*.rs"` still finds a target under `docs/`,
-  so narrowing a run to one language doesn't break links to other files. A target outside the globs is read to check
-  the link, but it is never validated itself.
+- **Paths and globs don't limit targets.** `blockwatch --diff --only-changed "src/**/*.rs"` still finds a target under
+  `docs/`, so narrowing a run to one language doesn't break links to other files. A target outside them is read to
+  check the link, but it is never validated itself.
 - With [`check-lua`](check-lua.md), a script can read its targets' contents through `ctx.affects`, without opening
   files.
 
