@@ -15,9 +15,8 @@ repos:
         # the message file to this argv, and `bash -c SCRIPT FILE` binds FILE to $0 rather than $1.
         # Otherwise it runs the same command as the `blockwatch-commit-msg` hook.
         #
-        # `-d check-lua` skips the one `check-lua` block here. Its script asks the OpenAI API for
-        # the latest model, which needs `BLOCKWATCH_LUA_MODE=safe`, an API key and the network. CI
-        # runs it.
+        # `-d check-lua` skips the one `check-lua` block here. Its script asks models.dev for the
+        # latest model, which needs `BLOCKWATCH_LUA_MODE=safe` and the network. CI runs it.
         entry: bash -c 'diff=$(git diff --patch --cached --unified=0) || exit; flags=(-d check-lua --ignore="tests/testdata/**" --suppress-from "$1"); if [ -z "$diff" ]; then exec cargo run --quiet -- "${flags[@]}"; fi; printf "%s\n" "$diff" | cargo run --quiet -- --diff "${flags[@]}"' --
         language: system
         stages: [ commit-msg ]

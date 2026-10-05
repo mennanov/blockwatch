@@ -12,6 +12,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Changed
+
+- `check-ai` uses `gpt-5.4-nano` by default, instead of `gpt-5-nano`. It costs more per token. To keep the old model,
+  set `BLOCKWATCH_AI_MODEL=gpt-5-nano`.
+
 ## [0.8.0] - 2026-10-05
 
 ### Added

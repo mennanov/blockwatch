@@ -97,7 +97,7 @@ A script that wants a single value reads `content[1]`:
 
 ```rust
 // <block check-lua="scripts/check_latest_gpt_nano_model.lua" check-lua-pattern='str = "(?P<value>[^"]+)"'>
-const DEFAULT_MODEL_NAME: &str = "gpt-5-nano";
+const DEFAULT_MODEL_NAME: &str = "gpt-5.4-nano";
 // </block>
 ```
 

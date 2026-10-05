@@ -1,26 +1,26 @@
 -- Checks that the configured model is the latest nano model from OpenAI.
--- Requires: BLOCKWATCH_LUA_MODE=safe, BLOCKWATCH_AI_API_KEY, jq, curl.
+-- Reads the model list from models.dev, because it needs no API key.
+-- Requires: BLOCKWATCH_LUA_MODE=safe, jq, curl.
+
+local MODELS_URL = "https://models.dev/api.json"
 
 local function check_dependencies()
-    if not os or not io then
-        return "os or io Lua module is unavailable"
-    end
-    local api_key = os.getenv("BLOCKWATCH_AI_API_KEY")
-    if not api_key or api_key == "" then
-        return "BLOCKWATCH_AI_API_KEY is not set"
+    if not io then
+        return "io Lua module is unavailable"
     end
     return nil
 end
 
-local function fetch_nano_models(api_key, api_url)
-    api_url = api_url or "https://api.openai.com/v1"
-    api_url = api_url:gsub("/$", "")
-
-    -- Fetch nano model IDs via jq, one per line
+local function fetch_latest_nano_model()
+    -- Only base aliases such as "gpt-5-nano" or "gpt-5.4-nano" match. So a dated snapshot
+    -- or another model whose ID contains "nano" can't be picked.
+    -- `release_date` is always YYYY-MM-DD, so comparing it as a string sorts it by date.
     local cmd = string.format(
-        'curl -sS -H "Authorization: Bearer %s" "%s/models"'
-        .. ' | jq -r \'.data[].id | select(test("nano"))\'',
-        api_key, api_url
+        'curl -sS "%s"'
+        .. ' | jq -r \'.openai.models | to_entries'
+        .. ' | map(select(.key | test("^gpt-[0-9.]+-nano$")))'
+        .. ' | max_by(.value.release_date) | .key // empty\'',
+        MODELS_URL
     )
     local handle = io.popen(cmd)
     if not handle then
@@ -29,26 +29,12 @@ local function fetch_nano_models(api_key, api_url)
     local output = handle:read("*a")
     handle:close()
 
-    if not output or output == "" then
-        return nil, "no nano models found in OpenAI API response"
+    local model = output and output:match("^%s*(.-)%s*$") or ""
+    if model == "" then
+        return nil, "no base nano model (gpt-N-nano) found at " .. MODELS_URL
     end
 
-    return output, nil
-end
-
-local function find_best_nano_model(output)
-    -- Find the latest-version base alias (e.g. "gpt-6-nano" over "gpt-5-nano").
-    -- Dated variants like "gpt-5-nano-2025-08-07" are skipped.
-    local best_name = nil
-    local best_version = -1
-    for line in output:gmatch("[^\n]+") do
-        local ver = line:match("^gpt%-(%d+)%-nano$")
-        if ver and tonumber(ver) > best_version then
-            best_version = tonumber(ver)
-            best_name = line
-        end
-    end
-    return best_name
+    return model, nil
 end
 
 
@@ -64,25 +50,17 @@ function validate(ctx, content)
         return "check-lua-pattern matched no model name in the block"
     end
 
-    local api_key = os.getenv("BLOCKWATCH_AI_API_KEY")
-    local api_url = os.getenv("BLOCKWATCH_AI_API_URL")
-
-    local output, fetch_err = fetch_nano_models(api_key, api_url)
+    local latest_model, fetch_err = fetch_latest_nano_model()
     if fetch_err then
         return fetch_err
     end
 
-    local best_name = find_best_nano_model(output)
-    if not best_name then
-        return "no base nano model (gpt-N-nano) found in API response"
-    end
-
-    if best_name == configured_model then
+    if latest_model == configured_model then
         return nil
     end
 
     return string.format(
         "expected %q but the latest nano model is %q",
-        configured_model, best_name
+        configured_model, latest_model
     )
 end
