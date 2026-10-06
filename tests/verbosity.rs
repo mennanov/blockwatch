@@ -65,7 +65,7 @@ fn summary_level_prints_one_line_of_counts() {
         .assert()
         .success()
         .stdout(
-            "blockwatch: mode=all, 3/3 files, 3 blocks (1 unchecked, 0 needs --diff), 2 checks, 0 violations\n",
+            "blockwatch: mode=all, 3/3 files, 3 blocks (1 unchecked, 0 need --diff), 2 checks, 0 violations\n",
         );
 }
 
@@ -84,7 +84,7 @@ fn summary_level_with_no_file_to_check_reports_zeroes() {
         .assert()
         .success()
         .stdout(
-            "blockwatch: mode=all, 0/0 files, 0 blocks (0 unchecked, 0 needs --diff), 0 checks, 0 violations\n",
+            "blockwatch: mode=all, 0/0 files, 0 blocks (0 unchecked, 0 need --diff), 0 checks, 0 violations\n",
         );
 }
 
@@ -97,7 +97,7 @@ fn summary_level_without_a_diff_counts_the_rules_it_could_not_check() {
     // The `affects` block is checked for reference integrity even without a diff, so it counts as a
     // check; its modified-together rule still needs a diff, so it also counts under `needs --diff`.
     output.assert().success().stdout(
-        "blockwatch: mode=all, 1/1 files, 2 blocks (1 unchecked, 1 needs --diff), 1 checks, 0 violations\n",
+        "blockwatch: mode=all, 1/1 files, 2 blocks (1 unchecked, 1 needs --diff), 1 check, 0 violations\n",
     );
 }
 
@@ -112,7 +112,7 @@ fn summary_level_with_the_diff_gated_validator_disabled_counts_no_rules_as_unche
 
     // A rule the user switched off is not a rule that went unchecked.
     output.assert().success().stdout(
-        "blockwatch: mode=all, 1/1 files, 2 blocks (2 unchecked, 0 needs --diff), 0 checks, 0 violations\n",
+        "blockwatch: mode=all, 1/1 files, 2 blocks (2 unchecked, 0 need --diff), 0 checks, 0 violations\n",
     );
 }
 
@@ -129,7 +129,7 @@ fn summary_level_with_a_diff_reports_the_all_plus_diff_mode() {
     // The whole tree is still scanned, but the diff says which blocks changed, so `affects` runs
     // and nothing is left needing a diff.
     output.assert().success().stdout(
-        "blockwatch: mode=all+diff, 1/1 files, 2 blocks (1 unchecked), 1 checks, 0 violations\n",
+        "blockwatch: mode=all+diff, 1/1 files, 2 blocks (1 unchecked), 1 check, 0 violations\n",
     );
 }
 
@@ -148,7 +148,7 @@ fn summary_level_with_a_diff_that_misses_the_rule_omits_the_needs_diff_clause() 
     // the normal state of an incremental check, not something to report, so once a diff is given the
     // `needs --diff` clause stays out: counting it would say nothing a reader could act on.
     output.assert().success().stdout(
-        "blockwatch: mode=all+diff, 1/1 files, 2 blocks (1 unchecked), 1 checks, 0 violations\n",
+        "blockwatch: mode=all+diff, 1/1 files, 2 blocks (1 unchecked), 1 check, 0 violations\n",
     );
 }
 
@@ -162,7 +162,7 @@ fn summary_level_with_only_changed_reports_the_only_changed_mode() {
     let output = cmd.output().unwrap();
 
     output.assert().success().stdout(
-        "blockwatch: mode=only-changed, 1/1 files, 2 blocks (1 unchecked), 1 checks, 0 violations\n",
+        "blockwatch: mode=only-changed, 1/1 files, 2 blocks (1 unchecked), 1 check, 0 violations\n",
     );
 }
 
@@ -314,12 +314,9 @@ fn summary_level_under_a_diff_counts_only_the_blocks_in_scope() {
         .write_stdin(DIFF_TOUCHING_ONE_BLOCK);
     let output = cmd.output().unwrap();
 
-    output
-        .assert()
-        .success()
-        .stdout(
-            "blockwatch: mode=only-changed, 1/1 files, 1 blocks (0 unchecked), 1 checks, 0 violations\n",
-        );
+    output.assert().success().stdout(
+        "blockwatch: mode=only-changed, 1/1 files, 1 block (0 unchecked), 1 check, 0 violations\n",
+    );
 }
 
 #[test]

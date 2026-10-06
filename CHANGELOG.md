@@ -38,6 +38,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
     stage or stash the unstaged changes.
   - The staged-diff examples in `--help`, the README, `docs/cli.md` and the agent skill now pipe
     `git diff --patch HEAD`. It covers staged and unstaged changes.
+- `--verbosity summary` printed `1 blocks`, `1 checks`, `1 violations` and `2 needs --diff`. It now prints `1 block`,
+  `1 check`, `1 violation` and `2 need --diff`. A script that looks for these words in the line must accept both
+  forms ([#143](https://github.com/mennanov/blockwatch/issues/143)).
 
 ## [0.8.1] - 2026-10-05
 

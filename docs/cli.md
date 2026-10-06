@@ -574,7 +574,7 @@ on its own.
 
 ```shell
 blockwatch --verbosity summary
-blockwatch: mode=all, 34/240 files, 61 blocks (3 unchecked, 2 needs --diff), 73 checks, 0 violations
+blockwatch: mode=all, 34/240 files, 61 blocks (3 unchecked, 2 need --diff), 73 checks, 0 violations
 ```
 
 Reading that line:
@@ -582,13 +582,13 @@ Reading that line:
 - `mode=all` — which [run mode](#run-modes) this was: `all`, `all+diff`, or `only-changed`. Each name is a single token,
   so the line stays tokenizable on whitespace.
 - `34/240 files` — 240 files were read, and 34 of them contain blocks.
-- `61 blocks (3 unchecked, 2 needs --diff)` — 61 blocks were in scope, no validator checked 3 of them, and 2 carry a
+- `61 blocks (3 unchecked, 2 need --diff)` — 61 blocks were in scope, no validator checked 3 of them, and 2 carry a
   rule that cannot fire at all without a diff. Fixing that means supplying one, so the figure is a prompt to change how
   you invoked `blockwatch`.
 - `73 checks` — validators ran 73 times in total, once per block they applied to.
 - `0 violations` — nothing failed.
 
-**`needs --diff` appears only under `mode=all`.** Every other field is present in every mode. Once a diff is supplied
+**`need --diff` appears only under `mode=all`.** Every other field is present in every mode. Once a diff is supplied
 those rules *can* fire, so the question the figure answers no longer arises — and the obvious substitute, counting the
 blocks the diff did not happen to reach, would just measure the size of your change. On a repository with fifty
 `affects` blocks, a one-line commit would report forty-nine, every time, with nothing wrong. So the clause is left out
@@ -603,7 +603,7 @@ A block goes unchecked for one of three reasons:
   it with `affects` or `same-as`. It declares no rule of its own, so nothing checks it. This is normal and needs no
   fixing.
 - **The validator does not apply to this run.** `affects` only compares blocks that a diff has touched, so it checks
-  nothing without `--diff`. These are the blocks the `needs --diff` figure counts. Under a diff the same block goes
+  nothing without `--diff`. These are the blocks the `need --diff` figure counts. Under a diff the same block goes
   unchecked whenever the diff did not reach it, which is normal for an incremental run and is not counted.
 - **The attributes do not add up to a rule.** A modifier such as `keep-sorted-pattern` only refines the validator it
   belongs to; on a block with no `keep-sorted`, it has nothing to modify and no validator claims the block. A `full`
@@ -624,7 +624,7 @@ a single file, even though two were involved:
 
 ```shell
 git diff --patch | blockwatch --diff --only-changed --verbosity summary
-blockwatch: mode=only-changed, 1/1 files, 1 blocks (0 unchecked), 1 checks, 1 violations
+blockwatch: mode=only-changed, 1/1 files, 1 block (0 unchecked), 1 check, 1 violation
 ```
 
 Nothing about the failure is hidden by this. Violations are printed to stderr as JSON, keyed by the file the violating
@@ -672,7 +672,7 @@ block that carries nothing but a `name` declares no rule of its own:
 
 ```shell
 git diff --patch | blockwatch --diff --only-changed --verbosity summary
-blockwatch: mode=only-changed, 2/2 files, 2 blocks (1 unchecked), 1 checks, 0 violations
+blockwatch: mode=only-changed, 2/2 files, 2 blocks (1 unchecked), 1 check, 0 violations
 ```
 
 ### Full Reports

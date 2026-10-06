@@ -109,7 +109,7 @@ give both blocks a name and point each one at the other:
 - **The edited-together check needs a diff.** Without one, no block counts as changed, so the check never runs. It
   does not pass; it just finds nothing. Run `git diff --patch | blockwatch --diff` to check the whole tree, or add
   `--only-changed` to check only the changed blocks. Without a diff, `blockwatch --verbosity summary` shows a
-  `needs --diff` count of the blocks it skipped. Missing targets (below) are checked either way. To compare values
+  `need --diff` count of the blocks it skipped. Missing targets (below) are checked either way. To compare values
   without a diff, use [`same-as`](same-as.md).
 - **It checks edits, not values.** Any edit to the target satisfies it, even an unrelated one. When both places must
   hold the same value, [`same-as`](same-as.md) is the stronger check.

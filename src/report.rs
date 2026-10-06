@@ -141,21 +141,28 @@ impl RunReport {
     /// Returns the run totals as a single line of text.
     pub(crate) fn summary_line(&self) -> String {
         let needs_diff = match self.summary.blocks_needing_diff {
-            Some(count) => format!(", {count} needs --diff"),
+            Some(count) => format!(", {}", counted(count, "needs --diff", "need --diff")),
             None => String::new(),
         };
         format!(
-            "blockwatch: mode={}, {}/{} files, {} blocks ({} unchecked{}), {} checks, {} violations",
+            "blockwatch: mode={}, {}/{} files, {} ({} unchecked{}), {}, {}",
             self.summary.mode.as_str(),
             self.summary.files_with_blocks,
             self.summary.files_scanned,
-            self.summary.blocks,
+            counted(self.summary.blocks, "block", "blocks"),
             self.summary.blocks_unchecked,
             needs_diff,
-            self.summary.checks,
-            self.summary.violations,
+            counted(self.summary.checks, "check", "checks"),
+            counted(self.summary.violations, "violation", "violations"),
         )
     }
+}
+
+/// Returns `count` followed by `one` if `count` is 1, or by `many` otherwise. For example, `1 block`,
+/// `0 blocks` and `2 blocks`.
+fn counted(count: usize, one: &str, many: &str) -> String {
+    let word = if count == 1 { one } else { many };
+    format!("{count} {word}")
 }
 
 #[cfg(test)]
@@ -232,7 +239,7 @@ mod tests {
 
         assert_eq!(
             report.summary_line(),
-            "blockwatch: mode=all, 1/4 files, 3 blocks (2 unchecked, 2 needs --diff), 1 checks, 1 violations"
+            "blockwatch: mode=all, 1/4 files, 3 blocks (2 unchecked, 2 need --diff), 1 check, 1 violation"
         );
         Ok(())
     }
@@ -255,7 +262,7 @@ mod tests {
 
         assert_eq!(
             report.summary_line(),
-            "blockwatch: mode=all+diff, 1/4 files, 3 blocks (2 unchecked), 1 checks, 1 violations"
+            "blockwatch: mode=all+diff, 1/4 files, 3 blocks (2 unchecked), 1 check, 1 violation"
         );
         Ok(())
     }
