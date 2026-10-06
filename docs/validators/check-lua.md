@@ -182,6 +182,9 @@ BLOCKWATCH_LUA_MODE=unsafe blockwatch
 | `safe`                | All memory-safe libraries (including `io`, `os`, `package`)           | Memory-safe - Allows file/OS access |
 | `unsafe`              | All Lua standard libraries with no restrictions (including C modules) | Unsafe - Full system access         |
 
+An empty value means `sandboxed`, the same as an unset variable. Any other value, such as `Safe`, stops a run that
+checks a `check-lua` block. The error lists the valid values.
+
 If a script uses a library that is not available in the selected mode, the run stops with a Lua error. The block is not
 reported as a violation — the whole run fails. So a script that needs `io` or `os` will fail every `sandboxed` run,
 including fork pull requests that changed nothing related to it. Disable `check-lua` for those runs instead; see

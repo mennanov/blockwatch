@@ -144,6 +144,32 @@ fn lua_script_using_os_succeeds_in_safe_mode() {
 }
 
 #[test]
+fn unknown_mode_fails_the_run_with_the_valid_modes() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg(MODE_FIXTURE);
+    cmd.env(LUA_MODE_ENV_VAR, "Safe");
+    let output = cmd.output().unwrap();
+
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains(
+            r#"BLOCKWATCH_LUA_MODE is "Safe", but it must be sandboxed, safe or unsafe"#,
+        ));
+}
+
+#[test]
+fn unknown_mode_with_check_lua_disabled_succeeds() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args([MODE_FIXTURE, "--disable", "check-lua"]);
+    cmd.env(LUA_MODE_ENV_VAR, "Safe");
+    let output = cmd.output().unwrap();
+
+    output.assert().success();
+}
+
+#[test]
 fn ctx_affects_exposes_in_sync_affected_blocks_succeeds() {
     // The diff touches both the check-lua block and the affected docs block so the `affects`
     // validator is satisfied and the check-lua script runs against an in-sync pair.

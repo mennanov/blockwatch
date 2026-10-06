@@ -18,6 +18,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   a typo such as `'scr/**/*.py'`, with `notes.txt`, whose extension is not supported, and with a file that
   `.gitignore` or `--ignore` leaves out. With `--only-changed`, an argument only has to select a file in the
   repository, not a changed one.
+- An unknown `BLOCKWATCH_LUA_MODE` value, such as `Safe`, stops a run that checks a `check-lua` block. The error
+  lists the valid values. Before, it quietly meant `sandboxed`, so a script lost `os` and `io` with an error that didn't
+  mention the variable. An empty value still means `sandboxed`.
 
 ### Fixed
 

@@ -11,6 +11,7 @@ use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use mlua::{HookTriggers, Lua, StdLib, VmState};
 use serde::Serialize;
+use std::ffi::OsStr;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -35,44 +36,68 @@ const CHECK_LUA_INSTRUCTION_HOOK_INTERVAL: u32 = 1_000;
 /// cannot interrupt (a blocking system call, say).
 const CHECK_LUA_TIMEOUT_BACKSTOP_GRACE: Duration = Duration::from_secs(1);
 
-/// Returns the Lua standard library set based on the `BLOCKWATCH_LUA_MODE` environment variable.
-///
-/// - `sandboxed` (default): Most restrictive, blocks file/OS access.
-/// - `safe`: Memory-safe but includes IO/OS (useful for trusted scripts).
-/// - `unsafe`: Fully unsafe, allows C module loading.
-fn lua_from_env() -> Lua {
-    /* <block name="lua-safety-modes" affects="docs/validators/check-lua.md:lua-safety-modes"
-    same-as="docs/validators/check-lua.md:lua-safety-modes"
-    same-as-pattern='(?:unwrap_or\(|^)"(?P<value>[a-z]+)"'> */
-    match std::env::var(LUA_STDLIB_ENV_VAR)
-        .as_deref()
-        .unwrap_or("sandboxed")
-    {
-        "unsafe" => unsafe { Lua::unsafe_new() },
-        "safe" => Lua::new(),
-        _ => Lua::new_with(
-            StdLib::COROUTINE | StdLib::TABLE | StdLib::STRING | StdLib::UTF8 | StdLib::MATH,
-            Default::default(),
-        )
-        .expect("failed to start Lua"),
-    }
-    // </block>
+/* <block name="lua-safety-modes" affects="docs/validators/check-lua.md:lua-safety-modes"
+same-as="docs/validators/check-lua.md:lua-safety-modes"
+same-as-pattern='"(?P<value>[a-z]+)"\) =>'> */
+/// Which Lua standard libraries a `check-lua` script can use, set by `BLOCKWATCH_LUA_MODE`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LuaMode {
+    /// Only `coroutine`, `table`, `string`, `utf8` and `math`, so no file or OS access.
+    Sandboxed,
+    /// Every memory-safe library, including `io`, `os` and `package`.
+    Safe,
+    /// Every library, including loading C modules.
+    Unsafe,
 }
+
+impl LuaMode {
+    /// Parses a value of `BLOCKWATCH_LUA_MODE`. An empty value means [`LuaMode::Sandboxed`].
+    ///
+    /// # Errors
+    /// Returns an error that lists the valid modes for any other value, including one that is not
+    /// valid Unicode.
+    fn parse(value: &OsStr) -> anyhow::Result<Self> {
+        match value.to_str() {
+            // CI systems often set a variable to an empty string instead of leaving it unset.
+            Some("" | "sandboxed") => Ok(Self::Sandboxed),
+            Some("safe") => Ok(Self::Safe),
+            Some("unsafe") => Ok(Self::Unsafe),
+            _ => Err(anyhow!(
+                "{LUA_STDLIB_ENV_VAR} is {value:?}, but it must be sandboxed, safe or unsafe"
+            )),
+        }
+    }
+
+    /// Starts a Lua VM with the libraries of this mode.
+    fn new_lua(self) -> Lua {
+        match self {
+            Self::Sandboxed => Lua::new_with(
+                StdLib::COROUTINE | StdLib::TABLE | StdLib::STRING | StdLib::UTF8 | StdLib::MATH,
+                Default::default(),
+            )
+            .expect("failed to start Lua"),
+            Self::Safe => Lua::new(),
+            Self::Unsafe => unsafe { Lua::unsafe_new() },
+        }
+    }
+}
+// </block>
 
 /// Enforces `check-lua="path/to/script.lua"`: runs a user-supplied Lua script over the block's
 /// content, for project-specific rules the built-in validators cannot express.
 ///
 /// Needs a filesystem to read the script, which is resolved inside the repository like any other
-/// referenced file. How much of the Lua standard library the script may use is set by
-/// `BLOCKWATCH_LUA_MODE`.
+/// referenced file.
 struct CheckLuaValidator<Fs: FileSystem> {
     file_system: Arc<Fs>,
+    mode: LuaMode,
 }
 
 impl<Fs: FileSystem + 'static> CheckLuaValidator<Fs> {
-    /// Creates the validator over the filesystem it will read scripts from.
-    fn new(file_system: Arc<Fs>) -> Self {
-        Self { file_system }
+    /// Creates the validator over the filesystem it will read scripts from. Every script runs
+    /// with the libraries of `mode`.
+    fn new(file_system: Arc<Fs>, mode: LuaMode) -> Self {
+        Self { file_system, mode }
     }
 }
 
@@ -105,6 +130,7 @@ impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
                 let context = Arc::clone(&context);
                 let file_path = file_path.clone();
                 let file_system = Arc::clone(&self.file_system);
+                let mode = self.mode;
                 tasks.spawn(async move {
                     let file_blocks = &context.blocks[&file_path];
                     let block_with_context = &file_blocks.blocks_with_context[block_idx];
@@ -133,6 +159,7 @@ impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
                         block_with_context,
                         content,
                         &affected_targets,
+                        mode,
                     )
                     .await;
 
@@ -169,6 +196,7 @@ async fn run_lua_script<Fs: FileSystem>(
     block_with_context: &BlockWithContext,
     content: LuaContent,
     affected_targets: &[AffectedTarget],
+    mode: LuaMode,
 ) -> anyhow::Result<Option<String>> {
     let timeout = parse_check_lua_timeout(&block_with_context.block)?;
     let script_content = file_system
@@ -187,7 +215,7 @@ async fn run_lua_script<Fs: FileSystem>(
 
     // Run the Lua script in a blocking thread for CPU-heavy scripts that never yield control back.
     // I/O-heavy scripts won't invoke the hook, in this case the Tokio's timeout will fire.
-    let worker = spawn_blocking(move || run_lua_script_sync(inputs));
+    let worker = spawn_blocking(move || run_lua_script_sync(inputs, mode));
     match tokio::time::timeout(timeout + CHECK_LUA_TIMEOUT_BACKSTOP_GRACE, worker).await {
         Ok(worker_result) => worker_result.context("the check-lua worker thread panicked")?,
         Err(_elapsed) => Err(anyhow!(timeout_error_message(timeout))),
@@ -267,10 +295,13 @@ impl LuaScriptInputs {
     }
 }
 
-/// Runs the script synchronously so its whole Lua lifetime stays on one thread, which lets
+/// Runs the script with the libraries of `mode`, and returns the message `validate()` returned, or
+/// `None` when it returned `nil`.
+///
+/// It runs synchronously so its whole Lua lifetime stays on one thread, which lets
 /// [`run_lua_script`] host it on a blocking thread and bound it with a wall-clock timeout.
-fn run_lua_script_sync(inputs: LuaScriptInputs) -> anyhow::Result<Option<String>> {
-    let lua = lua_from_env();
+fn run_lua_script_sync(inputs: LuaScriptInputs, mode: LuaMode) -> anyhow::Result<Option<String>> {
+    let lua = mode.new_lua();
     // Install the hook that stops the script from inside the VM once `timeout` elapses.
     // Needed for the CPU-heavy Lua scripts that never yield control back to the runtime.
     install_timeout_hook(&lua, inputs.timeout)?;
@@ -545,6 +576,8 @@ fn resolve_affected_targets<Fs: FileSystem>(
 }
 
 /// Selects [`CheckLuaValidator`] for blocks carrying a `check-lua` attribute.
+///
+/// Detecting such a block returns an error when `BLOCKWATCH_LUA_MODE` has an unknown value.
 pub(super) struct CheckLuaValidatorDetector;
 
 impl CheckLuaValidatorDetector {
@@ -565,8 +598,11 @@ impl<Fs: FileSystem + 'static> ValidatorDetector<Fs> for CheckLuaValidatorDetect
             .attributes
             .contains_key("check-lua")
         {
+            // Read here, not at startup, so a run without a check-lua block never fails over a
+            // variable it doesn't use.
+            let mode = LuaMode::parse(&std::env::var_os(LUA_STDLIB_ENV_VAR).unwrap_or_default())?;
             Ok(Some(ValidatorType::Async(Box::new(
-                CheckLuaValidator::new(Arc::clone(file_system)),
+                CheckLuaValidator::new(Arc::clone(file_system), mode),
             ))))
         } else {
             Ok(None)
@@ -597,7 +633,7 @@ mod tests {
             .iter()
             .map(|(path, contents)| (path.to_string(), contents.to_string()))
             .collect();
-        CheckLuaValidator::new(Arc::new(FakeFileSystem::new(files)))
+        CheckLuaValidator::new(Arc::new(FakeFileSystem::new(files)), LuaMode::Sandboxed)
     }
 
     #[tokio::test]
@@ -1362,6 +1398,39 @@ some content
             "unexpected error: {err_chain}"
         );
         Ok(())
+    }
+
+    #[test]
+    fn valid_lua_mode_parses_to_its_mode() -> anyhow::Result<()> {
+        for mode in [LuaMode::Sandboxed, LuaMode::Safe, LuaMode::Unsafe] {
+            // A new mode doesn't compile until it gets an arm here, and so a place in the list.
+            let value = match mode {
+                LuaMode::Sandboxed => "sandboxed",
+                LuaMode::Safe => "safe",
+                LuaMode::Unsafe => "unsafe",
+            };
+            assert_eq!(LuaMode::parse(OsStr::new(value))?, mode);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn empty_lua_mode_parses_to_sandboxed() -> anyhow::Result<()> {
+        assert_eq!(LuaMode::parse(OsStr::new(""))?, LuaMode::Sandboxed);
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_lua_mode_returns_an_error_with_the_valid_modes() {
+        for value in ["Safe", "sandbox", " safe", "unsafe "] {
+            let error = LuaMode::parse(OsStr::new(value)).unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "BLOCKWATCH_LUA_MODE is {value:?}, but it must be sandboxed, safe or unsafe"
+                )
+            );
+        }
     }
 
     #[tokio::test]
