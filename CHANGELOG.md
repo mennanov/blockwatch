@@ -21,6 +21,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - An unknown `BLOCKWATCH_LUA_MODE` value, such as `Safe`, stops a run that checks a `check-lua` block. The error
   lists the valid values. Before, it quietly meant `sandboxed`, so a script lost `os` and `io` with an error that didn't
   mention the variable. An empty value still means `sandboxed`.
+- `--diff` accepts an empty diff, which is what `git diff` prints when nothing changed. `--diff` then checks every
+  block, and `--diff --only-changed` checks none. Before, the run failed with `diff in stdin is empty.` So
+  `git diff --patch | blockwatch --diff`, as the README shows it, failed on a clean tree and after `git add`.
 
 ### Fixed
 

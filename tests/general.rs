@@ -134,9 +134,9 @@ fn severity_error_violation_present_run_fails_with_exit_code_one() {
 }
 
 #[test]
-fn empty_diff_provided_run_fails_with_error() {
+fn empty_diff_provided_run_checks_every_block() {
     let mut cmd = cargo_bin_cmd!();
-    cmd.args(["--diff"]);
+    cmd.args(["--diff", "tests/testdata/general/paths/invalid.py"]);
     cmd.write_stdin("");
 
     let output = cmd.output().expect("Failed to get command output");
@@ -144,7 +144,23 @@ fn empty_diff_provided_run_fails_with_error() {
     output
         .assert()
         .failure()
-        .stderr(predicate::str::contains("stdin is empty"));
+        .code(1)
+        .stderr(predicate::str::contains("keep-sorted"));
+}
+
+#[test]
+fn empty_diff_with_only_changed_flag_provided_run_checks_nothing() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args([
+        "--diff",
+        "--only-changed",
+        "tests/testdata/general/paths/invalid.py",
+    ]);
+    cmd.write_stdin("\n");
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.assert().success();
 }
 
 #[test]

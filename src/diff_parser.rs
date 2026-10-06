@@ -130,10 +130,12 @@ pub(crate) enum LineChangeKind {
     Deleted,
 }
 
-/// Rejects input that cannot be a unified diff, with a message naming the likely cause.
+/// Rejects input that cannot be a unified diff, with a message naming the likely cause. Accepts
+/// empty or whitespace-only input as a diff with no changes.
 pub(crate) fn validate_diff_input(diff: &str) -> anyhow::Result<()> {
     if diff.trim().is_empty() {
-        anyhow::bail!("diff in stdin is empty.");
+        // A diff tool prints nothing when nothing changed, such as on a clean working tree.
+        return Ok(());
     }
     if diff.lines().any(|line| line.starts_with('\u{1b}')) {
         anyhow::bail!("stdin carries ANSI color escapes, which cannot be parsed as a diff.");
@@ -532,16 +534,6 @@ mod validate_diff_input_tests {
     use super::*;
 
     #[test]
-    fn whitespace_only_input_returns_error() {
-        let err = validate_diff_input(" \n\t\n").unwrap_err();
-
-        assert!(
-            err.to_string().contains("stdin is empty"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
     fn colorized_input_returns_error() {
         // What `git diff --color=always` produces: the header lines carry SGR escapes.
         let diff = "\u{1b}[1mdiff --git a/rules.py b/rules.py\u{1b}[m\n\
@@ -581,6 +573,16 @@ index 1234567..0000000\n\
 -banana\n";
 
         validate_diff_input(diff)
+    }
+
+    #[test]
+    fn empty_input_is_accepted() -> anyhow::Result<()> {
+        validate_diff_input("")
+    }
+
+    #[test]
+    fn whitespace_only_input_is_accepted() -> anyhow::Result<()> {
+        validate_diff_input(" \n\t\n")
     }
 
     #[test]

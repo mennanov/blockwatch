@@ -115,9 +115,11 @@ much — see [Checking Only Changed Blocks](ci.md#checking-only-changed-blocks).
 - **`--only-changed` requires `--diff`.** Without a diff there is nothing to narrow the run down to.
 - **`--diff` with a terminal on stdin is an error.** No diff is coming, and quietly scanning the tree instead would hide
   that.
-- **Under `--diff`, stdin that cannot be a diff is an error.** Empty input, input carrying ANSI color escapes (produce
-  the diff with `--color=never`), and input with no unified-diff header are each reported by name rather than treated as
-  "nothing changed".
+- **Under `--diff`, an empty diff means nothing changed.** It is what `git diff` prints on a clean tree. `--diff` then
+  checks every block, and `--diff --only-changed` checks none.
+- **Under `--diff`, stdin that cannot be a diff is an error.** Input carrying ANSI color escapes (produce the diff with
+  `--color=never`) and input with no unified-diff header are each reported by name rather than treated as "nothing
+  changed".
 - **A diff that resolves to nothing is an error.** Under `--only-changed` the diff is the scope, so any path in it that
   BlockWatch would parse but cannot find fails the run. Under `--diff` alone such a path is passed over — unless *none*
   resolves, which means the diff was taken against a different root (`diff.relative=true`, a wrong `-p` level) and no

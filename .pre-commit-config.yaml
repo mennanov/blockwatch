@@ -14,7 +14,7 @@ repos:
         # the message being written is read. The trailing `--` is necessary: pre-commit appends
         # the message file to this argv, and `bash -c SCRIPT FILE` binds FILE to $0 rather than $1.
         # Otherwise it runs the same command as the `blockwatch-commit-msg` hook.
-        entry: bash -c 'diff=$(git diff --patch --cached --unified=0) || exit; flags=(--suppress-from "$1"); if [ -z "$diff" ]; then exec cargo run --quiet -- "${flags[@]}"; fi; printf "%s\n" "$diff" | cargo run --quiet -- --diff "${flags[@]}"' --
+        entry: bash -c 'diff=$(git diff --patch --cached --unified=0) || exit; printf "%s\n" "$diff" | cargo run --quiet -- --diff --suppress-from "$1"' --
         language: system
         stages: [ commit-msg ]
         pass_filenames: true

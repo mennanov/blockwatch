@@ -1,10 +1,8 @@
 - id: blockwatch
   name: blockwatch
   description: Validate every <block> rule in the repository, and enforce `affects` on the staged changes.
-  # The diff is saved first, so that a failing `git diff` fails the hook. An empty diff, as under
-  # `pre-commit run --all-files`, runs blockwatch without `--diff`, which would reject it. With
-  # nothing staged, `affects` has nothing to check anyway.
-  entry: bash -c 'diff=$(git diff --cached --patch --unified=0) || exit; if [ -z "$diff" ]; then exec blockwatch; fi; printf "%s\n" "$diff" | blockwatch --diff'
+  # The diff is saved first, so that a failing `git diff` fails the hook.
+  entry: bash -c 'diff=$(git diff --cached --patch --unified=0) || exit; printf "%s\n" "$diff" | blockwatch --diff'
   language: rust
   pass_filenames: false
   stages: [ pre-commit ]
@@ -15,7 +13,7 @@
   # The same command as the `blockwatch` hook, plus `--suppress-from`. The trailing `--` is
   # necessary: pre-commit appends the message file to this argv, and `bash -c SCRIPT FILE` binds
   # FILE to $0 rather than $1. The sentinel takes the $0 slot instead.
-  entry: bash -c 'diff=$(git diff --cached --patch --unified=0) || exit; if [ -z "$diff" ]; then exec blockwatch --suppress-from "$1"; fi; printf "%s\n" "$diff" | blockwatch --diff --suppress-from "$1"' --
+  entry: bash -c 'diff=$(git diff --cached --patch --unified=0) || exit; printf "%s\n" "$diff" | blockwatch --diff --suppress-from "$1"' --
   language: rust
   pass_filenames: true
   stages: [ commit-msg ]

@@ -310,8 +310,8 @@ just added is parsed and seen.
 The piped diff must carry Git's standard path prefixes, which a plain `git diff` produces. If BlockWatch reports that a
 diff target has no recognized prefix or does not exist, the repository sets `diff.noprefix`, a custom `diff.srcPrefix`,
 or `diff.relative`; re-run as
-`git diff --patch --default-prefix --no-relative | blockwatch --diff`. Under `--diff`, stdin that is
-empty, ANSI-colorized, or not a diff is an error rather than "nothing changed".
+`git diff --patch --default-prefix --no-relative | blockwatch --diff`. Under `--diff`, an empty diff
+means nothing changed, but stdin that is ANSI-colorized or not a diff is an error.
 
 If `blockwatch` is not on `PATH`, install it with `cargo install blockwatch` or
 `brew install mennanov/blockwatch/blockwatch`.
@@ -350,6 +350,8 @@ printf '%s\n' "$diff" | blockwatch --diff
 BlockWatch reads the files on disk, not the staged content. The pre-commit framework sets unstaged changes aside before
 it runs a hook, but a plain hook doesn't. So this hook stops when there are unstaged changes, instead of checking them
 in place of the commit.
+
+Both hooks run `blockwatch` without `--diff` when nothing is staged, because releases up to 0.8.1 reject an empty diff.
 
 If the project has `check-ai` blocks, add `--only-changed` after `--diff`: a full scan sends every one of them to the
 model on every commit.

@@ -45,8 +45,9 @@ The command saves the diff before it runs `blockwatch`:
 
 - A `git diff` that fails stops the hook, even one that dies partway through writing. Piped straight into `blockwatch`,
   such a diff would be shorter but still well-formed, and the run would pass.
-- When nothing is staged, as under `pre-commit run --all-files`, the diff is empty, and `--diff` rejects empty input. So
-  the hook runs `blockwatch` without `--diff`. With no changes, `affects` has nothing to check anyway.
+- When nothing is staged, as under `pre-commit run --all-files`, the diff is empty. Releases up to 0.8.1 reject an
+  empty diff under `--diff`, so the hook runs `blockwatch` without it. With no changes, `affects` has nothing to check
+  anyway.
 
 `--unified=0` leaves out the unchanged lines around each change, which keeps the diff small.
 
@@ -152,8 +153,9 @@ adds `--only-changed`.
 ## Diff Input
 
 Under `--diff` the piped diff must carry Git's path prefixes and be repository-relative. A normal `git diff`
-satisfies both, so no extra flags are needed for a standard checkout. Empty, ANSI-colorized, or non-diff input is
-rejected rather than read as "nothing changed", so produce the diff with `--color=never` where color is forced on.
+satisfies both, so no extra flags are needed for a standard checkout. An empty diff means nothing changed. ANSI-colorized
+or non-diff input is rejected rather than read as "nothing changed", so produce the diff with `--color=never` where
+color is forced on.
 
 Diffs produced with `--no-prefix`, `diff.noprefix`, a custom `diff.srcPrefix` / `diff.dstPrefix`, or
 `diff.relative` are rejected — BlockWatch stops rather than risk validating the wrong file. If your repositories set any
