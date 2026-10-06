@@ -1,0 +1,14 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        # Fails only when total coverage drops by more than about 18 of 17.8k lines.
+        # A few missed lines in a test fake shouldn't fail a commit.
+        threshold: 0.1%
+    patch:
+      default:
+        # Shows the patch coverage but never fails the commit. With the default
+        # target, a patch fails unless it is covered as well as the whole project.
+        # On a 230-line patch, 3 missed lines already fail it.
+        informational: true
