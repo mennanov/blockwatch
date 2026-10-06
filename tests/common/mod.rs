@@ -87,3 +87,30 @@ pub fn run_with_tty_stdin(args: &[&str], current_dir: Option<&str>) -> std::proc
     // Both FDs are automatically closed here as they go out of scope.
     output
 }
+
+/// The output of the `blockwatch` process that [`run_with_closed_output`] closes.
+pub enum ClosedOutput {
+    Stdout,
+    Stderr,
+}
+
+/// Runs the `blockwatch` binary with `args` and with `--config` set to [`EMPTY_CONFIG`]. The pipe
+/// of `closed` has no reader, as after `head` reads enough and exits, so every write to it fails.
+/// The other output is captured, so callers can assert on it.
+pub fn run_with_closed_output(closed: ClosedOutput, args: &[&str]) -> std::process::Output {
+    use assert_cmd::cargo::CommandCargoExt;
+    use std::process::Command;
+
+    // Closing the reader before the run starts makes the first write fail, however short the
+    // output is. A reader that closes later lets a short output fit in the pipe's buffer.
+    let (reader, writer) = std::io::pipe().expect("failed to create a pipe");
+    drop(reader);
+
+    let mut command = Command::cargo_bin("blockwatch").expect("blockwatch binary should be built");
+    command.args(["--config", EMPTY_CONFIG]).args(args);
+    match closed {
+        ClosedOutput::Stdout => command.stdout(writer),
+        ClosedOutput::Stderr => command.stderr(writer),
+    };
+    command.output().expect("failed to run blockwatch")
+}

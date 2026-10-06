@@ -424,3 +424,40 @@ fn verbosity_with_the_list_subcommand_fails() {
         "unexpected argument '--verbosity'",
     ));
 }
+
+#[test]
+fn summary_level_with_closed_stdout_exits_without_an_error() {
+    let output = common::run_with_closed_output(
+        common::ClosedOutput::Stdout,
+        &[CLEAN_GLOB, "--verbosity", "summary"],
+    );
+
+    output.assert().success().stderr("");
+}
+
+#[test]
+fn full_level_with_closed_stdout_still_writes_the_violations_and_fails() {
+    let output = common::run_with_closed_output(
+        common::ClosedOutput::Stdout,
+        &[FAILING_GLOB, "--verbosity", "full"],
+    );
+
+    // Only the violations reach stderr, so it parses as one JSON document.
+    let violations: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert!(violations["tests/testdata/verbosity/failing/unsorted.py"].is_array());
+    output.assert().failure().code(1);
+}
+
+#[test]
+fn summary_level_with_closed_stderr_still_writes_the_report_and_fails() {
+    let output = common::run_with_closed_output(
+        common::ClosedOutput::Stderr,
+        &[FAILING_GLOB, "--verbosity", "summary"],
+    );
+
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stdout(predicate::str::ends_with("1 violation\n"));
+}

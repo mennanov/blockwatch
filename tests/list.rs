@@ -324,3 +324,13 @@ fn list_subcommand_finishes_without_waiting_for_stdin() {
 
     assert!(status.success());
 }
+
+#[test]
+fn list_subcommand_with_closed_stdout_exits_without_an_error() {
+    let output = common::run_with_closed_output(
+        common::ClosedOutput::Stdout,
+        &["list", "tests/testdata/list/a.py"],
+    );
+
+    output.assert().success().stderr("");
+}

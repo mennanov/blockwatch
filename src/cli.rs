@@ -53,9 +53,7 @@ fn run_list(args: &flags::Args) -> anyhow::Result<()> {
         &file_system,
     )?;
     let report = context.to_serializable_report();
-    let mut stdout = std::io::stdout().lock();
-    serde_json::to_writer_pretty(&mut stdout, &report).context("Failed to list blocks")?;
-    writeln!(&mut stdout).context("Failed to list blocks")
+    write_json(std::io::stdout(), &report).context("Failed to list blocks")
 }
 
 /// Runs the default command: validates every block in scope and reports any violations.
@@ -157,17 +155,31 @@ fn write_report(
         return Ok(());
     }
     let report = report::RunReport::new(mode, blocks_needing_diff, scan_stats, context, log)?;
-    let mut stdout = std::io::stdout().lock();
     match verbosity {
-        flags::Verbosity::None => {}
-        flags::Verbosity::Summary => writeln!(&mut stdout, "{}", report.summary_line())?,
-        flags::Verbosity::Full => {
-            serde_json::to_writer_pretty(&mut stdout, &report)?;
-            writeln!(&mut stdout)?;
-        }
+        flags::Verbosity::None => Ok(()),
+        flags::Verbosity::Summary => write_line(std::io::stdout(), &report.summary_line()),
+        flags::Verbosity::Full => write_json(std::io::stdout(), &report),
     }
-    stdout.flush()?;
-    Ok(())
+}
+
+/// Writes `document` to `output` as pretty-printed JSON, followed by a newline, and flushes it.
+///
+/// Like [`write_line`], returns `Ok` when the reader has closed the pipe.
+fn write_json(output: impl Write, document: &impl serde::Serialize) -> anyhow::Result<()> {
+    write_line(output, &serde_json::to_string_pretty(document)?)
+}
+
+/// Writes `text` to `output`, followed by a newline, and flushes it.
+///
+/// Returns `Ok` without writing the rest when the reader has closed the pipe, as `head` does after
+/// reading enough. Returns an error for any other failed write.
+fn write_line(mut output: impl Write, text: &str) -> anyhow::Result<()> {
+    match writeln!(output, "{text}").and_then(|()| output.flush()) {
+        // Rust ignores SIGPIPE, so a write to a closed pipe returns this error instead of ending
+        // the process. A reader that closed the pipe wants no more output, so it is not a failure.
+        Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        result => Ok(result?),
+    }
 }
 
 /// Decides the [`ScanMode`] and extracts the [`diff_parser::LineChange`]s from the diff (if any).
@@ -316,20 +328,12 @@ fn write_json_violations(violations: &HashMap<RepoPath, Vec<Violation>>) -> anyh
             (file_path, file_diagnostics)
         })
         .collect();
-    write_to_stderr(&diagnostics)
+    write_json(std::io::stderr(), &diagnostics)
 }
 
 /// Writes the violations to stderr as a SARIF log.
 fn write_sarif_violations(violations: &HashMap<RepoPath, Vec<Violation>>) -> anyhow::Result<()> {
-    write_to_stderr(&sarif::SarifLog::new(violations))
-}
-
-/// Writes `document` to stderr as pretty-printed JSON, followed by a newline.
-fn write_to_stderr(document: &impl serde::Serialize) -> anyhow::Result<()> {
-    let mut stderr = std::io::stderr().lock();
-    serde_json::to_writer_pretty(&mut stderr, document)?;
-    writeln!(&mut stderr)?;
-    Ok(())
+    write_json(std::io::stderr(), &sarif::SarifLog::new(violations))
 }
 
 /// Finds the repository root by walking up from `current_path` to the nearest ancestor carrying a

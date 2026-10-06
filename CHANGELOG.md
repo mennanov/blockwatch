@@ -43,6 +43,10 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - `--verbosity summary` printed `1 blocks`, `1 checks`, `1 violations` and `2 needs --diff`. It now prints `1 block`,
   `1 check`, `1 violation` and `2 need --diff`. A script that looks for these words in the line must accept both
   forms ([#143](https://github.com/mennanov/blockwatch/issues/143)).
+- When the program that reads the output stops early, such as `head`, BlockWatch now stops writing without an error.
+  Before, it printed `Broken pipe (os error 32)` and exited with 1. Now the exit code depends only on the violations.
+  This covers `list`, `--verbosity` and the violations on stderr
+  ([#142](https://github.com/mennanov/blockwatch/issues/142)).
 
 ## [0.8.1] - 2026-10-05
 

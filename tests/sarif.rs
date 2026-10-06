@@ -155,3 +155,11 @@ fn json_diagnostics_are_what_a_run_writes_without_the_flag() {
 
     assert_eq!(diagnostics[SORTED][0]["code"], "keep-sorted");
 }
+
+#[test]
+fn closed_stderr_without_violations_exits_without_an_error() {
+    let output =
+        common::run_with_closed_output(common::ClosedOutput::Stderr, &[CLEAN, "--format", "sarif"]);
+
+    output.assert().success();
+}
