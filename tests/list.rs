@@ -15,6 +15,7 @@ fn list_subcommand_with_specific_file_returns_correct_json_from_that_file_only()
     let output = cmd.output().expect("Failed to get command output");
 
     output.clone().assert().success();
+    assert!(output.stdout.ends_with(b"}\n"));
 
     let actual: Value =
         serde_json::from_slice(&output.stdout).expect("Failed to parse JSON output");

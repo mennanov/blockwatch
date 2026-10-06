@@ -53,7 +53,9 @@ fn run_list(args: &flags::Args) -> anyhow::Result<()> {
         &file_system,
     )?;
     let report = context.to_serializable_report();
-    serde_json::to_writer_pretty(std::io::stdout(), &report).context("Failed to list blocks")
+    let mut stdout = std::io::stdout().lock();
+    serde_json::to_writer_pretty(&mut stdout, &report).context("Failed to list blocks")?;
+    writeln!(&mut stdout).context("Failed to list blocks")
 }
 
 /// Runs the default command: validates every block in scope and reports any violations.

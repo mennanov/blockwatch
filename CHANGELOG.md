@@ -24,6 +24,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Fixed
 
+- The output of `blockwatch list` now ends with a newline. Before, it ended at the closing `}`, so the shell prompt
+  started on the same line, and `while read` skipped the last line.
 - `--help` recommended `--only-changed` for hooks and CI. It now recommends `--diff` alone, like the docs and the
   shipped hooks. Only a full scan catches a change that breaks a block in a file it never touched.
 - The `--help` line for `-e`/`--enable` said "Enable a validator". It now says the flag runs only the validators it
