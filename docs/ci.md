@@ -89,22 +89,38 @@ reused with `git commit -e -F .git/COMMIT_EDITMSG` instead of being retyped.
 
 ## Plain Git Hook
 
-Without pre-commit, write the same steps to `.git/hooks/pre-commit` and make it executable (`chmod +x`):
+Without pre-commit, write these steps to `.git/hooks/pre-commit` and make it executable (`chmod +x`):
 
 ```bash
 #!/bin/sh
+if ! git diff --quiet; then
+  echo 'blockwatch checks the files on disk, so stage or stash the unstaged changes first' >&2
+  exit 1
+fi
 diff=$(git diff --patch --cached --unified=0) || exit
 if [ -z "$diff" ]; then exec blockwatch; fi
 printf '%s\n' "$diff" | blockwatch --diff
 ```
 
-Here the diff is empty after `git commit --amend` with nothing new staged.
+BlockWatch reads the files on disk, not the staged content. So the hook stops when a tracked file has unstaged changes.
+Otherwise it would check those changes instead of the commit:
+
+- A broken commit would pass, if the file on disk has an unstaged fix.
+- A correct commit would fail, if the file on disk has an unstaged broken edit.
+
+The pre-commit framework sets unstaged changes aside before it runs a hook, so the hooks above don't need this check.
+
+The diff is empty after `git commit --amend` with nothing new staged.
 
 To read suppressions from the message instead, write the same steps to `.git/hooks/commit-msg`, where Git passes the
 message file as the first argument:
 
 ```bash
 #!/bin/sh
+if ! git diff --quiet; then
+  echo 'blockwatch checks the files on disk, so stage or stash the unstaged changes first' >&2
+  exit 1
+fi
 diff=$(git diff --patch --cached --unified=0) || exit
 if [ -z "$diff" ]; then exec blockwatch --suppress-from "$1"; fi
 printf '%s\n' "$diff" | blockwatch --diff --suppress-from "$1"

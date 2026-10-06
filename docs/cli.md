@@ -94,8 +94,8 @@ git diff --patch | blockwatch --diff
 # Check only the blocks the diff changed
 git diff --patch --unified=0 | blockwatch --diff --only-changed
 
-# The same, for staged changes
-git diff --cached --patch --unified=0 | blockwatch --diff --only-changed
+# The same, for staged and unstaged changes
+git diff --patch --unified=0 HEAD | blockwatch --diff --only-changed
 
 # Changed blocks under specific paths or globs only
 git diff --patch | blockwatch --diff --only-changed src "**/*.md"
@@ -375,13 +375,10 @@ Blockwatch-suppress: api.md:handler:affects
 ```
 
 Matching is case-insensitive (e.g. `blockwatch-suppress:` is accepted). Any other line is ignored, so an ordinary commit
-message is valid input:
+message is valid input. A `commit-msg` hook can pass the message file that Git gives it, as the
+[plain `commit-msg` hook](ci.md#plain-git-hook) does. In CI, collect the messages of a pull request:
 
 ```shell
-# commit-msg hook, where $1 is the message being written
-git diff --cached --patch | blockwatch --diff --suppress-from "$1"
-
-# CI, over the range of a pull request
 git log --format=%B "$BASE..$HEAD" > msgs
 git diff --patch "$BASE...$HEAD" | blockwatch --diff --suppress-from msgs
 ```

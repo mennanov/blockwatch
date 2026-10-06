@@ -29,6 +29,13 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - A path argument selects the file or directory it points at. `./src/x.py`, `src`, `src/`, `.` and an absolute path
   used to match no file. A file whose name is also a glob, such as `app/[id].tsx`, is now checked itself, instead of
   `app/i.tsx`. Paths and globs still start from the repository root, from any directory.
+- Some documented commands piped in the staged diff, but BlockWatch reads the files on disk. With unstaged changes,
+  the run checked other content than the diff showed. So a broken commit could pass, and a correct one could fail. The
+  pre-commit framework hooks were not affected.
+  - The plain Git hooks in [Plain Git Hook](docs/ci.md#plain-git-hook) and in the agent skill now stop, and ask you to
+    stage or stash the unstaged changes.
+  - The staged-diff examples in `--help`, the README, `docs/cli.md` and the agent skill now pipe
+    `git diff --patch HEAD`. It covers staged and unstaged changes.
 
 ## [0.8.1] - 2026-10-05
 

@@ -73,8 +73,8 @@ You can put project-wide settings (--ignore, -E, --enable, --disable) in blockwa
     # Check only the blocks the diff changed, when a full scan costs too much
     git diff --patch --unified=0 | blockwatch --diff --only-changed
 
-    # The same, for staged changes only
-    git diff --cached --patch --unified=0 | blockwatch --diff --only-changed
+    # The same, for staged and unstaged changes
+    git diff --patch --unified=0 HEAD | blockwatch --diff --only-changed
 
     # Narrow a diff-driven run further with glob patterns
     git diff --patch | blockwatch --diff --only-changed 'src/**/*.rs'

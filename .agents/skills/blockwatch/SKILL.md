@@ -288,7 +288,7 @@ You can run the `blockwatch` command directly in the shell:
 ```bash
 blockwatch                                                   # validate every block in the tree
 git diff --patch | blockwatch --diff                         # every block, with `affects` enforced on your changes
-git diff --cached --patch | blockwatch --diff                # the same, for staged changes
+git diff --patch HEAD | blockwatch --diff                    # the same, for staged and unstaged changes
 git diff --patch | blockwatch --diff --only-changed          # only the blocks your changes touched
 blockwatch list                                              # JSON dump of every block found (audit / debug)
 blockwatch src/main.rs "**/*.md"                             # restrict to paths or globs (quote globs)
@@ -334,9 +334,25 @@ without a block tag is not parsed, so this stays fast.
       pass_filenames: false
 ```
 
-Without the pre-commit framework, put the same `entry` command in `.git/hooks/pre-commit` and `chmod +x` it. If the
-project has `check-ai` blocks, add `--only-changed` after `--diff`: a full scan sends every one of them to the model on
-every commit.
+Without the pre-commit framework, write this to `.git/hooks/pre-commit` and `chmod +x` it:
+
+```sh
+#!/bin/sh
+if ! git diff --quiet; then
+  echo 'blockwatch checks the files on disk, so stage or stash the unstaged changes first' >&2
+  exit 1
+fi
+diff=$(git diff --patch --cached --unified=0) || exit
+if [ -z "$diff" ]; then exec blockwatch; fi
+printf '%s\n' "$diff" | blockwatch --diff
+```
+
+BlockWatch reads the files on disk, not the staged content. The pre-commit framework sets unstaged changes aside before
+it runs a hook, but a plain hook doesn't. So this hook stops when there are unstaged changes, instead of checking them
+in place of the commit.
+
+If the project has `check-ai` blocks, add `--only-changed` after `--diff`: a full scan sends every one of them to the
+model on every commit.
 
 **GitHub Actions** (`.github/workflows/blockwatch.yml`):
 

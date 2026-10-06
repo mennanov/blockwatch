@@ -164,8 +164,8 @@ git diff --patch | blockwatch --diff
 # Check only the blocks the diff changed
 git diff --patch | blockwatch --diff --only-changed
 
-# The same, for staged changes
-git diff --cached --patch | blockwatch --diff --only-changed
+# The same, for staged and unstaged changes
+git diff --patch HEAD | blockwatch --diff --only-changed
 
 # Dump all discovered blocks as JSON
 blockwatch list
