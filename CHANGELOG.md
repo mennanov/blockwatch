@@ -26,6 +26,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 - `--help` recommended `--only-changed` for hooks and CI. It now recommends `--diff` alone, like the docs and the
   shipped hooks. Only a full scan catches a change that breaks a block in a file it never touched.
+- The `--help` line for `-e`/`--enable` said "Enable a validator". It now says the flag runs only the validators it
+  lists. So `-e check-ai` no longer reads like it adds `check-ai` to the ones that already run.
 - A path argument selects the file or directory it points at. `./src/x.py`, `src`, `src/`, `.` and an absolute path
   used to match no file. A file whose name is also a glob, such as `app/[id].tsx`, is now checked itself, instead of
   `app/i.tsx`. Paths and globs still start from the repository root, from any directory.

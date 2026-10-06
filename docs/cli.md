@@ -17,7 +17,7 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
 - **Config File**: `blockwatch --config FILE` reads the project's settings from FILE instead of `blockwatch.toml`
 - **Custom Extensions**: Map custom file extensions: `blockwatch -E cxx=cpp` (config key: `extensions`)
 - **Disable Validators**: `blockwatch -d check-ai` (config key: `disable`)
-- **Enable Validators**: `blockwatch -e keep-sorted` (config key: `enable`)
+- **Run Only Some Validators**: `blockwatch -e keep-sorted` runs only `keep-sorted` (config key: `enable`)
 - **Ignore Files**: `blockwatch --ignore "**/generated/**"` (config key: `ignore`)
 - **Report What Ran**: `blockwatch --verbosity summary` (or `full` for JSON on stdout)
 - **Suppress Violations**: `blockwatch --suppress FILE[:BLOCK[:VALIDATOR[:HASH]]]` reports them but stops them failing

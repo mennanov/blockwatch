@@ -183,7 +183,7 @@ pub(crate) struct ValidationFlags {
     )]
     disabled_validators: Vec<&'static str>,
 
-    /// Enable a validator, e.g. -e check-ai -e line-count
+    /// Run only this validator. Repeat to run more, e.g. -e keep-sorted -e line-count
     #[arg(
         short = 'e',
         long = "enable",
