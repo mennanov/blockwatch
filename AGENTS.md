@@ -117,16 +117,20 @@ The goal is a test suite that fails when behavior changes. Running every line is
 
 ## The repository lints itself
 
-Source files here contain real `<block ...>` tags. Three runs check them:
+Source files here contain real `<block ...>` tags. Two runs check them:
 
-- The `commit-msg` hook builds the linter from the working tree and runs it on the staged diff.
-- `tests/general.rs` runs the linter from the working tree on the whole repository.
+- The `commit-msg` hook builds the linter from the working tree and runs it on the whole repository. It pipes in the
+  staged diff with `--diff`, so rules that need a change, such as `affects`, fire for the blocks the commit touches.
 - CI runs the release that `mennanov/blockwatch-action` pins on the whole repository. That release can be older than
   the code here.
 
 The hook and CI read `blockwatch.toml`. It skips `tests/testdata/`, where the fixtures break rules on purpose. It also
 turns off `check-lua`, because the `check-lua` block here needs the network. `.github/workflows/trusted-checks.yml`
 runs that block on a schedule.
+
+No test checks these blocks, so `cargo test` can pass while the hook fails. `tests/general.rs` also runs the linter on
+the whole tree, but with an empty config, so the fixtures fail that run on purpose. To check the blocks before you
+commit, run `cargo run`.
 
 This means:
 
