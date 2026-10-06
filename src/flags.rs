@@ -46,10 +46,12 @@ impl std::fmt::Display for Verbosity {
     author,
     version = crate_version!(),
     about = "Validate interdependent code/doc blocks to prevent drift.",
-    long_about = r"Blockwatch validates that named blocks, sorted segments, and other constraints declared in block tags remain consistent across files. It is designed for use in pre-commit hooks and CI.
+    // <block name="help-text">
+    long_about =r"Blockwatch validates that named blocks, sorted segments, and other constraints declared in block tags remain consistent across files. It is designed for use in pre-commit hooks and CI.
 
-By default it scans every file in the repository. Pass --diff to additionally read a unified diff from stdin, which marks the blocks the diff changed; rules that only fire on changed content, such as `affects`, need it.
-Add --only-changed to narrow the run down to those blocks, which is what a pre-commit hook or a per-pull-request check usually wants.
+By default it scans every file in the repository. Pass --diff to also read a unified diff from stdin. The diff marks the blocks it changed. Rules that only fire on changed content, such as `affects`, need it.
+Hooks and CI should pass --diff and still scan every file. A change can break a block in a file it never touched, such as the other side of a `same-as`. Only a full scan sees that.
+Add --only-changed to check only the blocks the diff changed, when a full scan costs too much.
 
 You can put project-wide settings (--ignore, -E, --enable, --disable) in blockwatch.toml at the repository root. It can also declare blocks around one value of a JSON, TOML or YAML file, instead of tags.",
     after_help = r"EXAMPLES:
@@ -65,10 +67,10 @@ You can put project-wide settings (--ignore, -E, --enable, --disable) in blockwa
     # Ignore files using glob patterns
     blockwatch 'src/**/*.rs' --ignore '**/generated/**'
 
-    # Scan the whole tree, and enforce the rules that need a diff
+    # Scan the whole tree, and enforce the rules that need a diff (recommended for hooks and CI)
     git diff --patch | blockwatch --diff
 
-    # Check only the blocks the diff changed (recommended for hooks and CI)
+    # Check only the blocks the diff changed, when a full scan costs too much
     git diff --patch --unified=0 | blockwatch --diff --only-changed
 
     # The same, for staged changes only
@@ -106,6 +108,7 @@ You can put project-wide settings (--ignore, -E, --enable, --disable) in blockwa
 
     # List only the blocks the diff changed
     git diff --patch | blockwatch list --diff --only-changed",
+    // </block>
 )]
 pub(crate) struct Args {
     /* <block name="cli-flags" affects="docs/cli.md:cli-docs"

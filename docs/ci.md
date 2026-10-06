@@ -1,10 +1,14 @@
 # CI & Git Hooks Integration
 
+<!-- <block affects="src/flags.rs:help-text"> -->
+
 The hooks and the GitHub Action check every block in the repository. They pass the diff with `--diff`, so that the rules
 about changes, such as [`affects`](validators/affects.md), can fire. A change can break a block in a file it never
 touched: the other side of a `same-as`, or a block that points at one the change renamed. Only a full scan sees that.
 It stays fast, because a file without a block tag is not parsed. To check only the blocks the diff changed, see
 [Checking Only Changed Blocks](#checking-only-changed-blocks).
+
+<!-- </block> -->
 
 ## Pre-commit Framework
 
