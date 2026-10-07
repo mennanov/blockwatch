@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.9.0] - 2026-10-07
+
 ### Added
 
 - `blockwatch skill` prints the skill for AI agents as a complete `SKILL.md`, for the installed version. Save it with

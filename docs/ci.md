@@ -20,7 +20,7 @@ from source on the first run:
 
 ```yaml
 - repo: https://github.com/mennanov/blockwatch
-  rev: v0.8.1  # Use latest release
+  rev: v0.9.0  # Use latest release
   hooks:
     - id: blockwatch
 ```
@@ -62,7 +62,7 @@ The `blockwatch` hook runs before the commit message exists, so it cannot see a 
 
 ```yaml
 - repo: https://github.com/mennanov/blockwatch
-  rev: v0.8.1  # Use latest release
+  rev: v0.9.0  # Use latest release
   hooks:
     - id: blockwatch-commit-msg
 ```
