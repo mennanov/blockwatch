@@ -211,7 +211,10 @@ cxx = 'cpp'                               # like -E cxx=cpp
 
 - Write globs and regexes in single quotes. TOML then takes them as written, backslashes included.
 - `ignore` and `extensions` add to the flags. `--enable` or `--disable` on the command line replaces the config's
-  selection.
+  selection of validators, and `--only-block` or `--skip-block` replaces its selection of blocks.
+- `only-blocks` and `skip-blocks` list blocks as `FILE:BLOCK_NAME`, like `--only-block` and `--skip-block`. Skip a
+  block only when a normal run can't check it, such as a `check-lua` script that needs the network. Never skip a block
+  to make a failing run pass.
 - An unknown key or a bad value fails the run, so a typo can't turn a setting off.
 - The settings of `check-ai` and `check-lua` stay in environment variables. The config can't hold them.
 
@@ -277,7 +280,10 @@ When you change code in a file that contains blocks, you **MUST**:
 4. **Check `blockwatch.toml` before editing a JSON, TOML or YAML file.** A `[[block]]` entry can put rules on a key
    there, though the file shows no tag. If you rename or move that key, update the entry's `target` in the same
    change, or the run stops.
-5. **Verify** before claiming the change is done (see below).
+5. **Update a renamed block's address.** If you rename a block or move it to another file, update its `FILE:BLOCK_NAME`
+   wherever it appears: in `affects` and `same-as` targets, and in `only-blocks` and `skip-blocks` in
+   `blockwatch.toml`. An address that matches no block fails the run.
+6. **Verify** before claiming the change is done (see below).
 
 ## Running and verifying
 
@@ -291,10 +297,11 @@ git diff --patch | blockwatch --diff --only-changed          # only the blocks y
 blockwatch list                                              # JSON dump of every block found (audit / debug)
 blockwatch src/main.rs "**/*.md"                             # restrict to paths or globs (quote globs)
 blockwatch --ignore "**/generated/**"                        # exclude paths for this run
+blockwatch --only-block src/lib.rs:languages                 # check only this block
 ```
 
 Every run also applies the settings in `blockwatch.toml`. Put an exclusion the project always needs in its `ignore` key,
-not in each command.
+not in each command. A block that its `skip-blocks` lists is never checked, so a passing run says nothing about it.
 
 Stdin is read **only** with `--diff`; piping a diff without it is silently ignored and the whole tree is scanned
 instead. `--only-changed` narrows the run to the blocks the diff touched and requires `--diff`.

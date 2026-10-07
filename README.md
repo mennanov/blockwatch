@@ -172,7 +172,7 @@ blockwatch list
 ```
 
 Rules live in comments, next to the code they describe. Settings that apply to the whole project, such as ignored
-paths, extension mappings, and disabled validators, go into `blockwatch.toml` at the repository root:
+paths, extension mappings, disabled validators, and skipped blocks, go into `blockwatch.toml` at the repository root:
 
 ```toml
 ignore = ['**/generated/**']
@@ -194,6 +194,10 @@ blockwatch --suppress src/lib.rs:languages:same-as:270d21b4
 
 A shorter address like `src/lib.rs` covers more violations. See
 [Suppressing a Violation](docs/cli.md#suppressing-a-violation).
+
+To check only some blocks, or to skip some, pass `FILE:BLOCK_NAME` to `--only-block` or `--skip-block`. The
+`only-blocks` and `skip-blocks` keys of `blockwatch.toml` do the same for every run. See
+[Selecting Blocks](docs/cli.md#selecting-blocks).
 
 See [docs/cli.md](docs/cli.md) for all CLI flags, execution modes, the [config file](docs/cli.md#config-file), path
 exclusions, and custom extension mappings.
