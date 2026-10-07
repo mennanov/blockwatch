@@ -362,7 +362,7 @@ fn suppress_from_reads_a_file_outside_the_repository() {
     let msg_file = outside_dir.path().join("commit_msg.txt");
     std::fs::write(
         &msg_file,
-        "Blockwatch-suppress: tests/testdata/suppressions/sorted.py:fruits:keep-sorted\n",
+        "blockwatch-suppress: tests/testdata/suppressions/sorted.py:fruits:keep-sorted\n",
     )
     .unwrap();
 

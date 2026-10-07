@@ -9,7 +9,7 @@
 
 - id: blockwatch-commit-msg
   name: blockwatch (commit-msg)
-  description: Validate every <block> rule in the repository, enforce `affects` on the staged changes, and read Blockwatch-suppress trailers from the commit message.
+  description: Validate every <block> rule in the repository, enforce `affects` on the staged changes, and read blockwatch-suppress trailers from the commit message.
   # The same command as the `blockwatch` hook, plus `--suppress-from`. The trailing `--` is
   # necessary: pre-commit appends the message file to this argv, and `bash -c SCRIPT FILE` binds
   # FILE to $0 rather than $1. The sentinel takes the $0 slot instead.

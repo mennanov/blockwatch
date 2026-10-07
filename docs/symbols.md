@@ -32,7 +32,7 @@ around a symbol, instead of tags in a comment.
 
 <!-- </block> -->
 
-Other files have no symbols yet. BlockWatch still reads their blocks: see
+Other files have no symbols yet. blockwatch still reads their blocks: see
 [Supported Languages](../README.md#supported-languages). A path into one of them stops the run.
 
 A file you map to a language with `-E` gets that language's symbols. With `-E webmanifest=json`,
@@ -60,7 +60,7 @@ For example, the key `@types/node` is `#/dependencies/@types~1node`.
 ## When a path does not resolve
 
 - **A missing key is a violation.** The message suggests similar paths: `symbol not found; did you mean: /version`.
-- **A broken file stops the run.** BlockWatch does not guess what a broken file meant.
+- **A broken file stops the run.** blockwatch does not guess what a broken file meant.
 - **A missing file stops the run**, and so does a file without symbols.
 
 A virtual block's target is stricter: a missing key, or a key written twice, stops the run too. Without one symbol to
@@ -90,7 +90,7 @@ Every key and every array item is a symbol:
 - **A file can be an array.** Then `#/0` is its first item.
 - **A comment is not an array item.** It does not shift the positions of the items after it.
 - **Comments are allowed** in `.json` and `.jsonc` alike. A trailing comma is an error in both, so it stops the run.
-- **A key written twice is a violation**, because BlockWatch can't tell which copy you mean. The message shows where
+- **A key written twice is a violation**, because blockwatch can't tell which copy you mean. The message shows where
   each copy is: `ambiguous symbol, defined at 2:3, 5:3`.
 
 <!-- </block> -->
@@ -151,7 +151,7 @@ jobs:
 - **An alias (`*name`) is not a symbol.** What it stands for is written elsewhere, so a path to it or through it is not
   found. In a list, an alias still takes its position. `<<` is an ordinary key.
 - **A key that is a list or a mapping,** such as `? [a, b]`, is skipped with everything under it.
-- **A key written twice is a violation**, because BlockWatch can't tell which copy you mean.
+- **A key written twice is a violation**, because blockwatch can't tell which copy you mean.
 - **A file with several documents stops the run.** A path can't say which document it means. Put the value in a named
   block instead.
 

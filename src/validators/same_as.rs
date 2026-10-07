@@ -299,7 +299,7 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
 
     /// Resolves a whole-file target's comparable items from the file's entire text.
     ///
-    /// No grammar is involved, which is what lets a `same-as` target be a file BlockWatch cannot
+    /// No grammar is involved, which is what lets a `same-as` target be a file blockwatch cannot
     /// parse. A file already in the validation context is read from there; otherwise it is read
     /// through the filesystem and kept. A missing or unreadable file is an `Err`, as it is for a
     /// named target.

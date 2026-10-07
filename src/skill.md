@@ -1,14 +1,14 @@
 ---
 name: blockwatch
-description: Use whenever you write or change code. As you write it, add BlockWatch `<block>` tags in comments, so that `blockwatch` fails when related code falls out of sync. Use `affects` for code that must change together (an enum and its docs, a constant and its config), `same-as` for two places that must hold the same value, `keep-sorted` and `keep-unique` for lists, and `line-pattern` or `line-count` for strict formats and sizes. Also use it for rules on one key of a JSON, TOML or YAML file (such as `version` in `package.json`) through `[[block]]` entries in `blockwatch.toml`, and when you edit files that hold `<block ...>` tags or that `blockwatch.toml` points at.
+description: Use whenever you write or change code. As you write it, add blockwatch `<block>` tags in comments, so that `blockwatch` fails when related code falls out of sync. Use `affects` for code that must change together (an enum and its docs, a constant and its config), `same-as` for two places that must hold the same value, `keep-sorted` and `keep-unique` for lists, and `line-pattern` or `line-count` for strict formats and sizes. Also use it for rules on one key of a JSON, TOML or YAML file (such as `version` in `package.json`) through `[[block]]` entries in `blockwatch.toml`, and when you edit files that hold `<block ...>` tags or that `blockwatch.toml` points at.
 ---
 
-# BlockWatch
+# blockwatch
 
-`blockwatch skill` wrote this text for BlockWatch {{version}}. Before you follow it, run `blockwatch --version`. If that
+`blockwatch skill` wrote this text for blockwatch {{version}}. Before you follow it, run `blockwatch --version`. If that
 prints a newer version, save the output of `blockwatch skill` over this file, and read the file again.
 
-BlockWatch is a language-agnostic linter that enforces rules declared inside HTML-like `<block ...>` tags placed in
+blockwatch is a language-agnostic linter that enforces rules declared inside HTML-like `<block ...>` tags placed in
 source-file comments. It works across Rust, Python, JS/TS, Go, Java, Markdown, YAML, TOML, HTML, and more. By default it
 checks the whole tree; given a `git diff` on stdin plus `--diff --only-changed` it checks only the blocks that diff
 changed. Project-wide settings, and blocks declared around a key instead of with tags, live in `blockwatch.toml` (see
@@ -45,7 +45,7 @@ Then run `git diff --patch | blockwatch --diff` to confirm the new tags pass (se
 3. Run `blockwatch list` to confirm every new tag parses and is recognized, then run `blockwatch` to confirm all blocks
    pass on the current (clean) tree. Fix any tag you placed on already-inconsistent content.
 4. Put the flags every run needs, such as `--ignore` for generated code, in `blockwatch.toml`.
-5. Commit, then wire BlockWatch into hooks/CI (see below) so the rules are enforced from now on.
+5. Commit, then wire blockwatch into hooks/CI (see below) so the rules are enforced from now on.
 
 ### Where blocks add value (catalog)
 
@@ -152,7 +152,7 @@ other file fails the run.
 - **Some characters in a key must be escaped:** `/` as `~1`, `~` as `~0`, `,` as `%2C`, `:` as `%3A` and `%` as
   `%25`. The key `@types/node` is `#/dependencies/@types~1node`.
 - **A missing key is a violation.** The message suggests similar paths.
-- **A missing or broken file fails the run.** BlockWatch does not guess what a broken file meant.
+- **A missing or broken file fails the run.** blockwatch does not guess what a broken file meant.
 
 <!-- <block name="json-paths"> -->
 
@@ -160,7 +160,7 @@ other file fails the run.
 
 - A comment is not an array item, so it does not shift the positions after it.
 - A trailing comma breaks the file, even in `.jsonc`.
-- A key written twice is a violation, because BlockWatch can't tell which copy you mean.
+- A key written twice is a violation, because blockwatch can't tell which copy you mean.
 
 <!-- </block> -->
 
@@ -305,7 +305,7 @@ fix only if your change caused it, for example when you changed one side of a `s
 one points at. Otherwise leave it, and tell the user about it. Use `blockwatch list` to confirm a tag you
 just added is parsed and seen.
 
-The piped diff must carry Git's standard path prefixes, which a plain `git diff` produces. If BlockWatch reports that a
+The piped diff must carry Git's standard path prefixes, which a plain `git diff` produces. If blockwatch reports that a
 diff target has no recognized prefix or does not exist, the repository sets `diff.noprefix`, a custom `diff.srcPrefix`,
 or `diff.relative`; re-run as
 `git diff --patch --default-prefix --no-relative | blockwatch --diff`. Under `--diff`, an empty diff
@@ -342,7 +342,7 @@ if [ -z "$diff" ]; then exec blockwatch; fi
 printf '%s\n' "$diff" | blockwatch --diff
 ```
 
-BlockWatch reads the files on disk, not the staged content. The pre-commit framework sets unstaged changes aside before
+blockwatch reads the files on disk, not the staged content. The pre-commit framework sets unstaged changes aside before
 it runs a hook, but a plain hook doesn't. So this hook stops when there are unstaged changes, instead of checking them
 in place of the commit.
 

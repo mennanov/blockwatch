@@ -1,4 +1,4 @@
-// BlockWatch is a program, not a library. The library exists only for the binary and the fuzz
+// blockwatch is a program, not a library. The library exists only for the binary and the fuzz
 // targets, so nothing but `run` and `count_rust_blocks` may be `pub`. This lint catches any other.
 #![warn(unreachable_pub)]
 

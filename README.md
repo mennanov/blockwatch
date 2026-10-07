@@ -1,4 +1,4 @@
-# BlockWatch
+# blockwatch
 
 [![Build Status](https://github.com/mennanov/blockwatch/actions/workflows/rust.yml/badge.svg)](https://github.com/mennanov/blockwatch/actions)
 [![codecov](https://codecov.io/gh/mennanov/blockwatch/graph/badge.svg?token=LwUfGTZ551)](https://codecov.io/gh/mennanov/blockwatch)
@@ -7,7 +7,7 @@
 
 [//]: # (<block name="pitch">)
 Some parts of a codebase have to change together: a function and its docs, or a value duplicated across configs.
-BlockWatch lets you write those rules in comments, right next to the code. If they fall out of sync, your pre-commit
+blockwatch lets you write those rules in comments, right next to the code. If they fall out of sync, your pre-commit
 hook or CI run fails.
 
 Supports [34 languages](#supported-languages).
@@ -16,7 +16,7 @@ Supports [34 languages](#supported-languages).
 
 ## Quick Start
 
-Install BlockWatch:
+Install blockwatch:
 
 ```shell
 brew install mennanov/blockwatch/blockwatch
@@ -37,8 +37,8 @@ catches.
 <!-- </block> -->
 
 Review the suggested blocks and commit them. The skill stays in the project, so agents working on it later know
-the rules too. When you upgrade BlockWatch, the skill tells the agent to save it again. To check every future change,
-add BlockWatch to your [pre-commit hook or CI](#ci-integration).
+the rules too. When you upgrade blockwatch, the skill tells the agent to save it again. To check every future change,
+add blockwatch to your [pre-commit hook or CI](#ci-integration).
 
 ## How it works
 
@@ -147,7 +147,7 @@ See [docs/agents.md](docs/agents.md) for Cursor, Copilot, Codex, and other agent
 
 ## Usage
 
-Running `blockwatch` on its own checks every block in the repository. With `--diff`, BlockWatch reads a unified diff
+Running `blockwatch` on its own checks every block in the repository. With `--diff`, blockwatch reads a unified diff
 from stdin to enforce rules that need one, like `affects`. Adding `--only-changed` limits the check to only the blocks
 touched by that diff:
 
@@ -220,7 +220,7 @@ exclusions, and custom extension mappings.
 - uses: mennanov/blockwatch-action@v1
 ```
 
-BlockWatch exits with `1` when it finds at least one `error` violation, and `0` otherwise. Warnings, info, and hints
+blockwatch exits with `1` when it finds at least one `error` violation, and `0` otherwise. Warnings, info, and hints
 are printed, but won't fail the run.
 
 For GitHub code scanning, `blockwatch --format sarif` writes violations as a SARIF log instead of JSON. See
@@ -270,7 +270,7 @@ For plain git hooks, local pre-commit setups, and sandboxing untrusted Lua scrip
 
 [//]: # (</block>)
 
-BlockWatch only inspects files with the extensions listed above and skips everything else, even `.hpp`, `.hxx`, or
+blockwatch only inspects files with the extensions listed above and skips everything else, even `.hpp`, `.hxx`, or
 `.cxx`. To check those too, map them to a supported extension with `-E` or in the `extensions` table of
 `blockwatch.toml`:
 
@@ -288,7 +288,7 @@ blockwatch -E cxx=cpp -E hpp=cpp
   [symbols](docs/symbols.md), like plain JSON, you can define blocks in the
   [config file](docs/cli.md#blocks-in-the-config-file).
 - **A file with blocks must be UTF-8.** A file in another encoding, such as Latin-1, is skipped if it has no blocks. If
-  it has blocks, the run fails and shows the file. A UTF-16 file is skipped even when it has tags, because BlockWatch
+  it has blocks, the run fails and shows the file. A UTF-16 file is skipped even when it has tags, because blockwatch
   can't find them.
 - **Unsupported extensions are skipped silently.** A run that read nothing looks identical to a run that found no
   problems. Run `blockwatch --verbosity summary` to see how many files were actually checked.

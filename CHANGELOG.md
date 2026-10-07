@@ -1,6 +1,6 @@
 # Changelog
 
-All notable user-facing changes to BlockWatch are documented in this file.
+All notable user-facing changes to blockwatch are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -23,7 +23,7 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 ### Changed
 
 - The agent skill now loads whenever an agent writes or changes code, and the agent adds blocks as it writes, even in a
-  project that has none yet. Before, the skill applied only to a project that already used BlockWatch. The agent still
+  project that has none yet. Before, the skill applied only to a project that already used blockwatch. The agent still
   annotates a whole project only when you ask.
 
 - An argument that selects no file to check fails the run. Before, it checked nothing and passed. This happened with
@@ -41,7 +41,7 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 - A project that saved the agent skill in its tree failed every run with
   `failed to canonicalize path "docs/validators/README.md"`. The skill had block tags that point at files in the
-  BlockWatch repository. Upgrade, then save the skill again with `blockwatch skill`.
+  blockwatch repository. Upgrade, then save the skill again with `blockwatch skill`.
 - The output of `blockwatch list` now ends with a newline. Before, it ended at the closing `}`, so the shell prompt
   started on the same line, and `while read` skipped the last line.
 - `--help` recommended `--only-changed` for hooks and CI. It now recommends `--diff` alone, like the docs and the
@@ -51,7 +51,7 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - A path argument selects the file or directory it points at. `./src/x.py`, `src`, `src/`, `.` and an absolute path
   used to match no file. A file whose name is also a glob, such as `app/[id].tsx`, is now checked itself, instead of
   `app/i.tsx`. Paths and globs still start from the repository root, from any directory.
-- Some documented commands piped in the staged diff, but BlockWatch reads the files on disk. With unstaged changes,
+- Some documented commands piped in the staged diff, but blockwatch reads the files on disk. With unstaged changes,
   the run checked other content than the diff showed. So a broken commit could pass, and a correct one could fail. The
   pre-commit framework hooks were not affected.
   - The plain Git hooks in [Plain Git Hook](docs/ci.md#plain-git-hook) and in the agent skill now stop, and ask you to
@@ -61,7 +61,7 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - `--verbosity summary` printed `1 blocks`, `1 checks`, `1 violations` and `2 needs --diff`. It now prints `1 block`,
   `1 check`, `1 violation` and `2 need --diff`. A script that looks for these words in the line must accept both
   forms ([#143](https://github.com/mennanov/blockwatch/issues/143)).
-- When the program that reads the output stops early, such as `head`, BlockWatch now stops writing without an error.
+- When the program that reads the output stops early, such as `head`, blockwatch now stops writing without an error.
   Before, it printed `Broken pipe (os error 32)` and exited with 1. Now the exit code depends only on the violations.
   This covers `list`, `--verbosity` and the violations on stderr
   ([#142](https://github.com/mennanov/blockwatch/issues/142)).
@@ -179,7 +179,7 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Added
 
-- `--suppress-from FILE`, repeatable, reads suppression addresses from `Blockwatch-suppress: ADDRESS` lines in a text
+- `--suppress-from FILE`, repeatable, reads suppression addresses from `blockwatch-suppress: ADDRESS` lines in a text
   file. The prefix is matched case-insensitively and every other line is ignored, so an ordinary commit message is
   valid input and a suppression can travel with the commit that needs it instead of living in the CI configuration.
   The path may point anywhere the run can read, so a `commit-msg` hook can pass the message file Git hands it even

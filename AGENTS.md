@@ -5,8 +5,8 @@ symlink to it, because Claude Code only looks for `CLAUDE.md`.
 
 ## Project
 
-BlockWatch is a linter written in Rust and published on crates.io. It works with any language. Rules are written as
-HTML-like `<block ...>` tags inside code comments, and BlockWatch checks them. It can check the whole repository, or
+blockwatch is a linter written in Rust and published on crates.io. It works with any language. Rules are written as
+HTML-like `<block ...>` tags inside code comments, and blockwatch checks them. It can check the whole repository, or
 only the lines changed in a unified diff piped into it.
 
 ## Common commands
@@ -64,7 +64,7 @@ For example:
   variant and sends the rest to a single branch, quietly gives any new variant whatever that branch does. With a
   `match`, the compiler makes you decide what to do with each new variant.
 - *Always* give an item the narrowest visibility that compiles: private, then `pub(super)`, then `pub(crate)`.
-  BlockWatch is a program, not a library. Only `run` and `count_rust_blocks` in `lib.rs` are `pub`, for `main.rs` and
+  blockwatch is a program, not a library. Only `run` and `count_rust_blocks` in `lib.rs` are `pub`, for `main.rs` and
   the fuzz target. The `unreachable_pub` lint makes `cargo clippy -- -D warnings` fail on any other `pub`.
 
 ### Asking the human
@@ -258,8 +258,8 @@ skill this project ships, so that agents can add blocks to **other** repositorie
 - `.agents/skills/blockwatch/SKILL.md` is a stub for the plugin in `.claude-plugin/`. It runs `blockwatch skill` each
   time it loads. It has its own copy of the description, and `tests/skill.rs` checks that the two copies match.
 
-They are not instructions for working on BlockWatch, and changing them changes what users get. This file is the
-guidance for working on BlockWatch.
+They are not instructions for working on blockwatch, and changing them changes what users get. This file is the
+guidance for working on blockwatch.
 
 A block tag in `src/skill.md` can have a name and a pattern, but no rule. A project that saves the skill parses its
 tags too, and a rule's target exists only in this repository. Put the rule on the block at the other end instead.

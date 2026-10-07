@@ -35,7 +35,7 @@ index 0000000..1111111 100644
 /// - `src/[id].py`. Read as a glob, its name matches `src/i.py` instead.
 /// - `build/gen.py`, which `.gitignore` leaves out.
 ///
-/// `notes.txt` has an extension that BlockWatch does not support.
+/// `notes.txt` has an extension that blockwatch does not support.
 fn repository() -> (tempfile::TempDir, PathBuf) {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("repo");

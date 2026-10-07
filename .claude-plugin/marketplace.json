@@ -4,7 +4,7 @@
     "name": "Renat Mennanov",
     "email": "mennanov@gmail.com"
   },
-  "description": "BlockWatch: a language-agnostic linter that keeps co-dependent code, docs, and config in sync via <block> annotations in comments.",
+  "description": "blockwatch: a language-agnostic linter that keeps co-dependent code, docs, and config in sync via <block> annotations in comments.",
   "plugins": [
     {
       "name": "blockwatch",

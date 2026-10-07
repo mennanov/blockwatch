@@ -1,1 +1,1 @@
-Blockwatch-suppress: bad:::address
+blockwatch-suppress: bad:::address

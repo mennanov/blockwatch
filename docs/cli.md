@@ -122,7 +122,7 @@ much — see [Checking Only Changed Blocks](ci.md#checking-only-changed-blocks).
   `--color=never`) and input with no unified-diff header are each reported by name rather than treated as "nothing
   changed".
 - **A diff that resolves to nothing is an error.** Under `--only-changed` the diff is the scope, so any path in it that
-  BlockWatch would parse but cannot find fails the run. Under `--diff` alone such a path is passed over — unless *none*
+  blockwatch would parse but cannot find fails the run. Under `--diff` alone such a path is passed over — unless *none*
   resolves, which means the diff was taken against a different root (`diff.relative=true`, a wrong `-p` level) and no
   rule that needs a diff could fire.
 - **[`affects`](validators/affects.md) needs `--diff`.** It compares blocks that a diff has touched, so it reports
@@ -152,7 +152,7 @@ Two details make the detection reliable. Git draws the two prefixes from opposit
 rather than stripped. An added file is the exception: its source is `/dev/null`, which says nothing either way, so both
 readings are checked against the working tree and a target where both name a real file is reported as ambiguous.
 
-A diff with a file that does not exist in the repository is an error too — but only for files BlockWatch would parse.
+A diff with a file that does not exist in the repository is an error too — but only for files blockwatch would parse.
 Entries whose extension maps to no language, such as binary assets or lockfiles, contribute no blocks and are passed
 over, so a diff carrying them alongside source changes still validates normally.
 
@@ -374,10 +374,10 @@ An invalid address that covers nothing is ignored.
 `--suppress-from <FILE>` reads a text file and applies every matching line it finds as a `--suppress`:
 
 ```text
-Blockwatch-suppress: api.md:handler:affects
+blockwatch-suppress: api.md:handler:affects
 ```
 
-Matching is case-insensitive (e.g. `blockwatch-suppress:` is accepted). Any other line is ignored, so an ordinary commit
+Matching is case-insensitive (e.g. `BLOCKWATCH-SUPPRESS:` is accepted). Any other line is ignored, so an ordinary commit
 message is valid input. A `commit-msg` hook can pass the message file that Git gives it, as the
 [plain `commit-msg` hook](ci.md#plain-git-hook) does. In CI, collect the messages of a pull request:
 

@@ -74,7 +74,7 @@ impl SymbolPath {
 /// Characters that must be percent-encoded when formatting a symbol path segment.
 ///
 /// In addition to ASCII control characters and non-ASCII bytes, encodes characters that have
-/// special meaning in BlockWatch attributes and URI fragments:
+/// special meaning in blockwatch attributes and URI fragments:
 /// - `%`: prefix for percent-encoded bytes; raw `%` must be `%25` to avoid ambiguity.
 /// - `,`: separates multiple references in block attributes.
 /// - `:`: separates file and block names in references.

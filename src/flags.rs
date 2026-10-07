@@ -47,7 +47,7 @@ impl std::fmt::Display for Verbosity {
     version = crate_version!(),
     about = "Validate interdependent code/doc blocks to prevent drift.",
     // <block name="help-text">
-    long_about =r"Blockwatch validates that named blocks, sorted segments, and other constraints declared in block tags remain consistent across files. It is designed for use in pre-commit hooks and CI.
+    long_about =r"blockwatch validates that named blocks, sorted segments, and other constraints declared in block tags remain consistent across files. It is designed for use in pre-commit hooks and CI.
 
 By default it scans every file in the repository. Pass --diff to also read a unified diff from stdin. The diff marks the blocks it changed. Rules that only fire on changed content, such as `affects`, need it.
 Hooks and CI should pass --diff and still scan every file. A change can break a block in a file it never touched, such as the other side of a `same-as`. Only a full scan sees that.
@@ -225,7 +225,7 @@ pub(crate) struct ValidationFlags {
     suppressed_addresses: Vec<ViolationAddress>,
 
     /// Suppress reported violations loaded from a text file, matching lines with format:
-    /// Blockwatch-suppress: ADDRESS
+    /// blockwatch-suppress: ADDRESS
     ///
     /// Any other line is ignored, so an ordinary commit message is a valid input.
     /// Repeat the flag to read from multiple files.
@@ -250,7 +250,7 @@ pub(crate) enum SubCommand {
         #[arg(value_name = "PATHS")]
         paths: Vec<String>,
     },
-    /// Print the agent skill for this version of BlockWatch, as Markdown.
+    /// Print the agent skill for this version of blockwatch, as Markdown.
     Skill,
 }
 
@@ -578,7 +578,7 @@ mod tests {
     #[test]
     fn suppress_from_with_malformed_address_fails_validation() {
         let error = parse_suppressions(
-            "Blockwatch-suppress: bad:::address\n",
+            "blockwatch-suppress: bad:::address\n",
             Path::new("bad_msg.txt"),
         )
         .expect_err("a malformed address must be rejected");

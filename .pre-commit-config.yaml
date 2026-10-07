@@ -10,7 +10,7 @@ repos:
         # it does not yet know how to check. `.pre-commit-hooks.yaml` is the hook other repositories
         # consume; that one deliberately stays on a built release.
         #
-        # It runs at commit-msg rather than pre-commit so that a `Blockwatch-suppress:` trailer in
+        # It runs at commit-msg rather than pre-commit so that a `blockwatch-suppress:` trailer in
         # the message being written is read. The trailing `--` is necessary: pre-commit appends
         # the message file to this argv, and `bash -c SCRIPT FILE` binds FILE to $0 rather than $1.
         # Otherwise it runs the same command as the `blockwatch-commit-msg` hook.

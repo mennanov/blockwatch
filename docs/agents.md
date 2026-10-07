@@ -4,7 +4,7 @@ Annotating an existing repository with `<block>` tags by hand can be repetitive.
 process by scanning your codebase, adding `<block>` comments in the appropriate language syntax, and running
 `blockwatch` to verify their changes.
 
-BlockWatch comes with a skill that guides agents on where blocks add value, how tag parameters work, and how to test
+blockwatch comes with a skill that guides agents on where blocks add value, how tag parameters work, and how to test
 the resulting blocks. `blockwatch skill` prints it, so the text always matches the installed version. Its source is
 [`src/skill.md`](../src/skill.md).
 
@@ -28,7 +28,7 @@ catches.
 <!-- </block> -->
 
 The skill stays in the project, so agents that work on it later know the rules too. It records the version of
-BlockWatch that wrote it. When `blockwatch --version` prints a newer one, the skill tells the agent to save it again.
+blockwatch that wrote it. When `blockwatch --version` prints a newer one, the skill tells the agent to save it again.
 Always inspect the generated diff before committing to ensure the added blocks are necessary and accurate.
 
 ## 3. Enable Automated Checks

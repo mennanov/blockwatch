@@ -56,7 +56,7 @@ end
   - `ctx.line` — the line number of the block's start tag.
   - `ctx.attrs` — the block's own attributes, keyed by attribute name, each value exactly as it was written in the
     tag. A block tagged `<block check-lua="…" name="limits" severity="warning">` gives the script
-    `ctx.attrs["check-lua"]`, `ctx.attrs["name"]` and `ctx.attrs["severity"]`. Only BlockWatch's own attributes can
+    `ctx.attrs["check-lua"]`, `ctx.attrs["name"]` and `ctx.attrs["severity"]`. Only blockwatch's own attributes can
     appear here.
   - `ctx.affects` — present only when the block also has an [`affects`](affects.md) attribute. A 1-based array with
     one table per target, holding `file`, `name` and `content` (trimmed). `file` uses the same format as `ctx.file`.

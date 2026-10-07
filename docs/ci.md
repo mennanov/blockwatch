@@ -53,7 +53,7 @@ The command saves the diff before it runs `blockwatch`:
 
 ### Reading Suppressions From the Commit Message
 
-The `blockwatch` hook runs before the commit message exists, so it cannot see a `Blockwatch-suppress:` trailer. The
+The `blockwatch` hook runs before the commit message exists, so it cannot see a `blockwatch-suppress:` trailer. The
 `blockwatch-commit-msg` hook runs one stage later, at `commit-msg`, and hands the message Git is about to use to
 [`--suppress-from`](cli.md#suppressing-from-a-file):
 
@@ -103,7 +103,7 @@ if [ -z "$diff" ]; then exec blockwatch; fi
 printf '%s\n' "$diff" | blockwatch --diff
 ```
 
-BlockWatch reads the files on disk, not the staged content. So the hook stops when a tracked file has unstaged changes.
+blockwatch reads the files on disk, not the staged content. So the hook stops when a tracked file has unstaged changes.
 Otherwise it would check those changes instead of the commit:
 
 - A broken commit would pass, if the file on disk has an unstaged fix.
@@ -158,7 +158,7 @@ or non-diff input is rejected rather than read as "nothing changed", so produce 
 color is forced on.
 
 Diffs produced with `--no-prefix`, `diff.noprefix`, a custom `diff.srcPrefix` / `diff.dstPrefix`, or
-`diff.relative` are rejected — BlockWatch stops rather than risk validating the wrong file. If your repositories set any
+`diff.relative` are rejected — blockwatch stops rather than risk validating the wrong file. If your repositories set any
 of these globally, pin the output:
 
 ```shell
@@ -198,14 +198,14 @@ Dropping segments from the end widens what an address covers, so `--suppress ven
 
 The violations stay in the output, marked `"suppressed": true`.
 
-**BlockWatch holds no state.** It is told which addresses to suppress for the run it is about to perform and remembers
+**blockwatch holds no state.** It is told which addresses to suppress for the run it is about to perform and remembers
 nothing afterwards. Where that list lives is the job's decision — a variable in the workflow, a file the repository
 commits and the job expands onto the command line, or a record kept by whatever renders the annotations.
 
 An address that covers nothing does nothing, so a suppression left behind by a rename cannot break the build.
 
 Alternatively, `--suppress-from <FILE>` reads suppression addresses from commit message trailers
-(`Blockwatch-suppress: ADDRESS`), which allows suppressions to be scoped to specific commits or pull request ranges
+(`blockwatch-suppress: ADDRESS`), which allows suppressions to be scoped to specific commits or pull request ranges
 without modifying the workflow:
 
 ```shell
