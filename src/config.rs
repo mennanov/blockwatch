@@ -110,6 +110,8 @@ pub(crate) fn read(
             extensions,
             enable,
             disable,
+            only_blocks: Vec::new(),
+            skip_blocks: Vec::new(),
         },
         blocks: virtual_blocks(block, path, &text, line_changes)?,
     })

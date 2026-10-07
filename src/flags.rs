@@ -1,3 +1,4 @@
+use crate::blocks::BlockAddress;
 use crate::settings::{RawSettings, parse_validator};
 use crate::violation_address::ViolationAddress;
 use anyhow::Context;
@@ -167,8 +168,8 @@ pub(crate) struct Args {
     pub(crate) command: Option<SubCommand>,
 }
 
-/// The flags that only the default command takes. They choose the validators, report what they
-/// checked, or suppress what they found, and `list` runs no validators.
+/// The flags that only the default command takes. They choose the validators or the blocks,
+/// report what they checked, or suppress what they found, and `list` runs no validators.
 ///
 /// The default value is what a command line without any of these flags parses to.
 #[derive(clap::Args, Debug, Default, PartialEq)]
@@ -192,6 +193,29 @@ pub(crate) struct ValidationFlags {
         value_parser = ValueParser::new(parse_validator),
     )]
     enabled_validators: Vec<&'static str>,
+
+    /// Check only this block. Repeat to check more, e.g. --only-block docs/cli.md:cli-docs
+    ///
+    /// An address that matches no block fails the run.
+    #[arg(
+        long = "only-block",
+        value_name = "FILE:BLOCK_NAME",
+        action = clap::ArgAction::Append,
+        value_parser = ValueParser::new(BlockAddress::parse),
+    )]
+    only_blocks: Vec<BlockAddress>,
+
+    /// Skip this block. Repeat to skip more, e.g. --skip-block docs/cli.md:cli-docs
+    ///
+    /// Other blocks can still refer to a skipped block. An address that matches no block fails
+    /// the run.
+    #[arg(
+        long = "skip-block",
+        value_name = "FILE:BLOCK_NAME",
+        action = clap::ArgAction::Append,
+        value_parser = ValueParser::new(BlockAddress::parse),
+    )]
+    skip_blocks: Vec<BlockAddress>,
 
     /// How much to report about what the run checked. Printed to stdout.
     #[arg(
@@ -271,6 +295,18 @@ impl Args {
                 .disabled_validators
                 .iter()
                 .map(|name| name.to_string())
+                .collect(),
+            only_blocks: self
+                .validation
+                .only_blocks
+                .iter()
+                .map(|address| address.to_string())
+                .collect(),
+            skip_blocks: self
+                .validation
+                .skip_blocks
+                .iter()
+                .map(|address| address.to_string())
                 .collect(),
         }
     }
@@ -446,6 +482,8 @@ mod tests {
             "--format",
             "--suppress",
             "--suppress-from",
+            "--only-block",
+            "--skip-block",
         ] {
             assert!(
                 !help.contains(flag),
@@ -463,6 +501,8 @@ mod tests {
             ["blockwatch", "--format", "sarif", "list"],
             ["blockwatch", "--suppress", "a.md:n:keep-sorted", "list"],
             ["blockwatch", "--suppress-from", "msg.txt", "list"],
+            ["blockwatch", "--only-block", "a.md:n", "list"],
+            ["blockwatch", "--skip-block", "a.md:n", "list"],
         ] {
             let error = parse(&argv)?
                 .validate()

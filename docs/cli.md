@@ -19,6 +19,8 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
 - **Custom Extensions**: Map custom file extensions: `blockwatch -E cxx=cpp` (config key: `extensions`)
 - **Disable Validators**: `blockwatch -d check-ai` (config key: `disable`)
 - **Run Only Some Validators**: `blockwatch -e keep-sorted` runs only `keep-sorted` (config key: `enable`)
+- **Check Only Some Blocks**: `blockwatch --only-block FILE:BLOCK_NAME` checks only that block
+- **Skip Blocks**: `blockwatch --skip-block FILE:BLOCK_NAME` checks every block but that one
 - **Ignore Files**: `blockwatch --ignore "**/generated/**"` (config key: `ignore`)
 - **Report What Ran**: `blockwatch --verbosity summary` (or `full` for JSON on stdout)
 - **Suppress Violations**: `blockwatch --suppress FILE[:BLOCK[:VALIDATOR[:HASH]]]` reports them but stops them failing
@@ -203,6 +205,32 @@ blockwatch -e keep-sorted -e keep-unique
 Note: `-e` and `-d` cannot be combined in a single invocation.
 
 The `enable` and `disable` keys of the [config file](#config-file) make a selection the default for a project.
+
+## Selecting Blocks
+
+`--only-block` checks only the blocks you list, and `--skip-block` checks every block but those. Each takes the address
+of one named block: `FILE:BLOCK_NAME`. A violation of a named block prints an address that starts with it, so you can
+copy it from there.
+
+```shell
+# Check only the cli-docs block
+blockwatch --only-block docs/cli.md:cli-docs
+
+# Check every block but these two
+blockwatch --skip-block docs/cli.md:cli-docs --skip-block src/flags.rs:cli-flags
+```
+
+- Repeat a flag to list more blocks. `--only-block` and `--skip-block` can't be combined.
+- An unnamed block has no address. Give it a `name` to select it. To leave out a whole file, use a path argument or
+  `--ignore`.
+- An address that matches no block fails the run: a missing file, a file without a parser, or no block with that name
+  in the file. So a renamed block can't quietly turn its checks on or off.
+- The block doesn't have to be in this run. An address of a block that a path argument, `--ignore` or `--only-changed`
+  leaves out is not an error.
+- A block is checked only if every filter lets it through: paths and globs, `--ignore`, `-e` and `-d`, `--only-changed`,
+  and these flags.
+- A skipped block still exists. `affects` and `same-as` can still refer to it. No validator runs on it, and
+  `--verbosity` doesn't count it.
 
 ## Config File
 

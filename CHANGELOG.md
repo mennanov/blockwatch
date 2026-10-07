@@ -12,6 +12,15 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- `--only-block FILE:BLOCK_NAME` checks only the listed blocks, and `--skip-block FILE:BLOCK_NAME` checks every block
+  but those. Repeat a flag to list more blocks. A violation of a named block prints an address that starts with
+  `FILE:BLOCK_NAME`, so you can copy it from there. `affects` and `same-as` can still refer to a skipped block. An
+  address that matches no block fails the run, so a renamed block can't quietly turn its checks on or off. Before, a
+  run could pick files and validators, but not single blocks
+  ([#150](https://github.com/mennanov/blockwatch/issues/150)).
+
 ## [0.9.0] - 2026-10-07
 
 ### Added

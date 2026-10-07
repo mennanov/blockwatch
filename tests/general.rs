@@ -98,6 +98,39 @@ fn disable_and_enable_flags_provided_run_fails_with_error() {
 }
 
 #[test]
+fn only_block_arg_provided_run_checks_only_that_block() {
+    // Both blocks of the fixture violate their rule.
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/general/block_selection.py");
+    cmd.arg("--only-block=tests/testdata/general/block_selection.py:first");
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("block_selection.py:first:"))
+        .stderr(predicate::str::contains("block_selection.py:second:").not());
+}
+
+#[test]
+fn skip_block_arg_provided_run_checks_every_other_block() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/general/block_selection.py");
+    cmd.arg("--skip-block=tests/testdata/general/block_selection.py:first");
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("block_selection.py:second:"))
+        .stderr(predicate::str::contains("block_selection.py:first:").not());
+}
+
+#[test]
 fn severity_warning_violation_present_run_succeeds_with_exit_code_zero() {
     let diff_content = r#"
 diff --git a/tests/testdata/general/severity.py b/tests/testdata/general/severity.py

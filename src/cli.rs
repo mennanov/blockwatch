@@ -76,7 +76,7 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
     let language_parsers = language_parsers::language_parsers()?;
     let (settings, virtual_blocks) =
         read_config(args, file_system.as_ref(), &line_changes, &language_parsers)?;
-    let (context, scan_stats) = build_context(
+    let (mut context, scan_stats) = build_context(
         args,
         &settings,
         virtual_blocks,
@@ -85,6 +85,7 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
         language_parsers,
         file_system.as_ref(),
     )?;
+    context.apply_block_selection(settings.block_selection(), file_system.as_ref())?;
     let (sync_validators, async_validators) = validators::detect_validators(
         &context,
         &validators::detector_factories::<crate::fs::FileSystemImpl>(),

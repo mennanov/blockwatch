@@ -10,6 +10,7 @@ use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
+use std::fmt;
 use std::ops::Range;
 use std::path::Path;
 use std::str::FromStr;
@@ -84,6 +85,48 @@ impl BlockKey {
     /// The line the block starts on.
     pub(crate) fn start_line(&self) -> usize {
         self.start.line
+    }
+}
+
+/// What tells a named block apart from every other block in the repository: `FILE:BLOCK_NAME`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BlockAddress {
+    file: RepoPath,
+    name: String,
+}
+
+impl BlockAddress {
+    /// The address of the block called `name` in `file`.
+    pub(crate) fn new(file: RepoPath, name: String) -> Self {
+        Self { file, name }
+    }
+
+    /// Parses `FILE:BLOCK_NAME`.
+    ///
+    /// Returns an error for any other address, such as `FILE` alone, an empty segment, or a file
+    /// outside the repository.
+    pub(crate) fn parse(address: &str) -> anyhow::Result<Self> {
+        // `FILE` alone could select every block in a file, but a path argument or `--ignore`
+        // already does that.
+        match address.split(':').collect::<Vec<_>>().as_slice() {
+            [file, name] if !file.is_empty() && !name.is_empty() => Ok(Self {
+                file: RepoPath::from_reference(file)
+                    .with_context(|| format!("invalid file in the block address \"{address}\""))?,
+                name: name.to_string(),
+            }),
+            _ => bail!("expected FILE:BLOCK_NAME, got \"{address}\""),
+        }
+    }
+
+    /// The file the block is in.
+    pub(crate) fn file(&self) -> &RepoPath {
+        &self.file
+    }
+}
+
+impl fmt::Display for BlockAddress {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}:{}", self.file, self.name)
     }
 }
 
@@ -205,6 +248,12 @@ impl Block {
     /// Returns the block's name if present, otherwise a human-friendly placeholder label.
     pub(crate) fn name_display(&self) -> &str {
         self.name().unwrap_or(UNNAMED_BLOCK_LABEL)
+    }
+
+    /// The address of this block, which is in `file`: `FILE:BLOCK_NAME`. `None` for an unnamed
+    /// block.
+    pub(crate) fn address(&self, file: &RepoPath) -> Option<BlockAddress> {
+        Some(BlockAddress::new(file.clone(), self.name()?.to_string()))
     }
 
     /// Where the block's attributes are written, as messages show it: `line 3` for a block with
@@ -1002,6 +1051,78 @@ mod block_severity_from_str_tests {
         let block = new_empty_block_with_severity("warn");
 
         assert!(block.severity().is_err());
+    }
+}
+
+#[cfg(test)]
+mod block_address_tests {
+    use crate::Position;
+    use crate::blocks::{Block, BlockAddress, Content, Declaration};
+    use crate::repo_path::RepoPath;
+    use std::collections::HashMap;
+
+    fn repo_path(path: &str) -> RepoPath {
+        RepoPath::from_reference(path).expect("a valid repository path")
+    }
+
+    /// Builds a contentless block with `attributes`.
+    fn block_with_attributes(attributes: &[(&str, &str)]) -> Block {
+        Block {
+            attributes: attributes
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.to_string()))
+                .collect::<HashMap<_, _>>(),
+            start_tag_position_range: Position::new(0, 0)..Position::new(0, 0),
+            content: Content::source(0..0, Position::new(0, 0)..Position::new(0, 0)),
+            declaration: Declaration::Tags,
+        }
+    }
+
+    #[test]
+    fn named_block_address_is_its_file_and_name() {
+        let block = block_with_attributes(&[("name", "fruits")]);
+
+        let address = block
+            .address(&repo_path("a.py"))
+            .expect("a named block has an address");
+
+        assert_eq!(address.to_string(), "a.py:fruits");
+    }
+
+    #[test]
+    fn unnamed_block_has_no_address() {
+        let block = block_with_attributes(&[("keep-sorted", "asc")]);
+
+        assert_eq!(block.address(&repo_path("a.py")), None);
+    }
+
+    #[test]
+    fn parsed_address_equals_the_address_of_that_block() -> anyhow::Result<()> {
+        let address = BlockAddress::parse("./a.md:n")?;
+        assert_eq!(
+            address,
+            BlockAddress::new(repo_path("a.md"), "n".to_string())
+        );
+        assert_ne!(
+            address,
+            BlockAddress::new(repo_path("a.md"), "other".to_string())
+        );
+        assert_ne!(
+            address,
+            BlockAddress::new(repo_path("b.md"), "n".to_string())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn address_without_two_non_empty_segments_is_rejected() {
+        for address in ["a.md", "a.md:n:keep-unique", "a.md:", ":n"] {
+            let error = BlockAddress::parse(address).expect_err("the address must be rejected");
+            assert!(
+                format!("{error:#}").contains("expected FILE:BLOCK_NAME"),
+                "{address}: {error:#}"
+            );
+        }
     }
 }
 

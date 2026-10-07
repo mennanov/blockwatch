@@ -1,3 +1,4 @@
+use crate::blocks::BlockAddress;
 use crate::validators;
 use anyhow::{Context, bail};
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -18,6 +19,10 @@ pub(crate) struct RawSettings {
     pub(crate) enable: Vec<String>,
     /// Validators to leave out.
     pub(crate) disable: Vec<String>,
+    /// The addresses of the only blocks to check.
+    pub(crate) only_blocks: Vec<String>,
+    /// The addresses of blocks to leave out.
+    pub(crate) skip_blocks: Vec<String>,
 }
 
 impl RawSettings {
@@ -40,6 +45,12 @@ impl RawSettings {
         if !self.enable.is_empty() && !self.disable.is_empty() {
             bail!("`enable` and `disable` must not both be set");
         }
+        for address in self.only_blocks.iter().chain(&self.skip_blocks) {
+            BlockAddress::parse(address)?;
+        }
+        if !self.only_blocks.is_empty() && !self.skip_blocks.is_empty() {
+            bail!("`only-block` and `skip-block` must not both be set");
+        }
         Ok(())
     }
 }
@@ -54,6 +65,7 @@ pub(crate) struct Settings {
     extensions: HashMap<OsString, OsString>,
     disabled_validators: HashSet<&'static str>,
     enabled_validators: HashSet<&'static str>,
+    block_selection: BlockSelection,
 }
 
 impl Settings {
@@ -100,6 +112,7 @@ impl Settings {
             .iter()
             .map(|name| parse_validator(name))
             .collect::<anyhow::Result<_>>()?;
+        let block_selection = block_selection(&flags)?;
 
         let mut ignored_globs = GlobSetBuilder::new();
         for glob in config_file.ignore.iter().chain(&flags.ignore) {
@@ -121,6 +134,7 @@ impl Settings {
             extensions,
             disabled_validators,
             enabled_validators,
+            block_selection,
         })
     }
 
@@ -145,6 +159,42 @@ impl Settings {
     pub(crate) fn enabled_validators(&self) -> &HashSet<&'static str> {
         &self.enabled_validators
     }
+
+    /// Which blocks the run checks.
+    pub(crate) fn block_selection(&self) -> &BlockSelection {
+        &self.block_selection
+    }
+}
+
+/// The blocks that `settings` selects. `settings` must be validated, so that at most one of its
+/// lists is set.
+fn block_selection(settings: &RawSettings) -> anyhow::Result<BlockSelection> {
+    let parse = |addresses: &[String]| {
+        addresses
+            .iter()
+            .map(|address| BlockAddress::parse(address))
+            .collect::<anyhow::Result<_>>()
+    };
+    let selection = match (
+        settings.only_blocks.is_empty(),
+        settings.skip_blocks.is_empty(),
+    ) {
+        (true, true) => BlockSelection::All,
+        (false, _) => BlockSelection::Only(parse(&settings.only_blocks)?),
+        (true, false) => BlockSelection::Skip(parse(&settings.skip_blocks)?),
+    };
+    Ok(selection)
+}
+
+/// Which blocks a run checks. Each address is `FILE:BLOCK_NAME`.
+#[derive(Debug)]
+pub(crate) enum BlockSelection {
+    /// Every block.
+    All,
+    /// Only the blocks that an address selects.
+    Only(Vec<BlockAddress>),
+    /// Every block except the ones that an address selects.
+    Skip(Vec<BlockAddress>),
 }
 
 /// Looks up the validator called `value` and returns its name. Returns an error if there is no
@@ -364,5 +414,15 @@ mod tests {
             ..RawSettings::default()
         });
         assert!(error.contains("`enable` and `disable`"), "{error}");
+    }
+
+    #[test]
+    fn only_blocks_and_skip_blocks_together_are_rejected() {
+        let error = check_error(RawSettings {
+            only_blocks: to_string_vec(&["a.py:fruits"]),
+            skip_blocks: to_string_vec(&["a.py:vegetables"]),
+            ..RawSettings::default()
+        });
+        assert!(error.contains("`only-block` and `skip-block`"), "{error}");
     }
 }
