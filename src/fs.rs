@@ -15,8 +15,17 @@ const VCS_METADATA_DIRECTORY_NAMES: [&str; 4] = [".git", ".hg", ".jj", ".svn"];
 ///
 /// `Send + Sync` so an `Arc<Fs>` can be shared into validator threads (std::thread and Tokio).
 pub(crate) trait FileSystem: Send + Sync {
+    /// Reads the entire contents of a file as bytes.
+    fn read(&self, path: &Path) -> anyhow::Result<Vec<u8>>;
+
     /// Reads the entire contents of a file into a string.
-    fn read_to_string(&self, path: &Path) -> anyhow::Result<String>;
+    ///
+    /// # Errors
+    /// Returns an error if the file can't be read or is not valid UTF-8.
+    fn read_to_string(&self, path: &Path) -> anyhow::Result<String> {
+        String::from_utf8(self.read(path)?)
+            .with_context(|| format!("file \"{}\" is not valid UTF-8", path.display()))
+    }
 
     /// Whether a readable file exists at `path` inside the repository.
     fn exists(&self, path: &Path) -> bool;
@@ -109,9 +118,9 @@ impl FileSystemImpl {
 }
 
 impl FileSystem for FileSystemImpl {
-    fn read_to_string(&self, path: &Path) -> anyhow::Result<String> {
+    fn read(&self, path: &Path) -> anyhow::Result<Vec<u8>> {
         let resolved = self.resolve_within_root(path)?;
-        std::fs::read_to_string(&resolved)
+        std::fs::read(&resolved)
             .with_context(|| format!("Failed to read file \"{}\"", path.display()))
     }
 
@@ -345,6 +354,22 @@ mod file_system_impl_tests {
     }
 
     #[test]
+    fn read_to_string_rejects_non_utf8_file() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        // `é` in Latin-1 is the single byte 0xE9, which is not valid UTF-8.
+        std::fs::write(root.path().join("a.txt"), b"caf\xe9")?;
+        let file_system = FileSystemImpl::new(root.path())?;
+
+        let err = file_system.read_to_string(Path::new("a.txt")).unwrap_err();
+
+        assert!(
+            format!("{err:#}").contains("file \"a.txt\" is not valid UTF-8"),
+            "unexpected error: {err:#}"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn absolute_path_inside_root_repo_path_returns_it_from_the_root() -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
         write_file(root.path(), "src/a.txt", "hello");
@@ -462,12 +487,12 @@ pub(crate) mod test_utils {
     }
 
     impl FileSystem for FakeFileSystem {
-        fn read_to_string(&self, path: &Path) -> anyhow::Result<String> {
+        fn read(&self, path: &Path) -> anyhow::Result<Vec<u8>> {
             // Mirror a real filesystem: a missing file is an error, not a panic. This lets
             // validators' read-failure paths be exercised with the fake.
             self.files
                 .get(&path.display().to_string())
-                .cloned()
+                .map(|content| content.clone().into_bytes())
                 .ok_or_else(|| anyhow::anyhow!("File {} not found", path.display()))
         }
 

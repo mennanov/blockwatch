@@ -301,8 +301,11 @@ fn stdin_is_terminal() -> bool {
 fn read_diff_from_stdin(
     file_system: &impl FileSystem,
 ) -> anyhow::Result<HashMap<RepoPath, Vec<diff_parser::LineChange>>> {
-    let mut diff = String::new();
-    std::io::stdin().read_to_string(&mut diff)?;
+    let mut diff = Vec::new();
+    std::io::stdin().read_to_end(&mut diff)?;
+    // A diff of a file that is not UTF-8 carries the file's bytes as they are. Only line numbers
+    // are taken from a diff, so those bytes can be replaced.
+    let diff = String::from_utf8_lossy(&diff);
     diff_parser::validate_diff_input(&diff)?;
     diff_parser::line_changes_from_diff(&diff, file_system)
 }

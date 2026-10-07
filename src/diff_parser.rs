@@ -616,7 +616,7 @@ mod tests {
     struct TypicalRepo;
 
     impl FileSystem for TypicalRepo {
-        fn read_to_string(&self, _path: &Path) -> anyhow::Result<String> {
+        fn read(&self, _path: &Path) -> anyhow::Result<Vec<u8>> {
             unimplemented!("diff parsing never reads file contents")
         }
 

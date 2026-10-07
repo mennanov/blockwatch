@@ -94,6 +94,33 @@ line-pattern = '^\d+\.\d+\.\d+$'
 }
 
 #[test]
+fn virtual_block_in_a_non_utf8_file_fails_the_run() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = temp.path().join("repo");
+    std::fs::create_dir_all(root.join(".git"))?;
+    // `é` in Latin-1 is the single byte 0xE9, which is not valid UTF-8.
+    std::fs::write(
+        root.join("package.json"),
+        b"{\n  \"name\": \"caf\xe9\"\n}\n",
+    )?;
+    std::fs::write(
+        root.join("blockwatch.toml"),
+        "[[block]]\ntarget = 'package.json#/name'\nline-pattern = '.'\n",
+    )?;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.current_dir(&root);
+
+    cmd.output()?
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "file \"package.json\" is not valid UTF-8",
+        ));
+    Ok(())
+}
+
+#[test]
 fn config_with_an_unknown_key_fails_the_run_at_its_position() -> anyhow::Result<()> {
     let temp = tempfile::tempdir()?;
     let root = repo_with_a_generated_violation(temp.path())?;

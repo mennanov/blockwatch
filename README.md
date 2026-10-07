@@ -287,6 +287,9 @@ blockwatch -E cxx=cpp -E hpp=cpp
   such a file as a [whole file](docs/validators/affects.md#whole-files) instead. For files with
   [symbols](docs/symbols.md), like plain JSON, you can define blocks in the
   [config file](docs/cli.md#blocks-in-the-config-file).
+- **A file with blocks must be UTF-8.** A file in another encoding, such as Latin-1, is skipped if it has no blocks. If
+  it has blocks, the run fails and shows the file. A UTF-16 file is skipped even when it has tags, because BlockWatch
+  can't find them.
 - **Unsupported extensions are skipped silently.** A run that read nothing looks identical to a run that found no
   problems. Run `blockwatch --verbosity summary` to see how many files were actually checked.
 

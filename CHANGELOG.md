@@ -65,6 +65,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   Before, it printed `Broken pipe (os error 32)` and exited with 1. Now the exit code depends only on the violations.
   This covers `list`, `--verbosity` and the violations on stderr
   ([#142](https://github.com/mennanov/blockwatch/issues/142)).
+- One file that is not valid UTF-8, such as a Latin-1 file, stopped the whole run with
+  `stream did not contain valid UTF-8`. This happened even when the file had no blocks, and even with `--ignore` when
+  a diff from `--diff` touched the file. Now such a file is skipped if it has no blocks. If it has blocks, the run
+  fails with an error that shows the file and how to skip it
+  ([#139](https://github.com/mennanov/blockwatch/issues/139)).
 
 ## [0.8.1] - 2026-10-05
 

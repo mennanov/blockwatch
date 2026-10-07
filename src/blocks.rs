@@ -616,11 +616,13 @@ fn modified_blocks(block: &BlockWithContext) -> bool {
 
 /// Parses the blocks of one file, marking the ones `line_changes` touched and keeping those
 /// `block_predicate` selects. The blocks come in source order, the `virtual_blocks` of the file
-/// among its tags. Returns `None` for unsupported file extensions.
+/// among its tags. Returns `None` for unsupported file extensions. For a file that is not valid
+/// UTF-8 but has no blocks, returns no blocks and an empty text.
 ///
 /// # Errors
-/// Returns an error if a tag is malformed or a name is used twice, or if a virtual block's target
-/// does not resolve in the file.
+/// Returns an error if the file can't be read, if it is not valid UTF-8 and has blocks, if a tag
+/// is malformed or a name is used twice, or if a virtual block's target does not resolve in the
+/// file.
 pub(crate) fn parse_file(
     file_system: &impl FileSystem,
     file_path: &Path,
@@ -641,7 +643,74 @@ pub(crate) fn parse_file(
             return Err(virtual_block.unresolved(anyhow!("file format is unsupported")));
         }
     };
-    let source_code = file_system.read_to_string(file_path)?;
+    let source_code = match String::from_utf8(file_system.read(file_path)?) {
+        Ok(source_code) => source_code,
+        // The replaced bytes would change what a rule compares, so a block here can't be checked.
+        Err(error)
+            if non_utf8_file_has_blocks(parser, file_path, error.as_bytes(), virtual_blocks) =>
+        {
+            bail!(
+                "file {file_path:?} is not valid UTF-8, so its blocks can't be read. Save it as \
+                 UTF-8, or skip it with `ignore` in the config file or with `--ignore`."
+            );
+        }
+        // No block refers into a file without blocks, so its text is not kept.
+        Err(_) => {
+            return Ok(Some(FileBlocks {
+                file_content: String::new(),
+                blocks_with_context: Vec::new(),
+            }));
+        }
+    };
+    parse_source(
+        parser,
+        file_path,
+        source_code,
+        line_changes,
+        &block_predicate,
+        virtual_blocks,
+    )
+    .map(Some)
+}
+
+/// Whether a file that is not valid UTF-8 has blocks: one of its `virtual_blocks`, or a tag in
+/// `bytes`, the contents of `file_path`. A tag that doesn't parse counts as a block.
+fn non_utf8_file_has_blocks(
+    parser: &SharedLanguageParser,
+    file_path: &Path,
+    bytes: &[u8],
+    virtual_blocks: &[&VirtualBlock],
+) -> bool {
+    // Tags are ASCII. So in an encoding such as Latin-1 they are still found after the other bytes
+    // are replaced. In UTF-16 they are never found.
+    let text = String::from_utf8_lossy(bytes);
+    !virtual_blocks.is_empty()
+        || !tag_blocks(
+            parser,
+            file_path,
+            &text,
+            &[],
+            &every_block,
+            &mut HashMap::new(),
+        )
+        .is_ok_and(|tags| tags.is_empty())
+}
+
+/// Parses the blocks of `source_code`, the text of `file_path`: its tags and its
+/// `virtual_blocks`. Marks the ones `line_changes` touched and keeps those `block_predicate`
+/// selects, in source order.
+///
+/// # Errors
+/// Returns an error if a tag is malformed or a name is used twice, or if a virtual block's target
+/// does not resolve in the file.
+fn parse_source(
+    parser: &SharedLanguageParser,
+    file_path: &Path,
+    source_code: String,
+    line_changes: &[LineChange],
+    block_predicate: &impl Fn(&BlockWithContext) -> bool,
+    virtual_blocks: &[&VirtualBlock],
+) -> anyhow::Result<FileBlocks> {
     // Tracks where each name in this file is first declared, to reject duplicate blocks.
     let mut names_seen = HashMap::new();
     let mut blocks_with_context = tag_blocks(
@@ -649,7 +718,7 @@ pub(crate) fn parse_file(
         file_path,
         &source_code,
         line_changes,
-        &block_predicate,
+        block_predicate,
         &mut names_seen,
     )?;
     blocks_with_context.extend(virtual_blocks_in_file(
@@ -658,15 +727,15 @@ pub(crate) fn parse_file(
         file_path,
         &source_code,
         line_changes,
-        &block_predicate,
+        block_predicate,
         &mut names_seen,
     )?);
     // The tags come in source order. The virtual blocks join them there.
     blocks_with_context.sort_by(|a, b| a.block.cmp(&b.block));
-    Ok(Some(FileBlocks {
+    Ok(FileBlocks {
         file_content: source_code,
         blocks_with_context,
-    }))
+    })
 }
 
 /// The blocks that tags declare in `source`, the text of `file_path`, with what `line_changes`
