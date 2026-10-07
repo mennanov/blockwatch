@@ -284,3 +284,27 @@ fn block_referencing_a_virtual_block_reads_it_from_a_file_outside_the_globs() ->
     cmd.output()?.assert().success();
     Ok(())
 }
+
+#[test]
+fn list_shows_a_block_that_the_config_file_skips() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = temp.path().join("repo");
+    std::fs::create_dir_all(root.join(".git"))?;
+    std::fs::write(
+        root.join("doc.md"),
+        "<!-- <block name=\"fruits\"> -->\napple\n<!-- </block> -->\n",
+    )?;
+    std::fs::write(
+        root.join("blockwatch.toml"),
+        "skip-blocks = ['doc.md:fruits']\n",
+    )?;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.current_dir(&root).arg("list");
+    let output = cmd.output()?;
+
+    output.clone().assert().success();
+    let listing: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(listing["doc.md"][0]["name"], "fruits");
+    Ok(())
+}

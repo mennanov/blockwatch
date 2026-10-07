@@ -77,6 +77,8 @@ impl Settings {
     /// - The extension mappings from both are used. If both map the same extension, `flags` wins.
     /// - If `flags` enables or disables any validator, the `enable` and `disable` lists of
     ///   `config_file` are ignored.
+    /// - If `flags` lists any block to check or to skip, the `only_blocks` and `skip_blocks` lists
+    ///   of `config_file` are ignored.
     ///
     /// `supported_extensions` are the extensions that have a language parser. Returns an error if
     /// either source has an invalid value. The error says which source it came from.
@@ -112,7 +114,14 @@ impl Settings {
             .iter()
             .map(|name| parse_validator(name))
             .collect::<anyhow::Result<_>>()?;
-        let block_selection = block_selection(&flags)?;
+        // `--only-block` usually means "check only this block this time", even a block that the
+        // config file skips.
+        let block_lists = if flags.only_blocks.is_empty() && flags.skip_blocks.is_empty() {
+            &config_file
+        } else {
+            &flags
+        };
+        let block_selection = block_selection(block_lists)?;
 
         let mut ignored_globs = GlobSetBuilder::new();
         for glob in config_file.ignore.iter().chain(&flags.ignore) {
@@ -187,7 +196,7 @@ fn block_selection(settings: &RawSettings) -> anyhow::Result<BlockSelection> {
 }
 
 /// Which blocks a run checks. Each address is `FILE:BLOCK_NAME`.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum BlockSelection {
     /// Every block.
     All,
@@ -232,6 +241,13 @@ mod tests {
 
     fn to_string_vec(names: &[&str]) -> Vec<String> {
         names.iter().map(|name| name.to_string()).collect()
+    }
+
+    fn block_addresses(addresses: &[&str]) -> Vec<BlockAddress> {
+        addresses
+            .iter()
+            .map(|address| BlockAddress::parse(address).expect("a valid address"))
+            .collect()
     }
 
     #[test]
@@ -345,6 +361,71 @@ mod tests {
     }
 
     #[test]
+    fn only_blocks_in_config_file_check_only_those_blocks() -> anyhow::Result<()> {
+        let config_file = RawSettings {
+            only_blocks: to_string_vec(&["a.py:fruits"]),
+            ..RawSettings::default()
+        };
+        let settings = resolve(RawSettings::default(), config_file)?;
+        assert_eq!(
+            settings.block_selection,
+            BlockSelection::Only(block_addresses(&["a.py:fruits"]))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn skip_blocks_in_config_file_skip_those_blocks() -> anyhow::Result<()> {
+        let config_file = RawSettings {
+            skip_blocks: to_string_vec(&["a.py:fruits"]),
+            ..RawSettings::default()
+        };
+        let settings = resolve(RawSettings::default(), config_file)?;
+        assert_eq!(
+            settings.block_selection,
+            BlockSelection::Skip(block_addresses(&["a.py:fruits"]))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn only_block_flag_replaces_skip_blocks_in_config_file() -> anyhow::Result<()> {
+        // A weekly job runs only the block that the config file skips on every other run.
+        let flags = RawSettings {
+            only_blocks: to_string_vec(&["a.py:fruits"]),
+            ..RawSettings::default()
+        };
+        let config_file = RawSettings {
+            skip_blocks: to_string_vec(&["a.py:fruits"]),
+            ..RawSettings::default()
+        };
+        let settings = resolve(flags, config_file)?;
+        assert_eq!(
+            settings.block_selection,
+            BlockSelection::Only(block_addresses(&["a.py:fruits"]))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn skip_block_flag_replaces_only_blocks_in_config_file() -> anyhow::Result<()> {
+        let flags = RawSettings {
+            skip_blocks: to_string_vec(&["a.py:vegetables"]),
+            ..RawSettings::default()
+        };
+        let config_file = RawSettings {
+            only_blocks: to_string_vec(&["a.py:fruits"]),
+            ..RawSettings::default()
+        };
+        let settings = resolve(flags, config_file)?;
+        assert_eq!(
+            settings.block_selection,
+            BlockSelection::Skip(block_addresses(&["a.py:vegetables"]))
+        );
+        Ok(())
+    }
+
+    #[test]
     fn bad_flag_is_rejected_as_a_flag_error() {
         let flags = RawSettings {
             extensions: HashMap::from([("cxx".to_string(), "cobol".to_string())]),
@@ -414,6 +495,15 @@ mod tests {
             ..RawSettings::default()
         });
         assert!(error.contains("`enable` and `disable`"), "{error}");
+    }
+
+    #[test]
+    fn block_address_without_a_block_name_is_rejected() {
+        let error = check_error(RawSettings {
+            skip_blocks: to_string_vec(&["a.py:fruits", "a.py"]),
+            ..RawSettings::default()
+        });
+        assert!(error.contains("expected FILE:BLOCK_NAME"), "{error}");
     }
 
     #[test]

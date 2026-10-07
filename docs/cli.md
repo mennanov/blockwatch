@@ -19,8 +19,9 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
 - **Custom Extensions**: Map custom file extensions: `blockwatch -E cxx=cpp` (config key: `extensions`)
 - **Disable Validators**: `blockwatch -d check-ai` (config key: `disable`)
 - **Run Only Some Validators**: `blockwatch -e keep-sorted` runs only `keep-sorted` (config key: `enable`)
-- **Check Only Some Blocks**: `blockwatch --only-block FILE:BLOCK_NAME` checks only that block
-- **Skip Blocks**: `blockwatch --skip-block FILE:BLOCK_NAME` checks every block but that one
+- **Check Only Some Blocks**: `blockwatch --only-block FILE:BLOCK_NAME` checks only that block (config key:
+  `only-blocks`)
+- **Skip Blocks**: `blockwatch --skip-block FILE:BLOCK_NAME` checks every block but that one (config key: `skip-blocks`)
 - **Ignore Files**: `blockwatch --ignore "**/generated/**"` (config key: `ignore`)
 - **Report What Ran**: `blockwatch --verbosity summary` (or `full` for JSON on stdout)
 - **Suppress Violations**: `blockwatch --suppress FILE[:BLOCK[:VALIDATOR[:HASH]]]` reports them but stops them failing
@@ -229,8 +230,20 @@ blockwatch --skip-block docs/cli.md:cli-docs --skip-block src/flags.rs:cli-flags
   leaves out is not an error.
 - A block is checked only if every filter lets it through: paths and globs, `--ignore`, `-e` and `-d`, `--only-changed`,
   and these flags.
-- A skipped block still exists. `affects` and `same-as` can still refer to it. No validator runs on it, and
-  `--verbosity` doesn't count it.
+- A skipped block still exists. `affects` and `same-as` can still refer to it, and `blockwatch list` still shows it. No
+  validator runs on it, and `--verbosity` doesn't count it.
+
+The `only-blocks` and `skip-blocks` keys of the [config file](#config-file) make a selection the default for a project.
+A flag replaces the config's selection. So a block that needs the network can be skipped in `blockwatch.toml`, and a
+scheduled job can run just that block:
+
+```toml
+skip-blocks = ['src/models.rs:latest-model']
+```
+
+```shell
+blockwatch --only-block src/models.rs:latest-model
+```
 
 ## Config File
 
@@ -250,24 +263,27 @@ webmanifest = 'json'
 - Without the file, a run uses the flags alone.
 - `--config FILE` reads another file instead. The path is relative to the working directory, not to the repository
   root, and the file must exist.
-- The settings apply to `list` too.
+- The settings apply to `list` too, except `only-blocks` and `skip-blocks`. `list` shows every block.
 
 Write globs in single quotes. TOML then takes them as written, backslashes included.
 
 Each key matches a flag:
 
-| Key          | Flag        | When the flag is given too                        |
-|--------------|-------------|---------------------------------------------------|
-| `ignore`     | `--ignore`  | Both lists apply.                                 |
-| `extensions` | `-E`        | Both apply. The flag wins for the same extension. |
-| `enable`     | `--enable`  | The flags' selection replaces the config's.       |
-| `disable`    | `--disable` | The flags' selection replaces the config's.       |
+| Key           | Flag           | When the flag is given too                        |
+|---------------|----------------|---------------------------------------------------|
+| `ignore`      | `--ignore`     | Both lists apply.                                 |
+| `extensions`  | `-E`           | Both apply. The flag wins for the same extension. |
+| `enable`      | `--enable`     | The flags' selection replaces the config's.       |
+| `disable`     | `--disable`    | The flags' selection replaces the config's.       |
+| `only-blocks` | `--only-block` | The flags' selection replaces the config's.       |
+| `skip-blocks` | `--skip-block` | The flags' selection replaces the config's.       |
 
 So `blockwatch -e keep-sorted` runs only `keep-sorted`, whatever the config enables or disables. An extra `--ignore`
 still skips the files the config skips.
 
 A value is checked as the flag's would be. An unknown validator, a glob that does not compile, an extension mapped to an
-unsupported language, or both `enable` and `disable` in one file all fail the run. So does an unknown key, so a typo
+unsupported language, a block address that is not `FILE:BLOCK_NAME`, or both `enable` and `disable` (or both
+`only-blocks` and `skip-blocks`) in one file all fail the run. So does an unknown key, so a typo
 cannot turn a setting off without anyone noticing. The error quotes the bad key or value. For an unknown key or a value
 of the wrong type, it also shows the line and column:
 

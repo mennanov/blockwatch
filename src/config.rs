@@ -44,6 +44,10 @@ struct ConfigFile {
     enable: Vec<String>,
     #[serde(default)]
     disable: Vec<String>,
+    #[serde(default, rename = "only-blocks")]
+    only_blocks: Vec<String>,
+    #[serde(default, rename = "skip-blocks")]
+    skip_blocks: Vec<String>,
     /// The `[[block]]` entries, each with the byte range of its header.
     #[serde(default)]
     block: Vec<Spanned<BlockEntry>>,
@@ -101,6 +105,8 @@ pub(crate) fn read(
         extensions,
         enable,
         disable,
+        only_blocks,
+        skip_blocks,
         block,
     } = toml_edit::de::from_str(&text)
         .with_context(|| format!("invalid config file \"{}\"", path.display()))?;
@@ -110,8 +116,8 @@ pub(crate) fn read(
             extensions,
             enable,
             disable,
-            only_blocks: Vec::new(),
-            skip_blocks: Vec::new(),
+            only_blocks,
+            skip_blocks,
         },
         blocks: virtual_blocks(block, path, &text, line_changes)?,
     })
@@ -514,12 +520,23 @@ severity = 'loud'
     }
 
     #[test]
+    fn block_lists_read_into_the_settings() -> anyhow::Result<()> {
+        let config =
+            read_text("only-blocks = ['a.py:fruits']\nskip-blocks = ['b.py:vegetables']\n")?;
+        assert_eq!(config.settings.only_blocks, ["a.py:fruits"]);
+        assert_eq!(config.settings.skip_blocks, ["b.py:vegetables"]);
+        Ok(())
+    }
+
+    #[test]
     fn missing_default_file_reads_as_an_empty_config() -> anyhow::Result<()> {
         let config = read(None, &FakeFileSystem::new(HashMap::new()), &HashMap::new())?;
         assert!(config.settings.ignore.is_empty());
         assert!(config.settings.extensions.is_empty());
         assert!(config.settings.enable.is_empty());
         assert!(config.settings.disable.is_empty());
+        assert!(config.settings.only_blocks.is_empty());
+        assert!(config.settings.skip_blocks.is_empty());
         assert!(config.blocks.is_empty());
         Ok(())
     }

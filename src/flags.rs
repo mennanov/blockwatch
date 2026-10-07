@@ -54,7 +54,7 @@ By default it scans every file in the repository. Pass --diff to also read a uni
 Hooks and CI should pass --diff and still scan every file. A change can break a block in a file it never touched, such as the other side of a `same-as`. Only a full scan sees that.
 Add --only-changed to check only the blocks the diff changed, when a full scan costs too much.
 
-You can put project-wide settings (--ignore, -E, --enable, --disable) in blockwatch.toml at the repository root. It can also declare blocks around one value of a JSON, TOML or YAML file, instead of tags.",
+You can put project-wide settings (--ignore, -E, --enable, --disable, --only-block, --skip-block) in blockwatch.toml at the repository root. It can also declare blocks around one value of a JSON, TOML or YAML file, instead of tags.",
     after_help = r"EXAMPLES:
     # Check every block in the repository
     blockwatch
