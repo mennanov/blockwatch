@@ -180,7 +180,8 @@ The whole pipeline is in `src/cli.rs`. `src/main.rs` only calls `blockwatch::run
 9. Violations go to stderr, as JSON diagnostics or as a SARIF 2.1.0 log, depending on `--format`. The `--verbosity`
    report goes to stdout. The exit code depends on the error-severity violations that are not suppressed.
 
-The `list` subcommand stops after step 6 and writes the blocks it found to stdout as JSON.
+The `list` subcommand stops after step 6 and writes the blocks it found to stdout as JSON. The `skill` subcommand
+prints `src/skill.md` right after step 1.
 
 The main modules:
 
@@ -218,7 +219,7 @@ The main modules:
     express that.
 
   Each language's tests list every symbol it finds. When you give a language symbols, also document its paths in
-  `docs/symbols.md` and in the "Symbols" section of the skill. A test in `language_parsers/mod.rs` and the
+  `docs/symbols.md` and in the "Symbols" section of the skill, `src/skill.md`. A test in `language_parsers/mod.rs` and the
   repository's own blocks keep the list of file types with symbols, and each language's section, in sync with the
   code.
 - `src/symbols.rs` — `Symbol`, the `SymbolsParser` trait, and `resolve`, which finds the symbol a path refers to.
@@ -249,9 +250,19 @@ default), `safe` or `unsafe`.
 
 ## What ships to users and what is guidance
 
-`.agents/skills/blockwatch/SKILL.md` and `.claude-plugin/` are part of the *product*. They are the skill this project
-ships, so that agents can add blocks to **other** repositories. They are not instructions for working on BlockWatch,
-and changing them changes what users get. This file is the guidance for working on BlockWatch.
+`src/skill.md`, `.agents/skills/blockwatch/SKILL.md` and `.claude-plugin/` are part of the *product*. They make up the
+skill this project ships, so that agents can add blocks to **other** repositories:
+
+- `src/skill.md` is the skill. `blockwatch skill` prints it with the version filled in, and users save that output in
+  their projects.
+- `.agents/skills/blockwatch/SKILL.md` is a stub for the plugin in `.claude-plugin/`. It runs `blockwatch skill` each
+  time it loads. It has its own copy of the description, and `tests/skill.rs` checks that the two copies match.
+
+They are not instructions for working on BlockWatch, and changing them changes what users get. This file is the
+guidance for working on BlockWatch.
+
+A block tag in `src/skill.md` can have a name and a pattern, but no rule. A project that saves the skill parses its
+tags too, and a rule's target exists only in this repository. Put the rule on the block at the other end instead.
 
 Each agent's local config directory is left out of git on purpose: `.claude/`, `.cursor/`, `.gemini/`, `.windsurf/`,
 `.aider*`, and the others listed in `.gitignore`. Don't commit agent-specific settings. Anything a future contributor

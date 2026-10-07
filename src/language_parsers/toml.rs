@@ -457,7 +457,7 @@ name = "plantain"
         let banana = "[[fruits]]\nname = \"banana\"\n";
         let plantain = "[[fruits.varieties]]\nname = \"plantain\"\n";
 
-        // <block affects="docs/symbols.md:toml-paths, .agents/skills/blockwatch/SKILL.md:toml-paths">
+        // <block affects="docs/symbols.md:toml-paths, src/skill.md:toml-paths">
         assert_eq!(
             derived_symbols(source)?,
             expected_symbols(&[

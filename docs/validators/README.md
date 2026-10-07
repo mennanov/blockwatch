@@ -9,7 +9,7 @@ block tag at line N, column N`, rather than being silently ignored. Text counts 
 
 ## Which validator do I want?
 
-<!-- <block name="validators-index" affects=".agents/skills/blockwatch/SKILL.md:validator-catalog"
+<!-- <block name="validators-index" affects="src/skill.md:validator-catalog"
      same-as="src/validators/mod.rs:validator-registry, README.md:available-validators"
      same-as-pattern='\[`(?P<value>[a-z-]+)`\]\('> -->
 

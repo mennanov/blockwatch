@@ -14,6 +14,7 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
   every block in the repository.
 - **List Blocks**: `blockwatch list` outputs a JSON report of all discovered blocks. It takes `--diff`,
   `--only-changed`, `--config`, `-E` and `--ignore`.
+- **Print the Agent Skill**: `blockwatch skill` prints the [skill for AI agents](#the-skill-command), as a `SKILL.md`
 - **Config File**: `blockwatch --config FILE` reads the project's settings from FILE instead of `blockwatch.toml`
 - **Custom Extensions**: Map custom file extensions: `blockwatch -E cxx=cpp` (config key: `extensions`)
 - **Disable Validators**: `blockwatch -d check-ai` (config key: `disable`)
@@ -732,6 +733,21 @@ The report says which validators looked at a block, not what each one concluded.
 stay on stderr, under the same file paths and line numbers.
 
 `--verbosity` cannot be combined with the `list` subcommand, because `list` already prints its own JSON to stdout.
+
+## The `skill` Command
+
+`blockwatch skill` prints the skill for AI coding agents, as a complete `SKILL.md`. The skill tells an agent where blocks
+add value, how to write them, and how to check its work. The text is built into the binary, so it always matches the
+installed version. The command works in any directory, even outside a repository.
+
+Save it into your agent's skills directory:
+
+```shell
+blockwatch skill > .claude/skills/blockwatch/SKILL.md
+```
+
+The saved skill records the version that wrote it. When `blockwatch --version` prints a newer one, the skill tells the
+agent to save it again. See [Annotating Codebases with AI Agents](agents.md).
 
 ## Exit Codes
 

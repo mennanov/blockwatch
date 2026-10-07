@@ -29,16 +29,16 @@ Then paste this prompt into your AI coding agent:
 <!-- <block name="agent-prompt"> -->
 
 ```text
-Install the BlockWatch skill from
-https://raw.githubusercontent.com/mennanov/blockwatch/main/.agents/skills/blockwatch/SKILL.md
-in this project. Then use it to annotate the project and add `blockwatch.toml` if needed. List each block you
-added and the mistake it catches.
+Run `blockwatch skill` and save its output as `blockwatch/SKILL.md` in this project's skills directory. Then use the
+skill to annotate the project and add `blockwatch.toml` if needed. List each block you added and the mistake it
+catches.
 ```
 
 <!-- </block> -->
 
 Review the suggested blocks and commit them. The skill stays in the project, so agents working on it later know
-the rules too. To check every future change, add BlockWatch to your [pre-commit hook or CI](#ci-integration).
+the rules too. When you upgrade BlockWatch, the skill tells the agent to save it again. To check every future change,
+add BlockWatch to your [pre-commit hook or CI](#ci-integration).
 
 ## How it works
 
@@ -134,9 +134,9 @@ Prebuilt binaries are on the [Releases](https://github.com/mennanov/blockwatch/r
 
 ## AI Agents
 
-The [skill](.agents/skills/blockwatch/SKILL.md) tells an agent where blocks make sense, how to format them, and how to
-check its own work. The [Quick Start](#quick-start) prompt sets it up in a single project. To install it globally for
-every project in Claude Code instead:
+The [skill](src/skill.md) tells an agent where blocks make sense, how to format them, and how to check its own work.
+`blockwatch skill` prints it. The [Quick Start](#quick-start) prompt sets it up in a single project. To install it
+globally for every project in Claude Code instead:
 
 ```text
 /plugin marketplace add mennanov/blockwatch

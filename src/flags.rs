@@ -238,7 +238,7 @@ pub(crate) struct ValidationFlags {
     // </block>
 }
 
-/// A mode that inspects blocks instead of validating them.
+/// A command that does something other than validate the blocks.
 #[derive(clap::Subcommand, Debug, Clone)]
 pub(crate) enum SubCommand {
     /// List all blocks found in the scanned files.
@@ -250,6 +250,8 @@ pub(crate) enum SubCommand {
         #[arg(value_name = "PATHS")]
         paths: Vec<String>,
     },
+    /// Print the agent skill for this version of BlockWatch, as Markdown.
+    Skill,
 }
 
 impl Args {
@@ -296,7 +298,7 @@ impl Args {
         let mut arguments = self.paths.clone();
         match &self.command {
             Some(SubCommand::List { paths }) => arguments.extend(paths.iter().cloned()),
-            None => {}
+            Some(SubCommand::Skill) | None => {}
         }
         arguments
     }
@@ -307,6 +309,11 @@ impl Args {
             Some(SubCommand::List { .. }) => {
                 if self.validation != ValidationFlags::default() {
                     anyhow::bail!("the `list` subcommand doesn't take flags meant for validation");
+                }
+            }
+            Some(SubCommand::Skill) => {
+                if self.validation != ValidationFlags::default() {
+                    anyhow::bail!("the `skill` subcommand doesn't take flags meant for validation");
                 }
             }
             None => {

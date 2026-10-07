@@ -12,7 +12,19 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- `blockwatch skill` prints the skill for AI agents as a complete `SKILL.md`, for the installed version. Save it with
+  `blockwatch skill > .claude/skills/blockwatch/SKILL.md`, or into your agent's skills directory. The saved skill
+  records its version, and after an upgrade it tells the agent to save it again. Before, the README had agents
+  download the skill from GitHub, and the copy went stale. The Claude Code plugin now runs `blockwatch skill` each time
+  it loads the skill.
+
 ### Changed
+
+- The agent skill now loads whenever an agent writes or changes code, and the agent adds blocks as it writes, even in a
+  project that has none yet. Before, the skill applied only to a project that already used BlockWatch. The agent still
+  annotates a whole project only when you ask.
 
 - An argument that selects no file to check fails the run. Before, it checked nothing and passed. This happened with
   a typo such as `'scr/**/*.py'`, with `notes.txt`, whose extension is not supported, and with a file that
@@ -27,6 +39,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Fixed
 
+- A project that saved the agent skill in its tree failed every run with
+  `failed to canonicalize path "docs/validators/README.md"`. The skill had block tags that point at files in the
+  BlockWatch repository. Upgrade, then save the skill again with `blockwatch skill`.
 - The output of `blockwatch list` now ends with a newline. Before, it ended at the closing `}`, so the shell prompt
   started on the same line, and `while read` skipped the last line.
 - `--help` recommended `--only-changed` for hooks and CI. It now recommends `--diff` alone, like the docs and the

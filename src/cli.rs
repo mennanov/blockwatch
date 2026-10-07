@@ -22,8 +22,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::{env, fs, process};
 
-/// Runs the program with the command-line flags of the process: validates the blocks, or lists
-/// them with the `list` subcommand.
+/// Runs the program with the command-line flags of the process: validates the blocks, lists them
+/// with the `list` subcommand, or prints the agent skill with the `skill` subcommand.
 ///
 /// Returns an error if the run can't finish, such as for an invalid flag or an unreadable file.
 /// When a violation of error severity is found, it exits the process with code 1 instead of
@@ -32,8 +32,21 @@ pub fn run() -> anyhow::Result<()> {
     let args = flags::Args::parse();
     match &args.command {
         Some(flags::SubCommand::List { .. }) => run_list(&args),
+        Some(flags::SubCommand::Skill) => run_skill(&args),
         None => run_validators(&args),
     }
+}
+
+/// Runs the `skill` subcommand: writes the agent skill to stdout, as a complete `SKILL.md`.
+///
+/// It works in any directory, even outside a repository.
+fn run_skill(args: &flags::Args) -> anyhow::Result<()> {
+    args.validate()?;
+    // The skill is built into the binary, so the text always matches this version. The version is
+    // filled in here rather than written in the file, so it can't fall behind `Cargo.toml`.
+    let skill = include_str!("skill.md").replace("{{version}}", env!("CARGO_PKG_VERSION"));
+    // `write_line` adds the newline that ends the output, so the file's own one is dropped.
+    write_line(std::io::stdout(), skill.trim_end())
 }
 
 /// Runs the `list` subcommand: parses every block in scope and writes a JSON report to stdout.

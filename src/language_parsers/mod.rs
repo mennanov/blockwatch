@@ -790,7 +790,7 @@ mod tests {
         extensions_with_symbols.sort();
 
         /* <block name="extensions-with-symbols"
-        same-as="docs/symbols.md:extensions-with-symbols, .agents/skills/blockwatch/SKILL.md:extensions-with-symbols"
+        same-as="docs/symbols.md:extensions-with-symbols, src/skill.md:extensions-with-symbols"
         same-as-pattern='"(?P<value>[^"]+)"'> */
         let documented = ["json", "jsonc", "toml", "yaml", "yml"];
         // </block>

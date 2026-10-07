@@ -4,9 +4,9 @@ Annotating an existing repository with `<block>` tags by hand can be repetitive.
 process by scanning your codebase, adding `<block>` comments in the appropriate language syntax, and running
 `blockwatch` to verify their changes.
 
-This repository includes a skill definition
-([`.agents/skills/blockwatch/SKILL.md`](../.agents/skills/blockwatch/SKILL.md)) that guides agents on where blocks add
-value, how tag parameters work, and how to test the resulting blocks.
+BlockWatch comes with a skill that guides agents on where blocks add value, how tag parameters work, and how to test
+the resulting blocks. `blockwatch skill` prints it, so the text always matches the installed version. Its source is
+[`src/skill.md`](../src/skill.md).
 
 ## 1. Install the CLI
 
@@ -20,16 +20,16 @@ Paste this prompt into your agent. The agent installs the skill in your project 
 <!-- <block same-as="README.md:agent-prompt"> -->
 
 ```text
-Install the BlockWatch skill from
-https://raw.githubusercontent.com/mennanov/blockwatch/main/.agents/skills/blockwatch/SKILL.md
-in this project. Then use it to annotate the project and add `blockwatch.toml` if needed. List each block you
-added and the mistake it catches.
+Run `blockwatch skill` and save its output as `blockwatch/SKILL.md` in this project's skills directory. Then use the
+skill to annotate the project and add `blockwatch.toml` if needed. List each block you added and the mistake it
+catches.
 ```
 
 <!-- </block> -->
 
-The skill stays in the project, so agents that work on it later know the rules too. Always inspect the generated diff
-before committing to ensure the added blocks are necessary and accurate.
+The skill stays in the project, so agents that work on it later know the rules too. It records the version of
+BlockWatch that wrote it. When `blockwatch --version` prints a newer one, the skill tells the agent to save it again.
+Always inspect the generated diff before committing to ensure the added blocks are necessary and accurate.
 
 ## 3. Enable Automated Checks
 
@@ -48,9 +48,11 @@ Install the plugin once to make the skill available across all projects:
 /plugin install blockwatch@blockwatch
 ```
 
+The plugin's skill runs `blockwatch skill` each time it loads, so it always matches the installed version.
+
 ### Other AI Tools
 
-For other environments or project-local setups, copy `SKILL.md` to the expected skill location:
+For other environments or project-local setups, save the output of `blockwatch skill` to the expected skill location:
 
 | Agent               | Location                                               |
 |---------------------|--------------------------------------------------------|
@@ -59,12 +61,11 @@ For other environments or project-local setups, copy `SKILL.md` to the expected 
 | **GitHub Copilot**  | Append to `.github/copilot-instructions.md`            |
 | **Codex / generic** | Append to `AGENTS.md`                                  |
 
-To download `SKILL.md` directly:
+For example, for Claude Code:
 
 ```shell
 mkdir -p .claude/skills/blockwatch
-curl -sL https://raw.githubusercontent.com/mennanov/blockwatch/main/.agents/skills/blockwatch/SKILL.md \
-  -o .claude/skills/blockwatch/SKILL.md
+blockwatch skill > .claude/skills/blockwatch/SKILL.md
 ```
 
 ---
