@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.10.0] - 2026-10-07
+
 ### Added
 
 - `--only-block FILE:BLOCK_NAME` checks only the listed blocks, and `--skip-block FILE:BLOCK_NAME` checks every block
