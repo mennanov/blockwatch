@@ -42,7 +42,8 @@ A pattern that matches nothing is reported as a violation.
 
 - `BLOCKWATCH_AI_API_KEY`: API Key.
 - `BLOCKWATCH_AI_MODEL`: Model name
-  (default: <!-- <block name="default-model" same-as-pattern="[^`]+"> -->`gpt-5.4-nano`<!-- </block> -->).
+  (default: <!-- <block name="default-model" same-as="src/validators/check_ai.rs:latest-model"
+  same-as-pattern="[^`]+"> -->`gpt-5.4-nano`<!-- </block> -->).
 - `BLOCKWATCH_AI_API_URL`: Custom OpenAI compatible API base URL (optional, default:
   `https://api.openai.com/v1`).
 

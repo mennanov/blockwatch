@@ -24,8 +24,8 @@ const DEFAULT_SYSTEM_PROMPT: &str = r"You are a strict validator. You are given 
 - If the BLOCK violates the CONDITION, reply ONLY with a short, meaningful, and actionable error message describing what must be changed.
 - Do not include quotes, labels, or extra text.";
 
-/* <block check-lua="scripts/check_latest_gpt_nano_model.lua" check-lua-pattern='str = "(?P<value>[^"]+)"'
-   same-as="docs/validators/check-ai.md:default-model" same-as-pattern='str = "(?P<value>[^"]+)"'>
+/* <block name="latest-model" check-lua="scripts/check_latest_gpt_nano_model.lua"
+   check-lua-pattern='str = "(?P<value>[^"]+)"' same-as-pattern='str = "(?P<value>[^"]+)"'>
 */
 const DEFAULT_MODEL_NAME: &str = "gpt-5.4-nano";
 // </block>

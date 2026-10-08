@@ -1,6 +1,6 @@
 # The test fixtures break the rules on purpose.
 ignore = ['tests/testdata/**']
 
-# The check-lua blocks here need the network and BLOCKWATCH_LUA_MODE=safe, which a pull request
-# from a fork must not get. .github/workflows/trusted-checks.yml runs them on a schedule.
-disable = ['check-lua']
+# This block runs on a schedule in .github/workflows/trusted-checks.yml as it needs network access and ideally should
+# be avoided in a precommit hook.
+skip-blocks = ['src/validators/check_ai.rs:latest-model']
