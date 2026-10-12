@@ -412,6 +412,9 @@ fn parse_mode(block: &Block) -> anyhow::Result<Mode> {
 /// Set, sequence, and single are symmetric; `Mode::Subset` is directional (`source` ⊆ `target`).
 /// `Mode::Single` requires exactly one value per side; a side with a different count is itself a
 /// mismatch (the block's content does not meet the asserted shape), reported like any other.
+///
+/// Under `Mode::Set` and `Mode::Subset`, the reason lists each value once, at its first position.
+/// A repeat doesn't change the result in these modes, and in a long block it makes a long message.
 fn disagreement(source: &[String], target: &[String], mode: &Mode) -> Option<String> {
     if source.is_empty() || target.is_empty() {
         return Some("same-as-pattern matched no values in this block or its target".to_string());
@@ -431,17 +434,24 @@ fn disagreement(source: &[String], target: &[String], mode: &Mode) -> Option<Str
         Mode::Set => {
             let source_set: HashSet<&String> = source.iter().collect();
             let target_set: HashSet<&String> = target.iter().collect();
-            (source_set != target_set).then(|| format!("{source:?} != {target:?}"))
+            (source_set != target_set)
+                .then(|| format!("{:?} != {:?}", unique(source), unique(target)))
         }
         Mode::Subset => {
             let target_set: HashSet<&String> = target.iter().collect();
-            let missing: Vec<&String> = source
-                .iter()
+            let missing: Vec<&String> = unique(source)
+                .into_iter()
                 .filter(|item| !target_set.contains(item))
                 .collect();
             (!missing.is_empty()).then(|| format!("not a subset; missing from target: {missing:?}"))
         }
     }
+}
+
+/// Returns `values` without repeats, each value at the position where it first appears.
+fn unique(values: &[String]) -> Vec<&String> {
+    let mut seen = HashSet::new();
+    values.iter().filter(|value| seen.insert(*value)).collect()
 }
 
 #[derive(Serialize)]
@@ -845,6 +855,25 @@ ids = 1, 2
     }
 
     #[test]
+    fn set_mode_with_repeated_values_lists_each_once_in_first_seen_order() -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.rs",
+            "// <block same-as=\":b\" same-as-pattern=\"(?P<value>[a-z]+)\">\ngamma\nbeta\ngamma\nbeta\n// </block>\n// <block name=\"b\" same-as-pattern=\"(?P<value>[a-z]+)\">\ndelta\nalpha\ndelta\n// </block>",
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0]
+                .message
+                .ends_with(r#"["gamma", "beta"] != ["delta", "alpha"]"#),
+            "unexpected message: {}",
+            file[0].message
+        );
+        Ok(())
+    }
+
+    #[test]
     fn sequence_mode_with_reordered_values_returns_a_violation() -> anyhow::Result<()> {
         let context = merge_validation_contexts(vec![
             validation_context(
@@ -907,6 +936,26 @@ ids = 1, 2
             .unwrap();
         assert_eq!(file.len(), 1);
         assert_eq!(file[0].code, "same-as");
+        Ok(())
+    }
+
+    #[test]
+    fn subset_mode_with_repeated_missing_values_lists_each_once_in_first_seen_order()
+    -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.rs",
+            "// <block same-as=\":b\" same-as-mode=\"subset\" same-as-pattern=\"(?P<value>[a-z]+)\">\ngamma\nalpha\nbeta\ngamma\nbeta\n// </block>\n// <block name=\"b\">\nalpha\n// </block>",
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0]
+                .message
+                .ends_with(r#"missing from target: ["gamma", "beta"]"#),
+            "unexpected message: {}",
+            file[0].message
+        );
         Ok(())
     }
 
