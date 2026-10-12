@@ -41,6 +41,10 @@ pub(crate) trait FileSystem: Send + Sync {
     /// repository, or if its path is not valid UTF-8.
     fn entry(&self, path: &Path) -> Option<Entry>;
 
+    /// Whether `path` is a symlink. The link itself is checked, not the file it points at, so a
+    /// dangling link is a symlink too. Returns `false` if nothing exists at `path`.
+    fn is_symlink(&self, path: &RepoPath) -> bool;
+
     /// Walks the directory tree rooted at the file system's root path, returning an iterator over
     /// the paths of all regular files. A symlink is not a regular file, so it is never returned.
     fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>>;
@@ -149,6 +153,11 @@ impl FileSystem for FileSystemImpl {
         } else {
             Some(Entry::File(repo_path))
         }
+    }
+
+    fn is_symlink(&self, path: &RepoPath) -> bool {
+        std::fs::symlink_metadata(self.root_path.join(path.as_path()))
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
     }
 
     fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>> {
@@ -311,6 +320,30 @@ mod file_system_impl_tests {
         let file_system = FileSystemImpl::new(root.path())?;
 
         assert_eq!(walked_paths(&file_system)?, [] as [&str; 0]);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_is_symlink_returns_true_and_its_target_returns_false() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        write_file(root.path(), "AGENTS.md", "rules");
+        std::os::unix::fs::symlink("AGENTS.md", root.path().join("CLAUDE.md"))?;
+        let file_system = FileSystemImpl::new(root.path())?;
+
+        assert!(file_system.is_symlink(&RepoPath::from_reference("CLAUDE.md")?));
+        assert!(!file_system.is_symlink(&RepoPath::from_reference("AGENTS.md")?));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_symlink_is_symlink_returns_true() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        std::os::unix::fs::symlink("missing.md", root.path().join("link.md"))?;
+        let file_system = FileSystemImpl::new(root.path())?;
+
+        assert!(file_system.is_symlink(&RepoPath::from_reference("link.md")?));
         Ok(())
     }
 
@@ -507,12 +540,25 @@ pub(crate) mod test_utils {
     /// containment must exercise the real implementation.
     pub(crate) struct FakeFileSystem {
         files: HashMap<String, String>,
+        /// The paths that are symlinks. A path here needs no entry in `files`, as a dangling link
+        /// has none.
+        symlinks: HashSet<String>,
     }
 
     impl FakeFileSystem {
-        /// Creates a fake tree from a path -> contents map.
+        /// Creates a fake tree from a path -> contents map, with no symlinks.
         pub(crate) fn new(files: HashMap<String, String>) -> Self {
-            Self { files }
+            Self {
+                files,
+                symlinks: HashSet::new(),
+            }
+        }
+
+        /// Returns the tree with `paths` as symlinks.
+        pub(crate) fn with_symlinks(mut self, paths: &[&str]) -> Self {
+            self.symlinks
+                .extend(paths.iter().map(|path| (*path).to_string()));
+            self
         }
     }
 
@@ -562,6 +608,10 @@ pub(crate) mod test_utils {
             } else {
                 None
             }
+        }
+
+        fn is_symlink(&self, path: &RepoPath) -> bool {
+            self.symlinks.contains(path.as_str())
         }
 
         fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>> {

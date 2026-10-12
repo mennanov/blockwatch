@@ -172,6 +172,11 @@ pub(crate) fn line_changes_from_diff(
             // The header points at no file, e.g. the "/dev/null" side of a deletion.
             continue;
         };
+        if file_system.is_symlink(&target_path) {
+            // The walk skips a symlink, and the diff of one changes the path it points at, not
+            // the lines of that file.
+            continue;
+        }
         let changes = line_changes(&patched_file).with_context(|| {
             format!(
                 "failed to extract line changes from the diff for \"{}\"",
@@ -635,6 +640,10 @@ mod tests {
 
         fn entry(&self, _path: &Path) -> Option<crate::fs::Entry> {
             unimplemented!("diff parsing never resolves a path argument")
+        }
+
+        fn is_symlink(&self, _path: &RepoPath) -> bool {
+            false
         }
 
         fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>> {
@@ -1404,6 +1413,34 @@ index f384549..0000000
         assert!(line_changes.is_empty());
         Ok(())
     }
+
+    #[test]
+    fn symlink_diff_is_ignored() -> anyhow::Result<()> {
+        // Git shows a new symlink as a new file whose one line is the path it points at.
+        let diff = r"diff --git a/AGENTS.md b/AGENTS.md
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -1 +1 @@
+-rule
++rules
+diff --git a/CLAUDE.md b/CLAUDE.md
+new file mode 120000
+--- /dev/null
++++ b/CLAUDE.md
+@@ -0,0 +1 @@
++AGENTS.md
+\ No newline at end of file
+";
+
+        let files = tree(&["AGENTS.md"]).with_symlinks(&["CLAUDE.md"]);
+
+        let result = line_changes_from_diff(diff, &files)?;
+
+        assert!(result.contains_key(&key("AGENTS.md")));
+        assert!(!result.contains_key(&key("CLAUDE.md")));
+        Ok(())
+    }
+
     #[test]
     fn diff_with_parent_dir_traversal_target_path_returns_error() {
         let err = changes(

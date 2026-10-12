@@ -31,6 +31,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - A symlink to a file is no longer checked as a second copy of that file. Before, when `CLAUDE.md` was a symlink to
   `AGENTS.md`, every violation in `AGENTS.md` was reported twice. A dangling symlink, or one that points outside the
   repository, no longer stops the run either ([#159](https://github.com/mennanov/blockwatch/issues/159)).
+- With `--diff --only-changed`, a diff that adds or changes a symlink no longer marks the blocks of the file it points
+  at as changed. Before, adding `CLAUDE.md` as a symlink to `AGENTS.md` could report an `affects` violation under
+  `CLAUDE.md`. A diff that adds a dangling symlink no longer stops the run with `diff target ... does not exist`.
 - `same-as` now reports a violation when the block's `same-as-pattern` finds no values and the target's finds some.
   Before, `same-as-mode="subset"` passed in this case, because an empty list is a subset of any list. So a typo in the
   pattern turned the rule into a check that could never fail
