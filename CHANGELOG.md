@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.10.2] - 2026-10-12
+
 ### Added
 
 - A quoted attribute value can now hold its own kind of quote, with a backslash before it:
