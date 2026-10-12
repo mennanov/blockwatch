@@ -78,6 +78,8 @@ catches drift that a changed-blocks-only check would miss.
 - Tags live **inside comments**, using the host language's comment syntax. Open with `<block ...>`, close with
   `</block>`.
 - The block's *content* is the lines between the two tags.
+- To mention a tag in a comment without making one, put it in backticks: ``# checks the `<block>` rules``. Without
+  the backticks, it opens a block that is never closed, and the run fails.
 - A block around one key of a JSON, TOML or YAML file can be a `[[block]]` entry in `blockwatch.toml` instead of
   tags (see [The config file](#the-config-file-blockwatchtoml)). A JSON file can't hold a tag, so it needs one.
 - Under `--diff --only-changed` a block is only validated when its content (or its start tag) is touched by the diff, so

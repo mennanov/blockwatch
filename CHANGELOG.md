@@ -28,6 +28,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   Debian 11 and 12, and Ubuntu 20.04 and 22.04, and `blockwatch-installer.sh` installs it there. Before, it failed with
   ``version `GLIBC_2.38' not found``, and the installer stopped with `no compatible downloads were found`
   ([#156](https://github.com/mennanov/blockwatch/issues/156)).
+- Tag text inside backticks in a comment, such as ``# checks the `<block>` rules``, is no longer read as a tag. Before,
+  it opened a block that was never closed, so the run stopped with `Block at line N is not closed` and reported no
+  violations ([#155](https://github.com/mennanov/blockwatch/issues/155)).
 
 ## [0.10.1] - 2026-10-10
 

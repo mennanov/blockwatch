@@ -7,6 +7,9 @@ A start or end tag that fails to parse â€” most commonly a missing closing `>` â
 block tag at line N, column N`, rather than being silently ignored. Text counts as a tag only when whitespace follows
 `<block` or `</block`, or the comment ends there. So prose such as `<block, filesystem>` or `<blockquote>` is ignored.
 
+Text inside backticks in a comment is ignored too, so a comment can quote a tag: ``// add a `<block keep-sorted>` tag``.
+As in Markdown, the closing backticks must be on the same line, and there must be as many of them as opening ones.
+
 A tag can go on over several line comments in a row, such as `//` lines that rustfmt wraps. Only whitespace can
 come between them, so a comment after code on the next line does not continue the tag.
 

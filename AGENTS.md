@@ -134,10 +134,10 @@ commit, run `cargo run`.
 
 This means:
 
-- In a source comment, tag text counts even inside a code span. A full tag becomes a block, and a partial one can fail
-  the run as a malformed tag. Describe a tag in words instead, such as "the start tag" or "an end tag with a space
-  before its slash". Tag text is safe in a Rust string literal. In Markdown, it is safe outside `<!-- -->` and
-  `[//]: #` comments.
+- In a source comment, tag text counts. The release that CI runs reads it even inside backticks. A full tag becomes a
+  block, and a partial one can fail the run as a malformed tag. Describe a tag in words instead, such as "the start
+  tag" or "an end tag with a space before its slash". Tag text is safe in a Rust string literal. In Markdown, it is
+  safe outside `<!-- -->` and `[//]: #` comments.
 - When a commit fails, it is usually the linter reporting a rule that the change broke. The hook itself is usually
   fine. Read the violation before you work around it.
 

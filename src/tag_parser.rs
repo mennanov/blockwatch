@@ -51,7 +51,8 @@ pub(crate) struct WinnowBlockTagParser<'source> {
 }
 
 impl<'source> WinnowBlockTagParser<'source> {
-    /// Parses `source` starting at byte offset `cursor`.
+    /// Parses `source` starting at byte offset `cursor`, which must be a character boundary in
+    /// `source`. Otherwise [`BlockTagParser::next`] panics.
     ///
     /// Callers resume scanning a comment they have already partly consumed by passing back the
     /// [`Self::cursor`] of the previous parser.
@@ -63,65 +64,96 @@ impl<'source> WinnowBlockTagParser<'source> {
     pub(crate) fn cursor(&self) -> usize {
         self.cursor
     }
+
+    /// Parses the tag at byte offset `start` of the source, which holds a `<`, and moves the cursor
+    /// past it.
+    ///
+    /// Returns `None` if the text there is not a tag, and an error if it looks like one but does
+    /// not parse (see [`looks_like_tag_attempt`]). The cursor moves only when a tag is returned.
+    fn parse_tag_at(&mut self, start: usize) -> Result<Option<BlockTag>, BlockTagParseError> {
+        let input = &self.source[start..];
+        if let Ok((remaining, attributes)) = parse_start_tag.parse_peek(input) {
+            self.cursor = self.source.len() - remaining.len();
+            return Ok(Some(BlockTag::Start {
+                tag_range: start..self.cursor,
+                attributes,
+            }));
+        }
+        if let Ok((remaining, ())) = parse_end_tag.parse_peek(input) {
+            self.cursor = self.source.len() - remaining.len();
+            return Ok(Some(BlockTag::End {
+                start_position: start,
+            }));
+        }
+        if looks_like_tag_attempt(input) {
+            return Err(BlockTagParseError::Malformed(MalformedBlockTagError {
+                position: start,
+            }));
+        }
+        Ok(None)
+    }
 }
 
 impl<'source> BlockTagParser for WinnowBlockTagParser<'source> {
     fn next(&mut self) -> Result<Option<BlockTag>, BlockTagParseError> {
-        // Check if we've reached the end of input
-        if self.cursor >= self.source.len() {
-            return Ok(None);
-        }
-
-        let input = &self.source[self.cursor..];
-
-        // Search for tags by finding '<' characters and testing if they're followed by valid block tag syntax
-        let mut current_input = input;
-        let mut offset = 0;
-
-        loop {
-            if let Some(pos) = current_input.find("<") {
-                offset += pos;
-                let potential_tag_start = &current_input[pos..];
-
-                // Try to parse as start tag first
-                if let Ok((remaining, attributes)) = parse_start_tag.parse_peek(potential_tag_start)
-                {
-                    let start_position = self.cursor + offset;
-                    let match_len = potential_tag_start.len() - remaining.len();
-                    let end_position = start_position + match_len;
-                    self.cursor = end_position;
-                    return Ok(Some(BlockTag::Start {
-                        tag_range: start_position..end_position,
-                        attributes,
-                    }));
-                }
-
-                // Try to parse as end tag
-                if let Ok((remaining, _)) = parse_end_tag.parse_peek(potential_tag_start) {
-                    let start_position = self.cursor + offset;
-                    let match_len = potential_tag_start.len() - remaining.len();
-                    let end_position = start_position + match_len;
-                    self.cursor = end_position;
-                    return Ok(Some(BlockTag::End { start_position }));
-                }
-
-                // An input that looks like a misspelled block tag is an error.
-                if looks_like_tag_attempt(potential_tag_start) {
-                    return Err(BlockTagParseError::Malformed(MalformedBlockTagError {
-                        position: self.cursor + offset,
-                    }));
-                }
-
-                // Not a valid tag, skip past this '<' and continue searching
-                current_input = &potential_tag_start[1..];
-                offset += 1;
-            } else {
-                // No more '<' characters found
-                self.cursor = self.source.len();
-                return Ok(None);
+        let mut position = self.cursor;
+        while let Some(offset) = find_tag_start(&self.source[position..]) {
+            let start = position + offset;
+            if let Some(tag) = self.parse_tag_at(start)? {
+                return Ok(Some(tag));
             }
+            // Not a tag, such as `<blockquote>`, so the search goes on past its `<`.
+            position = start + 1;
+        }
+        self.cursor = self.source.len();
+        Ok(None)
+    }
+}
+
+/// The byte offset of the first `<` in `input` that is outside a code span, or `None` if there is
+/// no such `<`.
+fn find_tag_start(input: &str) -> Option<usize> {
+    let mut position = 0;
+    loop {
+        position += input[position..].find(['<', '`'])?;
+        let rest = &input[position..];
+        if rest.starts_with('<') {
+            return Some(position);
+        }
+        // Prose quotes code in backticks, as Markdown does, so a tag in a code span is an example
+        // of a tag rather than a real one.
+        position += code_span_len(rest);
+    }
+}
+
+/// The length in bytes of the code span at the start of `input`, which starts with a backtick.
+/// The result is at least 1. In a debug build, it panics if `input` does not start with a
+/// backtick, because the result would then be 0.
+///
+/// As in Markdown, a span that starts with N backticks in a row ends at the next N backticks in a
+/// row on the same line. More or fewer backticks in a row don't end it. If nothing ends it, the
+/// result is N.
+///
+/// ```text
+/// `a` b        -> 3, the span is `a`
+/// ``a ` b`` c  -> 9, one backtick does not end a span that starts with two
+/// `a b         -> 1, no backtick closes the span on this line
+/// ```
+fn code_span_len(input: &str) -> usize {
+    debug_assert!(input.starts_with('`'));
+    // A span ends on its own line, so a stray backtick can't hide a tag on a later line.
+    let line = &input[..input.find('\n').unwrap_or(input.len())];
+    let fence_len = line.len() - line.trim_start_matches('`').len();
+    let mut cursor = fence_len;
+    while let Some(pos) = line[cursor..].find('`') {
+        let run = &line[cursor + pos..];
+        let run_len = run.len() - run.trim_start_matches('`').len();
+        cursor += pos + run_len;
+        if run_len == fence_len {
+            return cursor;
         }
     }
+    fence_len
 }
 
 /// Whether `c` can appear in an attribute name or an unquoted attribute value (see

@@ -1018,6 +1018,39 @@ println!("hello2");
     }
 
     #[test]
+    fn tags_in_code_spans_are_not_read() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        let contents = "// `<block keep-sorted>`, `</block>`, `<block name=x` <block name=\"a\">\nfn foo() {}\n// </block>\n";
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(
+            blocks
+                .iter()
+                .map(|block| block.attributes["name"].as_str())
+                .collect::<Vec<_>>(),
+            ["a"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn backtick_without_a_closer_on_its_line_is_ordinary_text() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        let contents = "/* it`s <block name=\"a\">\n` */\nfn foo() {}\n/* </block> */\n";
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(blocks.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn code_span_ends_only_at_as_many_backticks_as_it_starts_with() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        let contents = "// ``a ` <block> `` and `b `` <block> `\nfn foo() {}\n";
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(blocks, vec![]);
+        Ok(())
+    }
+
+    #[test]
     fn block_closed_before_an_unclosed_one_is_returned_ahead_of_the_error() {
         let mut parser = create_parser();
         let contents = "// <block name=\"closed\">\n// </block>\n// <block name=\"open\">";
