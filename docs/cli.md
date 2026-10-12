@@ -37,6 +37,9 @@ By default, `blockwatch` scans every file in the repository, respecting `.gitign
 repository root, whichever directory you run from. Linked worktrees and submodules are supported too: a run inside one
 checks that repository only.
 
+A symlink is skipped. The file it points at is checked under its own path, if the run selects that file. So when
+`CLAUDE.md` is a symlink to `AGENTS.md`, the blocks are reported once, under `AGENTS.md`.
+
 VCS directories like `.git`, `.hg`, `.jj` and `.svn` are skipped.
 
 ```shell
@@ -345,6 +348,8 @@ keep-sorted-pattern = '^"(?P<value>[^"]+)",?$'
 
 A virtual block is a block of the file it wraps:
 
+- **A symlink stands for the file it points at.** When `package.json` is a symlink to `base.json`, the target
+  `package.json#/version` wraps `base.json#/version`, and its violations are reported in `base.json`.
 - **Its content is what a reference to the symbol reads.** A scalar gives its value: `1.2.3`, not
   `"version": "1.2.3"`. An object, a list or a table gives its text, key included.
 - **Its violations are reported in that file.** A violation of the whole block points at the first line of the symbol.

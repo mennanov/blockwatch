@@ -41,7 +41,8 @@ pub(crate) trait FileSystem: Send + Sync {
     /// repository, or if its path is not valid UTF-8.
     fn entry(&self, path: &Path) -> Option<Entry>;
 
-    /// Walks the directory tree rooted at the file system's root path, returning an iterator over the paths of all files.
+    /// Walks the directory tree rooted at the file system's root path, returning an iterator over
+    /// the paths of all regular files. A symlink is not a regular file, so it is never returned.
     fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>>;
 }
 
@@ -165,10 +166,16 @@ impl FileSystem for FileSystemImpl {
             .build()
             .filter_map(move |entry| match entry {
                 Ok(entry) => {
-                    let path = entry.path();
-                    if path.is_dir() {
+                    // The walk doesn't follow links, so a symlink has its own file type here and
+                    // is skipped. Its target is checked under the target's own path, so a linked
+                    // file is not checked twice. A dangling link is skipped too.
+                    if !entry
+                        .file_type()
+                        .is_some_and(|file_type| file_type.is_file())
+                    {
                         return None;
                     }
+                    let path = entry.path();
                     // Relative to the root. A name that is not valid UTF-8 cannot be written in a
                     // glob or a block reference, so it is skipped rather than failing the run.
                     let relative_path = path.strip_prefix(&root_path).unwrap_or(path);
@@ -281,6 +288,29 @@ mod file_system_impl_tests {
         let file_system = FileSystemImpl::new(root.path())?;
 
         assert_eq!(walked_paths(&file_system)?, ["vendor/dep/main.yml"]);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn walk_skips_symlinks_to_files() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        write_file(root.path(), "AGENTS.md", "rules");
+        std::os::unix::fs::symlink("AGENTS.md", root.path().join("CLAUDE.md"))?;
+        let file_system = FileSystemImpl::new(root.path())?;
+
+        assert_eq!(walked_paths(&file_system)?, ["AGENTS.md"]);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn walk_skips_dangling_symlinks() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        std::os::unix::fs::symlink("missing.md", root.path().join("link.md"))?;
+        let file_system = FileSystemImpl::new(root.path())?;
+
+        assert_eq!(walked_paths(&file_system)?, [] as [&str; 0]);
         Ok(())
     }
 

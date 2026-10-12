@@ -119,7 +119,7 @@ pub(crate) fn read(
             only_blocks,
             skip_blocks,
         },
-        blocks: virtual_blocks(block, path, &text, line_changes)?,
+        blocks: virtual_blocks(block, path, &text, line_changes, file_system)?,
     })
 }
 
@@ -162,7 +162,8 @@ fn read_file<'p>(
 }
 
 /// The virtual blocks that `entries` declare, in the order of `entries`. `path` and `text` are
-/// the config file's, and `line_changes` are the diff's changes to it.
+/// the config file's, and `line_changes` are the diff's changes to it. A target file that is a
+/// symlink in `file_system` becomes the file it points at.
 ///
 /// # Errors
 /// Returns an error if an entry is not valid, or if two entries wrap the same symbol. The error
@@ -172,6 +173,7 @@ fn virtual_blocks(
     path: &Path,
     text: &str,
     line_changes: &[LineChange],
+    file_system: &impl FileSystem,
 ) -> anyhow::Result<Vec<VirtualBlock>> {
     let symbols = toml::parse_symbols(text)?;
     let blocks: Vec<VirtualBlock> = entries
@@ -184,7 +186,13 @@ fn virtual_blocks(
             };
             let context = entry.error_context();
             let is_entry_modified = is_entry_modified(text, &symbols, index, line_changes)?;
-            virtual_block(block_entry.into_inner(), entry, is_entry_modified).context(context)
+            virtual_block(
+                block_entry.into_inner(),
+                entry,
+                is_entry_modified,
+                file_system,
+            )
+            .context(context)
         })
         .collect::<anyhow::Result<_>>()?;
     reject_second_blocks(&blocks)?;
@@ -230,7 +238,8 @@ fn is_entry_modified(
 }
 
 /// The virtual block that `block_entry`, written as `entry` of the config file, declares.
-/// `is_entry_modified` tells whether the diff touches the entry.
+/// `is_entry_modified` tells whether the diff touches the entry. A target file that is a symlink
+/// in `file_system` becomes the file it points at.
 ///
 /// # Errors
 /// Returns an error if the target is not a symbol in a file, or if an attribute is not one a tag
@@ -239,6 +248,7 @@ fn virtual_block(
     block_entry: BlockEntry,
     entry: ConfigEntry,
     is_entry_modified: bool,
+    file_system: &impl FileSystem,
 ) -> anyhow::Result<VirtualBlock> {
     let (file, path) = match parse_single_reference(&block_entry.target)? {
         TargetReference::Symbol {
@@ -252,6 +262,9 @@ fn virtual_block(
             block_entry.target
         ),
     };
+    // The walk skips a symlink, so a block on one would never be checked. A file that doesn't
+    // resolve is kept as written, so the error about it shows the path from the config.
+    let file = file_system.repo_path(file.as_path()).unwrap_or(file);
     let attributes = block_entry
         .attributes
         .into_iter()
@@ -414,6 +427,32 @@ target = 'a.json#/b'
                 "{line_change:?}"
             );
         }
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn target_in_a_symlink_reads_as_the_file_it_points_at() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        std::fs::write(root.path().join("real.json"), r#"{"a": 1}"#)?;
+        std::os::unix::fs::symlink("real.json", root.path().join("link.json"))?;
+        std::fs::write(
+            root.path().join(DEFAULT_FILE),
+            "[[block]]\ntarget = 'link.json#/a'\n",
+        )?;
+
+        let config = read(
+            None,
+            &crate::fs::FileSystemImpl::new(root.path())?,
+            &HashMap::new(),
+        )?;
+
+        let files: Vec<&str> = config
+            .blocks
+            .iter()
+            .map(|block| block.file.as_str())
+            .collect();
+        assert_eq!(files, ["real.json"]);
         Ok(())
     }
 

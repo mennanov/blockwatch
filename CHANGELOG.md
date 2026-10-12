@@ -28,6 +28,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - A pattern or a reference that a formatter split over two lines now fails the run with an error that says so. Before,
   a split `keep-sorted` or `keep-unique` pattern matched no line, and the rule passed without checking anything
   ([#154](https://github.com/mennanov/blockwatch/issues/154)).
+- A symlink to a file is no longer checked as a second copy of that file. Before, when `CLAUDE.md` was a symlink to
+  `AGENTS.md`, every violation in `AGENTS.md` was reported twice. A dangling symlink, or one that points outside the
+  repository, no longer stops the run either ([#159](https://github.com/mennanov/blockwatch/issues/159)).
 - `same-as` now reports a violation when the block's `same-as-pattern` finds no values and the target's finds some.
   Before, `same-as-mode="subset"` passed in this case, because an empty list is a subset of any list. So a typo in the
   pattern turned the rule into a check that could never fail
