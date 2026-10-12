@@ -39,7 +39,8 @@ checks that repository only.
 
 A symlink is skipped. The file it points at is checked under its own path, if the run selects that file. So when
 `CLAUDE.md` is a symlink to `AGENTS.md`, the blocks are reported once, under `AGENTS.md`. A diff's change to a symlink
-is skipped too. It changes the path the link points at, not the lines of that file.
+is skipped too. It changes the path the link points at, not the lines of that file. An `affects` reference through a
+symlink, such as `affects="CLAUDE.md:r"`, counts as changed when the diff changes `AGENTS.md`.
 
 VCS directories like `.git`, `.hg`, `.jj` and `.svn` are skipped.
 

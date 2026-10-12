@@ -1432,7 +1432,7 @@ new file mode 120000
 \ No newline at end of file
 ";
 
-        let files = tree(&["AGENTS.md"]).with_symlinks(&["CLAUDE.md"]);
+        let files = tree(&["AGENTS.md"]).with_symlinks(&[("CLAUDE.md", "AGENTS.md")]);
 
         let result = line_changes_from_diff(diff, &files)?;
 

@@ -34,6 +34,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - With `--diff --only-changed`, a diff that adds or changes a symlink no longer marks the blocks of the file it points
   at as changed. Before, adding `CLAUDE.md` as a symlink to `AGENTS.md` could report an `affects` violation under
   `CLAUDE.md`. A diff that adds a dangling symlink no longer stops the run with `diff target ... does not exist`.
+- An `affects` reference through a symlink now sees the changes to the file the link points at. Before, when
+  `CLAUDE.md` was a symlink to `AGENTS.md`, `affects="CLAUDE.md:r"` reported `CLAUDE.md:r is not` modified, even when
+  the diff changed the block `r` in `AGENTS.md`.
 - `same-as` now reports a violation when the block's `same-as-pattern` finds no values and the target's finds some.
   Before, `same-as-mode="subset"` passed in this case, because an empty list is a subset of any list. So a typo in the
   pattern turned the rule into a check that could never fail

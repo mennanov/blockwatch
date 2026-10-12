@@ -105,6 +105,7 @@ impl<'a, Fs: FileSystem> TargetIndex<'a, Fs> {
         target_file: &RepoPath,
         target_name: &str,
     ) -> anyhow::Result<Option<bool>> {
+        let target_file = &self.real_path(target_file);
         if let Some(index) = self.in_scope.get(target_file)
             && let Some(&modified) = index.get(target_name)
         {
@@ -138,6 +139,7 @@ impl<'a, Fs: FileSystem> TargetIndex<'a, Fs> {
         target_file: &RepoPath,
         path: &SymbolPath,
     ) -> anyhow::Result<TargetResult<bool>> {
+        let target_file = &self.real_path(target_file);
         // A file the diff never mentions has no line changes, so nothing in it counts as modified.
         let line_changes = self.context.line_changes_for(target_file).unwrap_or(&[]);
         let (content, resolution) = self.files.resolve_symbol(target_file, path)?;
@@ -151,11 +153,23 @@ impl<'a, Fs: FileSystem> TargetIndex<'a, Fs> {
 
     /// Whether the diff mentions `target_file`.
     fn file_modified(&self, target_file: &RepoPath) -> bool {
-        self.context.line_changes_for(target_file).is_some()
+        self.context
+            .line_changes_for(&self.real_path(target_file))
+            .is_some()
     }
 
     fn file_exists(&self, target_file: &RepoPath) -> bool {
         self.file_system.exists(target_file.as_path())
+    }
+
+    /// The path of `target_file`, with a symlink replaced by the file it points at. Returns
+    /// `target_file` itself when it does not resolve, such as when the file is missing.
+    fn real_path(&self, target_file: &RepoPath) -> RepoPath {
+        // The walk skips a symlink and the diff drops it, so a linked file's blocks and changes are
+        // only found under the path of the file it points at.
+        self.file_system
+            .repo_path(target_file.as_path())
+            .unwrap_or_else(|| target_file.clone())
     }
 }
 
@@ -450,11 +464,19 @@ mod validate_tests {
 
     /// Builds a validator with a fake filesystem seeded with `files` (path, contents).
     fn validator(files: &[(&str, &str)]) -> AffectsValidator<FakeFileSystem> {
+        validator_with_symlinks(files, &[])
+    }
+
+    /// Like [`validator`], with `symlinks` (link, the path it points at) in the filesystem too.
+    fn validator_with_symlinks(
+        files: &[(&str, &str)],
+        symlinks: &[(&str, &str)],
+    ) -> AffectsValidator<FakeFileSystem> {
         let map = files
             .iter()
             .map(|(p, c)| (p.to_string(), c.to_string()))
             .collect();
-        AffectsValidator::new(Arc::new(FakeFileSystem::new(map)))
+        AffectsValidator::new(Arc::new(FakeFileSystem::new(map).with_symlinks(symlinks)))
     }
 
     /// The two-file setup where a block in `source.py` references a block in `target.py`.
@@ -596,6 +618,48 @@ print("bar")
         let violations = validator.validate(context)?.violations;
 
         assert!(violations.is_empty());
+        Ok(())
+    }
+
+    /// A file with a block named `r`, which `CLAUDE.md` is a symlink to in the symlink tests.
+    const AGENTS_MD: &str = "<!-- <block name=\"r\"> -->\nrules\n<!-- </block> -->\n";
+
+    /// A source file whose only block points at the block `r` through the symlink `CLAUDE.md`.
+    const SOURCE_THROUGH_A_SYMLINK: &str =
+        "# <block affects=\"CLAUDE.md:r\">\nvalue = 1\n# </block>\n";
+
+    #[test]
+    fn modified_block_with_a_modified_target_through_a_symlink_returns_no_violations()
+    -> anyhow::Result<()> {
+        let context = merge_validation_contexts(vec![
+            validation_context("source.py", SOURCE_THROUGH_A_SYMLINK),
+            validation_context("AGENTS.md", AGENTS_MD),
+        ]);
+
+        let report =
+            validator_with_symlinks(&[("AGENTS.md", AGENTS_MD)], &[("CLAUDE.md", "AGENTS.md")])
+                .validate(context)?;
+
+        assert_eq!(violation_count(&report), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_block_with_an_unmodified_target_through_a_symlink_returns_a_violation()
+    -> anyhow::Result<()> {
+        let context = validation_context("source.py", SOURCE_THROUGH_A_SYMLINK);
+
+        let violations =
+            validator_with_symlinks(&[("AGENTS.md", AGENTS_MD)], &[("CLAUDE.md", "AGENTS.md")])
+                .validate(context)?
+                .violations;
+
+        let source_violations = &violations[&RepoPath::from_reference("source.py")?];
+        assert_eq!(source_violations.len(), 1);
+        assert_eq!(
+            source_violations[0].message,
+            "Block source.py:(unnamed) at line 1 is modified, but CLAUDE.md:r is not"
+        );
         Ok(())
     }
 
@@ -1099,6 +1163,25 @@ pass
     }
 
     #[test]
+    fn modified_block_with_a_modified_whole_file_target_through_a_symlink_returns_no_violations()
+    -> anyhow::Result<()> {
+        let files = [
+            (
+                "source.py",
+                "# <block name=\"s\" affects=\"settings.json\">\nvalue = 2\n# </block>",
+            ),
+            ("config.json", "{\"value\": 2}\n"),
+        ];
+        let context = context_with_changed_files(&files, &["source.py", "config.json"])?;
+
+        let report = validator_with_symlinks(&files, &[("settings.json", "config.json")])
+            .validate(context)?;
+
+        assert_eq!(violation_count(&report), 0);
+        Ok(())
+    }
+
+    #[test]
     fn unmodified_block_with_an_unmodified_whole_file_target_returns_no_violations()
     -> anyhow::Result<()> {
         // An unchanged block places no obligation on what it references.
@@ -1158,6 +1241,36 @@ version = "1.1"
         ]);
 
         let report = validator(&[("package.json", PACKAGE_JSON)]).validate(context)?;
+
+        assert_eq!(violation_count(&report), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_block_with_a_modified_symbol_target_through_a_symlink_returns_no_violations()
+    -> anyhow::Result<()> {
+        let context = merge_validation_contexts(vec![
+            validation_context(
+                "source.py",
+                r#"# <block affects="settings.json#/version">
+version = "1.1"
+# </block>"#,
+            ),
+            validation_context_with_changes(
+                "package.json",
+                PACKAGE_JSON,
+                vec![LineChange {
+                    line: 2,
+                    kind: LineChangeKind::Added,
+                }],
+            ),
+        ]);
+
+        let report = validator_with_symlinks(
+            &[("package.json", PACKAGE_JSON)],
+            &[("settings.json", "package.json")],
+        )
+        .validate(context)?;
 
         assert_eq!(violation_count(&report), 0);
         Ok(())

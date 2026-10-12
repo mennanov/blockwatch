@@ -540,9 +540,9 @@ pub(crate) mod test_utils {
     /// containment must exercise the real implementation.
     pub(crate) struct FakeFileSystem {
         files: HashMap<String, String>,
-        /// The paths that are symlinks. A path here needs no entry in `files`, as a dangling link
-        /// has none.
-        symlinks: HashSet<String>,
+        /// Each symlink's path, and the path it points at. A link needs no entry in `files`. As on
+        /// disk, every method follows a link, except `is_symlink` and `walk`.
+        symlinks: HashMap<String, String>,
     }
 
     impl FakeFileSystem {
@@ -550,15 +550,24 @@ pub(crate) mod test_utils {
         pub(crate) fn new(files: HashMap<String, String>) -> Self {
             Self {
                 files,
-                symlinks: HashSet::new(),
+                symlinks: HashMap::new(),
             }
         }
 
-        /// Returns the tree with `paths` as symlinks.
-        pub(crate) fn with_symlinks(mut self, paths: &[&str]) -> Self {
-            self.symlinks
-                .extend(paths.iter().map(|path| (*path).to_string()));
+        /// Returns the tree with `symlinks` added, each as (link, the path it points at).
+        pub(crate) fn with_symlinks(mut self, symlinks: &[(&str, &str)]) -> Self {
+            self.symlinks.extend(
+                symlinks
+                    .iter()
+                    .map(|(link, target)| ((*link).to_string(), (*target).to_string())),
+            );
             self
+        }
+
+        /// The key of `path` in `files`: the path a symlink points at, or else `path` itself.
+        fn file_key(&self, path: &Path) -> String {
+            let key = path.display().to_string();
+            self.symlinks.get(&key).cloned().unwrap_or(key)
         }
     }
 
@@ -567,17 +576,17 @@ pub(crate) mod test_utils {
             // Mirror a real filesystem: a missing file is an error, not a panic. This lets
             // validators' read-failure paths be exercised with the fake.
             self.files
-                .get(&path.display().to_string())
+                .get(&self.file_key(path))
                 .map(|content| content.clone().into_bytes())
                 .ok_or_else(|| anyhow::anyhow!("File {} not found", path.display()))
         }
 
         fn exists(&self, path: &Path) -> bool {
-            self.files.contains_key(&path.display().to_string())
+            self.files.contains_key(&self.file_key(path))
         }
 
         fn repo_path(&self, path: &Path) -> Option<RepoPath> {
-            RepoPath::from_relative(path)
+            RepoPath::from_relative(Path::new(&self.file_key(path)))
                 .ok()
                 .filter(|repo_path| self.exists(repo_path.as_path()))
         }
@@ -590,7 +599,7 @@ pub(crate) mod test_utils {
                 return Some(Entry::Root);
             }
             // The fake has no place on disk, so an absolute path points at nothing.
-            let repo_path = RepoPath::from_relative(path).ok()?;
+            let repo_path = RepoPath::from_relative(Path::new(&self.file_key(path))).ok()?;
             let files: Vec<RepoPath> = self
                 .files
                 .keys()
@@ -611,7 +620,7 @@ pub(crate) mod test_utils {
         }
 
         fn is_symlink(&self, path: &RepoPath) -> bool {
-            self.symlinks.contains(path.as_str())
+            self.symlinks.contains_key(path.as_str())
         }
 
         fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>> {
