@@ -31,6 +31,12 @@ runner = "macos-14"
 
 [dist.github-custom-runners.x86_64-unknown-linux-gnu]
 runner = "ubuntu-latest"
+# A binary needs the glibc it was built with, or a newer one, to start. ubuntu-latest
+# has a new glibc, so a binary built there fails on distributions like Ubuntu 22.04.
+# This image has glibc 2.28, so the binary also runs on RHEL 8 and Ubuntu 20.04.
+# The installer checks the same version. dist assumes a container is musl unless
+# `host` says otherwise.
+container = { image = "quay.io/pypa/manylinux_2_28_x86_64", host = "x86_64-unknown-linux-gnu" }
 
 [dist.github-custom-runners.aarch64-unknown-linux-gnu]
 runner = "ubuntu-latest"
