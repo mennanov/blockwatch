@@ -138,13 +138,13 @@ impl<I: Iterator<Item = Comment>> Iterator for BlocksIterator<'_, I> {
 /// Flattens comments into the stream of individual start and end tags they contain.
 ///
 /// One comment may hold several tags (or a whole block, opened and closed in the same comment), so
-/// the iterator keeps a cursor into the current comment's text and only advances to the next
-/// comment once that text is exhausted.
+/// the iterator parses all the tags of a comment at once and returns them one by one.
 struct PartialBlocksIterator<'source, I: Iterator<Item = Comment>> {
     contents: &'source str,
     comments: Peekable<I>,
-    comment: Option<Rc<Comment>>,
-    tags_parser_cursor: usize,
+    /// The tags of the last comment read that are not returned yet, in source order. A tag that
+    /// does not parse is an error, and it comes last.
+    pending: VecDeque<anyhow::Result<PartialBlock>>,
 }
 
 impl<'source, I: Iterator<Item = Comment>> PartialBlocksIterator<'source, I> {
@@ -153,50 +153,102 @@ impl<'source, I: Iterator<Item = Comment>> PartialBlocksIterator<'source, I> {
         Self {
             contents,
             comments: comments.peekable(),
-            comment: None,
-            tags_parser_cursor: 0,
+            pending: VecDeque::new(),
         }
     }
 
-    /// Takes the next comment, or `None` once the comments run out.
+    /// Parses the tags of `comment`.
     ///
-    /// A tag that does not parse in the comment continues in the comments right after it, with
-    /// only whitespace between. Those comments are joined into the returned one until the tag
-    /// parses or no such comment is left.
-    fn next_comment(&mut self) -> Option<Comment> {
-        let contents = self.contents;
-        let mut comment = self.comments.next()?;
-        // Most grammars make each line comment a node of its own, and a formatter such as rustfmt
-        // wraps a long tag in a line comment over several of them. The comments are joined before
-        // any tag is read from them, so all their tags share one `Comment`, as in a `/* */` one.
-        while has_malformed_tag(&comment.comment_text)
-            && let Some(next) = self.comments.next_if(|next| {
-                contents[comment.source_range.end..next.source_range.start]
-                    .trim()
-                    .is_empty()
-            })
-        {
-            // The text between the comments is copied from the source, so an offset into the
-            // joined text maps onto the source as it does for a single comment.
-            let between = &contents[comment.source_range.end..next.source_range.start];
-            comment = Comment {
-                position_range: comment.position_range.start..next.position_range.end,
-                source_range: comment.source_range.start..next.source_range.end,
-                comment_text: comment.comment_text + between + &next.comment_text,
-            };
+    /// A tag that does not parse continues in the comments right after `comment`, with only
+    /// whitespace between. Those comments are taken from the stream and joined to `comment`, until
+    /// the tag parses or no such comment is left.
+    ///
+    /// Returns the comment with the comments joined to it, and its tags in source order. A tag
+    /// that still does not parse is an error, and it comes last.
+    fn parse_tags(
+        &mut self,
+        mut comment: Comment,
+    ) -> (Comment, Vec<Result<BlockTag, BlockTagParseError>>) {
+        let mut tags = Vec::new();
+        let mut tags_parser_cursor = 0;
+        loop {
+            let mut tags_parser =
+                WinnowBlockTagParser::new(&comment.comment_text, tags_parser_cursor);
+            match tags_parser.next() {
+                Ok(Some(tag)) => {
+                    tags.push(Ok(tag));
+                    tags_parser_cursor = tags_parser.cursor();
+                }
+                Ok(None) => return (comment, tags),
+                // Most grammars make each line comment a node of its own, and a formatter such as
+                // rustfmt wraps a long tag in a line comment over several of them.
+                Err(BlockTagParseError::Malformed(malformed)) => {
+                    match self.take_adjacent_comment(&comment) {
+                        Some(next) => {
+                            comment = join_comments(comment, next, self.contents);
+                            // Joining only adds text after the open tag, so the tags before it
+                            // stay as they were parsed.
+                            tags_parser_cursor = malformed.position;
+                        }
+                        None => {
+                            tags.push(Err(BlockTagParseError::Malformed(malformed)));
+                            return (comment, tags);
+                        }
+                    }
+                }
+            }
         }
-        Some(comment)
+    }
+
+    /// Takes the next comment from the stream if only whitespace separates it from `comment`.
+    fn take_adjacent_comment(&mut self, comment: &Comment) -> Option<Comment> {
+        let contents = self.contents;
+        self.comments.next_if(|next| {
+            contents[comment.source_range.end..next.source_range.start]
+                .trim()
+                .is_empty()
+        })
     }
 }
 
-/// Whether `comment_text` holds a tag that does not parse, such as a start tag without its `>`.
-fn has_malformed_tag(comment_text: &str) -> bool {
-    let mut tags_parser = WinnowBlockTagParser::new(comment_text, 0);
-    loop {
-        match tags_parser.next() {
-            Ok(Some(_)) => {}
-            Ok(None) => return false,
-            Err(BlockTagParseError::Malformed(_)) => return true,
+/// Joins `comment` and `next`, a later comment of `contents`, into one comment that spans both.
+fn join_comments(comment: Comment, next: Comment, contents: &str) -> Comment {
+    // The text between the comments is copied from the source, so an offset into the joined text
+    // maps onto the source as it does for a single comment.
+    let between = &contents[comment.source_range.end..next.source_range.start];
+    Comment {
+        position_range: comment.position_range.start..next.position_range.end,
+        source_range: comment.source_range.start..next.source_range.end,
+        comment_text: comment.comment_text + between + &next.comment_text,
+    }
+}
+
+/// Turns a tag parsed from `comment` into a partial block. A tag that does not parse becomes an
+/// error that shows its line and column.
+fn to_partial_block(
+    tag: Result<BlockTag, BlockTagParseError>,
+    comment: &Rc<Comment>,
+) -> anyhow::Result<PartialBlock> {
+    match tag {
+        Ok(BlockTag::Start {
+            tag_range,
+            attributes,
+        }) => Ok(PartialBlock::Start(BlockStart::new(
+            Rc::clone(comment),
+            attributes,
+            tag_range,
+        ))),
+        Ok(BlockTag::End { start_position }) => Ok(PartialBlock::End(BlockEnd::new(
+            Rc::clone(comment),
+            start_position,
+        ))),
+        Err(BlockTagParseError::Malformed(malformed)) => {
+            let position = BlockStart::source_position_at(malformed.position, comment);
+            Err(anyhow::anyhow!(
+                "Malformed block tag at line {}, column {}",
+                position.line,
+                position.character
+            ))
         }
     }
 }
@@ -205,49 +257,16 @@ impl<I: Iterator<Item = Comment>> Iterator for PartialBlocksIterator<'_, I> {
     type Item = anyhow::Result<PartialBlock>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if self.comment.is_none() {
-                {
-                    let c = self.next_comment()?;
-                    self.comment = Some(Rc::new(c));
-                    self.tags_parser_cursor = 0;
-                }
-            }
-
-            let comment_rc = self.comment.as_ref().unwrap();
-            let mut tags_parser =
-                WinnowBlockTagParser::new(&comment_rc.comment_text, self.tags_parser_cursor);
-            let block_tag_result = tags_parser.next();
-            self.tags_parser_cursor = tags_parser.cursor();
-            return match block_tag_result {
-                Ok(Some(tag)) => match tag {
-                    BlockTag::Start {
-                        tag_range,
-                        attributes,
-                    } => Some(Ok(PartialBlock::Start(BlockStart::new(
-                        Rc::clone(self.comment.as_ref().unwrap()),
-                        attributes,
-                        tag_range,
-                    )))),
-                    BlockTag::End { start_position } => Some(Ok(PartialBlock::End(BlockEnd::new(
-                        Rc::clone(self.comment.as_ref().unwrap()),
-                        start_position,
-                    )))),
-                },
-                Ok(None) => {
-                    self.comment = None;
-                    continue;
-                }
-                Err(BlockTagParseError::Malformed(malformed)) => {
-                    let position = BlockStart::source_position_at(malformed.position, comment_rc);
-                    Some(Err(anyhow::anyhow!(
-                        "Malformed block tag at line {}, column {}",
-                        position.line,
-                        position.character
-                    )))
-                }
-            };
+        while self.pending.is_empty() {
+            let comment = self.comments.next()?;
+            let (comment, tags) = self.parse_tags(comment);
+            // The tags become partial blocks only once the comment stops growing, so all of them
+            // share one `Comment`, as in a `/* */` one.
+            let comment = Rc::new(comment);
+            self.pending
+                .extend(tags.into_iter().map(|tag| to_partial_block(tag, &comment)));
         }
+        self.pending.pop_front()
     }
 }
 
