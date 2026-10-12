@@ -2316,7 +2316,7 @@ mod parse_blocks_tests {
         assert!(file_blocks.is_err());
         assert_eq!(
             file_blocks.unwrap_err().source().unwrap().to_string(),
-            "Unexpected closed block at line 2, column 3"
+            "Unexpected closed block at line 2, column 3. If this is not meant as a tag, put it in backticks."
         );
         Ok(())
     }
@@ -2342,7 +2342,7 @@ mod parse_blocks_tests {
         assert!(file_blocks.is_err());
         assert_eq!(
             file_blocks.unwrap_err().source().unwrap().to_string(),
-            "Block at line 1 is not closed"
+            "Block at line 1, column 3 is not closed. If this is not meant as a tag, put it in backticks."
         );
         Ok(())
     }

@@ -30,7 +30,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   ([#156](https://github.com/mennanov/blockwatch/issues/156)).
 - Tag text inside backticks in a comment, such as ``# checks the `<block>` rules``, is no longer read as a tag. Before,
   it opened a block that was never closed, so the run stopped with `Block at line N is not closed` and reported no
-  violations ([#155](https://github.com/mennanov/blockwatch/issues/155)).
+  violations. This error now shows the line and column of the start tag, instead of the first line of its comment. It
+  and the other errors about a tag now say to put text that is not meant as a tag in backticks
+  ([#155](https://github.com/mennanov/blockwatch/issues/155)).
 
 ## [0.10.1] - 2026-10-10
 
