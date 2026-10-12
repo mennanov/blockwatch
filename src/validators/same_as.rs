@@ -413,7 +413,7 @@ fn parse_mode(block: &Block) -> anyhow::Result<Mode> {
 /// `Mode::Single` requires exactly one value per side; a side with a different count is itself a
 /// mismatch (the block's content does not meet the asserted shape), reported like any other.
 fn disagreement(source: &[String], target: &[String], mode: &Mode) -> Option<String> {
-    if source.is_empty() && target.is_empty() {
+    if source.is_empty() || target.is_empty() {
         return Some("same-as-pattern matched no values in this block or its target".to_string());
     }
     match mode {
@@ -779,6 +779,54 @@ mod validate_tests {
             ),
         ]);
         assert_eq!(validator(&[]).validate(context)?.violations.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_matching_nothing_in_the_block_returns_a_violation() -> anyhow::Result<()> {
+        // An empty list is a subset of any list, so `subset` would pass whatever the target holds.
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-mode="subset" same-as-pattern="id=(?P<value>\d+)">
+ids = 1, 2
+# </block>
+# <block name="b" same-as-pattern="id=(?P<value>\d+)">
+id=1
+# </block>
+"#,
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0].message.contains("matched no values"),
+            "unexpected message: {}",
+            file[0].message
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_matching_nothing_in_the_target_returns_a_violation() -> anyhow::Result<()> {
+        // The values alone, `["1"] != []`, would not say that the target's pattern found nothing.
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-pattern="id=(?P<value>\d+)">
+id=1
+# </block>
+# <block name="b" same-as-pattern="id=(?P<value>\d+)">
+ids = 1, 2
+# </block>
+"#,
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0].message.contains("matched no values"),
+            "unexpected message: {}",
+            file[0].message
+        );
         Ok(())
     }
 
