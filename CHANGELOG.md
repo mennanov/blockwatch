@@ -24,6 +24,10 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   Before, `same-as-mode="subset"` passed in this case, because an empty list is a subset of any list. So a typo in the
   pattern turned the rule into a check that could never fail
   ([#157](https://github.com/mennanov/blockwatch/issues/157)).
+- The prebuilt `x86_64-unknown-linux-gnu` binary now needs glibc 2.28 instead of 2.38. It starts on RHEL 8 and 9,
+  Debian 11 and 12, and Ubuntu 20.04 and 22.04, and `blockwatch-installer.sh` installs it there. Before, it failed with
+  ``version `GLIBC_2.38' not found``, and the installer stopped with `no compatible downloads were found`
+  ([#156](https://github.com/mennanov/blockwatch/issues/156)).
 
 ## [0.10.1] - 2026-10-10
 
