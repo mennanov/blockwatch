@@ -1,8 +1,9 @@
 use crate::Position;
 use crate::blocks::{Block, Content, Declaration};
 use crate::language_parsers::{Comment, CommentsParser};
-use crate::tag_parser::{BlockTag, BlockTagParser, MalformedBlockTagError, WinnowBlockTagParser};
+use crate::tag_parser::{BlockTag, BlockTagParseError, BlockTagParser, WinnowBlockTagParser};
 use std::collections::{HashMap, VecDeque};
+use std::iter::Peekable;
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -26,13 +27,13 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
         &'a mut self,
         contents: &'a str,
     ) -> impl Iterator<Item = anyhow::Result<Block>> + 'a {
-        BlocksIterator::new(self.comments_parser.parse(contents))
+        BlocksIterator::new(self.comments_parser.parse(contents), contents)
     }
 }
 
 /// Assembles [`Block`]s out of a comment stream.
-struct BlocksIterator<I: Iterator<Item = Comment>> {
-    partial_blocks: PartialBlocksIterator<I>,
+struct BlocksIterator<'source, I: Iterator<Item = Comment>> {
+    partial_blocks: PartialBlocksIterator<'source, I>,
     /// Start tags still waiting for their end tag, outermost first.
     open_blocks: Vec<BlockStart>,
     /// The current group of blocks, in start order.
@@ -43,11 +44,11 @@ struct BlocksIterator<I: Iterator<Item = Comment>> {
     done: bool,
 }
 
-impl<I: Iterator<Item = Comment>> BlocksIterator<I> {
-    /// Starts the block stream over the given comments, which must be in source order.
-    fn new(comments: I) -> Self {
+impl<'source, I: Iterator<Item = Comment>> BlocksIterator<'source, I> {
+    /// Starts the block stream over the comments of `contents`, which must be in source order.
+    fn new(comments: I, contents: &'source str) -> Self {
         Self {
-            partial_blocks: PartialBlocksIterator::new(comments),
+            partial_blocks: PartialBlocksIterator::new(comments, contents),
             open_blocks: Vec::new(),
             blocks: VecDeque::new(),
             error: None,
@@ -118,7 +119,7 @@ impl<I: Iterator<Item = Comment>> BlocksIterator<I> {
     }
 }
 
-impl<I: Iterator<Item = Comment>> Iterator for BlocksIterator<I> {
+impl<I: Iterator<Item = Comment>> Iterator for BlocksIterator<'_, I> {
     type Item = anyhow::Result<Block>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -139,31 +140,75 @@ impl<I: Iterator<Item = Comment>> Iterator for BlocksIterator<I> {
 /// One comment may hold several tags (or a whole block, opened and closed in the same comment), so
 /// the iterator keeps a cursor into the current comment's text and only advances to the next
 /// comment once that text is exhausted.
-struct PartialBlocksIterator<I: Iterator<Item = Comment>> {
-    comments: I,
+struct PartialBlocksIterator<'source, I: Iterator<Item = Comment>> {
+    contents: &'source str,
+    comments: Peekable<I>,
     comment: Option<Rc<Comment>>,
     tags_parser_cursor: usize,
 }
 
-impl<I: Iterator<Item = Comment>> PartialBlocksIterator<I> {
-    /// Starts the tag stream over the given comments, which must be in source order.
-    fn new(comments: I) -> Self {
+impl<'source, I: Iterator<Item = Comment>> PartialBlocksIterator<'source, I> {
+    /// Starts the tag stream over the comments of `contents`, which must be in source order.
+    fn new(comments: I, contents: &'source str) -> Self {
         Self {
-            comments,
+            contents,
+            comments: comments.peekable(),
             comment: None,
             tags_parser_cursor: 0,
         }
     }
+
+    /// Takes the next comment, or `None` once the comments run out.
+    ///
+    /// A tag that does not parse in the comment continues in the comments right after it, with
+    /// only whitespace between. Those comments are joined into the returned one until the tag
+    /// parses or no such comment is left.
+    fn next_comment(&mut self) -> Option<Comment> {
+        let contents = self.contents;
+        let mut comment = self.comments.next()?;
+        // Most grammars make each line comment a node of its own, and a formatter such as rustfmt
+        // wraps a long tag in a line comment over several of them. The comments are joined before
+        // any tag is read from them, so all their tags share one `Comment`, as in a `/* */` one.
+        while has_malformed_tag(&comment.comment_text)
+            && let Some(next) = self.comments.next_if(|next| {
+                contents[comment.source_range.end..next.source_range.start]
+                    .trim()
+                    .is_empty()
+            })
+        {
+            // The text between the comments is copied from the source, so an offset into the
+            // joined text maps onto the source as it does for a single comment.
+            let between = &contents[comment.source_range.end..next.source_range.start];
+            comment = Comment {
+                position_range: comment.position_range.start..next.position_range.end,
+                source_range: comment.source_range.start..next.source_range.end,
+                comment_text: comment.comment_text + between + &next.comment_text,
+            };
+        }
+        Some(comment)
+    }
 }
 
-impl<I: Iterator<Item = Comment>> Iterator for PartialBlocksIterator<I> {
+/// Whether `comment_text` holds a tag that does not parse, such as a start tag without its `>`.
+fn has_malformed_tag(comment_text: &str) -> bool {
+    let mut tags_parser = WinnowBlockTagParser::new(comment_text, 0);
+    loop {
+        match tags_parser.next() {
+            Ok(Some(_)) => {}
+            Ok(None) => return false,
+            Err(BlockTagParseError::Malformed(_)) => return true,
+        }
+    }
+}
+
+impl<I: Iterator<Item = Comment>> Iterator for PartialBlocksIterator<'_, I> {
     type Item = anyhow::Result<PartialBlock>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if self.comment.is_none() {
                 {
-                    let c = self.comments.next()?;
+                    let c = self.next_comment()?;
                     self.comment = Some(Rc::new(c));
                     self.tags_parser_cursor = 0;
                 }
@@ -193,19 +238,14 @@ impl<I: Iterator<Item = Comment>> Iterator for PartialBlocksIterator<I> {
                     self.comment = None;
                     continue;
                 }
-                // A malformed tag carries its own byte offset; everything else propagates as-is.
-                Err(e) => match e.downcast_ref::<MalformedBlockTagError>() {
-                    Some(malformed) => {
-                        let position =
-                            BlockStart::source_position_at(malformed.position, comment_rc);
-                        Some(Err(anyhow::anyhow!(
-                            "Malformed block tag at line {}, column {}",
-                            position.line,
-                            position.character
-                        )))
-                    }
-                    None => Some(Err(e)),
-                },
+                Err(BlockTagParseError::Malformed(malformed)) => {
+                    let position = BlockStart::source_position_at(malformed.position, comment_rc);
+                    Some(Err(anyhow::anyhow!(
+                        "Malformed block tag at line {}, column {}",
+                        position.line,
+                        position.character
+                    )))
+                }
             };
         }
     }
@@ -628,6 +668,86 @@ println!("hello2");
     }
 
     #[test]
+    fn start_tag_continued_over_line_comments_returns_correct_block() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        let contents =
+            "// <block name=\"foo\"\n// keep-sorted\n// keep-unique>\nlet a = 1;\n// </block>";
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(
+            blocks,
+            vec![Block {
+                attributes: HashMap::from([
+                    ("name".to_string(), "foo".to_string()),
+                    ("keep-sorted".to_string(), String::new()),
+                    ("keep-unique".to_string(), String::new()),
+                ]),
+                start_tag_position_range: Position::new(1, 4)..Position::new(3, 16),
+                content: Content::source(
+                    test_utils::substr_range(contents, "\nlet a = 1;\n"),
+                    Position::new(3, 16)..Position::new(5, 1),
+                ),
+                declaration: Declaration::Tags,
+            },]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn start_tag_continued_after_an_end_tag_on_the_same_line_returns_correct_blocks()
+    -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        let contents = "// <block name=\"a\">\nlet x = 1;\n// </block> <block name=\"b\"\n// keep-sorted>\nlet y = 2;\n// </block>";
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(
+            blocks,
+            vec![
+                Block {
+                    attributes: HashMap::from([("name".to_string(), "a".to_string())]),
+                    start_tag_position_range: Position::new(1, 4)..Position::new(1, 20),
+                    content: Content::source(
+                        test_utils::substr_range(contents, "\nlet x = 1;\n"),
+                        Position::new(1, 20)..Position::new(3, 1),
+                    ),
+                    declaration: Declaration::Tags,
+                },
+                Block {
+                    attributes: HashMap::from([
+                        ("name".to_string(), "b".to_string()),
+                        ("keep-sorted".to_string(), String::new()),
+                    ]),
+                    start_tag_position_range: Position::new(3, 13)..Position::new(4, 16),
+                    content: Content::source(
+                        test_utils::substr_range(contents, "\nlet y = 2;\n"),
+                        Position::new(4, 16)..Position::new(6, 1),
+                    ),
+                    declaration: Declaration::Tags,
+                },
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn block_with_only_line_comments_as_content_returns_correct_block() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        let contents = "// <block>\n// b\n// a\n// </block>";
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(
+            blocks,
+            vec![Block {
+                attributes: HashMap::new(),
+                start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
+                content: Content::source(
+                    test_utils::substr_range(contents, "\n// b\n// a\n"),
+                    Position::new(1, 11)..Position::new(4, 1),
+                ),
+                declaration: Declaration::Tags,
+            },]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn block_with_a_multiline_end_tag_returns_correct_block() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = "/* <block> */ let say = \"hi\"; /* </block\n> */";
@@ -818,6 +938,17 @@ println!("hello2");
     fn malformed_tag_on_a_later_line_reports_that_line_and_column() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = "fn foo() {}\n    // <block name=\"foo\" keep-sorted\n";
+        let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
+        assert_eq!(error_message, "Malformed block tag at line 2, column 8");
+        Ok(())
+    }
+
+    #[test]
+    fn start_tag_continued_after_code_returns_error() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        // `A` reads as a valueless attribute, so the tag would close if the code between the two
+        // comments were read as part of it.
+        let contents = "enum E {\n    // <block name=\"foo\"\n    A // keep-sorted>\n}\n";
         let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
         assert_eq!(error_message, "Malformed block tag at line 2, column 8");
         Ok(())

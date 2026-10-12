@@ -10,7 +10,7 @@ use winnow::token::{literal, take_till, take_while};
 ///
 /// The input string is implicitly bound to the implementing type when it's created.
 pub(crate) trait BlockTagParser {
-    fn next(&mut self) -> anyhow::Result<Option<BlockTag>>;
+    fn next(&mut self) -> Result<Option<BlockTag>, BlockTagParseError>;
 }
 
 /// Represents a parsed block tag.
@@ -30,6 +30,12 @@ pub(crate) enum BlockTag {
     },
 }
 
+/// Why [`BlockTagParser::next`] could not return the next tag.
+#[derive(Debug)]
+pub(crate) enum BlockTagParseError {
+    Malformed(MalformedBlockTagError),
+}
+
 /// A start or end tag that was recognized as an attempt (see [`looks_like_tag_attempt`]) but
 /// failed to parse as a complete tag, for example, a missing closing `>`.
 #[derive(Debug)]
@@ -37,14 +43,6 @@ pub(crate) struct MalformedBlockTagError {
     /// Byte offset of the offending `<` within the comment text passed to the parser.
     pub(crate) position: usize,
 }
-
-impl std::fmt::Display for MalformedBlockTagError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "malformed block tag")
-    }
-}
-
-impl std::error::Error for MalformedBlockTagError {}
 
 /// A winnow-based parser for block tags.
 pub(crate) struct WinnowBlockTagParser<'source> {
@@ -68,7 +66,7 @@ impl<'source> WinnowBlockTagParser<'source> {
 }
 
 impl<'source> BlockTagParser for WinnowBlockTagParser<'source> {
-    fn next(&mut self) -> anyhow::Result<Option<BlockTag>> {
+    fn next(&mut self) -> Result<Option<BlockTag>, BlockTagParseError> {
         // Check if we've reached the end of input
         if self.cursor >= self.source.len() {
             return Ok(None);
@@ -109,10 +107,9 @@ impl<'source> BlockTagParser for WinnowBlockTagParser<'source> {
 
                 // An input that looks like a misspelled block tag is an error.
                 if looks_like_tag_attempt(potential_tag_start) {
-                    return Err(MalformedBlockTagError {
+                    return Err(BlockTagParseError::Malformed(MalformedBlockTagError {
                         position: self.cursor + offset,
-                    }
-                    .into());
+                    }));
                 }
 
                 // Not a valid tag, skip past this '<' and continue searching
