@@ -17,6 +17,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - A tag that goes on over several `//` or `#` comment lines in a row no longer fails the run with
   `Malformed block tag`. rustfmt makes this shape when `wrap_comments` is on and a tag is longer than `comment_width`
   ([#153](https://github.com/mennanov/blockwatch/issues/153)).
+- A pattern or a reference that a formatter split over two lines now fails the run with an error that says so. Before,
+  a split `keep-sorted` or `keep-unique` pattern matched no line, and the rule passed without checking anything
+  ([#154](https://github.com/mennanov/blockwatch/issues/154)).
 
 ## [0.10.1] - 2026-10-10
 

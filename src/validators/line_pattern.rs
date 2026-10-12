@@ -3,10 +3,10 @@ use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
     ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
+    compile_pattern,
 };
 use crate::{Position, validators};
 use anyhow::anyhow;
-use regex::Regex;
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -40,7 +40,7 @@ impl ValidatorSync for LinePatternValidator {
                     continue;
                 };
                 // Compile regex and ensure it anchors to entire line. Users may pass unanchored; we enforce full-line.
-                let re = Regex::new(pattern).map_err(|e| {
+                let re = compile_pattern(pattern).map_err(|e| {
                     anyhow!(
                         "line-pattern expected a valid regular expression, got \"{}\" in {}:{} at {} (error: {})",
                         pattern,
@@ -314,6 +314,21 @@ mod validate_tests {
         let result = validator.validate(context);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn block_with_a_line_break_in_the_pattern_returns_an_error() {
+        let validator = LinePatternValidator::new();
+        let context = validation_context(
+            "example.py",
+            "# <block line-pattern=\"^[a-z]+\n# $\">\nabc\n# </block>",
+        );
+
+        let err = validator.validate(context).unwrap_err();
+        assert!(
+            err.to_string().contains("line break"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

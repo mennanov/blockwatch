@@ -716,6 +716,13 @@ pub(crate) fn parse_single_reference(raw: &str) -> anyhow::Result<TargetReferenc
     if reference.is_empty() {
         bail!("Invalid target reference: \"{reference}\"");
     }
+    // A formatter that wraps long comments can break a tag inside a reference. The file or block
+    // would then not be found, and that error would not say why.
+    if reference.contains('\n') {
+        bail!(
+            "Invalid target reference: \"{reference}\" has a line break. Put the reference on one line"
+        );
+    }
     if reference.contains('#') && reference.contains(':') {
         bail!(
             "Invalid target reference: \"{reference}\" combines '#' and ':'; \
@@ -942,6 +949,20 @@ fn regex_value<'a>(line: &'a str, regex: &regex::Regex) -> Option<(&'a str, Rang
     Some((m.as_str(), start..end))
 }
 
+/// Compiles `pattern`, the regex in a block attribute such as `keep-sorted-pattern`.
+///
+/// Returns an error when `pattern` has a line break or is not a valid regex.
+fn compile_pattern(pattern: &str) -> anyhow::Result<regex::Regex> {
+    // A formatter that wraps long comments can break a tag inside a pattern. Where it breaks at a
+    // space, the space is gone, so the line break can't be turned back into the text it replaced.
+    // Left in, the line break makes the pattern match no line, and a rule such as keep-sorted then
+    // checks nothing.
+    if pattern.contains('\n') {
+        bail!("the pattern has a line break. Put the pattern on one line");
+    }
+    Ok(regex::Regex::new(pattern)?)
+}
+
 /// The content for the `*-pattern` attribute extracted from the block.
 enum PatternContent<'c> {
     /// No `*-pattern` attribute: the block's whole content (trimmed).
@@ -960,7 +981,7 @@ fn block_content_for_pattern<'c>(
     let Some(pattern) = block_with_context.block.attributes.get(pattern_attribute) else {
         return Ok(PatternContent::Whole(content.trim()));
     };
-    let re = regex::Regex::new(pattern)
+    let re = compile_pattern(pattern)
         .with_context(|| format!("{pattern_attribute} is not a valid regex"))?;
     Ok(PatternContent::Matches(
         re.captures_iter(content)
@@ -1054,6 +1075,17 @@ mod parse_number_tests {
 }
 
 #[cfg(test)]
+mod compile_pattern_tests {
+    use super::compile_pattern;
+
+    #[test]
+    fn pattern_with_an_escaped_line_break_compiles() -> anyhow::Result<()> {
+        assert!(compile_pattern(r"a\nb")?.is_match("a\nb"));
+        Ok(())
+    }
+}
+
+#[cfg(test)]
 mod parse_target_references_tests {
     use crate::repo_path::RepoPath;
     use crate::symbol_path::SymbolPath;
@@ -1090,6 +1122,25 @@ mod parse_target_references_tests {
             vec![block("file1.rs", "block1")?, block("file2.rs", "block2")?]
         );
         Ok(())
+    }
+
+    #[test]
+    fn multiple_references_with_a_line_break_after_a_comma() -> anyhow::Result<()> {
+        let result = parse_target_references("file1.rs:block1,\n   file2.rs:block2")?;
+        assert_eq!(
+            result,
+            vec![block("file1.rs", "block1")?, block("file2.rs", "block2")?]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_reference_with_a_line_break_returns_error() {
+        let err = parse_target_references("docs/config.\n   md:block").unwrap_err();
+        assert!(
+            err.to_string().contains("line break"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

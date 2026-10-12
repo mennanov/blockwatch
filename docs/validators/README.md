@@ -10,6 +10,10 @@ block tag at line N, column N`, rather than being silently ignored. Text counts 
 A tag can go on over several line comments in a row, such as `//` lines that rustfmt wraps. Only whitespace can
 come between them, so a comment after code on the next line does not continue the tag.
 
+A pattern or a reference with a line break in it fails the run. A formatter that wraps the tag there may have dropped a
+space, so blockwatch can't know what the value was. Keep each one on a single line. A line break after the comma
+between two references is fine.
+
 ## Which validator do I want?
 
 <!-- <block name="validators-index" affects="src/skill.md:validator-catalog"

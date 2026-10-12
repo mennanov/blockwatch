@@ -3,7 +3,7 @@ use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
     ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
-    regex_value, trimmed_line_value,
+    compile_pattern, regex_value, trimmed_line_value,
 };
 use crate::{Position, validators};
 use std::collections::HashSet;
@@ -46,7 +46,7 @@ impl ValidatorSync for KeepUniqueValidator {
                 let re = if pattern.is_empty() {
                     None
                 } else {
-                    Some(regex::Regex::new(&pattern))
+                    Some(compile_pattern(&pattern))
                 };
                 let mut block_violations = Vec::new();
                 let mut seen: HashSet<&str> = HashSet::new();
@@ -371,6 +371,21 @@ ID:1 C
             ViolationRange::new(Position::new(4, 1), Position::new(4, 5))
         );
         Ok(())
+    }
+
+    #[test]
+    fn pattern_with_a_line_break_returns_an_error() {
+        let validator = KeepUniqueValidator::new();
+        let context = validation_context(
+            "example.py",
+            "# <block keep-unique=\"id = (?P<value>\\w+)\n# ok\">\nid = a ok\nid = a ok\n# </block>",
+        );
+
+        let err = validator.validate(context).unwrap_err();
+        assert!(
+            err.to_string().contains("line break"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

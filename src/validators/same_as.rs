@@ -4,11 +4,10 @@ use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
 use crate::validators::{
     self, TargetFiles, TargetReference, TargetResult, ValidationReport, ValidatorDetector,
-    ValidatorSync, ValidatorType, Violation, ViolationRange, parse_number, target_display,
-    value_match,
+    ValidatorSync, ValidatorType, Violation, ViolationRange, compile_pattern, parse_number,
+    target_display, value_match,
 };
 use anyhow::{Context, anyhow};
-use regex::Regex;
 use serde::Serialize;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -200,7 +199,7 @@ fn extract_items_from(content: &str, pattern: Option<&String>) -> anyhow::Result
     let Some(pattern) = pattern else {
         return Ok(vec![normalize_content(content)]);
     };
-    let regex = Regex::new(pattern)
+    let regex = compile_pattern(pattern)
         .map_err(|e| anyhow!("same-as-pattern is not a valid regex ({pattern}): {e}"))?;
     Ok(content
         .lines()
@@ -781,6 +780,20 @@ mod validate_tests {
         ]);
         assert_eq!(validator(&[]).validate(context)?.violations.len(), 1);
         Ok(())
+    }
+
+    #[test]
+    fn pattern_with_a_line_break_returns_an_error() {
+        let context = validation_context(
+            "config.py",
+            "# <block same-as=\":b\" same-as-pattern=\"port\n# (?P<value>\\d+)\">\nport 80\n# </block>\n# <block name=\"b\">\n80\n# </block>",
+        );
+
+        let err = validator(&[]).validate(context).unwrap_err();
+        assert!(
+            err.to_string().contains("line break"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

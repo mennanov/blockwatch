@@ -3,7 +3,7 @@ use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
     ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
-    parse_number, regex_value, trimmed_line_value,
+    compile_pattern, parse_number, regex_value, trimmed_line_value,
 };
 use crate::{Position, validators};
 use anyhow::{Context, anyhow};
@@ -89,7 +89,7 @@ impl ValidatorSync for KeepSortedValidator {
                     let re = if pattern.is_empty() {
                         None
                     } else {
-                        Some(regex::Regex::new(&pattern))
+                        Some(compile_pattern(&pattern))
                     };
 
                     let format_raw = block_with_context
@@ -679,6 +679,21 @@ mod validate_tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn pattern_with_a_line_break_returns_an_error() {
+        let validator = KeepSortedValidator::new();
+        let context = validation_context(
+            "example.py",
+            "# <block keep-sorted=\"asc\" keep-sorted-pattern=\"id = (?P<value>\\w+)\n# ok\">\nid = b ok\nid = a ok\n# </block>",
+        );
+
+        let err = validator.validate(context).unwrap_err();
+        assert!(
+            err.to_string().contains("line break"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

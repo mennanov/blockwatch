@@ -939,6 +939,21 @@ some content
     }
 
     #[tokio::test]
+    async fn check_lua_pattern_with_a_line_break_returns_an_error() {
+        let context = validation_context(
+            "example.py",
+            "# <block check-lua=\"check.lua\" check-lua-pattern=\"port\n# (?P<value>\\d+)\">\nport 80\n# </block>",
+        );
+
+        let err = validator(&[]).validate(context).await.unwrap_err();
+        let err_chain = format!("{err:#}");
+        assert!(
+            err_chain.contains("line break"),
+            "unexpected error: {err_chain}"
+        );
+    }
+
+    #[tokio::test]
     async fn lua_context_exposes_the_block_fields() -> anyhow::Result<()> {
         let context = validation_context(
             "example.py",
