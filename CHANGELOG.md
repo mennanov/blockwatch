@@ -12,6 +12,14 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- A quoted attribute value can now hold its own kind of quote, with a backslash before it:
+  `keep-unique="\"(?P<value>[a-z]+)\""`. The backslash stays in the value, and a regex reads `\"` as `"`. Before, the
+  value ended at that quote, and the run stopped with `Malformed block tag`. So a quoted value can no longer end in one
+  backslash: `name="foo\"` now fails with `Malformed block tag`
+  ([#158](https://github.com/mennanov/blockwatch/issues/158)).
+
 ### Fixed
 
 - A tag that goes on over several `//` or `#` comment lines in a row no longer fails the run with

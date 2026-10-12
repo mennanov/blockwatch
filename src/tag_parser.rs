@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::ops::Range;
 use winnow::Result as PResult;
-use winnow::ascii::{multispace0, multispace1};
+use winnow::ascii::{multispace0, multispace1, take_escaped};
 use winnow::combinator::{alt, delimited, opt, preceded, repeat};
 use winnow::prelude::*;
-use winnow::token::{literal, take_till, take_while};
+use winnow::token::{any, literal, take_till, take_while};
 
 /// Parses block tags from the concatenated comment string.
 ///
@@ -256,13 +256,27 @@ fn parse_attribute_name(input: &mut &str) -> PResult<String> {
 /// 2. Single-quoted: `'value with spaces'`
 /// 3. Unquoted: `simple-value` (no spaces, alphanumeric + '-' + '_')
 ///
+/// In a quoted value, a backslash escapes the character after it, so `"a\"b"` is one value. The
+/// value is returned as written, with the backslash: `a\"b`. A value that ends in one backslash
+/// has no closing quote, so it fails to parse.
+///
 /// Note: HTML entities are NOT decoded (e.g., `&quot;` stays as `&quot;`)
 fn parse_attribute_value(input: &mut &str) -> PResult<String> {
+    // Escapes are not decoded, because most quoted values are regexes. A regex already reads `\"`
+    // as a quote, and decoding `\\` would change what an existing pattern matches.
     alt((
         // Double-quoted value
-        delimited(literal("\""), take_till(0.., '"'), literal("\"")),
+        delimited(
+            literal("\""),
+            take_escaped(take_till(1.., ['"', '\\']), '\\', any),
+            literal("\""),
+        ),
         // Single-quoted value
-        delimited(literal("'"), take_till(0.., '\''), literal("'")),
+        delimited(
+            literal("'"),
+            take_escaped(take_till(1.., ['\'', '\\']), '\\', any),
+            literal("'"),
+        ),
         // Unquoted value (restricted character set)
         take_while(1.., is_attribute_char),
     ))

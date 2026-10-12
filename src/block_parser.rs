@@ -1219,6 +1219,60 @@ println!("hello2");
     }
 
     #[test]
+    fn escaped_quotes_in_quoted_attribute_values_return_the_values_verbatim() -> anyhow::Result<()>
+    {
+        let mut parser = create_parser();
+        let contents = r#"
+        // <block keep-unique="\"(?P<value>[a-z]+)\"" line-pattern='^\'[a-z]+\'$'>
+        // </block>
+        "#;
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(
+            blocks[0].attributes,
+            HashMap::from([
+                (
+                    "keep-unique".to_string(),
+                    r#"\"(?P<value>[a-z]+)\""#.to_string()
+                ),
+                ("line-pattern".to_string(), r"^\'[a-z]+\'$".to_string())
+            ])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn quoted_attribute_values_ending_in_two_backslashes_return_the_values_verbatim()
+    -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        let contents = r#"
+        // <block line-pattern="^C:\\" keep-unique='\w+\\'>
+        // </block>
+        "#;
+        let blocks = parse_all(&mut parser, contents)?;
+        assert_eq!(
+            blocks[0].attributes,
+            HashMap::from([
+                ("line-pattern".to_string(), r"^C:\\".to_string()),
+                ("keep-unique".to_string(), r"\w+\\".to_string())
+            ])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn quoted_attribute_value_ending_in_one_backslash_returns_error() -> anyhow::Result<()> {
+        let mut parser = create_parser();
+        // The backslash escapes the quote after it, so the value has no closing quote.
+        let contents = "// <block name=\"foo\\\">\nfn foo() {}\n// </block>\n";
+        let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
+        assert_eq!(
+            error_message,
+            "Malformed block tag at line 1, column 4. If this is not meant as a tag, put it in backticks."
+        );
+        Ok(())
+    }
+
+    #[test]
     fn valueless_attributes_return_empty_strings() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
