@@ -455,7 +455,7 @@ same-as = 'go.mod:go-version'
   and it counts as changed when the diff touches what it wraps. So `--diff --only-changed` checks a plugin that the
   diff adds. A diff that edits the entry changes every block it declares.
 - **A path that exists is never a glob.** `app/[id]/meta.json` is that one file. A path that doesn't exist is a glob
-  only when it has `*`, `?`, `[` or `{`.
+  only when it has `*`, `?`, `[`, `{` or `\`.
 - **A glob that matches no file stops every run**, so a typo can't turn the rule off.
 
 ## Suppressing a Violation

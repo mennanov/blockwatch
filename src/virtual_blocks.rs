@@ -13,8 +13,7 @@ use std::ops::Range;
 use std::path::PathBuf;
 
 /// A block that a `[[block]]` entry of the config file declares in one file, instead of tags in a
-/// comment. It is a block of that file. An entry whose target is a glob declares one for each file
-/// the glob matches.
+/// comment. It is a block of that file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct VirtualBlock {
     /// The file the block is in.

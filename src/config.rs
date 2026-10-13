@@ -3,7 +3,7 @@ use crate::blocks::validate_attributes;
 use crate::diff_parser::{self, LineChange};
 use crate::fs::FileSystem;
 use crate::language_parsers::toml;
-use crate::paths_glob::PathsGlob;
+use crate::paths_glob::{GLOB_CHARACTERS, PathsGlob};
 use crate::repo_path::RepoPath;
 use crate::settings::RawSettings;
 use crate::symbol_path::SymbolPath;
@@ -275,7 +275,7 @@ fn entry_blocks(
     validate_attributes(&attributes)?;
     let files = target_files(file, file_system)?;
     if files.is_empty() {
-        // Like a missing file, so that a typo in the glob can't turn the rules off.
+        // Without this error, a typo in the glob would turn the rules off without a word.
         return Err(anyhow!("no file matches the glob")
             .context(format!("target {} does not resolve", block_entry.target)));
     }
@@ -306,7 +306,7 @@ fn target_files(file: RepoPath, file_system: &impl FileSystem) -> anyhow::Result
     if let Some(file) = file_system.repo_path(file.as_path()) {
         return Ok(vec![file]);
     }
-    if !file.as_str().contains(['*', '?', '[', '{']) {
+    if !file.as_str().contains(GLOB_CHARACTERS) {
         // The error about the missing file shows the path from the config.
         return Ok(vec![file]);
     }

@@ -3,6 +3,10 @@ use crate::repo_path::RepoPath;
 use globset::{GlobBuilder, GlobMatcher};
 use std::collections::BTreeSet;
 
+/// The characters that have a special meaning in a glob. A glob without them matches only the
+/// path it spells.
+pub(crate) const GLOB_CHARACTERS: [char; 5] = ['*', '?', '[', '{', '\\'];
+
 /// A glob over the repository's paths, compiled to list the paths it matches.
 pub(crate) struct PathsGlob {
     /// Matches a path without its trailing `/`.
@@ -74,7 +78,7 @@ fn base_directory(glob: &str) -> Option<RepoPath> {
     // The last segment is matched against a name, so it is never part of the directory.
     let fixed_segments: Vec<&str> = segments[..segments.len() - 1]
         .iter()
-        .take_while(|segment| !segment.contains(['*', '?', '[', '{', '\\']))
+        .take_while(|segment| !segment.contains(GLOB_CHARACTERS))
         .copied()
         .collect();
     // A directory that isn't a repository path, such as an empty one or one with `..`, can't narrow
