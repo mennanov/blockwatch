@@ -75,8 +75,9 @@ services:
 | `#/services/1/port`              | `9090`    |
 | `#/services/~[name=worker]/port` | `9090`    |
 
-- **Exactly one item must match.** No match is like a missing key, and the message suggests the values the items
-  hold: `did you mean: /services/~[name=worker]/port`. Several matches are a violation too.
+- **Exactly one item must match.** No match is like a missing key. When the items have the key, the message suggests
+  the values that only one item holds: `did you mean: /services/~[name=worker]/port`. Several matches are a violation
+  too: `2 items match ~[name=web], at 2:5, 6:5`.
 - **The value compares as a symbol reads it:** a string without its quotes, any other value as written. So
   `~[port=8080]` matches `port: 8080` and `port: "8080"`.
 - **Only a key right under the item counts.** A `name` deeper inside the item does not make it match.

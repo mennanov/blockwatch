@@ -20,6 +20,14 @@ fn symbol_paths_with_escapes_resolve() {
 }
 
 #[test]
+fn symbol_path_with_a_filter_resolves() {
+    // The filter picks the second item, so a path that reached the first one would fail.
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/filter_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
 fn reference_list_mixing_symbols_and_blocks_resolves() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/symbol_references/mixed_list_source.rs");

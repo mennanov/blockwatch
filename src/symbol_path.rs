@@ -116,14 +116,19 @@ const FRAGMENT_ENCODE_SET: &AsciiSet = &CONTROLS
 impl fmt::Display for SymbolPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for segment in &self.segments {
-            match segment {
-                Segment::Key(key) => write!(f, "/{}", encode(key))?,
-                Segment::Filter { key, value } => {
-                    write!(f, "/~[{}={}]", encode(key), encode(value))?;
-                }
-            }
+            write!(f, "/{segment}")?;
         }
         Ok(())
+    }
+}
+
+/// Writes the segment as a path writes it, escapes included, without the `/` before it.
+impl fmt::Display for Segment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Segment::Key(key) => write!(f, "{}", encode(key)),
+            Segment::Filter { key, value } => write!(f, "~[{}={}]", encode(key), encode(value)),
+        }
     }
 }
 

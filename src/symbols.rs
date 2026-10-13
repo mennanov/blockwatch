@@ -84,16 +84,21 @@ pub(crate) enum ResolveError<'a> {
     /// No symbol has the path. `hints` holds the paths that resemble it, the most alike first.
     NotFound { hints: Vec<SymbolPath> },
     /// Several symbols have the path. `candidates` holds every one of them, in document order.
-    /// When a filter in the path matches several children, they are the keys it matched.
-    Ambiguous { candidates: Vec<&'a Symbol> },
+    AmbiguousSymbol { candidates: Vec<&'a Symbol> },
+    /// `filter`, a filter in the path, matches several children. `keys` holds the key of each one
+    /// that holds the filter's value, in document order.
+    AmbiguousFilter {
+        filter: Segment,
+        keys: Vec<&'a Symbol>,
+    },
 }
 
 impl ResolveError<'_> {
     /// Why the path did not resolve, as a short phrase such as
     /// `symbol not found; did you mean: /version`. The phrase does not include the path itself.
     ///
-    /// `source` is the text of the file the symbols come from. It places each ambiguous candidate
-    /// at its line and column.
+    /// `source` is the text of the file the symbols come from. It places each ambiguous candidate,
+    /// and each key an ambiguous filter matched, at its line and column.
     pub(crate) fn reason(&self, source: &str) -> String {
         match self {
             ResolveError::NotFound { hints } if hints.is_empty() => "symbol not found".to_string(),
@@ -101,21 +106,36 @@ impl ResolveError<'_> {
                 let hints: Vec<String> = hints.iter().map(|hint| hint.to_string()).collect();
                 format!("symbol not found; did you mean: {}", hints.join(", "))
             }
-            ResolveError::Ambiguous { candidates } => {
-                // The candidates share one path, and can share a line too, so only a line and a
-                // column tell them apart. Where a candidate is written first is enough for that.
-                let positions: Vec<String> = candidates
-                    .iter()
-                    .map(|candidate| {
-                        let ranges = candidate.position_ranges(source);
-                        let start = &ranges[0].start;
-                        format!("{}:{}", start.line, start.character)
-                    })
-                    .collect();
-                format!("ambiguous symbol, defined at {}", positions.join(", "))
+            ResolveError::AmbiguousSymbol { candidates } => {
+                format!(
+                    "ambiguous symbol, defined at {}",
+                    positions(candidates, source)
+                )
+            }
+            ResolveError::AmbiguousFilter { filter, keys } => {
+                format!(
+                    "{} items match {filter}, at {}",
+                    keys.len(),
+                    positions(keys, source)
+                )
             }
         }
     }
+}
+
+/// Where each of `symbols` is first written in `source`, as `line:column`, joined with `, `.
+fn positions(symbols: &[&Symbol], source: &str) -> String {
+    // Symbols can share a path and a line, so only a line and a column tell them apart. Where a
+    // symbol is first written is enough for that.
+    let positions: Vec<String> = symbols
+        .iter()
+        .map(|symbol| {
+            let ranges = symbol.position_ranges(source);
+            let start = &ranges[0].start;
+            format!("{}:{}", start.line, start.character)
+        })
+        .collect();
+    positions.join(", ")
 }
 
 /// The most hints a path that does not resolve gets.
@@ -132,14 +152,15 @@ const MIN_HINT_SIMILARITY: f64 = 0.6;
 /// matches without its quotes, and any other value as written.
 ///
 /// When no symbol has `path`, the hints are the paths that resemble it: those at least 60% alike
-/// by edit distance, and those that end in the same segment. Their filters are swapped for the
-/// children they matched. When a filter matches no child, the hints are `path` with the filter's
-/// value swapped for the value each child holds.
+/// by edit distance, and those that end in the same segment. When `path` has a filter, they are
+/// only paths under the child that the last filter matched, and they keep every filter as written.
+/// When a filter matches no child, the hints are `path` with the filter's value swapped for a
+/// value that exactly one child holds.
 ///
 /// # Errors
 /// Returns [`ResolveError::NotFound`] when no symbol matches `path`, or a filter matches no child.
-/// Returns [`ResolveError::Ambiguous`] when several symbols match `path`, or a filter matches
-/// several children.
+/// Returns [`ResolveError::AmbiguousSymbol`] when several symbols match `path`, and
+/// [`ResolveError::AmbiguousFilter`] when a filter matches several children.
 pub(crate) fn resolve<'a>(
     symbols: &'a [Symbol],
     path: &SymbolPath,
@@ -151,10 +172,10 @@ pub(crate) fn resolve<'a>(
         .collect();
     match candidates.len() {
         0 => Err(ResolveError::NotFound {
-            hints: hints(symbols.iter().map(|symbol| &symbol.path), &resolved),
+            hints: path_hints(symbols, path, &resolved),
         }),
         1 => Ok(candidates[0]),
-        _ => Err(ResolveError::Ambiguous { candidates }),
+        _ => Err(ResolveError::AmbiguousSymbol { candidates }),
     }
 }
 
@@ -163,7 +184,8 @@ pub(crate) fn resolve<'a>(
 ///
 /// # Errors
 /// Returns [`ResolveError::NotFound`] when a filter matches no child, and
-/// [`ResolveError::Ambiguous`] when it matches several. The error is about the first such filter.
+/// [`ResolveError::AmbiguousFilter`] when it matches several. The error is about the first such
+/// filter.
 fn resolve_filters<'a>(
     symbols: &'a [Symbol],
     path: &SymbolPath,
@@ -199,8 +221,9 @@ fn resolve_filters<'a>(
                 resolved = resolved.with_segment(index, child);
             }
             _ => {
-                return Err(ResolveError::Ambiguous {
-                    candidates: matches,
+                return Err(ResolveError::AmbiguousFilter {
+                    filter: segment.clone(),
+                    keys: matches,
                 });
             }
         }
@@ -227,34 +250,84 @@ fn child_keys<'s>(
     })
 }
 
+/// The paths to suggest when no symbol has `resolved`, which is `path` with its filters swapped
+/// for the children they matched. The most alike come first.
+///
+/// When `path` has a filter, the hints are only paths under the child that the last filter
+/// matched, written with every filter of `path`. Otherwise they come from all of `symbols`.
+fn path_hints(symbols: &[Symbol], path: &SymbolPath, resolved: &SymbolPath) -> Vec<SymbolPath> {
+    let last_filter = path.segments().iter().rposition(|segment| match segment {
+        Segment::Key(_) => false,
+        Segment::Filter { .. } => true,
+    });
+    match last_filter {
+        None => hints(
+            symbols.iter().map(|symbol| &symbol.path),
+            path,
+            MIN_HINT_SIMILARITY,
+        ),
+        Some(last) => {
+            // A path under another child points at an item that the filters did not pick. A
+            // position in place of a filter breaks when an item is added above it.
+            let matched = &resolved.segments()[..=last];
+            let candidates: Vec<SymbolPath> = symbols
+                .iter()
+                .filter(|symbol| symbol.path.segments().starts_with(matched))
+                // The keys up to the last filter are the same in both paths, so only the filters
+                // change.
+                .map(|symbol| {
+                    (0..=last).fold(symbol.path.clone(), |hint, index| {
+                        hint.with_segment(index, path.segments()[index].clone())
+                    })
+                })
+                .collect();
+            hints(&candidates, path, MIN_HINT_SIMILARITY)
+        }
+    }
+}
+
 /// The paths to suggest when the filter at `index` in `path`, on `key`, matches none of `keys`:
-/// `path` with the filter's value swapped for the value each of `keys` holds. The most alike come
-/// first.
+/// `path` with the filter's value swapped for each value that exactly one of `keys` holds. The
+/// most alike come first.
 fn filter_hints<'s>(
     path: &SymbolPath,
     index: usize,
     key: &str,
     keys: impl Iterator<Item = &'s Symbol>,
 ) -> Vec<SymbolPath> {
-    // The hints start from `path`, so the filters before `index` stay as the reference wrote them.
-    let alternatives: Vec<SymbolPath> = keys
+    let values: Vec<&str> = keys
         // A key that holds a list or a map has no value to put in a filter.
         .filter_map(|symbol| symbol.value.as_ref())
-        .map(|held| {
+        .map(|held| held.text.as_str())
+        .collect();
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for value in &values {
+        *counts.entry(value).or_default() += 1;
+    }
+    // A value that several children hold would make the hint match several children too. The
+    // hints start from `path`, so the filters before `index` stay as the reference wrote them.
+    let alternatives: Vec<SymbolPath> = values
+        .iter()
+        .filter(|value| counts[*value] == 1)
+        .map(|value| {
             let filter = Segment::Filter {
                 key: key.to_string(),
-                value: held.text.clone(),
+                value: value.to_string(),
             };
             path.clone().with_segment(index, filter)
         })
         .collect();
-    hints(&alternatives, path)
+    // Each alternative points at a real child and differs from `path` only in the filter's value,
+    // so a similarity cutoff would only drop real choices.
+    hints(&alternatives, path, 0.0)
 }
 
-/// The paths among `candidates` that resemble `path`, the most alike first.
+/// The paths among `candidates` that resemble `path`, the most alike first: those at least
+/// `min_similarity` alike, as a normalized edit distance, and those that end in the same segment.
 fn hints<'p>(
     candidates: impl IntoIterator<Item = &'p SymbolPath>,
     path: &SymbolPath,
+    min_similarity: f64,
 ) -> Vec<SymbolPath> {
     // The paths are compared as written, escapes included, so that a `/` left unescaped in a key
     // reads as a small difference.
@@ -266,8 +339,7 @@ fn hints<'p>(
             (similarity, candidate)
         })
         .filter(|(similarity, candidate)| {
-            *similarity >= MIN_HINT_SIMILARITY
-                || candidate.segments().last() == path.segments().last()
+            *similarity >= min_similarity || candidate.segments().last() == path.segments().last()
         })
         .collect();
     alike.sort_by(|(a, _), (b, _)| b.total_cmp(a));
@@ -930,7 +1002,7 @@ mod resolve_tests {
 
         assert_eq!(
             resolve(&symbols, &path("/v")),
-            Err(ResolveError::Ambiguous {
+            Err(ResolveError::AmbiguousSymbol {
                 candidates: vec![&symbols[0], &symbols[2]]
             })
         );
@@ -1032,8 +1104,9 @@ mod resolve_tests {
 
         assert_eq!(
             resolve(&symbols, &path("/items/~[name=blue]/content")),
-            Err(ResolveError::Ambiguous {
-                candidates: vec![&symbols[0], &symbols[4]]
+            Err(ResolveError::AmbiguousFilter {
+                filter: path("/~[name=blue]").segments()[0].clone(),
+                keys: vec![&symbols[0], &symbols[4]]
             })
         );
     }
@@ -1050,6 +1123,33 @@ mod resolve_tests {
                     path("/items/~[name=blues]/content"),
                     path("/items/~[name=red]/content"),
                 ]
+            })
+        );
+    }
+
+    #[test]
+    fn filter_matching_no_child_leaves_values_of_several_children_out_of_hints() {
+        // `blues` is the most alike value, but two children hold it, so
+        // `/items/~[name=blues]/content` would not resolve either.
+        let symbols = named_items(&["blues", "red", "blues"]);
+
+        assert_eq!(
+            resolve(&symbols, &path("/items/~[name=blue]/content")),
+            Err(ResolveError::NotFound {
+                hints: vec![path("/items/~[name=red]/content")]
+            })
+        );
+    }
+
+    #[test]
+    fn filter_at_the_end_matching_no_child_returns_hints_below_the_similarity_floor() {
+        // `/~[name=crimson]` is 56% alike to `/~[name=blue]`, below the 60% that other hints need.
+        let symbols = [scalar("/0/name", 0, "red"), scalar("/1/name", 1, "crimson")];
+
+        assert_eq!(
+            resolve(&symbols, &path("/~[name=blue]")),
+            Err(ResolveError::NotFound {
+                hints: vec![path("/~[name=red]"), path("/~[name=crimson]")]
             })
         );
     }
@@ -1164,15 +1264,40 @@ mod resolve_tests {
     }
 
     #[test]
-    fn filter_then_missing_key_returns_the_alike_paths_under_the_match_as_hints() {
-        // The hint is alike to `/items/0/contents`, the path with the filter resolved. The path as
-        // written is too long to be 60% alike to it.
-        let symbols = named_items(&["blue"]);
+    fn filter_then_missing_key_returns_hints_only_under_the_matched_child() {
+        // `/items/1/content` is 88% alike to `/items/0/contents`, the path with the filter resolved,
+        // but it belongs to `red`.
+        let symbols = named_items(&["blue", "red"]);
 
         assert_eq!(
             resolve(&symbols, &path("/items/~[name=blue]/contents")),
             Err(ResolveError::NotFound {
-                hints: vec![path("/items/0/content")]
+                hints: vec![
+                    path("/items/~[name=blue]/content"),
+                    path("/items/~[name=blue]/name"),
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn filters_then_missing_key_return_hints_with_every_filter_as_written() {
+        let symbols = [
+            scalar("/groups/0/name", 0, "first"),
+            scalar("/groups/0/items/0/name", 1, "blue"),
+            symbol("/groups/0/items/0/content", 2),
+        ];
+
+        assert_eq!(
+            resolve(
+                &symbols,
+                &path("/groups/~[name=first]/items/~[name=blue]/contents")
+            ),
+            Err(ResolveError::NotFound {
+                hints: vec![
+                    path("/groups/~[name=first]/items/~[name=blue]/content"),
+                    path("/groups/~[name=first]/items/~[name=blue]/name"),
+                ]
             })
         );
     }
@@ -1181,13 +1306,28 @@ mod resolve_tests {
     fn duplicate_keys_on_one_line_reason_lists_each_line_and_column() {
         let source = r#"{"v": 1, "v": 2}"#;
         let symbols = [symbol("/v", 1), symbol("/v", 9)];
-        let error = ResolveError::Ambiguous {
+        let error = ResolveError::AmbiguousSymbol {
             candidates: vec![&symbols[0], &symbols[1]],
         };
 
         assert_eq!(
             error.reason(source),
             "ambiguous symbol, defined at 1:2, 1:10"
+        );
+    }
+
+    #[test]
+    fn ambiguous_filter_reason_counts_the_children_and_lists_where_each_key_is() {
+        let source = "- name: blue\n- name: blue\n";
+        let keys = [symbol("/0/name", 2), symbol("/1/name", 15)];
+        let error = ResolveError::AmbiguousFilter {
+            filter: path("/~[name=blue]").segments()[0].clone(),
+            keys: vec![&keys[0], &keys[1]],
+        };
+
+        assert_eq!(
+            error.reason(source),
+            "2 items match ~[name=blue], at 1:3, 2:3"
         );
     }
 
