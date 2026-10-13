@@ -9,6 +9,7 @@ use crate::validators::{
 };
 use anyhow::{Context, anyhow, bail};
 use globset::{GlobBuilder, GlobMatcher};
+use heck::ToSnakeCase;
 use serde::Serialize;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -505,6 +506,9 @@ enum Format {
     Verbatim,
     /// Parse each item as a number so different spellings (`"10"`, `"10.0"`) compare equal.
     Numeric,
+    /// Split each item into words so naming styles (`"PreExistingFailure"`,
+    /// `"pre-existing-failure"`) compare equal.
+    Identifier,
 }
 
 /// Reads a block's `same-as-format` attribute, defaulting to [`Format::Verbatim`]. An unrecognized
@@ -513,8 +517,9 @@ fn parse_format(block: &Block) -> anyhow::Result<Format> {
     match block.attributes.get("same-as-format").map(String::as_str) {
         None => Ok(Format::Verbatim),
         Some("numeric") => Ok(Format::Numeric),
+        Some("identifier") => Ok(Format::Identifier),
         Some(other) => Err(anyhow!(
-            "invalid same-as-format \"{other}\" (expected numeric)"
+            "invalid same-as-format \"{other}\" (expected numeric or identifier)"
         )),
     }
 }
@@ -524,8 +529,9 @@ fn parse_format(block: &Block) -> anyhow::Result<Format> {
 /// Under [`Format::Numeric`] each item is parsed as a number (see [`parse_number`]) and re-formatted
 /// so that different spellings of the same value (`"10"`, `"10.0"`, `"1_0"`) compare equal; an item
 /// that is not a number yields `Err` with a human-readable reason, which the caller surfaces as a
-/// violation rather than aborting the run. Under [`Format::Verbatim`] the items are returned
-/// unchanged.
+/// violation rather than aborting the run. Under [`Format::Identifier`] each item becomes its
+/// snake_case form (`"HTTPServer"` becomes `"http_server"`) and never fails. Under
+/// [`Format::Verbatim`] the items are returned unchanged.
 ///
 /// Normalizing drops the trailing zeros and the exponent notation that would otherwise leave two
 /// spellings of one value differing as strings.
@@ -540,6 +546,9 @@ fn canonicalize(items: Vec<String>, format: &Format) -> Result<Vec<String>, Stri
                     .ok_or_else(|| format!("same-as-format=numeric but \"{item}\" is not a number"))
             })
             .collect(),
+        // snake_case keeps the word breaks, so a violation message stays readable, and two names
+        // that only split the same letters differently still differ.
+        Format::Identifier => Ok(items.iter().map(|item| item.to_snake_case()).collect()),
     }
 }
 
@@ -1253,6 +1262,69 @@ ids = 1, 2
         assert_eq!(file.len(), 1);
         assert!(
             file[0].message.contains("is not a number"),
+            "unexpected message: {}",
+            file[0].message
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn identifier_format_with_one_name_in_different_styles_returns_no_violations()
+    -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.rs",
+            r#"// <block same-as=":b" same-as-pattern="(?P<value>\w+)," same-as-format="identifier">
+PreExistingFailure,
+ToolBlocked,
+RetryLimit,
+// </block>
+// <block name="b" same-as-pattern="(?P<value>\S+)">
+pre-existing-failure
+TOOL_BLOCKED
+retryLimit
+// </block>
+"#,
+        );
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn identifier_format_with_an_acronym_returns_no_violations() -> anyhow::Result<()> {
+        // A run of capitals is one word, so `HTTP` is not split letter by letter.
+        let context = validation_context(
+            "a.rs",
+            r#"// <block same-as=":b" same-as-format="identifier">
+HTTPServer
+// </block>
+// <block name="b">
+http-server
+// </block>
+"#,
+        );
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn identifier_format_with_words_split_differently_returns_a_violation() -> anyhow::Result<()> {
+        // The same letters split into different words are different names. For example, serde
+        // turns `Signin` into `signin`, so docs that say `sign-in` are wrong.
+        let context = validation_context(
+            "a.rs",
+            r#"// <block same-as=":b" same-as-format="identifier">
+Signin
+// </block>
+// <block name="b">
+sign-in
+// </block>
+"#,
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0].message.contains(r#"["signin"] != ["sign_in"]"#),
             "unexpected message: {}",
             file[0].message
         );

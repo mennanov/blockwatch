@@ -286,6 +286,7 @@ dependencies = [
  "clap",
  "fnv",
  "globset",
+ "heck",
  "ignore",
  "libc",
  "mlua",

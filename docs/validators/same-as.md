@@ -14,7 +14,7 @@ It runs on every scan, with or without a diff.
 | `same-as-paths`   | A [glob](#paths-as-targets) of paths to compare     | —                 |
 | `same-as-pattern` | A regex that picks the values to compare            | the whole content |
 | `same-as-mode`    | `set`, `sequence`, `single` or `subset`             | `set`             |
-| `same-as-format`  | `numeric`                                           | text              |
+| `same-as-format`  | `numeric` or `identifier`                           | text              |
 
 ## Targets
 
@@ -210,6 +210,46 @@ Rust writes `60.0` and TypeScript writes `60`. As numbers they are equal. As tex
 - A number can have a sign, a fraction and an exponent: `-1`, `.5`, `1e9`. `inf` and `NaN` are not numbers here.
 - `_` can separate digits, so Rust's `1_000_000` equals JSON's `1000000`. It must sit between two digits: `_1`, `1_`,
   `1__0` and `1_.0` are not numbers.
+
+## Identifier comparison
+
+`same-as-format="identifier"` splits each value into words and compares the words. So `PreExistingFailure`,
+`pre-existing-failure`, `pre_existing_failure` and `PRE_EXISTING_FAILURE` are equal.
+
+This helps when one name is written in a different style on each side. Here a Rust enum is sent as kebab-case, and the
+docs list the values it sends:
+
+**src/report.rs**:
+
+```rust
+#[derive(serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Category {
+    // <block same-as="docs/report.md:categories" same-as-format="identifier" same-as-pattern="^(?P<value>\w+),$">
+    PreExistingFailure,
+    ToolBlocked,
+    // </block>
+}
+```
+
+**docs/report.md**:
+
+```markdown
+<!-- <block name="categories" same-as-pattern="`(?P<value>[a-z-]+)`"> -->
+- `pre-existing-failure`
+- `tool-blocked`
+<!-- </block> -->
+```
+
+- **Words break at a change from lower case to upper case,** and at any character that is not a letter or a digit,
+  such as `_`, `-`, `.` or a space.
+- **A run of capitals is one word.** `HTTPServer` is `http server`, so it equals `http-server`. serde writes
+  `HTTPServer` as `h-t-t-p-server`, and that does not equal `HTTPServer`. Write `HttpServer` instead.
+- **A digit stays in the word before it.** `Version2` equals `version2`, but not `version_2`.
+- **Where the words break counts.** `Signin` and `sign-in` are not equal.
+- **The style itself is not checked.** If the docs said `pre_existing_failure`, the words would still match. To catch
+  that, let the pattern match only one style. Above, `[a-z-]+` doesn't match `_`, so that value would be missing.
+- **Messages show each value in snake_case,** such as `pre_existing_failure`, because that is what is compared.
 
 ## Notes
 

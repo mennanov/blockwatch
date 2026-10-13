@@ -19,6 +19,10 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   picks the names from both the block and the paths. See
   [Paths as targets](docs/validators/same-as.md#paths-as-targets)
   ([#161](https://github.com/mennanov/blockwatch/issues/161)).
+- `same-as-format="identifier"` compares names written in different styles. So `PreExistingFailure` equals
+  `pre-existing-failure`, `pre_existing_failure` and `PRE_EXISTING_FAILURE`. See
+  [Identifier comparison](docs/validators/same-as.md#identifier-comparison)
+  ([#164](https://github.com/mennanov/blockwatch/issues/164)).
 
 ## [0.10.2] - 2026-10-12
 
