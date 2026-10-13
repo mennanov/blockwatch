@@ -18,6 +18,10 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   `plugins/*/package.json#/version`. The entry then declares a block in each file that matches, so a plugin added later
   gets the rule too. A glob that matches no file stops the run. See [Glob targets](docs/cli.md#glob-targets)
   ([#167](https://github.com/mennanov/blockwatch/issues/167)).
+- `same-as-format="flat"` compares names whose words break in different places, or not at all. It keeps only the
+  lower-cased letters and digits, so `CronTab` equals `crontab`, `cron-tab` and `CRON_TAB`. See
+  [Flat comparison](docs/validators/same-as.md#flat-comparison)
+  ([#168](https://github.com/mennanov/blockwatch/issues/168)).
 - blockwatch now checks more file types with the grammars it already has. Before, it skipped them, so their tags were
   never checked. A mapping set with `-E` or in `blockwatch.toml` still wins.
   - Bash: `.zsh`, `.bashrc`, `.bash_profile`, `.zshrc`, `.envrc`

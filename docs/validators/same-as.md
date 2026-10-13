@@ -14,7 +14,7 @@ It runs on every scan, with or without a diff.
 | `same-as-paths`   | A [glob](#paths-as-targets) of paths to compare     | —                 |
 | `same-as-pattern` | A regex that picks the values to compare            | the whole content |
 | `same-as-mode`    | `set`, `sequence`, `single` or `subset`             | `set`             |
-| `same-as-format`  | `numeric` or `identifier`                           | text              |
+| `same-as-format`  | `numeric`, `identifier` or `flat`                   | text              |
 
 ## Targets
 
@@ -246,10 +246,48 @@ pub enum Category {
 - **A run of capitals is one word.** `HTTPServer` is `http server`, so it equals `http-server`. serde writes
   `HTTPServer` as `h-t-t-p-server`, and that does not equal `HTTPServer`. Write `HttpServer` instead.
 - **A digit stays in the word before it.** `Version2` equals `version2`, but not `version_2`.
-- **Where the words break counts.** `Signin` and `sign-in` are not equal.
+- **Where the words break counts.** `Signin` and `sign-in` are not equal. To ignore it, use
+  [`flat`](#flat-comparison).
 - **The style itself is not checked.** If the docs said `pre_existing_failure`, the words would still match. To catch
   that, let the pattern match only one style. Above, `[a-z-]+` doesn't match `_`, so that value would be missing.
 - **Messages show each value in snake_case,** such as `pre_existing_failure`, because that is what is compared.
+
+## Flat comparison
+
+`same-as-format="flat"` lower-cases each value and drops every character that is not a letter or a digit. So
+`CronTab`, `cron-tab`, `CRON_TAB` and `crontab` all compare as `crontab`.
+
+This helps when one side writes a name with no word breaks at all. Here a list of Kubernetes kinds is in CamelCase, and
+the manifest files that define them use the lower-case plural:
+
+**src/kinds.rs**:
+
+```rust
+pub const KINDS: &[&str] = &[
+    // <block same-as="deploy/kustomization.yaml:crds" same-as-format="flat" same-as-pattern='"(?P<value>\w+)"'>
+    "CronTab",
+    "DataSource",
+    // </block>
+];
+```
+
+**deploy/kustomization.yaml**:
+
+```yaml
+resources:
+  # <block name="crds" same-as-pattern="crds/(?P<value>[a-z]+?)s?\.yaml">
+  - crds/crontabs.yaml
+  - crds/datasources.yaml
+  # </block>
+```
+
+The YAML pattern drops the plural `s`: `[a-z]+?` takes as few letters as it can, so `s?` gets the `s`. It only drops a
+plain `s`, so `policies.yaml` gives `policie`, which doesn't equal `Policy`.
+
+- **Where the words break doesn't count.** `Signin` equals `sign-in`. When both sides write the word breaks, use
+  [`identifier`](#identifier-comparison), which catches `Signin` against `sign-in`.
+- **Digits and accents count.** `Version2` equals `version-2`, but not `version`. `CAFÉ` equals `café`, but not `cafe`.
+- **Messages show each value as it is compared,** such as `crontab`.
 
 ## Notes
 

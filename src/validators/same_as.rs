@@ -443,6 +443,9 @@ enum Format {
     /// Split each item into words so naming styles (`"PreExistingFailure"`,
     /// `"pre-existing-failure"`) compare equal.
     Identifier,
+    /// Keep only the lower-cased letters and digits of each item, so names whose words break in
+    /// different places (`"DarkRed"`, `"darkred"`) compare equal.
+    Flat,
 }
 
 /// Reads a block's `same-as-format` attribute, defaulting to [`Format::Verbatim`]. An unrecognized
@@ -452,8 +455,9 @@ fn parse_format(block: &Block) -> anyhow::Result<Format> {
         None => Ok(Format::Verbatim),
         Some("numeric") => Ok(Format::Numeric),
         Some("identifier") => Ok(Format::Identifier),
+        Some("flat") => Ok(Format::Flat),
         Some(other) => Err(anyhow!(
-            "invalid same-as-format \"{other}\" (expected numeric or identifier)"
+            "invalid same-as-format \"{other}\" (expected numeric, identifier or flat)"
         )),
     }
 }
@@ -464,8 +468,9 @@ fn parse_format(block: &Block) -> anyhow::Result<Format> {
 /// so that different spellings of the same value (`"10"`, `"10.0"`, `"1_0"`) compare equal; an item
 /// that is not a number yields `Err` with a human-readable reason, which the caller surfaces as a
 /// violation rather than aborting the run. Under [`Format::Identifier`] each item becomes its
-/// snake_case form (`"HTTPServer"` becomes `"http_server"`) and never fails. Under
-/// [`Format::Verbatim`] the items are returned unchanged.
+/// snake_case form (`"HTTPServer"` becomes `"http_server"`) and never fails. Under [`Format::Flat`]
+/// each item keeps only its lower-cased letters and digits (`"Sign-In"` becomes `"signin"`) and
+/// never fails. Under [`Format::Verbatim`] the items are returned unchanged.
 ///
 /// Normalizing drops the trailing zeros and the exponent notation that would otherwise leave two
 /// spellings of one value differing as strings.
@@ -483,6 +488,15 @@ fn canonicalize(items: Vec<String>, format: &Format) -> Result<Vec<String>, Stri
         // snake_case keeps the word breaks, so a violation message stays readable, and two names
         // that only split the same letters differently still differ.
         Format::Identifier => Ok(items.iter().map(|item| item.to_snake_case()).collect()),
+        Format::Flat => Ok(items
+            .iter()
+            .map(|item| {
+                item.chars()
+                    .filter(|c| c.is_alphanumeric())
+                    .flat_map(char::to_lowercase)
+                    .collect()
+            })
+            .collect()),
     }
 }
 
@@ -1259,6 +1273,89 @@ sign-in
         assert_eq!(file.len(), 1);
         assert!(
             file[0].message.contains(r#"["signin"] != ["sign_in"]"#),
+            "unexpected message: {}",
+            file[0].message
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn flat_format_with_one_name_in_different_styles_returns_no_violations() -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.rs",
+            r#"// <block same-as=":b" same-as-pattern="(?P<value>\w+)," same-as-format="flat">
+DarkRed,
+LightBlue,
+PaleGreen,
+// </block>
+// <block name="b" same-as-pattern="(?P<value>\S+)">
+darkred
+light-blue
+PALE_GREEN
+// </block>
+"#,
+        );
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn flat_format_with_words_split_differently_returns_no_violations() -> anyhow::Result<()> {
+        // Unlike `same-as-format="identifier"`, where the words break doesn't count.
+        let context = validation_context(
+            "a.rs",
+            r#"// <block same-as=":b" same-as-format="flat">
+Signin
+// </block>
+// <block name="b">
+sign-in
+// </block>
+"#,
+        );
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn flat_format_with_a_missing_digit_returns_a_violation() -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.rs",
+            r#"// <block same-as=":b" same-as-format="flat">
+DarkRed2
+// </block>
+// <block name="b">
+dark-red
+// </block>
+"#,
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0].message.contains(r#"["darkred2"] != ["darkred"]"#),
+            "unexpected message: {}",
+            file[0].message
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn flat_format_with_a_missing_accent_returns_a_violation() -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.rs",
+            r#"// <block same-as=":b" same-as-format="flat">
+CAFÉ
+// </block>
+// <block name="b">
+cafe
+// </block>
+"#,
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0].message.contains(r#"["café"] != ["cafe"]"#),
             "unexpected message: {}",
             file[0].message
         );
