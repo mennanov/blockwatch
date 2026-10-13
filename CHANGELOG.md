@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.10.3] - 2026-10-13
+
 ### Added
 
 - `same-as-paths="services/*/"` compares a block with the paths in the repository that match a glob. So a list in the
