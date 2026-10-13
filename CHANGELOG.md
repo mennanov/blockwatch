@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.10.4] - 2026-10-13
+
 ### Added
 
 - A symbol path can pick a list item by the value of one of its keys, not only by its position:
