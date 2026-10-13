@@ -182,8 +182,9 @@ disable = ['check-ai']
 cxx = 'cpp'
 ```
 
-The config file can also declare [blocks around a key](docs/cli.md#blocks-in-the-config-file) in a JSON, TOML, or YAML
-file instead of using comment tags. That is how files without comment support, such as `package.json`, get rules.
+The config file can also declare [blocks](docs/cli.md#blocks-in-the-config-file) instead of comment tags: around a key
+in a JSON, TOML, or YAML file, around the text a regex matches, or around a whole file. That is how a file that can't
+hold a tag gets rules, such as `package.json`, a prompt, or a module that a build copies as it is.
 
 To keep a known violation from failing the run without editing the source, pass its `address` from the output to
 `--suppress`. The violation is still reported. For the failure in [How it works](#how-it-works):
@@ -287,10 +288,6 @@ blockwatch -E cxx=cpp -E hpp=cpp
 - **Deleting a block deletes its rule, quietly.** If you delete a file or strip its tags, its rules are gone. The run
   passes without warning you that a rule disappeared. Blocks still *pointing* at the deleted one do fail, as a missing
   reference.
-- **A file needs comments or symbols to hold a block.** Files like CSV and `.env` have nowhere to put a tag. Link to
-  such a file as a [whole file](docs/validators/affects.md#whole-files) instead. For files with
-  [symbols](docs/symbols.md), like plain JSON, you can define blocks in the
-  [config file](docs/cli.md#blocks-in-the-config-file).
 - **A file with blocks must be UTF-8.** A file in another encoding, such as Latin-1, is skipped if it has no blocks. If
   it has blocks, the run fails and shows the file. A UTF-16 file is skipped even when it has tags, because blockwatch
   can't find them.

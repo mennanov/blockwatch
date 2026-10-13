@@ -278,6 +278,7 @@ fn build_context(
                 &path_checker,
                 &language_parsers,
                 settings.extensions(),
+                &virtual_blocks,
             )))?
         }
     }

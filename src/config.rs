@@ -8,7 +8,7 @@ use crate::settings::RawSettings;
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{self, Symbol};
 use crate::validators::{TargetReference, parse_single_reference};
-use crate::virtual_blocks::{ConfigEntry, VirtualBlock};
+use crate::virtual_blocks::{ConfigEntry, Locator, TargetPattern, VirtualBlock};
 use anyhow::{Context, anyhow, bail};
 use serde::Deserialize;
 use serde::de::IgnoredAny;
@@ -56,8 +56,13 @@ struct ConfigFile {
 /// A `[[block]]` entry, as written.
 #[derive(Deserialize)]
 struct BlockEntry {
-    /// The symbol the block wraps, such as `package.json#/version`.
+    /// The file the block is in, such as `settings.py`, or a symbol in a file, such as
+    /// `package.json#/version`.
     target: String,
+    /// The regex that finds the block in the `target` file, such as `^MODEL = .*`. Without it,
+    /// the block is the whole file.
+    #[serde(rename = "target-pattern")]
+    target_pattern: Option<String>,
     /// Every other key: the block's attributes.
     // `deny_unknown_fields` does not work with `flatten`, so an unknown attribute is caught by the
     // same check that tags go through.
@@ -195,20 +200,25 @@ fn virtual_blocks(
             .context(context)
         })
         .collect::<anyhow::Result<_>>()?;
-    reject_second_blocks(&blocks)?;
+    reject_duplicate_blocks(&blocks)?;
     Ok(blocks)
 }
 
-/// Rejects a block whose symbol already has a block earlier in `blocks`.
+/// Rejects a block with the same file and locator as a block earlier in `blocks`.
 ///
 /// # Errors
 /// Returns an error that shows the line of the second block's entry and of the first one.
-fn reject_second_blocks(blocks: &[VirtualBlock]) -> anyhow::Result<()> {
-    // A symbol has at most one block, as all its rules fit in one. Allowing more blocks later
-    // breaks no config, while forbidding them later would.
+// A `Regex` keeps a cache that it changes as it runs, so the lint calls the key mutable. But a
+// `TargetPattern` is hashed and compared by its text, which never changes.
+#[allow(clippy::mutable_key_type)]
+fn reject_duplicate_blocks(blocks: &[VirtualBlock]) -> anyhow::Result<()> {
+    // A symbol, a pattern or a whole file has at most one block, as all its rules fit in one.
+    // Allowing more blocks later breaks no config, while forbidding them later would.
     let mut first_lines = HashMap::new();
     for block in blocks {
-        if let Some(first_line) = first_lines.insert((&block.file, &block.path), block.entry.line) {
+        if let Some(first_line) =
+            first_lines.insert((&block.file, &block.locator), block.entry.line)
+        {
             return Err(anyhow!(
                 "target {} already has the block at line {first_line}",
                 block.target()
@@ -242,31 +252,74 @@ fn is_entry_modified(
 /// in `file_system` becomes the file it points at.
 ///
 /// # Errors
-/// Returns an error if the target is not a symbol in a file, or if an attribute is not one a tag
-/// can have, or has a value that is not a string, `true` or an integer.
+/// Returns an error if:
+/// - the target is not a file or a symbol in a file;
+/// - `target-pattern` comes with a symbol, or is not a valid regex;
+/// - an attribute is not one a tag can have, or has a value that is not a string, `true` or an
+///   integer.
 fn virtual_block(
     block_entry: BlockEntry,
     entry: ConfigEntry,
     is_entry_modified: bool,
     file_system: &impl FileSystem,
 ) -> anyhow::Result<VirtualBlock> {
-    let (file, path) = match parse_single_reference(&block_entry.target)? {
-        TargetReference::Symbol {
-            file: Some(file),
-            path,
-        } => (file, path),
-        TargetReference::Symbol { file: None, .. }
-        | TargetReference::Block { .. }
-        | TargetReference::File(_) => bail!(
-            "target `{}` must be a symbol in a file, such as `package.json#/version`",
-            block_entry.target
-        ),
-    };
+    let (file, locator) = parse_target(&block_entry.target, block_entry.target_pattern)?;
     // The walk skips a symlink, so a block on one would never be checked. A file that doesn't
     // resolve is kept as written, so the error about it shows the path from the config.
     let file = file_system.repo_path(file.as_path()).unwrap_or(file);
-    let attributes = block_entry
-        .attributes
+    let attributes = attributes_as_text(block_entry.attributes)?;
+    validate_attributes(&attributes)?;
+    Ok(VirtualBlock {
+        file,
+        locator,
+        attributes,
+        entry,
+        is_entry_modified,
+    })
+}
+
+/// Returns the file that `target` refers to, and how to find the block in it: the symbol of
+/// `target`, the text that `target_pattern` matches, or else the whole file.
+///
+/// # Errors
+/// Returns an error if `target` is not a file or a symbol in a file, or if `target_pattern` comes
+/// with a symbol or is not a valid regex.
+fn parse_target(
+    target: &str,
+    target_pattern: Option<String>,
+) -> anyhow::Result<(RepoPath, Locator)> {
+    Ok(match (parse_single_reference(target)?, target_pattern) {
+        (
+            TargetReference::Symbol {
+                file: Some(file),
+                path,
+            },
+            None,
+        ) => (file, Locator::Symbol(path)),
+        (TargetReference::File(file), None) => (file, Locator::File),
+        // The block is found only when its file is read. A bad regex fails here, so that it fails
+        // every run.
+        (TargetReference::File(file), Some(pattern)) => {
+            (file, Locator::Pattern(TargetPattern::new(&pattern)?))
+        }
+        (TargetReference::Symbol { file: Some(_), .. }, Some(_)) => {
+            bail!("`target-pattern` needs a whole file as `target`, such as `settings.py`")
+        }
+        (TargetReference::Symbol { file: None, .. } | TargetReference::Block { .. }, _) => bail!(
+            "target `{target}` must be a file or a symbol in a file, such as `settings.py` or \
+             `package.json#/version`"
+        ),
+    })
+}
+
+/// Returns `attributes` with each value as the text a tag would give it.
+///
+/// # Errors
+/// Returns an error for a value that is not a string, `true` or an integer.
+fn attributes_as_text(
+    attributes: HashMap<String, AttributeValue>,
+) -> anyhow::Result<HashMap<String, String>> {
+    attributes
         .into_iter()
         .map(|(name, value)| {
             let text = match value {
@@ -280,15 +333,7 @@ fn virtual_block(
             };
             Ok((name, text))
         })
-        .collect::<anyhow::Result<_>>()?;
-    validate_attributes(&attributes)?;
-    Ok(VirtualBlock {
-        file,
-        path,
-        attributes,
-        entry,
-        is_entry_modified,
-    })
+        .collect()
 }
 
 #[cfg(test)]
@@ -345,7 +390,7 @@ target = 'a.yaml#/b'
             vec![
                 VirtualBlock {
                     file: RepoPath::from_reference("package.json")?,
-                    path: SymbolPath::parse("/version")?,
+                    locator: Locator::Symbol(SymbolPath::parse("/version")?),
                     attributes: HashMap::from([
                         ("name".to_string(), "version".to_string()),
                         ("keep-unique".to_string(), String::new()),
@@ -359,7 +404,7 @@ target = 'a.yaml#/b'
                 },
                 VirtualBlock {
                     file: RepoPath::from_reference("a.yaml")?,
-                    path: SymbolPath::parse("/b")?,
+                    locator: Locator::Symbol(SymbolPath::parse("/b")?),
                     attributes: HashMap::new(),
                     entry: ConfigEntry {
                         file: PathBuf::from(DEFAULT_FILE),
@@ -367,6 +412,38 @@ target = 'a.yaml#/b'
                     },
                     is_entry_modified: false,
                 },
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn file_target_read_wraps_the_whole_file_or_the_target_pattern_match() -> anyhow::Result<()> {
+        let text = r"[[block]]
+target = 'settings.py'
+
+[[block]]
+target = 'settings.py'
+target-pattern = '^MODEL = .*'
+";
+
+        let config = read_text(text)?;
+
+        // `target-pattern` is not an attribute.
+        let blocks: Vec<(&str, &Locator, usize)> = config
+            .blocks
+            .iter()
+            .map(|block| (block.file.as_str(), &block.locator, block.attributes.len()))
+            .collect();
+        assert_eq!(
+            blocks,
+            [
+                ("settings.py", &Locator::File, 0),
+                (
+                    "settings.py",
+                    &Locator::Pattern(TargetPattern::new("^MODEL = .*")?),
+                    0
+                ),
             ]
         );
         Ok(())
@@ -457,7 +534,7 @@ target = 'a.json#/b'
     }
 
     #[test]
-    fn second_block_for_a_symbol_is_rejected() {
+    fn duplicate_block_for_a_symbol_is_rejected() {
         // `./package.json` is another spelling of the same file.
         let text = r"[[block]]
 target = 'package.json#/version'
@@ -476,8 +553,27 @@ name = 'version'
     }
 
     #[test]
-    fn blocks_for_other_symbols_are_accepted() -> anyhow::Result<()> {
-        // Each target shares its file or its path with another one, but not both.
+    fn duplicate_block_with_the_same_file_and_pattern_is_rejected() {
+        let text = r"[[block]]
+target = 'settings.py'
+target-pattern = '^MODEL = .*'
+
+[[block]]
+target = 'settings.py'
+target-pattern = '^MODEL = .*'
+";
+
+        assert_eq!(
+            read_error(text),
+            "invalid block at line 5 of \"blockwatch.toml\": target settings.py already has the \
+             block at line 1"
+        );
+    }
+
+    #[test]
+    fn blocks_with_different_targets_or_patterns_are_accepted() -> anyhow::Result<()> {
+        // Each target shares its file or its path with another one, but not both. The last three
+        // share their file, but each finds a different part of it.
         let text = r"[[block]]
 target = 'a.json#/x'
 
@@ -486,17 +582,28 @@ target = 'a.json#/y'
 
 [[block]]
 target = 'b.json#/x'
+
+[[block]]
+target = 'settings.py'
+
+[[block]]
+target = 'settings.py'
+target-pattern = '^A = .*'
+
+[[block]]
+target = 'settings.py'
+target-pattern = '^B = .*'
 ";
 
         let config = read_text(text)?;
 
-        assert_eq!(config.blocks.len(), 3);
+        assert_eq!(config.blocks.len(), 6);
         Ok(())
     }
 
     #[test]
-    fn target_that_is_not_a_symbol_in_a_file_is_rejected() {
-        for target in ["#/x", "a.md:name", "a.json"] {
+    fn target_that_is_not_a_file_or_a_symbol_in_a_file_is_rejected() {
+        for target in ["#/x", "a.md:name"] {
             let text = format!(
                 r"[[block]]
 target = '{target}'
@@ -507,10 +614,42 @@ target = '{target}'
                 read_error(&text),
                 format!(
                     "invalid block at line 1 of \"blockwatch.toml\": target `{target}` must be a \
-                     symbol in a file, such as `package.json#/version`"
+                     file or a symbol in a file, such as `settings.py` or `package.json#/version`"
                 )
             );
         }
+    }
+
+    #[test]
+    fn target_pattern_with_a_symbol_target_is_rejected() {
+        let text = r"[[block]]
+target = 'package.json#/version'
+target-pattern = '^1'
+";
+
+        assert_eq!(
+            read_error(text),
+            "invalid block at line 1 of \"blockwatch.toml\": `target-pattern` needs a whole file \
+             as `target`, such as `settings.py`"
+        );
+    }
+
+    #[test]
+    fn target_pattern_that_is_not_a_regex_is_rejected() {
+        let text = r"[[block]]
+target = 'settings.py'
+target-pattern = '('
+";
+
+        let error = read_error(text);
+
+        assert!(
+            error.starts_with(
+                "invalid block at line 1 of \"blockwatch.toml\": invalid `target-pattern`: regex \
+                 parse error"
+            ),
+            "{error}"
+        );
     }
 
     #[test]

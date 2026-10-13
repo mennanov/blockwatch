@@ -3,7 +3,7 @@ use crate::diff_parser::{self, LineChange, LineChangeKind};
 use crate::fs::{FileSystem, PathChecker};
 use crate::language_parsers::{LanguageParsers, SharedLanguageParser};
 use crate::repo_path::RepoPath;
-use crate::virtual_blocks::{ConfigEntry, VirtualBlock};
+use crate::virtual_blocks::{ConfigEntry, Locator, VirtualBlock};
 use anyhow::{Context, anyhow, bail};
 use serde_repr::Serialize_repr;
 use std::cmp::Ordering;
@@ -558,21 +558,27 @@ fn parse_all_files(
 }
 
 /// The files of the walk that a run can check, in walk order: those that `path_checker` doesn't
-/// ignore and that have a parser. The allow globs are not applied, and no file is read. An error
-/// from the walk comes through as an `Err` item.
+/// ignore and that have a parser or one of `virtual_blocks`. The allow globs are not applied, and
+/// no file is read. An error from the walk comes through as an `Err` item.
 pub(crate) fn checkable_files<'a>(
     file_system: &'a impl FileSystem,
     path_checker: &'a impl PathChecker,
     parsers: &'a LanguageParsers,
     extra_file_extensions: &'a HashMap<OsString, OsString>,
+    virtual_blocks: &'a [VirtualBlock],
 ) -> impl Iterator<Item = anyhow::Result<RepoPath>> + 'a {
+    let virtual_block_files: HashSet<&RepoPath> = virtual_blocks
+        .iter()
+        .map(|virtual_block| &virtual_block.file)
+        .collect();
     file_system
         .walk(None)
         .filter(move |file_path| match file_path {
             Ok(file_path) => {
                 !path_checker.should_ignore(file_path)
-                    && parser_for_file_path(file_path.as_path(), parsers, extra_file_extensions)
+                    && (parser_for_file_path(file_path.as_path(), parsers, extra_file_extensions)
                         .is_some()
+                        || virtual_block_files.contains(file_path))
             }
             Err(_) => true,
         })
@@ -620,7 +626,8 @@ fn parse_changed_files(
         )
         .map_err(|error| {
             // Only a file this run validates reaches a read: filtered-out paths are skipped above,
-            // and one with no language parser returns before its contents are read.
+            // and one with no language parser and no virtual blocks returns before its contents
+            // are read.
             if file_system.exists(file_path.as_path()) {
                 error
             } else {
@@ -667,8 +674,9 @@ fn modified_blocks(block: &BlockWithContext) -> bool {
 
 /// Parses the blocks of one file, marking the ones `line_changes` touched and keeping those
 /// `block_predicate` selects. The blocks come in source order, the `virtual_blocks` of the file
-/// among its tags. Returns `None` for unsupported file extensions. For a file that is not valid
-/// UTF-8 but has no blocks, returns no blocks and an empty text.
+/// among its tags. A file without a parser has no tags, only its `virtual_blocks`. Returns `None`
+/// for a file with neither a parser nor `virtual_blocks`. For a file that is not valid UTF-8 but
+/// has no blocks, returns no blocks and an empty text.
 ///
 /// # Errors
 /// Returns an error if the file can't be read, if it is not valid UTF-8 and has blocks, if a tag
@@ -683,17 +691,10 @@ pub(crate) fn parse_file(
     extra_file_extensions: &HashMap<OsString, OsString>,
     virtual_blocks: &[&VirtualBlock],
 ) -> anyhow::Result<Option<FileBlocks>> {
-    let parser = match (
-        parser_for_file_path(file_path, parsers, extra_file_extensions),
-        virtual_blocks,
-    ) {
-        (Some(parser), _) => parser,
-        (None, []) => return Ok(None),
-        // A virtual block needs the symbols of its file, and a file without a parser has none.
-        (None, [virtual_block, ..]) => {
-            return Err(virtual_block.unresolved(anyhow!("file format is unsupported")));
-        }
-    };
+    let parser = parser_for_file_path(file_path, parsers, extra_file_extensions);
+    if parser.is_none() && virtual_blocks.is_empty() {
+        return Ok(None);
+    }
     let source_code = match String::from_utf8(file_system.read(file_path)?) {
         Ok(source_code) => source_code,
         // The replaced bytes would change what a rule compares, so a block here can't be checked.
@@ -725,37 +726,40 @@ pub(crate) fn parse_file(
 }
 
 /// Whether a file that is not valid UTF-8 has blocks: one of its `virtual_blocks`, or a tag in
-/// `bytes`, the contents of `file_path`. A tag that doesn't parse counts as a block.
+/// `bytes`, the contents of `file_path`. A tag that doesn't parse counts as a block. A file
+/// without a `parser` has no tags.
 fn non_utf8_file_has_blocks(
-    parser: &SharedLanguageParser,
+    parser: Option<&SharedLanguageParser>,
     file_path: &Path,
     bytes: &[u8],
     virtual_blocks: &[&VirtualBlock],
 ) -> bool {
-    // Tags are ASCII. So in an encoding such as Latin-1 they are still found after the other bytes
-    // are replaced. In UTF-16 they are never found.
-    let text = String::from_utf8_lossy(bytes);
     !virtual_blocks.is_empty()
-        || !tag_blocks(
-            parser,
-            file_path,
-            &text,
-            &[],
-            &every_block,
-            &mut HashMap::new(),
-        )
-        .is_ok_and(|tags| tags.is_empty())
+        || parser.is_some_and(|parser| {
+            // Tags are ASCII. So in an encoding such as Latin-1 they are still found after the
+            // other bytes are replaced. In UTF-16 they are never found.
+            let text = String::from_utf8_lossy(bytes);
+            !tag_blocks(
+                parser,
+                file_path,
+                &text,
+                &[],
+                &every_block,
+                &mut HashMap::new(),
+            )
+            .is_ok_and(|tags| tags.is_empty())
+        })
 }
 
 /// Parses the blocks of `source_code`, the text of `file_path`: its tags and its
 /// `virtual_blocks`. Marks the ones `line_changes` touched and keeps those `block_predicate`
-/// selects, in source order.
+/// selects, in source order. Without a `parser`, the file has no tags.
 ///
 /// # Errors
 /// Returns an error if a tag is malformed or a name is used twice, or if a virtual block's target
 /// does not resolve in the file.
 fn parse_source(
-    parser: &SharedLanguageParser,
+    parser: Option<&SharedLanguageParser>,
     file_path: &Path,
     source_code: String,
     line_changes: &[LineChange],
@@ -764,14 +768,18 @@ fn parse_source(
 ) -> anyhow::Result<FileBlocks> {
     // Tracks where each name in this file is first declared, to reject duplicate blocks.
     let mut names_seen = HashMap::new();
-    let mut blocks_with_context = tag_blocks(
-        parser,
-        file_path,
-        &source_code,
-        line_changes,
-        block_predicate,
-        &mut names_seen,
-    )?;
+    let mut blocks_with_context = match parser {
+        Some(parser) => tag_blocks(
+            parser,
+            file_path,
+            &source_code,
+            line_changes,
+            block_predicate,
+            &mut names_seen,
+        )?,
+        // Tags are found in the file's comments, and only a parser knows how a comment is written.
+        None => Vec::new(),
+    };
     blocks_with_context.extend(virtual_blocks_in_file(
         virtual_blocks,
         parser,
@@ -845,29 +853,39 @@ fn tag_blocks(
 /// `virtual_blocks`, and records every block's name in `names_seen`.
 ///
 /// # Errors
-/// Returns an error if the file has no symbols or a syntax error, if a target does not resolve,
-/// or if a block has a name that `names_seen` already holds.
+/// Returns an error if a block wraps a symbol and the file has no parser, no symbols or a syntax
+/// error, if a target does not resolve, or if a block has a name that `names_seen` already holds.
 fn virtual_blocks_in_file(
     virtual_blocks: &[&VirtualBlock],
-    parser: &SharedLanguageParser,
+    parser: Option<&SharedLanguageParser>,
     file_path: &Path,
     source: &str,
     line_changes: &[LineChange],
     block_predicate: &impl Fn(&BlockWithContext) -> bool,
     names_seen: &mut HashMap<String, String>,
 ) -> anyhow::Result<Vec<BlockWithContext>> {
-    // Without virtual blocks the file's symbols are not needed, and a language that has none
-    // must not fail.
-    let [first, ..] = virtual_blocks else {
-        return Ok(Vec::new());
-    };
+    // Only a block that wraps a symbol needs the file's symbols. A language without symbols must
+    // not fail the other blocks.
+    let first_symbol_block =
+        virtual_blocks
+            .iter()
+            .find(|virtual_block| match virtual_block.locator {
+                Locator::Symbol(_) => true,
+                Locator::Pattern(_) | Locator::File => false,
+            });
     // The file's symbols are the same for each of its virtual blocks. So is the error when they
-    // can't be found, which then shows the first block.
-    let symbols = parser
-        .lock()
-        .expect("no active locks")
-        .parse_symbols(source)
-        .map_err(|error| first.unresolved(error))?;
+    // can't be found, which then shows the first block that needs them.
+    let symbols = match (first_symbol_block, parser) {
+        (None, _) => Vec::new(),
+        (Some(first), Some(parser)) => parser
+            .lock()
+            .expect("no active locks")
+            .parse_symbols(source)
+            .map_err(|error| first.unresolved(error))?,
+        (Some(first), None) => {
+            return Err(first.unresolved(anyhow!("file format is unsupported")));
+        }
+    };
     let mut blocks_with_context = Vec::new();
     for virtual_block in virtual_blocks {
         let block_with_context = virtual_block.resolve(&symbols, source, line_changes)?;
@@ -1215,6 +1233,7 @@ mod parse_blocks_tests {
             &path_checker,
             &language_parsers()?,
             &HashMap::new(),
+            &[],
         )
         .collect::<anyhow::Result<Vec<_>>>()?;
 
@@ -1235,6 +1254,7 @@ mod parse_blocks_tests {
             &FakePathChecker::allow_all(),
             &language_parsers()?,
             &HashMap::new(),
+            &[],
         )
         .collect::<anyhow::Result<Vec<_>>>();
 
@@ -2601,8 +2621,69 @@ mod parse_blocks_tests {
     }
 
     #[test]
+    fn target_file_without_a_parser_parse_blocks_reads_its_whole_file_block() -> anyhow::Result<()>
+    {
+        let virtual_blocks = [test_utils::virtual_block(
+            "notes.txt",
+            &[("name", "notes")],
+        )?];
+
+        let blocks = parse_with_virtual_blocks(
+            &[("notes.txt", "x\n")],
+            &FakePathChecker::allow_all(),
+            &virtual_blocks,
+        )?;
+
+        let names: Vec<Option<&str>> = blocks[&RepoPath::from_reference("notes.txt")?]
+            .blocks_with_context
+            .iter()
+            .map(|block_with_context| block_with_context.block.name())
+            .collect();
+        assert_eq!(names, [Some("notes")]);
+        Ok(())
+    }
+
+    #[test]
+    fn target_file_without_symbols_parse_blocks_reads_its_whole_file_block() -> anyhow::Result<()> {
+        let virtual_blocks = [test_utils::virtual_block("a.py", &[("name", "a")])?];
+
+        let blocks = parse_with_virtual_blocks(
+            &[("a.py", "x = 1\n")],
+            &FakePathChecker::allow_all(),
+            &virtual_blocks,
+        )?;
+
+        assert_eq!(
+            blocks[&RepoPath::from_reference("a.py")?].blocks_with_context[0]
+                .block
+                .name(),
+            Some("a")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn virtual_block_in_a_file_without_a_parser_non_utf8_file_has_blocks_returns_true()
+    -> anyhow::Result<()> {
+        let virtual_block = test_utils::virtual_block("notes.txt", &[])?;
+
+        // `é` in Latin-1 is the single byte 0xE9, which is not valid UTF-8.
+        assert!(non_utf8_file_has_blocks(
+            None,
+            Path::new("notes.txt"),
+            b"caf\xe9",
+            &[&virtual_block]
+        ));
+        Ok(())
+    }
+
+    #[test]
     fn target_file_without_a_parser_parse_blocks_returns_error() -> anyhow::Result<()> {
-        let virtual_blocks = [test_utils::virtual_block("notes.txt#/x", &[])?];
+        // The whole-file block needs no parser, so the error shows the symbol's block.
+        let virtual_blocks = [
+            test_utils::virtual_block("notes.txt", &[])?,
+            test_utils::virtual_block("notes.txt#/x", &[])?,
+        ];
 
         let error = parse_with_virtual_blocks(
             &[("notes.txt", "x")],
@@ -2621,7 +2702,11 @@ mod parse_blocks_tests {
 
     #[test]
     fn target_file_without_symbols_parse_blocks_returns_error() -> anyhow::Result<()> {
-        let virtual_blocks = [test_utils::virtual_block("a.py#/x", &[])?];
+        // The whole-file block needs no symbols, so the error shows the symbol's block.
+        let virtual_blocks = [
+            test_utils::virtual_block("a.py", &[])?,
+            test_utils::virtual_block("a.py#/x", &[])?,
+        ];
 
         let error = parse_with_virtual_blocks(
             &[("a.py", "x = 1\n")],

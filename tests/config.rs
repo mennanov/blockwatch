@@ -94,6 +94,42 @@ line-pattern = '^\d+\.\d+\.\d+$'
 }
 
 #[test]
+fn pattern_block_in_a_file_without_a_grammar_reports_its_violation_there() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = temp.path().join("repo");
+    std::fs::create_dir_all(root.join(".git"))?;
+    std::fs::write(
+        root.join("prompt.txt"),
+        "Answer briefly.
+Categories: billing, Refunds
+",
+    )?;
+    std::fs::write(
+        root.join("blockwatch.toml"),
+        r"[[block]]
+target = 'prompt.txt'
+target-pattern = '^Categories: (?P<value>.+)$'
+line-pattern = '^[a-z, ]+$'
+",
+    )?;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.current_dir(&root);
+    let output = cmd.output()?;
+
+    output.clone().assert().failure();
+    let violations: serde_json::Value = serde_json::from_slice(&output.stderr)?;
+    let violation = &violations["prompt.txt"][0];
+    assert_eq!(violation["code"], "line-pattern");
+    // The value group starts after `Categories: `, at column 13 of line 2.
+    assert_eq!(
+        violation["range"]["start"],
+        serde_json::json!({"line": 2, "character": 13})
+    );
+    Ok(())
+}
+
+#[test]
 fn virtual_block_in_a_non_utf8_file_fails_the_run() -> anyhow::Result<()> {
     let temp = tempfile::tempdir()?;
     let root = temp.path().join("repo");
@@ -212,6 +248,39 @@ fn diff_touching_an_entry_of_the_config_flag_file_rechecks_its_block() -> anyhow
         .assert()
         .failure()
         .stderr(predicate::str::contains("\"package.json\""));
+    Ok(())
+}
+
+#[test]
+fn only_changed_with_an_argument_for_an_unchanged_virtual_block_file_passes() -> anyhow::Result<()>
+{
+    let temp = tempfile::tempdir()?;
+    let root = temp.path().join("repo");
+    std::fs::create_dir_all(root.join(".git"))?;
+    std::fs::write(root.join("a.py"), "x = 1\n")?;
+    // blockwatch has no grammar for `.txt`, so only its virtual block makes it a file to check.
+    std::fs::write(root.join("prompt.txt"), "Answer briefly.\n")?;
+    std::fs::write(
+        root.join("blockwatch.toml"),
+        "[[block]]
+target = 'prompt.txt'
+",
+    )?;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.current_dir(&root);
+    cmd.args(["--diff", "--only-changed", "prompt.txt"]);
+    cmd.write_stdin(
+        "diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1 +1 @@
+-x = 0
++x = 1
+",
+    );
+
+    cmd.output()?.assert().success();
     Ok(())
 }
 

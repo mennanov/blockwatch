@@ -122,7 +122,7 @@ mod test_utils {
     use crate::repo_path::RepoPath;
     use crate::symbol_path::SymbolPath;
     use crate::validators::ValidationContext;
-    use crate::virtual_blocks::{ConfigEntry, VirtualBlock};
+    use crate::virtual_blocks::{ConfigEntry, Locator, VirtualBlock};
     use std::collections::HashMap;
     use std::ops::Range;
     use std::path::PathBuf;
@@ -193,16 +193,20 @@ mod test_utils {
         ))
     }
 
-    /// A virtual block around `target`, such as `a.json#/key`, with `attributes`. It is declared
-    /// at line 7 of `blockwatch.toml`.
+    /// A virtual block around `target`, with `attributes`. It is declared at line 7 of
+    /// `blockwatch.toml`. A target such as `a.json#/key` wraps a symbol, and one such as `a.txt`
+    /// wraps the whole file.
     pub(crate) fn virtual_block(
         target: &str,
         attributes: &[(&str, &str)],
     ) -> anyhow::Result<VirtualBlock> {
-        let (file, path) = target.split_once('#').expect("the target has a `#`");
+        let (file, locator) = match target.split_once('#') {
+            Some((file, path)) => (file, Locator::Symbol(SymbolPath::parse(path)?)),
+            None => (target, Locator::File),
+        };
         Ok(VirtualBlock {
             file: RepoPath::from_reference(file)?,
-            path: SymbolPath::parse(path)?,
+            locator,
             attributes: attributes
                 .iter()
                 .map(|(name, value)| (name.to_string(), value.to_string()))

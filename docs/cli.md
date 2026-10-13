@@ -70,8 +70,9 @@ Paths and globs start from the repository root, whichever directory you run from
 not `main.rs`. An absolute path works too.
 
 An argument that selects no file to check fails the run. A file is not checked if `.gitignore`, `--ignore` or the
-`ignore` key in the config file leaves it out, or if its extension is not supported. With `--only-changed`, an
-argument only has to select a file in the repository, not a changed one.
+`ignore` key in the config file leaves it out, or if its extension is not supported and the config file has no
+[`[[block]]` entry](#blocks-in-the-config-file) for it. With `--only-changed`, an argument only has to select a file in
+the repository, not a changed one.
 
 Exclusions that hold for the whole project belong in the `ignore` key of the [config file](#config-file).
 
@@ -314,12 +315,22 @@ Everything else stays out of the file:
 
 ### Blocks in the Config File
 
-A `[[block]]` entry in the config file declares a block around one [symbol](symbols.md), instead of tags in a comment.
-Such a block is a **virtual block**. Use one when:
+A `[[block]]` entry in the config file declares a block in a file, instead of tags in a comment. Such a block is a
+**virtual block**. Use one when:
 
 - The file can't hold a comment, such as `package.json`.
+- The file must not change, so it can't take a tag. For example, a module that a build copies byte for byte, an applied
+  database migration, or a prompt sent to a language model.
 - The rule is about one value, such as a version. The block then sees just the value, without the key and the quotes.
 - The file should stay free of tags, or the project keeps its rules in one place.
+
+An entry wraps one of three things:
+
+| `target`                | `target-pattern`                | The block wraps                   |
+|-------------------------|---------------------------------|-----------------------------------|
+| `package.json#/version` | not allowed                     | the [symbol](symbols.md)          |
+| `settings.py`           | `'^MODEL = "(?P<value>[^"]+)"'` | the text that the pattern matches |
+| `settings.py`           | none                            | the whole file                    |
 
 For example:
 
@@ -339,34 +350,68 @@ line-pattern = '^\d+\.\d+\.\d+$'
 target = 'package.json#/keywords'
 keep-sorted = true
 keep-sorted-pattern = '^"(?P<value>[^"]+)",?$'
+
+# A build copies settings.py as it is, so it can't hold a tag. The block is just `model-b` in `MODEL = "model-b"`.
+[[block]]
+target = 'settings.py'
+target-pattern = '^MODEL = "(?P<value>[^"]+)"'
+name = 'model'
+same-as = 'config/models.json#/default'
+
+# Every environment variable the worker reads must be one that src/config.rs lists.
+[[block]]
+target = 'worker/env.py'
+same-as = 'src/config.rs:env-vars'
+same-as-mode = 'subset'
+same-as-pattern = 'os\.environ\["(?P<value>[A-Z_]+)"\]'
 ```
 
-- `target` is required. It is a symbol in a file, such as `package.json#/version`. Any other target, such as a whole
-  file or a named block, is an error.
+- `target` is required. It is a symbol in a file, such as `package.json#/version`, or a file, such as `settings.py`.
+  Any other target, such as a named block, is an error.
+- `target-pattern` is a regex that finds the block in a file. It needs a file as `target`. See
+  [Target patterns](#target-patterns).
 - Every other key is an attribute, with the same name and meaning as in a tag. An unknown attribute is an error.
 - A value is a string. `true` stands for an attribute without a value, so `keep-unique = true` is `keep-unique`. An
   integer counts as its digits, so `check-lua-timeout = 30` works. Any other value is an error.
-- A symbol has at most one block. Put all its attributes in one entry: a second entry for the same symbol is an error.
+- A target has at most one block. Put all its attributes in one entry. A second entry with the same `target` and the
+  same `target-pattern` is an error.
+
+#### Target patterns
+
+- **It must match exactly once.** The pattern runs on the whole file. No match, or more than one, stops the run. The
+  error shows the lines where the matches start.
+- **`^` and `$` match at the start and the end of each line**, as in the other patterns. `.` does not match a line
+  break, so a match stays on one line.
+- **A match can span lines with `(?s)`.** `(?s)^CREATE TABLE users \(.*?^\);` matches the whole statement. Write
+  `.*?`, not `.*`. A `.*` runs to the last `);` in the file, and that still counts as one match.
+- **A `value` group picks the content**, as in the `*-pattern` attributes. Without one, the content is the whole match.
 
 A virtual block is a block of the file it wraps:
 
+- **Any text file can hold a pattern or a whole-file block**, even one that blockwatch has no grammar for, such as
+  `.txt` or `.env`. Such a file has no tags, only the blocks that the config file declares. A symbol needs a file with
+  [symbols](symbols.md).
 - **A symlink stands for the file it points at.** When `package.json` is a symlink to `base.json`, the target
   `package.json#/version` wraps `base.json#/version`, and its violations are reported in `base.json`.
-- **Its content is what a reference to the symbol reads.** A scalar gives its value: `1.2.3`, not
-  `"version": "1.2.3"`. An object, a list or a table gives its text, key included.
-- **Its violations are reported in that file.** A violation of the whole block points at the first line of the symbol.
-  A violation inside a scalar points at the start of the value.
+- **Its content depends on what it wraps:**
+  - A symbol gives what a reference to it reads. A scalar gives its value: `1.2.3`, not `"version": "1.2.3"`. An
+    object, a list or a table gives its text, key included.
+  - A pattern gives its `value` group, or else the whole match.
+  - A whole file gives the file's text.
+- **Its violations are reported in that file.** A violation of the whole block points at the first line of the symbol,
+  of the match or of the file. A violation inside a scalar points at the start of the value.
 - **Its `name` is a block name in that file.** A name that another block in the file already has is an error. A
   reference such as `affects="package.json:react-version"` finds the block, as it finds a tag.
 - **The run's filters apply to that file.** When the paths and globs, `--ignore` or `.gitignore` leave the file out,
   its virtual blocks are not checked. A reference to one of them still finds it.
-- **It counts as changed when the diff touches the symbol or the entry.** A change elsewhere in either file does not
-  count. The entry plays the part of the start tag. So when you edit an entry, `--diff --only-changed` checks its
-  block, even if the diff does not touch the file the block wraps.
+- **It counts as changed when the diff touches what it wraps, or the entry.** That is the symbol with its key, the
+  whole match, or any line of a whole file. A change elsewhere in either file does not count. The entry plays the part
+  of the start tag. So when you edit an entry, `--diff --only-changed` checks its block, even if the diff does not
+  touch the file the block wraps.
 
 A target that does not resolve stops the run when its file is checked or a reference reads that file. That is a
-missing file, a file without symbols or with a syntax error, a missing or ambiguous symbol, or a TOML table written in
-several places. The error shows the entry's line:
+missing file, a file without symbols or with a syntax error, a missing or ambiguous symbol, a TOML table written in
+several places, or a pattern that matches no text or matches more than once. The error shows the entry's line:
 
 ```text
 Error: invalid block at line 7 of "blockwatch.toml"
@@ -557,7 +602,7 @@ Each block entry carries an `is_content_modified` boolean field. Without a diff 
 is `false` throughout; under `--diff` it identifies the blocks the diff touched.
 
 A [virtual block](#blocks-in-the-config-file) also has `config_line`: the line of the config file that declares it.
-Its `line` and `column` are where the symbol starts.
+Its `line` and `column` are where the symbol, the match or the file starts.
 
 Lines and columns are 1-based, with an exclusive end column. A column counts characters rather than bytes, so a
 multi-byte character such as `é` or an emoji advances it by one. The `range` of a violation follows the same

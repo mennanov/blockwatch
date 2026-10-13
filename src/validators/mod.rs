@@ -388,7 +388,8 @@ impl ValidationContext {
     }
 
     /// Whether the file of `address` on disk has the block it selects, counting the file's
-    /// virtual blocks. Returns `false` for a missing file or one without a parser.
+    /// virtual blocks. Returns `false` for a missing file or one with neither a parser nor virtual
+    /// blocks.
     fn has_block(
         &self,
         address: &BlockAddress,

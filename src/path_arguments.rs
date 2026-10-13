@@ -86,7 +86,8 @@ impl PathArguments {
                         "no file to check matches {}. Paths and globs start from the repository \
                          root, not from the current directory. A file is not checked if \
                          .gitignore, --ignore or the `ignore` key in the config file leaves it \
-                         out, or if its extension is not supported.",
+                         out, or if its extension is not supported and the config file has no \
+                         `[[block]]` entry for it.",
                         quoted.join(" or ")
                     );
                 }

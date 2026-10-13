@@ -23,6 +23,12 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   `pre-existing-failure`, `pre_existing_failure` and `PRE_EXISTING_FAILURE`. See
   [Identifier comparison](docs/validators/same-as.md#identifier-comparison)
   ([#164](https://github.com/mennanov/blockwatch/issues/164)).
+- A `[[block]]` entry in `blockwatch.toml` can now wrap a whole file, or the text that a `target-pattern` regex
+  matches in it, not only a symbol. So a file that must not hold a tag can still carry rules, such as a prompt or a
+  module that a build copies as it is. This works even in a file that blockwatch has no grammar for, such as `.txt`.
+  The pattern must match exactly once, or the run stops. See
+  [Blocks in the Config File](docs/cli.md#blocks-in-the-config-file)
+  ([#162](https://github.com/mennanov/blockwatch/issues/162)).
 
 ## [0.10.2] - 2026-10-12
 

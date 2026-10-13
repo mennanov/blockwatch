@@ -156,16 +156,17 @@ The whole pipeline is in `src/cli.rs`. `src/main.rs` only calls `blockwatch::run
 4. Resolve the run's settings. `config::read` reads `blockwatch.toml` from the repository root, or the file given by
    `--config`. `Args::raw_settings` returns the settings given as flags. `settings::Settings::resolve` validates both
    with the same rules and merges them: the ignore globs, the extension mappings and the validator selection.
-   `config::read` also returns the file's virtual blocks: its `[[block]]` entries, each around a symbol. It marks the
-   ones whose entry the diff touches.
+   `config::read` also returns the file's virtual blocks: its `[[block]]` entries, each around a symbol, the text a
+   `target-pattern` matches, or a whole file. It marks the ones whose entry the diff touches.
 5. Walk the repository with the `ignore` crate, which respects `.gitignore`. Keep the files that the paths and globs
    from the command line select, and that don't match the settings' ignore globs. `PathArguments::resolve` turns an
    existing file or directory into a glob first, so `src` selects `src/**`. Pick each file's language by its
    extension, using the settings' extension mappings too.
 6. For each file, the matching `language_parsers::<lang>` (a tree-sitter grammar) finds the comments. `tag_parser` and
    `block_parser` turn the comment text into `Block` values, with their attributes and their byte and line ranges.
-   `VirtualBlock::resolve` finds the symbol of each virtual block in the file, and adds it as a `Block` too. A target
-   that does not resolve stops the run. `--only-changed` also parses the file of a virtual block whose entry the diff
+   `VirtualBlock::resolve` finds each virtual block in the file, by its `Locator`, and adds it as a `Block` too. A file
+   without a grammar is read as plain text: it has no tags, only its virtual blocks. A target that does not resolve
+   stops the run. `--only-changed` also parses the file of a virtual block whose entry the diff
    touches, even when the diff does not touch that file. The result is a `blocks::FileBlocks` for each file, kept in a
    `validators::ValidationContext`. Each path or glob argument must select at least one parsed file, or the run
    stops. Under `--only-changed`, an argument that selects no file in the diff is checked against a walk of the tree.
@@ -194,13 +195,17 @@ The main modules:
 - `src/config.rs` — reads the config file into a `RawSettings` and the virtual blocks, using `toml_edit`'s serde
   support. Only the errors that `toml_edit` raises itself, such as an unknown key, show a line and column. An error
   about a `[[block]]` entry shows the line of its header, which `serde_spanned` gives.
-- `src/virtual_blocks.rs` — `VirtualBlock`, a block that the config file declares around a symbol, instead of tags in a
-  comment. A file without comments, such as `package.json`, can only get blocks this way. It is a block of the file it
-  wraps. Its content is what a reference to the symbol reads: a scalar's decoded
-  value (`ContentText::Decoded`), or else the definition's text. Its `Block::declaration` is the config entry, so every
-  message about it shows that line, through `Block::declared_at`. `ValidationContext` keeps every virtual block's
-  declaration. So when `affects` or `same-as` reads a file the run did not keep, `ValidationContext::parse_file` adds
-  that file's virtual blocks, as the run does.
+- `src/virtual_blocks.rs` — `VirtualBlock`, a block that the config file declares in a file, instead of tags in a
+  comment. A file that can't or must not hold a tag, such as `package.json` or a prompt, can only get blocks this way.
+  It is a block of the file it wraps. Its `Locator` says how to find it:
+  - `Symbol`: the content is what a reference to the symbol reads: a scalar's decoded value
+    (`ContentText::Decoded`), or else the definition's text.
+  - `Pattern`: the `target-pattern` regex must match once. The content is its `value` group, or else the whole match.
+  - `File`: the content is the whole file.
+
+  Its `Block::declaration` is the config entry, so every message about it shows that line, through
+  `Block::declared_at`. `ValidationContext` keeps every virtual block's declaration. So when `affects` or `same-as`
+  reads a file the run did not keep, `ValidationContext::parse_file` adds that file's virtual blocks, as the run does.
 - `src/repo_path.rs` — `RepoPath`, the one way to write a path relative to the repository root. A diff header
   (`b/src/main.rs`), a path found in the walk and a `file:name` attribute all become a `RepoPath`. So the same file is
   always the same map key.
@@ -239,9 +244,10 @@ A block counts as changed only when its content or its start tag overlaps a `Lin
 `--diff --only-changed`, only changed blocks are validated. With `--diff` alone, every block is validated, but rules
 that need a change, such as `affects`, only fire for changed blocks. This is the most common source of surprises. If a
 rule didn't fire, check whether the diff actually touched the block's lines. The same goes for an `affects` target that
-is a symbol, and for a virtual block. They count as changed only when the diff touches the symbol's definition, not
-anything else in its file. A virtual block also counts as changed when the diff touches its `[[block]]` entry, which
-plays the part of its start tag.
+is a symbol, and for a virtual block. They count as changed only when the diff touches the symbol's definition, or the
+whole match of a `target-pattern`, not anything else in its file. A virtual block around a whole file counts as
+changed when the diff touches any part of the file. A virtual block also counts as changed when the diff touches its
+`[[block]]` entry, which plays the part of its start tag.
 
 The `check-ai` validator calls an OpenAI-compatible API. It is configured with `BLOCKWATCH_AI_API_KEY`,
 `BLOCKWATCH_AI_MODEL` and `BLOCKWATCH_AI_API_URL`. The `check-lua` validator embeds Lua 5.4 through `mlua`. The
