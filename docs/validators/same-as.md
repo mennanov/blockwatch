@@ -11,6 +11,7 @@ It runs on every scan, with or without a diff.
 | Attribute         | Value                                               | Default           |
 |-------------------|-----------------------------------------------------|-------------------|
 | `same-as`         | One or more [targets](#targets), comma-separated    | —                 |
+| `same-as-paths`   | A [glob](#paths-as-targets) of paths to compare     | —                 |
 | `same-as-pattern` | A regex that picks the values to compare            | the whole content |
 | `same-as-mode`    | `set`, `sequence`, `single` or `subset`             | `set`             |
 | `same-as-format`  | `numeric`                                           | text              |
@@ -135,6 +136,37 @@ What a symbol compares as:
 
 The referencing block's pattern reads the symbol, as it does a whole file.
 
+## Paths as targets
+
+`same-as-paths` compares the block with the paths in the repository that match a glob. Use it for a list that must
+show every entry of a directory, such as the services in a README:
+
+```markdown
+<!-- <block same-as-paths="services/*/" same-as-pattern="services/(?P<value>[a-z-]+)"> -->
+- [billing](services/billing)
+- [search](services/search)
+<!-- </block> -->
+```
+
+The glob lists `services/auth/`, `services/billing/` and `services/search/`. The pattern picks `auth`, `billing` and
+`search` from them, and `billing` and `search` from the block. So the run reports that `auth` is missing.
+
+- **`same-as-pattern` is required.** It reads both the block and the paths. To compare whole lines, use
+  `same-as-pattern=".+"`.
+- **The paths are sorted, and each one is listed once.** So `same-as-mode="sequence"` also checks that the block
+  lists them in that order.
+- **A trailing `/` lists directories.** A directory is listed when it holds a file, and `services/billing/` is listed
+  once however many files it holds. Without the `/`, the glob lists files: `crates/*/AGENTS.md`.
+- **`*` stops at `/`.** `services/*/` lists `services/billing/`, but not `services/billing/src/`. `**` matches any
+  number of directories: `docs/**/*.md`. This differs from path arguments and the `ignore` setting, where `*` also
+  matches `/`.
+- **It takes one glob.** To list several directories, use braces: `{services,workers}/*/`.
+- **Files that `.gitignore` leaves out are not listed,** and neither are symlinks. The `ignore` setting does not apply:
+  it chooses which blocks to check, not what a target holds.
+- **A glob that matches nothing is a violation,** so a typo in it can't pass.
+
+A block can have both `same-as` and `same-as-paths`. Each target is compared with the block on its own.
+
 ## Comparison modes
 
 | `same-as-mode`  | Passes when                                                       |
@@ -182,17 +214,20 @@ Rust writes `60.0` and TypeScript writes `60`. As numbers they are equal. As tex
 ## Notes
 
 - **Which block's attributes count.** The referencing block's `same-as-mode` and `same-as-format` decide how to compare.
-  Each block's `same-as-pattern` reads only that block. A whole file or a symbol has no block, so the referencing
-  block's pattern reads it too.
+  Each block's `same-as-pattern` reads only that block. A whole file, a symbol or a list of paths has no block, so the
+  referencing block's pattern reads it too.
 - **Violations:** a missing block, a missing or repeated key, a value that is not a number under `numeric`, a `single`
-  side without exactly one value, and a pattern that matches nothing on either side. Two empty sides do not count as
-  equal.
-- **Errors that stop the run:** an unknown `same-as-mode` or `same-as-format`, an invalid regex, a missing target file,
-  and a symbol in a file with a syntax error, without symbols, or with several YAML documents.
+  side without exactly one value, a pattern that matches nothing on either side, and a `same-as-paths` glob that
+  matches no path. Two empty sides do not count as equal.
+- **Errors that stop the run:** an unknown `same-as-mode` or `same-as-format`, an invalid regex or glob,
+  `same-as-paths` without `same-as-pattern`, a missing target file, and a symbol in a file with a syntax error, without
+  symbols, or with several YAML documents.
 - **Run it on the whole tree now and then.** `same-as` needs no diff, so a plain `blockwatch` run catches drift that
   `--only-changed` misses. See [CI integration](../ci.md).
 - **A rename alone goes unnoticed in a diff.** Renaming a target file without changing it (a plain `git mv`) gives
   `--only-changed` nothing to check. A full run catches it, because the old path no longer exists.
+- **A new path alone goes unnoticed in a diff.** Adding `services/payments/` doesn't touch the block that lists the
+  services, so `--only-changed` doesn't check it. A full run catches it.
 - **Targets are checked but not listed.** Under `--only-changed`, a target the diff did not touch is still compared, but
   it does not appear in the `--verbosity` report. See [Reports Under a Diff](../cli.md#reports-under-a-diff).
 

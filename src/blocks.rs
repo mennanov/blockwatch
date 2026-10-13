@@ -532,7 +532,7 @@ fn parse_all_files(
     virtual_blocks_by_file: &HashMap<&RepoPath, Vec<&VirtualBlock>>,
 ) -> anyhow::Result<ParsedBlocks> {
     let mut parsed = ParsedBlocks::default();
-    for repo_path_result in file_system.walk() {
+    for repo_path_result in file_system.walk(None) {
         let file_path =
             repo_path_result.map_err(|err| anyhow!("Failed to walk directory: {err}"))?;
         if !path_checker.should_allow(&file_path) || path_checker.should_ignore(&file_path) {
@@ -566,14 +566,16 @@ pub(crate) fn checkable_files<'a>(
     parsers: &'a LanguageParsers,
     extra_file_extensions: &'a HashMap<OsString, OsString>,
 ) -> impl Iterator<Item = anyhow::Result<RepoPath>> + 'a {
-    file_system.walk().filter(move |file_path| match file_path {
-        Ok(file_path) => {
-            !path_checker.should_ignore(file_path)
-                && parser_for_file_path(file_path.as_path(), parsers, extra_file_extensions)
-                    .is_some()
-        }
-        Err(_) => true,
-    })
+    file_system
+        .walk(None)
+        .filter(move |file_path| match file_path {
+            Ok(file_path) => {
+                !path_checker.should_ignore(file_path)
+                    && parser_for_file_path(file_path.as_path(), parsers, extra_file_extensions)
+                        .is_some()
+            }
+            Err(_) => true,
+        })
 }
 
 /// Parses only the files in the diff, and the files of the virtual blocks whose entry it modified.
@@ -896,6 +898,7 @@ const RECOGNIZED_ATTRIBUTES: &[&str] = &[
     "same-as",
     "same-as-format",
     "same-as-mode",
+    "same-as-paths",
     "same-as-pattern",
     "severity",
     // </block>

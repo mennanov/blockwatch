@@ -47,7 +47,10 @@ pub(crate) trait FileSystem: Send + Sync {
 
     /// Walks the directory tree rooted at the file system's root path, returning an iterator over
     /// the paths of all regular files. A symlink is not a regular file, so it is never returned.
-    fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>>;
+    ///
+    /// With `directory`, only the files below it are returned. A `directory` that doesn't exist,
+    /// or that is reached through a symlink, gives no files.
+    fn walk(&self, directory: Option<&RepoPath>) -> impl Iterator<Item = anyhow::Result<RepoPath>>;
 }
 
 /// What a path points at inside the repository.
@@ -160,17 +163,34 @@ impl FileSystem for FileSystemImpl {
             .is_ok_and(|metadata| metadata.file_type().is_symlink())
     }
 
-    fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>> {
-        // Clone root_path for the closure.
+    fn walk(&self, directory: Option<&RepoPath>) -> impl Iterator<Item = anyhow::Result<RepoPath>> {
+        // Clone root_path for the closures.
         let root_path = self.root_path.clone();
+        let filter_root_path = self.root_path.clone();
+        let directory = directory.map(|directory| directory.as_path().to_path_buf());
         WalkBuilder::new(&self.root_path)
             // Hidden files should not be ignored as e.g. `.github` directory should be scanned.
             .hidden(false)
-            .filter_entry(|entry| {
-                !entry
+            .filter_entry(move |entry| {
+                let is_vcs_metadata = entry
                     .file_name()
                     .to_str()
-                    .is_some_and(|name| VCS_METADATA_DIRECTORY_NAMES.contains(&name))
+                    .is_some_and(|name| VCS_METADATA_DIRECTORY_NAMES.contains(&name));
+                // The walk starts at the root even for a `directory`. So a symlink on the way to
+                // it is skipped like any other, and can't lead out of the repository. Entering only
+                // the directories on the way to it keeps the rest of the tree unread.
+                let relative_path = entry
+                    .path()
+                    .strip_prefix(&filter_root_path)
+                    .unwrap_or(entry.path());
+                let is_wanted = directory.as_ref().is_none_or(|directory| {
+                    let is_directory = entry
+                        .file_type()
+                        .is_some_and(|file_type| file_type.is_dir());
+                    (is_directory && directory.starts_with(relative_path))
+                        || (relative_path != directory && relative_path.starts_with(directory))
+                });
+                !is_vcs_metadata && is_wanted
             })
             .build()
             .filter_map(move |entry| match entry {
@@ -246,10 +266,15 @@ mod file_system_impl_tests {
         std::fs::write(&path, content).unwrap();
     }
 
-    /// The paths [`FileSystem::walk`] yields, relative to the root and sorted for comparison.
-    fn walked_paths(file_system: &FileSystemImpl) -> anyhow::Result<Vec<String>> {
+    /// The paths [`FileSystem::walk`] yields under `directory`, relative to the root and sorted for
+    /// comparison.
+    fn walked_paths(
+        file_system: &FileSystemImpl,
+        directory: Option<&str>,
+    ) -> anyhow::Result<Vec<String>> {
+        let directory = directory.map(RepoPath::from_reference).transpose()?;
         let mut paths = file_system
-            .walk()
+            .walk(directory.as_ref())
             .map(|path| path.map(|path| path.as_str().to_owned()))
             .collect::<anyhow::Result<Vec<_>>>()?;
         paths.sort();
@@ -262,7 +287,10 @@ mod file_system_impl_tests {
         write_file(root.path(), ".github/workflows/ci.yml", "name: CI");
         let file_system = FileSystemImpl::new(root.path())?;
 
-        assert_eq!(walked_paths(&file_system)?, [".github/workflows/ci.yml"]);
+        assert_eq!(
+            walked_paths(&file_system, None)?,
+            [".github/workflows/ci.yml"]
+        );
         Ok(())
     }
 
@@ -272,7 +300,7 @@ mod file_system_impl_tests {
         write_file(root.path(), ".eslintrc.yml", "root: true");
         let file_system = FileSystemImpl::new(root.path())?;
 
-        assert_eq!(walked_paths(&file_system)?, [".eslintrc.yml"]);
+        assert_eq!(walked_paths(&file_system, None)?, [".eslintrc.yml"]);
         Ok(())
     }
 
@@ -285,7 +313,7 @@ mod file_system_impl_tests {
         write_file(root.path(), "src/main.yml", "name: app");
         let file_system = FileSystemImpl::new(root.path())?;
 
-        assert_eq!(walked_paths(&file_system)?, ["src/main.yml"]);
+        assert_eq!(walked_paths(&file_system, None)?, ["src/main.yml"]);
         Ok(())
     }
 
@@ -296,7 +324,7 @@ mod file_system_impl_tests {
         write_file(root.path(), "vendor/dep/main.yml", "name: dep");
         let file_system = FileSystemImpl::new(root.path())?;
 
-        assert_eq!(walked_paths(&file_system)?, ["vendor/dep/main.yml"]);
+        assert_eq!(walked_paths(&file_system, None)?, ["vendor/dep/main.yml"]);
         Ok(())
     }
 
@@ -308,7 +336,7 @@ mod file_system_impl_tests {
         std::os::unix::fs::symlink("AGENTS.md", root.path().join("CLAUDE.md"))?;
         let file_system = FileSystemImpl::new(root.path())?;
 
-        assert_eq!(walked_paths(&file_system)?, ["AGENTS.md"]);
+        assert_eq!(walked_paths(&file_system, None)?, ["AGENTS.md"]);
         Ok(())
     }
 
@@ -319,7 +347,34 @@ mod file_system_impl_tests {
         std::os::unix::fs::symlink("missing.md", root.path().join("link.md"))?;
         let file_system = FileSystemImpl::new(root.path())?;
 
-        assert_eq!(walked_paths(&file_system)?, [] as [&str; 0]);
+        assert_eq!(walked_paths(&file_system, None)?, [] as [&str; 0]);
+        Ok(())
+    }
+
+    #[test]
+    fn walk_under_a_directory_yields_only_the_files_below_it() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        for path in ["a/b/y.txt", "a/x.txt", "a/bc/z.txt", "c.txt"] {
+            write_file(root.path(), path, "");
+        }
+        let file_system = FileSystemImpl::new(root.path())?;
+
+        assert_eq!(walked_paths(&file_system, Some("a/b"))?, ["a/b/y.txt"]);
+        // A file has nothing below it.
+        assert_eq!(walked_paths(&file_system, Some("c.txt"))?, [] as [&str; 0]);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn walk_under_a_symlinked_directory_yields_nothing() -> anyhow::Result<()> {
+        let outside = tempfile::tempdir()?;
+        write_file(outside.path(), "secret.txt", "secret");
+        let root = tempfile::tempdir()?;
+        std::os::unix::fs::symlink(outside.path(), root.path().join("link"))?;
+        let file_system = FileSystemImpl::new(root.path())?;
+
+        assert_eq!(walked_paths(&file_system, Some("link"))?, [] as [&str; 0]);
         Ok(())
     }
 
@@ -623,8 +678,19 @@ pub(crate) mod test_utils {
             self.symlinks.contains_key(path.as_str())
         }
 
-        fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>> {
-            self.files.keys().map(|path| RepoPath::from_reference(path))
+        fn walk(
+            &self,
+            directory: Option<&RepoPath>,
+        ) -> impl Iterator<Item = anyhow::Result<RepoPath>> {
+            let prefix = directory.map(|directory| format!("{}/", directory.as_str()));
+            self.files
+                .keys()
+                .filter(move |path| {
+                    prefix
+                        .as_ref()
+                        .is_none_or(|prefix| path.starts_with(prefix.as_str()))
+                })
+                .map(|path| RepoPath::from_reference(path))
         }
     }
 

@@ -12,6 +12,14 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- `same-as-paths="services/*/"` compares a block with the paths in the repository that match a glob. So a list in the
+  docs fails the run when it misses a directory or a file, such as a new service. It needs `same-as-pattern`, which
+  picks the names from both the block and the paths. See
+  [Paths as targets](docs/validators/same-as.md#paths-as-targets)
+  ([#161](https://github.com/mennanov/blockwatch/issues/161)).
+
 ## [0.10.2] - 2026-10-12
 
 ### Added

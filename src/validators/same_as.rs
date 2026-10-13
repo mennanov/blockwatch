@@ -7,10 +7,11 @@ use crate::validators::{
     ValidatorSync, ValidatorType, Violation, ViolationRange, compile_pattern, parse_number,
     target_display, value_match,
 };
-use anyhow::{Context, anyhow};
+use anyhow::{Context, anyhow, bail};
+use globset::{GlobBuilder, GlobMatcher};
 use serde::Serialize;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 /// Enforces `same-as="file:name"`: the block's content must equal that of the blocks it names.
@@ -21,6 +22,9 @@ use std::sync::Arc;
 ///
 /// A target spelled without a `:` names a whole file, whose entire text is then the thing compared
 /// against — so a file with no comments to declare a block in can still be a target.
+///
+/// A `same-as-paths` glob compares the block with the repository paths that match it, so a list in
+/// the docs can't miss a directory that was added later.
 struct SameAsValidator<Fs: FileSystem> {
     /// Reads files containing referenced target blocks that are not already parsed into the
     /// validation context.
@@ -43,15 +47,16 @@ impl<Fs: FileSystem + 'static> ValidatorSync for SameAsValidator<Fs> {
         let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
-                let Some(same_as) = block_with_context.block.attributes.get("same-as") else {
+                let attributes = &block_with_context.block.attributes;
+                if !attributes.contains_key("same-as") && !attributes.contains_key("same-as-paths")
+                {
                     continue;
-                };
+                }
                 let violations = block_violations(
                     &mut targets,
                     file_path,
                     &file_blocks.file_content,
                     &block_with_context.block,
-                    same_as,
                 )?;
                 report.add_all(file_path, &block_with_context.block, violations);
             }
@@ -69,8 +74,8 @@ struct Comparison {
     /// against every reference the block makes rather than aborting the run, since content that does
     /// not meet the asserted shape is a violation like any other.
     source_items: Result<Vec<String>, String>,
-    /// The block's `same-as-pattern`, which governs a whole-file target too: such a target has no
-    /// block of its own to carry one.
+    /// The block's `same-as-pattern`. It also reads a whole-file, symbol or paths target, because
+    /// such a target has no block of its own to carry one.
     pattern: Option<String>,
 }
 
@@ -97,24 +102,170 @@ impl Comparison {
     }
 }
 
-/// Every violation one block's `same-as` produces: at most one per reference it names.
-///
-/// `same_as` is the attribute's raw value; the caller has already established that `block` carries
-/// it.
+/// Every violation one block's `same-as` and `same-as-paths` produce: at most one per reference in
+/// `same-as`, then at most one for `same-as-paths`.
 fn block_violations<Fs: FileSystem>(
     targets: &mut TargetItems<'_, Fs>,
     file_path: &RepoPath,
     file_content: &str,
     block: &Block,
-    same_as: &str,
 ) -> anyhow::Result<Vec<Violation>> {
     let comparison = Comparison::new(block, file_content)?;
     let mut violations = Vec::new();
-    for reference in parse_references(file_path, block, same_as)? {
-        let violation = reference_violation(targets, &comparison, file_path, block, reference)?;
-        violations.extend(violation);
+    if let Some(same_as) = block.attributes.get("same-as") {
+        for reference in parse_references(file_path, block, same_as)? {
+            let violation = reference_violation(targets, &comparison, file_path, block, reference)?;
+            violations.extend(violation);
+        }
+    }
+    if let Some(glob) = block.attributes.get("same-as-paths") {
+        violations.extend(paths_violation(
+            targets.file_system,
+            &comparison,
+            file_path,
+            block,
+            glob,
+        )?);
     }
     Ok(violations)
+}
+
+/// The violation a `same-as-paths` glob produces, or `None` when the block agrees with the
+/// repository paths that match `glob`.
+///
+/// # Errors
+/// Returns an error if the block has no `same-as-pattern`, if `glob` is not a valid glob, or if the
+/// repository can't be walked.
+fn paths_violation(
+    file_system: &impl FileSystem,
+    comparison: &Comparison,
+    file_path: &RepoPath,
+    block: &Block,
+    glob: &str,
+) -> anyhow::Result<Option<Violation>> {
+    // Without a pattern, all the paths would make one value. A mismatch would then show the whole
+    // list as one string, and every mode would act the same.
+    let Some(pattern) = &comparison.pattern else {
+        bail!(
+            "same-as-paths needs same-as-pattern on {}. To compare whole lines, use \
+             same-as-pattern=\".+\"",
+            block_display(file_path, block)
+        );
+    };
+    let paths = PathsGlob::new(glob)
+        .with_context(|| {
+            format!(
+                "invalid same-as-paths glob on {}",
+                block_display(file_path, block)
+            )
+        })?
+        .matching_paths(file_system)?;
+    let reason = if paths.is_empty() {
+        Some("no paths match".to_string())
+    } else {
+        comparison.disagreement_with(extract_items_from(&paths.join("\n"), Some(pattern))?)
+    };
+    reason
+        .map(|reason| {
+            create_violation(
+                file_path,
+                block,
+                &format!("paths matching {glob}"),
+                SameAsViolation {
+                    target_file: None,
+                    target_name: None,
+                    target_paths: Some(glob),
+                    reason: &reason,
+                },
+            )
+        })
+        .transpose()
+}
+
+/// How an error message shows `block` in `file_path`, such as `block README.md:services at line 3`.
+fn block_display(file_path: &RepoPath, block: &Block) -> String {
+    format!(
+        "block {}:{} at {}",
+        file_path,
+        block.name_display(),
+        block.declared_at()
+    )
+}
+
+/// A `same-as-paths` glob, compiled to list the repository paths it matches.
+struct PathsGlob {
+    /// Matches a path without its trailing `/`.
+    matcher: GlobMatcher,
+    /// The directory that holds every match, or `None` for the repository root. Only it is walked.
+    base: Option<RepoPath>,
+    /// Whether the glob ends with `/`, which lists directories instead of files.
+    list_directories: bool,
+}
+
+impl PathsGlob {
+    /// Compiles `glob`.
+    ///
+    /// # Errors
+    /// Returns an error if `glob` is not a valid glob.
+    fn new(glob: &str) -> anyhow::Result<Self> {
+        let (file_glob, list_directories) = match glob.strip_suffix('/') {
+            Some(directory_glob) => (directory_glob, true),
+            None => (glob, false),
+        };
+        // `*` stops at `/`, so `services/*/` lists the services and not the directories inside
+        // them.
+        let matcher = GlobBuilder::new(file_glob)
+            .literal_separator(true)
+            .build()?
+            .compile_matcher();
+        Ok(Self {
+            matcher,
+            base: base_directory(file_glob),
+            list_directories,
+        })
+    }
+
+    /// The paths in `file_system` that the glob matches, sorted and each listed once.
+    ///
+    /// A glob that lists directories is matched against the directories that hold a file, and each
+    /// one is listed with a trailing `/`. Any other glob is matched against the files.
+    ///
+    /// # Errors
+    /// Returns an error if the repository can't be walked.
+    fn matching_paths(&self, file_system: &impl FileSystem) -> anyhow::Result<Vec<String>> {
+        let mut paths = BTreeSet::new();
+        for file in file_system.walk(self.base.as_ref()) {
+            let file = file?;
+            let file = file.as_str();
+            if self.list_directories {
+                for (end, _) in file.match_indices('/') {
+                    let directory = &file[..end];
+                    if self.matcher.is_match(directory) {
+                        paths.insert(format!("{directory}/"));
+                    }
+                }
+            } else if self.matcher.is_match(file) {
+                paths.insert(file.to_string());
+            }
+        }
+        Ok(paths.into_iter().collect())
+    }
+}
+
+/// The directory that holds every path `glob` matches: its segments before the first one with a
+/// glob character, such as `services` for `services/*`. Returns `None` when that is the repository
+/// root, as for `{services,workers}/*` or `**/AGENTS.md`.
+fn base_directory(glob: &str) -> Option<RepoPath> {
+    let segments: Vec<&str> = glob.split('/').collect();
+    // The last segment is matched against a name, so it is never part of the directory.
+    let fixed_segments: Vec<&str> = segments[..segments.len() - 1]
+        .iter()
+        .take_while(|segment| !segment.contains(['*', '?', '[', '{', '\\']))
+        .copied()
+        .collect();
+    // A directory that isn't a repository path, such as an empty one or one with `..`, can't narrow
+    // the walk. Walking the whole repository gives the same paths, only more slowly.
+    RepoPath::from_reference(&fixed_segments.join("/")).ok()
 }
 
 /// Parses the attribute's raw value, naming the block that wrote it so an author can find the
@@ -126,10 +277,8 @@ fn parse_references(
 ) -> anyhow::Result<Vec<TargetReference>> {
     validators::parse_target_references(same_as).with_context(|| {
         format!(
-            "invalid same-as reference on block {}:{} at {}",
-            file_path,
-            block.name_display(),
-            block.declared_at(),
+            "invalid same-as reference on {}",
+            block_display(file_path, block)
         )
     })
 }
@@ -169,7 +318,19 @@ fn reference_violation<Fs: FileSystem>(
         Err(reason) => Some(reason),
     };
     reason
-        .map(|reason| create_violation(file_path, block, &target_file, target_name, &reason))
+        .map(|reason| {
+            create_violation(
+                file_path,
+                block,
+                &target_display(&target_file, target_name),
+                SameAsViolation {
+                    target_file: Some(&target_file),
+                    target_name,
+                    target_paths: None,
+                    reason: &reason,
+                },
+            )
+        })
         .transpose()
 }
 
@@ -456,26 +617,32 @@ fn unique(values: &[String]) -> Vec<&String> {
 
 #[derive(Serialize)]
 struct SameAsViolation<'a> {
-    target_file: &'a RepoPath,
+    /// The file of a `same-as` reference. Absent for a `same-as-paths` glob.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_file: Option<&'a RepoPath>,
     /// A block name, or a symbol path with its leading `#`. Absent for a whole-file reference.
     #[serde(skip_serializing_if = "Option::is_none")]
     target_name: Option<&'a str>,
+    /// The `same-as-paths` glob. Absent for a `same-as` reference.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_paths: Option<&'a str>,
     reason: &'a str,
 }
 
+/// The violation of `block` in `file_path`. `target` is how the message shows the target, such as
+/// `file VERSION`.
 fn create_violation(
     file_path: &RepoPath,
     block: &Block,
-    target_file: &RepoPath,
-    target_name: Option<&str>,
-    reason: &str,
+    target: &str,
+    data: SameAsViolation<'_>,
 ) -> anyhow::Result<Violation> {
-    let target = target_display(target_file, target_name);
     let message = format!(
-        "Block {}:{} at {} disagrees with {target}: {reason}",
+        "Block {}:{} at {} disagrees with {target}: {}",
         file_path.display(),
         block.name_display(),
         block.declared_at(),
+        data.reason,
     );
     Violation::new(
         ViolationRange::new(
@@ -487,16 +654,12 @@ fn create_violation(
         "same-as".to_string(),
         message,
         // A block may be compared against several targets, so the target identifies this violation.
-        Some(&target),
-        Some(serde_json::to_value(SameAsViolation {
-            target_file,
-            target_name,
-            reason,
-        })?),
+        Some(target),
+        Some(serde_json::to_value(data)?),
     )
 }
 
-/// Selects [`SameAsValidator`] for blocks carrying a `same-as` attribute.
+/// Selects [`SameAsValidator`] for blocks carrying a `same-as` or a `same-as-paths` attribute.
 pub(super) struct SameAsValidatorDetector();
 
 impl SameAsValidatorDetector {
@@ -512,7 +675,8 @@ impl<Fs: FileSystem + 'static> ValidatorDetector<Fs> for SameAsValidatorDetector
         block_with_context: &BlockWithContext,
         file_system: &Arc<Fs>,
     ) -> anyhow::Result<Option<ValidatorType>> {
-        if block_with_context.block.attributes.contains_key("same-as") {
+        let attributes = &block_with_context.block.attributes;
+        if attributes.contains_key("same-as") || attributes.contains_key("same-as-paths") {
             Ok(Some(ValidatorType::Sync(Box::new(SameAsValidator::new(
                 Arc::clone(file_system),
             )))))
@@ -1308,6 +1472,211 @@ ids = 1, 2
         let report = validator(&[]).validate(context)?;
 
         assert_eq!(violation_count(&report), 0);
+        Ok(())
+    }
+
+    /// The repository of the `same-as-paths` tests: two services, one with a nested directory.
+    const SERVICES: &[(&str, &str)] = &[
+        ("services/auth/README.md", ""),
+        ("services/billing/README.md", ""),
+        ("services/billing/src/main.rs", ""),
+    ];
+
+    #[test]
+    fn paths_target_with_an_unlisted_directory_returns_a_violation() -> anyhow::Result<()> {
+        let context = validation_context(
+            "README.md",
+            r#"<!-- <block same-as-paths="services/*/" same-as-pattern="services/(?P<value>[a-z]+)"> -->
+- [billing](services/billing)
+<!-- </block> -->"#,
+        );
+
+        let violations = validator(SERVICES).validate(context)?.violations;
+
+        let file = &violations[&RepoPath::from_reference("README.md")?];
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0].message.ends_with(
+                r#"disagrees with paths matching services/*/: ["billing"] != ["auth", "billing"]"#
+            ),
+            "unexpected message: {}",
+            file[0].message
+        );
+        let data = file[0].data.as_ref().unwrap();
+        assert_eq!(data["target_paths"], serde_json::json!("services/*/"));
+        assert!(
+            data.get("target_file").is_none(),
+            "a paths target has no file"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn paths_target_lists_each_match_once_in_sorted_order() -> anyhow::Result<()> {
+        // `services/billing/` holds two files but is listed once. `*` stops at `/`, so
+        // `services/billing/src/` is not listed. The `sequence` mode shows the repeats that the
+        // default mode would hide.
+        let context = validation_context(
+            "README.md",
+            r#"<!-- <block same-as-paths="services/*/" same-as-pattern=".+" same-as-mode="sequence"> -->
+services/billing/
+<!-- </block> -->"#,
+        );
+
+        let violations = validator(SERVICES).validate(context)?.violations;
+
+        let message = &violations[&RepoPath::from_reference("README.md")?][0].message;
+        assert!(
+            message
+                .ends_with(r#"["services/billing/"] != ["services/auth/", "services/billing/"]"#),
+            "unexpected message: {message}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn paths_target_without_a_trailing_slash_lists_files() -> anyhow::Result<()> {
+        let context = validation_context(
+            "README.md",
+            r#"<!-- <block same-as-paths="crates/*/AGENTS.md" same-as-pattern=".+"> -->
+crates/b/AGENTS.md
+<!-- </block> -->"#,
+        );
+
+        let violations = validator(&[
+            ("crates/a/AGENTS.md", ""),
+            ("crates/b/Cargo.toml", ""),
+            ("crates/b/docs/AGENTS.md", ""),
+        ])
+        .validate(context)?
+        .violations;
+
+        let message = &violations[&RepoPath::from_reference("README.md")?][0].message;
+        assert!(
+            message.ends_with(r#"["crates/b/AGENTS.md"] != ["crates/a/AGENTS.md"]"#),
+            "unexpected message: {message}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn paths_target_without_glob_characters_lists_that_one_file() -> anyhow::Result<()> {
+        let context = validation_context(
+            "README.md",
+            r#"<!-- <block same-as-paths="docs/INDEX.md" same-as-pattern=".+"> -->
+docs/other.md
+<!-- </block> -->"#,
+        );
+
+        let violations = validator(&[("docs/INDEX.md", ""), ("docs/other.md", "")])
+            .validate(context)?
+            .violations;
+
+        let message = &violations[&RepoPath::from_reference("README.md")?][0].message;
+        assert!(
+            message.ends_with(r#"["docs/other.md"] != ["docs/INDEX.md"]"#),
+            "unexpected message: {message}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn paths_target_with_braces_lists_every_alternative() -> anyhow::Result<()> {
+        let context = validation_context(
+            "README.md",
+            r#"<!-- <block same-as-paths="{services,workers}/*/" same-as-pattern=".+"> -->
+services/auth/
+<!-- </block> -->"#,
+        );
+
+        let violations = validator(&[("services/auth/x", ""), ("workers/mail/x", "")])
+            .validate(context)?
+            .violations;
+
+        let message = &violations[&RepoPath::from_reference("README.md")?][0].message;
+        assert!(
+            message.ends_with(r#"["services/auth/"] != ["services/auth/", "workers/mail/"]"#),
+            "unexpected message: {message}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn paths_target_matching_nothing_returns_a_violation() -> anyhow::Result<()> {
+        let context = validation_context(
+            "README.md",
+            r#"<!-- <block same-as-paths="servces/*/" same-as-pattern=".+"> -->
+services/auth/
+<!-- </block> -->"#,
+        );
+
+        let violations = validator(SERVICES).validate(context)?.violations;
+
+        let message = &violations[&RepoPath::from_reference("README.md")?][0].message;
+        assert!(
+            message.ends_with("disagrees with paths matching servces/*/: no paths match"),
+            "unexpected message: {message}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn paths_target_without_a_pattern_returns_an_error() {
+        let context = validation_context(
+            "README.md",
+            r#"<!-- <block same-as-paths="services/*/"> -->
+services/auth/
+<!-- </block> -->"#,
+        );
+
+        let error = validator(SERVICES).validate(context).unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "same-as-paths needs same-as-pattern on block README.md:(unnamed) at line 1. To \
+             compare whole lines, use same-as-pattern=\".+\""
+        );
+    }
+
+    #[test]
+    fn paths_target_with_an_invalid_glob_returns_an_error() {
+        let context = validation_context(
+            "README.md",
+            r#"<!-- <block same-as-paths="services/[a" same-as-pattern=".+"> -->
+services/auth/
+<!-- </block> -->"#,
+        );
+
+        let error = validator(SERVICES).validate(context).unwrap_err();
+
+        assert!(
+            format!("{error:#}")
+                .starts_with("invalid same-as-paths glob on block README.md:(unnamed) at line 1"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn block_with_same_as_and_same_as_paths_is_compared_with_both_targets() -> anyhow::Result<()> {
+        let context = validation_context(
+            "README.md",
+            r#"<!-- <block same-as=":b" same-as-paths="services/*/" same-as-pattern=".+"> -->
+services/auth/
+<!-- </block> -->
+<!-- <block name="b"> -->
+services/billing/
+<!-- </block> -->"#,
+        );
+
+        let violations = validator(SERVICES).validate(context)?.violations;
+
+        let messages: Vec<&str> = violations[&RepoPath::from_reference("README.md")?]
+            .iter()
+            .map(|violation| violation.message.as_str())
+            .collect();
+        assert_eq!(messages.len(), 2, "unexpected messages: {messages:?}");
+        assert!(messages[0].contains("disagrees with README.md:b:"));
+        assert!(messages[1].contains("disagrees with paths matching services/*/:"));
         Ok(())
     }
 

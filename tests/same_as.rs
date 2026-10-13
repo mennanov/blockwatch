@@ -106,6 +106,37 @@ index 1111111..2222222 100644
 }
 
 #[test]
+fn paths_target_with_an_unlisted_directory_fails() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/same_as/paths_source.md");
+    cmd.output()
+        .unwrap()
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "disagrees with paths matching tests/testdata/same_as/paths/*/",
+        ));
+}
+
+#[test]
+fn block_with_same_as_and_same_as_paths_fails_for_each_target() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/same_as/paths_and_block_source.md");
+    cmd.output()
+        .unwrap()
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "disagrees with tests/testdata/same_as/paths_and_block_source.md:names",
+        ))
+        .stderr(predicate::str::contains(
+            "disagrees with paths matching tests/testdata/same_as/paths/*/",
+        ));
+}
+
+#[test]
 fn symbol_targets_agreeing_with_the_blocks_pass() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/same_as/symbol_source.rs");

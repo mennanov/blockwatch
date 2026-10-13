@@ -646,7 +646,10 @@ mod tests {
             false
         }
 
-        fn walk(&self) -> impl Iterator<Item = anyhow::Result<RepoPath>> {
+        fn walk(
+            &self,
+            _directory: Option<&RepoPath>,
+        ) -> impl Iterator<Item = anyhow::Result<RepoPath>> {
             std::iter::empty()
         }
     }
