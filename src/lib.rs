@@ -31,7 +31,8 @@ mod report;
 mod sarif;
 /// Project settings: how they are validated, and how the flags and the config file are merged.
 mod settings;
-/// `SymbolPath`: a parsed and validated RFC 6901 symbol path.
+/// `SymbolPath`: a parsed and validated symbol path. It follows RFC 6901 and adds filters, such as
+/// `~[name=blue]`.
 mod symbol_path;
 /// Derives the symbols of a file: the elements a symbol reference can address.
 mod symbols;

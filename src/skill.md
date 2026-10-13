@@ -156,6 +156,9 @@ other file fails the run.
 <!-- </block> -->
 
 - **Paths follow RFC 6901.** `/` separates keys. An array item is its position, counted from 0: `#/files/0`.
+- **Pick a list item by a key's value when items can be added above it:** `#/services/~[name=web]/port` is the `port`
+  of the one item whose `name` is `web`. Exactly one item must match, or it is a violation. A string value compares
+  without its quotes.
 - **Some characters in a key must be escaped:** `/` as `~1`, `~` as `~0`, `,` as `%2C`, `:` as `%3A` and `%` as
   `%25`. The key `@types/node` is `#/dependencies/@types~1node`.
 - **A missing key is a violation.** The message suggests similar paths.

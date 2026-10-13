@@ -12,6 +12,14 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- A symbol path can pick a list item by the value of one of its keys, not only by its position:
+  `#/services/~[name=web]/port`. So the path still points at the same item after someone adds an item above it.
+  Exactly one item must match. Keys such as `[python]` read as before. See
+  [Picking an item by a key's value](docs/symbols.md#picking-an-item-by-a-keys-value)
+  ([#163](https://github.com/mennanov/blockwatch/issues/163)).
+
 ## [0.10.3] - 2026-10-13
 
 ### Added

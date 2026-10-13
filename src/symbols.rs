@@ -1,5 +1,5 @@
 use crate::Position;
-use crate::symbol_path::SymbolPath;
+use crate::symbol_path::{Segment, SymbolPath};
 use anyhow::{Context, bail};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -82,8 +82,9 @@ pub(crate) struct ScalarValue {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ResolveError<'a> {
     /// No symbol has the path. `hints` holds the paths that resemble it, the most alike first.
-    NotFound { hints: Vec<&'a SymbolPath> },
+    NotFound { hints: Vec<SymbolPath> },
     /// Several symbols have the path. `candidates` holds every one of them, in document order.
+    /// When a filter in the path matches several children, they are the keys it matched.
     Ambiguous { candidates: Vec<&'a Symbol> },
 }
 
@@ -126,39 +127,143 @@ const MIN_HINT_SIMILARITY: f64 = 0.6;
 
 /// Finds a matching `Symbol` in `symbols` for the given `path`.
 ///
+/// A filter in `path`, such as `~[name=blue]`, stands for the one child of the path before it
+/// whose `name` key holds the value `blue`. A child is a list item or a map entry. A string value
+/// matches without its quotes, and any other value as written.
+///
 /// When no symbol has `path`, the hints are the paths that resemble it: those at least 60% alike
-/// by edit distance, and those that end in the same segment.
+/// by edit distance, and those that end in the same segment. Their filters are swapped for the
+/// children they matched. When a filter matches no child, the hints are `path` with the filter's
+/// value swapped for the value each child holds.
 ///
 /// # Errors
-/// Returns [`ResolveError::NotFound`] when no symbol matches `path`, and
-/// [`ResolveError::Ambiguous`] when several do.
+/// Returns [`ResolveError::NotFound`] when no symbol matches `path`, or a filter matches no child.
+/// Returns [`ResolveError::Ambiguous`] when several symbols match `path`, or a filter matches
+/// several children.
 pub(crate) fn resolve<'a>(
     symbols: &'a [Symbol],
     path: &SymbolPath,
 ) -> Result<&'a Symbol, ResolveError<'a>> {
+    let resolved = resolve_filters(symbols, path)?;
     let candidates: Vec<&Symbol> = symbols
         .iter()
-        .filter(|symbol| symbol.path == *path)
+        .filter(|symbol| symbol.path == resolved)
         .collect();
     match candidates.len() {
         0 => Err(ResolveError::NotFound {
-            hints: hints(symbols, path),
+            hints: hints(symbols.iter().map(|symbol| &symbol.path), &resolved),
         }),
         1 => Ok(candidates[0]),
         _ => Err(ResolveError::Ambiguous { candidates }),
     }
 }
 
-/// The paths in `symbols` that resemble `path`.
-fn hints<'a>(symbols: &'a [Symbol], path: &SymbolPath) -> Vec<&'a SymbolPath> {
+/// Returns `path` with each filter swapped for the child it matches among `symbols`, such as
+/// `/items/1` for `/items/~[name=blue]`. A path without filters comes back unchanged.
+///
+/// # Errors
+/// Returns [`ResolveError::NotFound`] when a filter matches no child, and
+/// [`ResolveError::Ambiguous`] when it matches several. The error is about the first such filter.
+fn resolve_filters<'a>(
+    symbols: &'a [Symbol],
+    path: &SymbolPath,
+) -> Result<SymbolPath, ResolveError<'a>> {
+    // Filters are swapped one at a time, from the left. So a filter looks only under the children
+    // that the filters before it matched.
+    let mut resolved = path.clone();
+    for (index, segment) in path.segments().iter().enumerate() {
+        let (key, value) = match segment {
+            Segment::Key(_) => continue,
+            Segment::Filter { key, value } => (key, value),
+        };
+        let parent = &resolved.segments()[..index];
+        let matches: Vec<&Symbol> = child_keys(symbols, parent, key)
+            .filter(|symbol| {
+                symbol
+                    .value
+                    .as_ref()
+                    .is_some_and(|held| held.text == *value)
+            })
+            .collect();
+        match matches.len() {
+            0 => {
+                // The second call to `child_keys` walks `symbols` again. It happens only when no
+                // child matches, so a filter that matches doesn't keep every key it looked at.
+                let keys = child_keys(symbols, parent, key);
+                return Err(ResolveError::NotFound {
+                    hints: filter_hints(path, index, key, keys),
+                });
+            }
+            1 => {
+                let child = matches[0].path.segments()[index].clone();
+                resolved = resolved.with_segment(index, child);
+            }
+            _ => {
+                return Err(ResolveError::Ambiguous {
+                    candidates: matches,
+                });
+            }
+        }
+    }
+    Ok(resolved)
+}
+
+/// The `key` keys of the children of `parent` among `symbols`, in document order. For `parent`
+/// `/items` and `key` `name`, they are the symbols at `/items/0/name`, `/items/1/name` and so on.
+/// A child is a list item or a map entry.
+fn child_keys<'s>(
+    symbols: &'s [Symbol],
+    parent: &[Segment],
+    key: &str,
+) -> impl Iterator<Item = &'s Symbol> {
+    let key = Segment::Key(key.to_string());
+    // A key deeper inside a child, such as `/items/0/content/name`, describes something inside the
+    // child, not the child itself.
+    symbols.iter().filter(move |symbol| {
+        let segments = symbol.path.segments();
+        segments.len() == parent.len() + 2
+            && segments.starts_with(parent)
+            && segments[parent.len() + 1] == key
+    })
+}
+
+/// The paths to suggest when the filter at `index` in `path`, on `key`, matches none of `keys`:
+/// `path` with the filter's value swapped for the value each of `keys` holds. The most alike come
+/// first.
+fn filter_hints<'s>(
+    path: &SymbolPath,
+    index: usize,
+    key: &str,
+    keys: impl Iterator<Item = &'s Symbol>,
+) -> Vec<SymbolPath> {
+    // The hints start from `path`, so the filters before `index` stay as the reference wrote them.
+    let alternatives: Vec<SymbolPath> = keys
+        // A key that holds a list or a map has no value to put in a filter.
+        .filter_map(|symbol| symbol.value.as_ref())
+        .map(|held| {
+            let filter = Segment::Filter {
+                key: key.to_string(),
+                value: held.text.clone(),
+            };
+            path.clone().with_segment(index, filter)
+        })
+        .collect();
+    hints(&alternatives, path)
+}
+
+/// The paths among `candidates` that resemble `path`, the most alike first.
+fn hints<'p>(
+    candidates: impl IntoIterator<Item = &'p SymbolPath>,
+    path: &SymbolPath,
+) -> Vec<SymbolPath> {
     // The paths are compared as written, escapes included, so that a `/` left unescaped in a key
     // reads as a small difference.
     let written = path.to_string();
-    let mut alike: Vec<(f64, &SymbolPath)> = symbols
-        .iter()
-        .map(|symbol| {
-            let similarity = strsim::normalized_levenshtein(&written, &symbol.path.to_string());
-            (similarity, &symbol.path)
+    let mut alike: Vec<(f64, &SymbolPath)> = candidates
+        .into_iter()
+        .map(|candidate| {
+            let similarity = strsim::normalized_levenshtein(&written, &candidate.to_string());
+            (similarity, candidate)
         })
         .filter(|(similarity, candidate)| {
             *similarity >= MIN_HINT_SIMILARITY
@@ -169,7 +274,7 @@ fn hints<'a>(symbols: &'a [Symbol], path: &SymbolPath) -> Vec<&'a SymbolPath> {
     alike
         .into_iter()
         .take(MAX_HINTS)
-        .map(|(_, candidate)| candidate)
+        .map(|(_, candidate)| candidate.clone())
         .collect()
 }
 
@@ -785,6 +890,33 @@ mod resolve_tests {
         }
     }
 
+    /// A symbol at `path` that holds the scalar `value`.
+    fn scalar(path_text: &str, start: usize, value: &str) -> Symbol {
+        Symbol {
+            value: Some(ScalarValue {
+                text: value.to_string(),
+                byte_range: start..start + 1,
+            }),
+            ..symbol(path_text, start)
+        }
+    }
+
+    /// The symbols of the list `/items`, with one item for each of `names`. Each item is a map
+    /// with two keys: `name`, which holds one of `names`, and `content`, which holds a list or a
+    /// map.
+    fn named_items(names: &[&str]) -> Vec<Symbol> {
+        names
+            .iter()
+            .enumerate()
+            .flat_map(|(index, name)| {
+                [
+                    scalar(&format!("/items/{index}/name"), 2 * index, name),
+                    symbol(&format!("/items/{index}/content"), 2 * index + 1),
+                ]
+            })
+            .collect()
+    }
+
     #[test]
     fn path_of_one_symbol_returns_that_symbol() {
         let symbols = [symbol("/a/b", 0), symbol("/b", 1)];
@@ -816,7 +948,7 @@ mod resolve_tests {
         assert_eq!(
             resolve(&symbols, &path("/verison")),
             Err(ResolveError::NotFound {
-                hints: vec![&symbols[1].path]
+                hints: vec![symbols[1].path.clone()]
             })
         );
     }
@@ -828,7 +960,7 @@ mod resolve_tests {
         assert_eq!(
             resolve(&symbols, &path("/dependencies/@types/node")),
             Err(ResolveError::NotFound {
-                hints: vec![&symbols[0].path]
+                hints: vec![symbols[0].path.clone()]
             })
         );
     }
@@ -844,7 +976,7 @@ mod resolve_tests {
         assert_eq!(
             resolve(&symbols, &path("/RetryConfig")),
             Err(ResolveError::NotFound {
-                hints: vec![&symbols[0].path]
+                hints: vec![symbols[0].path.clone()]
             })
         );
     }
@@ -862,7 +994,11 @@ mod resolve_tests {
         assert_eq!(
             resolve(&symbols, &path("/timeout")),
             Err(ResolveError::NotFound {
-                hints: vec![&symbols[2].path, &symbols[3].path, &symbols[1].path]
+                hints: vec![
+                    symbols[2].path.clone(),
+                    symbols[3].path.clone(),
+                    symbols[1].path.clone(),
+                ]
             })
         );
     }
@@ -875,7 +1011,168 @@ mod resolve_tests {
         assert_eq!(
             resolve(&symbols, &path("/abcd")),
             Err(ResolveError::NotFound {
-                hints: vec![&symbols[0].path]
+                hints: vec![symbols[0].path.clone()]
+            })
+        );
+    }
+
+    #[test]
+    fn filter_matching_one_child_returns_the_symbol_under_it() {
+        let symbols = named_items(&["red", "blue"]);
+
+        assert_eq!(
+            resolve(&symbols, &path("/items/~[name=blue]/content")),
+            Ok(&symbols[3])
+        );
+    }
+
+    #[test]
+    fn filter_matching_several_children_returns_their_keys_as_ambiguous() {
+        let symbols = named_items(&["blue", "red", "blue"]);
+
+        assert_eq!(
+            resolve(&symbols, &path("/items/~[name=blue]/content")),
+            Err(ResolveError::Ambiguous {
+                candidates: vec![&symbols[0], &symbols[4]]
+            })
+        );
+    }
+
+    #[test]
+    fn filter_matching_no_child_returns_the_other_values_as_hints() {
+        // `blues` is more alike to `blue` than `red` is, so it comes first.
+        let symbols = named_items(&["red", "blues"]);
+
+        assert_eq!(
+            resolve(&symbols, &path("/items/~[name=blue]/content")),
+            Err(ResolveError::NotFound {
+                hints: vec![
+                    path("/items/~[name=blues]/content"),
+                    path("/items/~[name=red]/content"),
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn filters_in_two_segments_resolve_one_after_the_other() {
+        // Both groups have an item named `blue`, so the second filter has to look only under
+        // `second`.
+        let symbols = [
+            scalar("/groups/0/name", 0, "first"),
+            scalar("/groups/0/items/0/name", 1, "blue"),
+            symbol("/groups/0/items/0/content", 2),
+            scalar("/groups/1/name", 3, "second"),
+            scalar("/groups/1/items/0/name", 4, "blue"),
+            symbol("/groups/1/items/0/content", 5),
+        ];
+
+        assert_eq!(
+            resolve(
+                &symbols,
+                &path("/groups/~[name=second]/items/~[name=blue]/content")
+            ),
+            Ok(&symbols[5])
+        );
+    }
+
+    #[test]
+    fn filter_at_the_root_selects_a_list_item() {
+        // The file is a list, so no key comes before the filter.
+        let symbols = [
+            symbol("/0", 0),
+            scalar("/0/name", 1, "red"),
+            symbol("/1", 2),
+            scalar("/1/name", 3, "blue"),
+        ];
+
+        assert_eq!(resolve(&symbols, &path("/~[name=blue]")), Ok(&symbols[2]));
+    }
+
+    #[test]
+    fn filter_selects_an_entry_of_a_map() {
+        // `b` is a key of a map, not a position in a list.
+        let symbols = [
+            symbol("/items/a", 0),
+            scalar("/items/a/name", 1, "red"),
+            symbol("/items/b", 2),
+            scalar("/items/b/name", 3, "blue"),
+        ];
+
+        assert_eq!(
+            resolve(&symbols, &path("/items/~[name=blue]")),
+            Ok(&symbols[2])
+        );
+    }
+
+    #[test]
+    fn filter_ignores_a_value_deeper_inside_the_key() {
+        let symbols = [
+            symbol("/items/0", 0),
+            symbol("/items/0/name", 1),
+            scalar("/items/0/name/first", 2, "blue"),
+        ];
+
+        assert_eq!(
+            resolve(&symbols, &path("/items/~[name=blue]")),
+            Err(ResolveError::NotFound { hints: vec![] })
+        );
+    }
+
+    #[test]
+    fn filter_ignores_another_key_that_holds_the_value() {
+        let symbols = [symbol("/items/0", 0), scalar("/items/0/color", 1, "blue")];
+
+        assert_eq!(
+            resolve(&symbols, &path("/items/~[name=blue]")),
+            Err(ResolveError::NotFound { hints: vec![] })
+        );
+    }
+
+    #[test]
+    fn second_filter_matching_no_child_returns_hints_with_the_first_filter_as_written() {
+        let symbols = [
+            scalar("/groups/0/name", 0, "first"),
+            scalar("/groups/0/items/0/name", 1, "blue"),
+        ];
+
+        assert_eq!(
+            resolve(
+                &symbols,
+                &path("/groups/~[name=first]/items/~[name=red]/content")
+            ),
+            Err(ResolveError::NotFound {
+                hints: vec![path("/groups/~[name=first]/items/~[name=blue]/content")]
+            })
+        );
+    }
+
+    #[test]
+    fn filter_on_a_key_without_a_value_leaves_that_key_out_of_hints() {
+        // The `name` of the first item is a list or a map, so it has no value to compare.
+        let symbols = [
+            symbol("/items/0/name", 0),
+            scalar("/items/1/name", 1, "red"),
+        ];
+
+        assert_eq!(
+            resolve(&symbols, &path("/items/~[name=blue]/content")),
+            Err(ResolveError::NotFound {
+                hints: vec![path("/items/~[name=red]/content")]
+            })
+        );
+    }
+
+    #[test]
+    fn filter_then_missing_key_returns_the_alike_paths_under_the_match_as_hints() {
+        // The hint is alike to `/items/0/contents`, the path with the filter resolved. The path as
+        // written is too long to be 60% alike to it.
+        let symbols = named_items(&["blue"]);
+
+        assert_eq!(
+            resolve(&symbols, &path("/items/~[name=blue]/contents")),
+            Err(ResolveError::NotFound {
+                hints: vec![path("/items/0/content")]
             })
         );
     }
@@ -901,7 +1198,7 @@ mod resolve_tests {
             path("/dependencies/zod"),
         ];
         let error = ResolveError::NotFound {
-            hints: vec![&hints[0], &hints[1]],
+            hints: hints.to_vec(),
         };
 
         assert_eq!(

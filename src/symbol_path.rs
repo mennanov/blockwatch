@@ -11,9 +11,20 @@ use std::fmt;
 /// - Percent-decoding is validated strictly (rejecting malformed `%xx` or invalid UTF-8).
 /// - Segments are separated by `/`.
 /// - RFC 6901 escape sequences in each segment are unescaped: `~1` becomes `/` and `~0` becomes `~`.
+///
+/// It adds one thing to RFC 6901: a segment such as `~[name=blue]` is a [`Segment::Filter`].
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct SymbolPath {
-    segments: Vec<String>,
+    segments: Vec<Segment>,
+}
+
+/// One segment of a [`SymbolPath`], with its escapes decoded.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Segment {
+    /// A key, or a position in a list, such as `0`.
+    Key(String),
+    /// A filter, written `~[key=value]`. It stands for the one child whose `key` holds `value`.
+    Filter { key: String, value: String },
 }
 
 impl SymbolPath {
@@ -44,17 +55,26 @@ impl SymbolPath {
         }
 
         // A rooted path always has a leading `/`, so the segment slice starts after index 1.
-        let segments: Vec<String> = decoded[1..]
+        let segments: Vec<Segment> = decoded[1..]
             .split('/')
-            .map(unescape_rfc6901)
-            .collect::<anyhow::Result<Vec<String>>>()?;
+            .map(parse_segment)
+            .collect::<anyhow::Result<Vec<Segment>>>()?;
 
         Ok(Self { segments })
     }
 
     /// Returns the parsed and unescaped path segments.
-    pub(crate) fn segments(&self) -> &[String] {
+    pub(crate) fn segments(&self) -> &[Segment] {
         &self.segments
+    }
+
+    /// Returns this path with its segment at `index` replaced by `segment`.
+    ///
+    /// # Panics
+    /// Panics if the path has no segment at `index`.
+    pub(crate) fn with_segment(mut self, index: usize, segment: Segment) -> Self {
+        self.segments[index] = segment;
+        self
     }
 
     /// Creates a rooted [`SymbolPath`] from unescaped segments.
@@ -67,7 +87,9 @@ impl SymbolPath {
             !segments.is_empty(),
             "a symbol path needs at least one segment"
         );
-        Self { segments }
+        Self {
+            segments: segments.into_iter().map(Segment::Key).collect(),
+        }
     }
 }
 
@@ -94,10 +116,42 @@ const FRAGMENT_ENCODE_SET: &AsciiSet = &CONTROLS
 impl fmt::Display for SymbolPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for segment in &self.segments {
-            let escaped = escape_rfc6901(segment);
-            write!(f, "/{}", utf8_percent_encode(&escaped, FRAGMENT_ENCODE_SET))?;
+            match segment {
+                Segment::Key(key) => write!(f, "/{}", encode(key))?,
+                Segment::Filter { key, value } => {
+                    write!(f, "/~[{}={}]", encode(key), encode(value))?;
+                }
+            }
         }
         Ok(())
+    }
+}
+
+/// Escapes `text`, a key or a filter's key or value, so that [`SymbolPath::parse`] reads it back
+/// as the same text.
+fn encode(text: &str) -> String {
+    utf8_percent_encode(&escape_rfc6901(text), FRAGMENT_ENCODE_SET).to_string()
+}
+
+/// Parses one segment of a symbol path, after percent-decoding: a filter such as
+/// `~[name=blue]`, or else a key.
+///
+/// # Errors
+/// Returns an error if the segment starts with `~[` but is not a whole filter, or if it has an
+/// invalid RFC 6901 escape.
+fn parse_segment(segment: &str) -> anyhow::Result<Segment> {
+    // RFC 6901 gives `~` a meaning only before `0` and `1`. So an escaped key never starts with
+    // `~[`, and a filter can't be mistaken for a key.
+    match segment.strip_prefix("~[") {
+        // The key ends at the first `=` and the value at the last `]`, so a value can hold both.
+        Some(filter) => match filter.strip_suffix(']').and_then(|f| f.split_once('=')) {
+            Some((key, value)) => Ok(Segment::Filter {
+                key: unescape_rfc6901(key)?,
+                value: unescape_rfc6901(value)?,
+            }),
+            None => bail!("invalid filter \"{segment}\" in symbol path; write it as ~[key=value]"),
+        },
+        None => Ok(Segment::Key(unescape_rfc6901(segment)?)),
     }
 }
 
@@ -149,11 +203,26 @@ fn unescape_rfc6901(segment: &str) -> anyhow::Result<String> {
 mod tests {
     use super::*;
 
+    fn key(key: &str) -> Segment {
+        Segment::Key(key.to_string())
+    }
+
+    fn keys(keys: &[&str]) -> Vec<Segment> {
+        keys.iter().map(|k| key(k)).collect()
+    }
+
+    fn filter(key: &str, value: &str) -> Segment {
+        Segment::Filter {
+            key: key.to_string(),
+            value: value.to_string(),
+        }
+    }
+
     #[test]
     fn rooted_path_parses_successfully() -> anyhow::Result<()> {
         let path = SymbolPath::parse("/dependencies/inngest")?;
         assert_eq!(path.to_string(), "/dependencies/inngest");
-        assert_eq!(path.segments(), &["dependencies", "inngest"]);
+        assert_eq!(path.segments(), keys(&["dependencies", "inngest"]));
         Ok(())
     }
 
@@ -161,7 +230,7 @@ mod tests {
     fn leading_hash_path_parses_identical_to_unprefixed() -> anyhow::Result<()> {
         let path = SymbolPath::parse("#/project/version")?;
         assert_eq!(path.to_string(), "/project/version");
-        assert_eq!(path.segments(), &["project", "version"]);
+        assert_eq!(path.segments(), keys(&["project", "version"]));
         Ok(())
     }
 
@@ -169,7 +238,7 @@ mod tests {
     fn leading_and_trailing_whitespace_trimmed_successfully() -> anyhow::Result<()> {
         let path = SymbolPath::parse("  #/project/version  ")?;
         assert_eq!(path.to_string(), "/project/version");
-        assert_eq!(path.segments(), &["project", "version"]);
+        assert_eq!(path.segments(), keys(&["project", "version"]));
 
         let path2 = SymbolPath::parse("  /project/version  ")?;
         assert_eq!(path2.to_string(), "/project/version");
@@ -224,7 +293,7 @@ mod tests {
     fn percent_encoded_characters_decode_before_splitting() -> anyhow::Result<()> {
         // %2C is comma, %3A is colon, %20 is space, %25 is percent
         let path = SymbolPath::parse("/keys/%2C/%3A/%20/%25")?;
-        assert_eq!(path.segments(), &["keys", ",", ":", " ", "%"]);
+        assert_eq!(path.segments(), keys(&["keys", ",", ":", " ", "%"]));
         Ok(())
     }
 
@@ -232,10 +301,10 @@ mod tests {
     fn percent_encoded_slash_acts_as_separator() -> anyhow::Result<()> {
         // Because decoding comes first, %2F is a separator everywhere, including the leading position
         let path = SymbolPath::parse("/a%2Fb")?;
-        assert_eq!(path.segments(), &["a", "b"]);
+        assert_eq!(path.segments(), keys(&["a", "b"]));
 
         let leading = SymbolPath::parse("%2Fa%2Fb")?;
-        assert_eq!(leading.segments(), &["a", "b"]);
+        assert_eq!(leading.segments(), keys(&["a", "b"]));
         assert_eq!(path, leading);
 
         let hash_leading = SymbolPath::parse("#%2Fa%2Fb")?;
@@ -264,7 +333,7 @@ mod tests {
     fn rfc6901_escape_sequences_decode_correctly() -> anyhow::Result<()> {
         // ~1 becomes /, ~0 becomes ~
         let path = SymbolPath::parse("/deps/@types~1node/v~01")?;
-        assert_eq!(path.segments(), &["deps", "@types/node", "v~1"]);
+        assert_eq!(path.segments(), keys(&["deps", "@types/node", "v~1"]));
         assert_eq!(path.to_string(), "/deps/@types~1node/v~01");
         Ok(())
     }
@@ -275,12 +344,54 @@ mod tests {
         assert!(SymbolPath::parse("/invalid/~").is_err());
         assert!(SymbolPath::parse("/invalid/foo~bar").is_err());
         assert!(SymbolPath::parse("/invalid/foo~~").is_err());
+        assert!(SymbolPath::parse("/~[key=~value]").is_err());
+        assert!(SymbolPath::parse("/~[~key=value]").is_err());
+    }
+
+    #[test]
+    fn filter_parses_into_key_and_value_and_displays_as_written() -> anyhow::Result<()> {
+        let test_cases = [
+            (
+                "/items/~[name=blue]/content",
+                vec![key("items"), filter("name", "blue"), key("content")],
+            ),
+            // The value starts after the first `=` and ends at the last `]`.
+            ("/~[k=a=b]c]", vec![filter("k", "a=b]c")]),
+            ("/~[=]", vec![filter("", "")]),
+            ("/~[a~1b=c~0d%2C]", vec![filter("a/b", "c~d,")]),
+        ];
+        for (raw, segments) in test_cases {
+            let path = SymbolPath::parse(raw)?;
+            assert_eq!(path.segments(), segments, "unexpected segments for {raw}");
+            assert_eq!(path.to_string(), raw);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn key_that_resembles_a_filter_parses_as_key() -> anyhow::Result<()> {
+        // VS Code settings have keys such as `[python]`.
+        let path = SymbolPath::parse("/[python]/[a=b]/~0[a=b]")?;
+        assert_eq!(path.segments(), keys(&["[python]", "[a=b]", "~[a=b]"]));
+        assert_eq!(path.to_string(), "/[python]/[a=b]/~0[a=b]");
+        Ok(())
+    }
+
+    #[test]
+    fn incomplete_filter_parse_fails() {
+        for raw in ["/~[name=blue", "/~[name]"] {
+            let err = SymbolPath::parse(raw).unwrap_err();
+            assert!(
+                err.to_string().contains("invalid filter"),
+                "unexpected error message for {raw}: {err}"
+            );
+        }
     }
 
     #[test]
     fn empty_segments_are_preserved() -> anyhow::Result<()> {
         let path = SymbolPath::parse("/a//b")?;
-        assert_eq!(path.segments(), &["a", "", "b"]);
+        assert_eq!(path.segments(), keys(&["a", "", "b"]));
         assert_eq!(path.to_string(), "/a//b");
         Ok(())
     }
@@ -288,7 +399,7 @@ mod tests {
     #[test]
     fn root_only_path_yields_single_empty_segment() -> anyhow::Result<()> {
         let path = SymbolPath::parse("/")?;
-        assert_eq!(path.segments(), &[""]);
+        assert_eq!(path.segments(), keys(&[""]));
         assert_eq!(path.to_string(), "/");
         Ok(())
     }
@@ -335,7 +446,7 @@ mod tests {
     #[test]
     fn path_with_single_and_double_quotes_display_percent_encoded() -> anyhow::Result<()> {
         let path = SymbolPath::parse("/items/\"double\"/'single'")?;
-        assert_eq!(path.segments(), &["items", "\"double\"", "'single'"]);
+        assert_eq!(path.segments(), keys(&["items", "\"double\"", "'single'"]));
         assert_eq!(path.to_string(), "/items/%22double%22/%27single%27");
 
         let reparsed = SymbolPath::parse(&path.to_string())?;
@@ -348,7 +459,7 @@ mod tests {
         let path =
             SymbolPath::from_segments(vec!["dependencies".to_string(), "inngest".to_string()]);
         assert_eq!(path.to_string(), "/dependencies/inngest");
-        assert_eq!(path.segments(), &["dependencies", "inngest"]);
+        assert_eq!(path.segments(), keys(&["dependencies", "inngest"]));
     }
 
     #[test]

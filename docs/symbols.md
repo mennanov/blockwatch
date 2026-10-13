@@ -57,6 +57,38 @@ Some characters must be escaped when a key contains them:
 
 For example, the key `@types/node` is `#/dependencies/@types~1node`.
 
+## Picking an item by a key's value
+
+A position breaks when someone adds an item above the one you mean. A **filter** picks the item by what it holds
+instead: `~[key=value]` is the one item whose `key` holds `value`.
+
+```yaml
+services:
+  - name: web
+    port: 8080
+  - name: worker
+    port: 9090
+```
+
+| Path                             | Points at |
+|----------------------------------|-----------|
+| `#/services/1/port`              | `9090`    |
+| `#/services/~[name=worker]/port` | `9090`    |
+
+- **Exactly one item must match.** No match is like a missing key, and the message suggests the values the items
+  hold: `did you mean: /services/~[name=worker]/port`. Several matches are a violation too.
+- **The value compares as a symbol reads it:** a string without its quotes, any other value as written. So
+  `~[port=8080]` matches `port: 8080` and `port: "8080"`.
+- **Only a key right under the item counts.** A `name` deeper inside the item does not make it match.
+- **A filter picks a map entry too.** In `{"a": {"name": "x"}}`, `#/~[name=x]` is `#/a`.
+- **A path can hold several filters**, such as `#/groups/~[name=api]/services/~[name=web]/port`. A filter can come
+  first, in a file that is a list: `#/~[name=web]`.
+- **The value starts after the first `=` and ends at the last `]`,** so it can hold both. The key can't hold `=`.
+  Inside a filter, escape the key and the value like any key: `/` as `~1`, `,` as `%2C`, and so on.
+
+Keys that look like filters still work. `[python]`, as in VS Code settings, needs no escape. A key that starts with
+`~[` is written `~0[`, as RFC 6901 already requires.
+
 ## When a path does not resolve
 
 - **A missing key is a violation.** The message suggests similar paths: `symbol not found; did you mean: /version`.
