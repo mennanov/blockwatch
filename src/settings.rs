@@ -152,7 +152,7 @@ impl Settings {
         &self.ignored_globs
     }
 
-    /// Maps an extension to a supported one. For example, `cxx` to `cpp` makes `.cxx` files parse
+    /// Maps an extension to a supported one. For example, `ino` to `cpp` makes `.ino` files parse
     /// as C++.
     pub(crate) fn extensions(&self) -> &HashMap<OsString, OsString> {
         &self.extensions

@@ -12,6 +12,30 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- blockwatch now checks more file types with the grammars it already has. Before, it skipped them, so their tags were
+  never checked. A mapping set with `-E` or in `blockwatch.toml` still wins.
+  - Bash: `.zsh`, `.bashrc`, `.bash_profile`, `.zshrc`, `.envrc`
+  - C/C++: `.cxx`, `.hh`, `.hpp`, `.hxx`
+  - GraphQL: `.graphqls`
+  - HCL: `.tofu`
+  - HTML: `.xhtml`
+  - JavaScript: `.mjs`, `.cjs`
+  - JSON: `.webmanifest`
+  - Lua: `.rockspec`
+  - Makefile: `GNUmakefile`, `.mak`
+  - Python: `.pyw`
+  - Ruby: `Gemfile`, `Rakefile`, `Podfile`, `Brewfile`, `Fastfile`, `Vagrantfile`, `.gemspec`, `.podspec`, `.rake`,
+    `.ru`, `.builder`, `.jbuilder`
+  - Starlark: `BUCK`, `Tiltfile`
+  - TOML: `Pipfile`
+  - TypeScript: `.mts`, `.cts`
+  - XML: `.csproj`, `.fsproj`, `.vbproj`, `.vcxproj`, `.props`, `.targets`, `.xaml`, `.xsd`, `.xsl`, `.xslt`
+  - YAML: `.cff`
+
+  `Pipfile`, `.webmanifest` and `.cff` files also have [symbols](docs/symbols.md), such as `Pipfile#/packages/requests`.
+
 ## [0.10.4] - 2026-10-13
 
 ### Added

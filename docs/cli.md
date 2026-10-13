@@ -16,7 +16,7 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
   `--only-changed`, `--config`, `-E` and `--ignore`.
 - **Print the Agent Skill**: `blockwatch skill` prints the [skill for AI agents](#the-skill-command), as a `SKILL.md`
 - **Config File**: `blockwatch --config FILE` reads the project's settings from FILE instead of `blockwatch.toml`
-- **Custom Extensions**: Map custom file extensions: `blockwatch -E cxx=cpp` (config key: `extensions`)
+- **Custom Extensions**: Map custom file extensions: `blockwatch -E ino=cpp` (config key: `extensions`)
 - **Disable Validators**: `blockwatch -d check-ai` (config key: `disable`)
 - **Run Only Some Validators**: `blockwatch -e keep-sorted` runs only `keep-sorted` (config key: `enable`)
 - **Check Only Some Blocks**: `blockwatch --only-block FILE:BLOCK_NAME` checks only that block (config key:
@@ -190,7 +190,7 @@ git diff --patch --default-prefix --no-relative | blockwatch --diff
 Language detection relies on file extensions. Use `-E` to map unrecognized or custom extensions to a supported grammar:
 
 ```shell
-blockwatch -E cxx=cpp -E c++=cpp
+blockwatch -E ino=cpp -E cu=cpp
 ```
 
 Files with extensions that do not map to any supported grammar are ignored.
@@ -261,8 +261,8 @@ ignore = ['**/generated/**', 'tests/testdata/**']
 disable = ['check-ai']
 
 [extensions]
-cxx = 'cpp'
-webmanifest = 'json'
+ino = 'cpp'
+avsc = 'json'
 ```
 
 - The file is read from the repository root, whichever directory you run from.

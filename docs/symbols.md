@@ -22,21 +22,20 @@ declares, instead of tags in a comment.
 ## Files with symbols
 
 <!-- <block name="extensions-with-symbols" same-as="src/language_parsers/mod.rs:extensions-with-symbols"
-     same-as-pattern="`\.(?P<value>[a-z]+)`"> -->
+     same-as-pattern="`\.?(?P<value>[A-Za-z]+)`"> -->
 
-| Language | Files             | Paths         |
-|----------|-------------------|---------------|
-| JSON     | `.json`, `.jsonc` | [JSON](#json) |
-| TOML     | `.toml`           | [TOML](#toml) |
-| YAML     | `.yaml`, `.yml`   | [YAML](#yaml) |
+| Language | Files                             | Paths         |
+|----------|-----------------------------------|---------------|
+| JSON     | `.json`, `.jsonc`, `.webmanifest` | [JSON](#json) |
+| TOML     | `.toml`, `Pipfile`                | [TOML](#toml) |
+| YAML     | `.yaml`, `.yml`, `.cff`           | [YAML](#yaml) |
 
 <!-- </block> -->
 
 Other files have no symbols yet. blockwatch still reads their blocks: see
 [Supported Languages](../README.md#supported-languages). A path into one of them stops the run.
 
-A file you map to a language with `-E` gets that language's symbols. With `-E webmanifest=json`,
-`site.webmanifest#/name` works.
+A file you map to a language with `-E` gets that language's symbols. With `-E avsc=json`, `user.avsc#/name` works.
 
 ## Writing a path
 

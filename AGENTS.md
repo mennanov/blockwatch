@@ -50,7 +50,7 @@ For example:
 | Hard to follow                                                                             | Easy to follow                                                                                     |
 |--------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
 | The settings that hold for a whole project, as opposed to the flags that describe one run. | The validated settings for a run: the config file merged with the flags.                           |
-| A file whose extension is a key is parsed as if its extension were the value.              | Maps an extension to a supported one. For example, `cxx` to `cpp` makes `.cxx` files parse as C++. |
+| A file whose extension is a key is parsed as if its extension were the value.              | Maps an extension to a supported one. For example, `ino` to `cpp` makes `.ino` files parse as C++. |
 | Validates the arguments that describe one run, as opposed to the project-wide settings.    | Validates the flags that are not settings, such as `--format` and `--suppress`.                    |
 
 ### Reading and editing code

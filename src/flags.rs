@@ -81,7 +81,7 @@ You can put project-wide settings (--ignore, -E, --enable, --disable, --only-blo
     git diff --patch | blockwatch --diff --only-changed 'src/**/*.rs'
 
     # Provide extra extension mappings (map unknown extensions to supported grammars)
-    blockwatch -E cxx=cpp -E c++=cpp
+    blockwatch -E ino=cpp -E cu=cpp
 
     # Disable specific validators
     blockwatch -d keep-sorted -d line-count
@@ -125,7 +125,7 @@ pub(crate) struct Args {
     #[arg(long = "only-changed", requires = "diff", global = true)]
     pub(crate) only_changed: bool,
 
-    /// Additional file extension mappings, e.g. -E c++=cpp -E cxx=cpp
+    /// Additional file extension mappings, e.g. -E ino=cpp -E cu=cpp
     #[arg(
         short = 'E',
         long = "extension",

@@ -148,10 +148,10 @@ A symbol is one value inside a file, such as the `version` key in `package.json`
 with `file#/path`, or with `#/path` for the block's own file. Use a symbol when only one key in a file matters, or when
 the file cannot hold a comment. To put rules on the value itself, wrap it in a `[[block]]` entry in `blockwatch.toml`.
 
-<!-- <block name="extensions-with-symbols" same-as-pattern="`\.(?P<value>[a-z]+)`"> -->
+<!-- <block name="extensions-with-symbols" same-as-pattern="`\.?(?P<value>[A-Za-z]+)`"> -->
 
-Only these files have symbols: JSON (`.json`, `.jsonc`), TOML (`.toml`) and YAML (`.yaml`, `.yml`). A path into any
-other file fails the run.
+Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`.toml`, `Pipfile`) and YAML (`.yaml`,
+`.yml`, `.cff`). A path into any other file fails the run.
 
 <!-- </block> -->
 
@@ -216,7 +216,7 @@ ignore = ['**/generated/**', 'vendor/**'] # like --ignore
 disable = ['check-ai']                    # like --disable; `enable` is like --enable, never set both
 
 [extensions]
-cxx = 'cpp'                               # like -E cxx=cpp
+ino = 'cpp'                               # like -E ino=cpp
 ```
 
 - Write globs and regexes in single quotes. TOML then takes them as written, backslashes included.

@@ -10,7 +10,7 @@ Some parts of a codebase have to change together: a function and its docs, or a 
 blockwatch lets you write those rules in comments, right next to the code. If they fall out of sync, your pre-commit
 hook or CI run fails.
 
-Supports [34 languages](#supported-languages).
+Supports [34 languages](#supported-languages) and their common file names, such as `Gemfile` or `.mjs`.
 
 [//]: # (</block>)
 
@@ -179,7 +179,7 @@ ignore = ['**/generated/**']
 disable = ['check-ai']
 
 [extensions]
-cxx = 'cpp'
+ino = 'cpp'
 ```
 
 The config file can also declare [blocks](docs/cli.md#blocks-in-the-config-file) instead of comment tags: around a key
@@ -236,51 +236,52 @@ For plain git hooks, local pre-commit setups, and sandboxing untrusted Lua scrip
 
 ## Supported Languages
 
-[//]: # (<block name="supported-grammar" keep-sorted="asc" affects=":pitch">)
+<!-- <block name="supported-grammar" keep-sorted="asc" keep-sorted-pattern="^- (?P<value>.+)" affects=":pitch"> -->
 
-- Bash
+- Bash (with `.zsh`, `.bashrc`, `.bash_profile`, `.zshrc` and `.envrc` support)
 - C#
-- C/C++ (`.c`, `.cc`, `.cpp`, `.h`)
+- C/C++ (`.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hh`, `.hpp`, `.hxx`)
 - CMake (`CMakeLists.txt`, `.cmake`)
 - CSS
 - Dart
 - Dockerfile (with `Containerfile` and `.dockerfile` support)
 - Elixir (`.ex`, `.exs`)
 - Go (with `go.mod`, `go.sum` and `go.work` support)
-- GraphQL (`.graphql`, `.gql`)
+- GraphQL (`.graphql`, `.graphqls`, `.gql`)
 - Groovy (with `.gradle` and `Jenkinsfile` support)
-- HCL (Terraform: `.tf`, `.tfvars`, `.hcl`)
-- HTML
-- JSON (`.json`, `.jsonc`)
+- HCL (Terraform and OpenTofu: `.tf`, `.tfvars`, `.tofu`, `.hcl`)
+- HTML (with `.xhtml` support)
+- JSON (`.json`, `.jsonc`, `.webmanifest`)
 - Java
-- JavaScript
+- JavaScript (with `.mjs` and `.cjs` support)
 - Kotlin
-- Lua
-- Makefile
+- Lua (with `.rockspec` support)
+- Makefile (with `GNUmakefile` and `.mak` support)
 - Markdown
 - Nix
 - PHP
 - Protocol Buffers (`.proto`)
-- Python
-- Ruby
+- Python (with `.pyi` and `.pyw` support)
+- Ruby (with `Gemfile`, `Rakefile`, `Podfile`, `Brewfile`, `Fastfile`, `Vagrantfile`, `.gemspec`, `.podspec`, `.rake`,
+  `.ru`, `.builder` and `.jbuilder` support)
 - Rust
 - SQL
 - Scala (with `.sbt` support)
-- Starlark (Bazel: `BUILD`, `WORKSPACE`, `MODULE.bazel`, `.bzl`, `.bzlmod`, `.star`)
+- Starlark (Bazel: `BUILD`, `WORKSPACE`, `MODULE.bazel`, `.bzl`, `.bzlmod`, `.star`; Buck: `BUCK`; Tilt: `Tiltfile`)
 - Swift
-- TOML
-- TypeScript
-- XML
-- YAML
+- TOML (with `Pipfile` support)
+- TypeScript (with `.mts` and `.cts` support)
+- XML (with `.csproj`, `.fsproj`, `.vbproj`, `.vcxproj`, `.props`, `.targets`, `.xaml`, `.xsd`, `.xsl` and `.xslt`
+  support)
+- YAML (with `.cff` support)
 
-[//]: # (</block>)
+<!-- </block> -->
 
-blockwatch only inspects files with the extensions listed above and skips everything else, even `.hpp`, `.hxx`, or
-`.cxx`. To check those too, map them to a supported extension with `-E` or in the `extensions` table of
-`blockwatch.toml`:
+blockwatch only inspects files with the extensions listed above and skips everything else, such as `.ino` or `.cu`.
+To check those too, map them to a supported extension with `-E` or in the `extensions` table of `blockwatch.toml`:
 
 ```shell
-blockwatch -E cxx=cpp -E hpp=cpp
+blockwatch -E ino=cpp -E cu=cpp
 ```
 
 ## Known Limitations
