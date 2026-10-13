@@ -310,11 +310,7 @@ fn target_files(file: RepoPath, file_system: &impl FileSystem) -> anyhow::Result
         // The error about the missing file shows the path from the config.
         return Ok(vec![file]);
     }
-    PathsGlob::new(file.as_str())?
-        .matching_paths(file_system)?
-        .iter()
-        .map(|path| RepoPath::from_reference(path))
-        .collect()
+    PathsGlob::new(file.as_str())?.matching_files(file_system)
 }
 
 /// Returns the file that `target` refers to, and how to find the block in it: the symbol of

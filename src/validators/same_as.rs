@@ -153,14 +153,24 @@ fn paths_violation(
             block_display(file_path, block)
         );
     };
-    let paths = PathsGlob::new(glob)
-        .with_context(|| {
-            format!(
-                "invalid same-as-paths glob on {}",
-                block_display(file_path, block)
-            )
-        })?
-        .matching_paths(file_system)?;
+    let invalid_glob = || {
+        format!(
+            "invalid same-as-paths glob on {}",
+            block_display(file_path, block)
+        )
+    };
+    // The glob is written the way the block writes its paths, so a directory ends with `/`.
+    let paths = match glob.strip_suffix('/') {
+        Some(directory_glob) => PathsGlob::new(directory_glob)
+            .with_context(invalid_glob)?
+            .matching_directories(file_system)?,
+        None => PathsGlob::new(glob)
+            .with_context(invalid_glob)?
+            .matching_files(file_system)?
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+    };
     let reason = if paths.is_empty() {
         Some("no paths match".to_string())
     } else {
