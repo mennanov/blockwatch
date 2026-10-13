@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.10.5] - 2026-10-13
+
 ### Added
 
 - The `target` of a `[[block]]` entry in `blockwatch.toml` can now be a glob, such as
