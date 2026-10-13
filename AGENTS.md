@@ -157,7 +157,8 @@ The whole pipeline is in `src/cli.rs`. `src/main.rs` only calls `blockwatch::run
    `--config`. `Args::raw_settings` returns the settings given as flags. `settings::Settings::resolve` validates both
    with the same rules and merges them: the ignore globs, the extension mappings and the validator selection.
    `config::read` also returns the file's virtual blocks: its `[[block]]` entries, each around a symbol, the text a
-   `target-pattern` matches, or a whole file. It marks the ones whose entry the diff touches.
+   `target-pattern` matches, or a whole file. A target whose file is a glob gives one virtual block for each file it
+   matches, found with `paths_glob::PathsGlob`. `config::read` marks the blocks whose entry the diff touches.
 5. Walk the repository with the `ignore` crate, which respects `.gitignore`. Keep the files that the paths and globs
    from the command line select, and that don't match the settings' ignore globs. `PathArguments::resolve` turns an
    existing file or directory into a glob first, so `src` selects `src/**`. Pick each file's language by its
@@ -195,7 +196,7 @@ The main modules:
 - `src/config.rs` — reads the config file into a `RawSettings` and the virtual blocks, using `toml_edit`'s serde
   support. Only the errors that `toml_edit` raises itself, such as an unknown key, show a line and column. An error
   about a `[[block]]` entry shows the line of its header, which `serde_spanned` gives.
-- `src/virtual_blocks.rs` — `VirtualBlock`, a block that the config file declares in a file, instead of tags in a
+- `src/virtual_blocks.rs` — `VirtualBlock`, a block that the config file declares in one file, instead of tags in a
   comment. A file that can't or must not hold a tag, such as `package.json` or a prompt, can only get blocks this way.
   It is a block of the file it wraps. Its `Locator` says how to find it:
   - `Symbol`: the content is what a reference to the symbol reads: a scalar's decoded value

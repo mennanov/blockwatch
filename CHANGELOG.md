@@ -14,6 +14,10 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Added
 
+- The `target` of a `[[block]]` entry in `blockwatch.toml` can now be a glob, such as
+  `plugins/*/package.json#/version`. The entry then declares a block in each file that matches, so a plugin added later
+  gets the rule too. A glob that matches no file stops the run. See [Glob targets](docs/cli.md#glob-targets)
+  ([#167](https://github.com/mennanov/blockwatch/issues/167)).
 - blockwatch now checks more file types with the grammars it already has. Before, it skipped them, so their tags were
   never checked. A mapping set with `-E` or in `blockwatch.toml` still wins.
   - Bash: `.zsh`, `.bashrc`, `.bash_profile`, `.zshrc`, `.envrc`

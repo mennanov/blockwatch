@@ -367,14 +367,15 @@ same-as-pattern = 'os\.environ\["(?P<value>[A-Z_]+)"\]'
 ```
 
 - `target` is required. It is a symbol in a file, such as `package.json#/version`, or a file, such as `settings.py`.
-  Any other target, such as a named block, is an error.
+  Any other target, such as a named block, is an error. The file can be a glob, such as `plugins/*/package.json`. See
+  [Glob targets](#glob-targets).
 - `target-pattern` is a regex that finds the block in a file. It needs a file as `target`. See
   [Target patterns](#target-patterns).
 - Every other key is an attribute, with the same name and meaning as in a tag. An unknown attribute is an error.
 - A value is a string. `true` stands for an attribute without a value, so `keep-unique = true` is `keep-unique`. An
   integer counts as its digits, so `check-lua-timeout = 30` works. Any other value is an error.
 - A target has at most one block. Put all its attributes in one entry. A second entry with the same `target` and the
-  same `target-pattern` is an error.
+  same `target-pattern` is an error. So is a glob that matches a file another entry already wraps the same way.
 
 #### Target patterns
 
@@ -422,6 +423,40 @@ Caused by:
 ```
 
 [`blockwatch list`](#the-list-command) shows a virtual block under the file it wraps.
+
+#### Glob targets
+
+A glob in `target` declares a block in each file that matches. Use it when many files of the same shape hold one value.
+A file added later gets the rule too.
+
+```toml
+# Every plugin has the version of the root package.
+[[block]]
+target = 'plugins/*/package.json#/version'
+same-as = 'package.json#/version'
+
+# Every module uses the Go version of the root module.
+[[block]]
+target = 'go.mod'
+target-pattern = '^go (?P<value>\S+)$'
+name = 'go-version'
+
+[[block]]
+target = 'modules/*/go.mod'
+target-pattern = '^go (?P<value>\S+)$'
+same-as = 'go.mod:go-version'
+```
+
+- **The glob works like the one in [`same-as-paths`](validators/same-as.md#paths-as-targets).** `*` stops at `/`. `**`
+  matches any number of directories. Braces list options: `{plugins,themes}/*/package.json`.
+- **Files that `.gitignore` leaves out, and symlinks, don't match.**
+- **Each file gets its own virtual block**, with every attribute of the entry. Everything above applies to each one on
+  its own: its violations are reported in its file, its `name` works in its file (`plugins/red/package.json:version`),
+  and it counts as changed when the diff touches what it wraps. So `--diff --only-changed` checks a plugin that the
+  diff adds. A diff that edits the entry changes every block it declares.
+- **A path that exists is never a glob.** `app/[id]/meta.json` is that one file. A path that doesn't exist is a glob
+  only when it has `*`, `?`, `[` or `{`.
+- **A glob that matches no file stops every run**, so a typo can't turn the rule off.
 
 ## Suppressing a Violation
 

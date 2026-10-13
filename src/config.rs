@@ -3,6 +3,7 @@ use crate::blocks::validate_attributes;
 use crate::diff_parser::{self, LineChange};
 use crate::fs::FileSystem;
 use crate::language_parsers::toml;
+use crate::paths_glob::PathsGlob;
 use crate::repo_path::RepoPath;
 use crate::settings::RawSettings;
 use crate::symbol_path::SymbolPath;
@@ -57,7 +58,8 @@ struct ConfigFile {
 #[derive(Deserialize)]
 struct BlockEntry {
     /// The file the block is in, such as `settings.py`, or a symbol in a file, such as
-    /// `package.json#/version`.
+    /// `package.json#/version`. The file can be a glob, such as `plugins/*/package.json`, to
+    /// declare the block in each file that matches.
     target: String,
     /// The regex that finds the block in the `target` file, such as `^MODEL = .*`. Without it,
     /// the block is the whole file.
@@ -166,9 +168,10 @@ fn read_file<'p>(
     }
 }
 
-/// The virtual blocks that `entries` declare, in the order of `entries`. `path` and `text` are
-/// the config file's, and `line_changes` are the diff's changes to it. A target file that is a
-/// symlink in `file_system` becomes the file it points at.
+/// The virtual blocks that `entries` declare, in the order of `entries`. An entry whose target is
+/// a glob declares one block in each file that matches, sorted by file. `path` and `text` are the
+/// config file's, and `line_changes` are the diff's changes to it. A target file that is a symlink
+/// in `file_system` becomes the file it points at.
 ///
 /// # Errors
 /// Returns an error if an entry is not valid, or if two entries wrap the same symbol. The error
@@ -191,7 +194,7 @@ fn virtual_blocks(
             };
             let context = entry.error_context();
             let is_entry_modified = is_entry_modified(text, &symbols, index, line_changes)?;
-            virtual_block(
+            entry_blocks(
                 block_entry.into_inner(),
                 entry,
                 is_entry_modified,
@@ -199,7 +202,10 @@ fn virtual_blocks(
             )
             .context(context)
         })
-        .collect::<anyhow::Result<_>>()?;
+        .collect::<anyhow::Result<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect();
     reject_duplicate_blocks(&blocks)?;
     Ok(blocks)
 }
@@ -247,35 +253,68 @@ fn is_entry_modified(
     }))
 }
 
-/// The virtual block that `block_entry`, written as `entry` of the config file, declares.
-/// `is_entry_modified` tells whether the diff touches the entry. A target file that is a symlink
-/// in `file_system` becomes the file it points at.
+/// The virtual blocks that `block_entry`, written as `entry` of the config file, declares: one in
+/// each file of [`target_files`], in that order. `is_entry_modified` tells whether the diff
+/// touches the entry.
 ///
 /// # Errors
 /// Returns an error if:
 /// - the target is not a file or a symbol in a file;
+/// - the target's file is a glob that is not valid or that matches no file;
 /// - `target-pattern` comes with a symbol, or is not a valid regex;
 /// - an attribute is not one a tag can have, or has a value that is not a string, `true` or an
 ///   integer.
-fn virtual_block(
+fn entry_blocks(
     block_entry: BlockEntry,
     entry: ConfigEntry,
     is_entry_modified: bool,
     file_system: &impl FileSystem,
-) -> anyhow::Result<VirtualBlock> {
+) -> anyhow::Result<Vec<VirtualBlock>> {
     let (file, locator) = parse_target(&block_entry.target, block_entry.target_pattern)?;
-    // The walk skips a symlink, so a block on one would never be checked. A file that doesn't
-    // resolve is kept as written, so the error about it shows the path from the config.
-    let file = file_system.repo_path(file.as_path()).unwrap_or(file);
     let attributes = attributes_as_text(block_entry.attributes)?;
     validate_attributes(&attributes)?;
-    Ok(VirtualBlock {
-        file,
-        locator,
-        attributes,
-        entry,
-        is_entry_modified,
-    })
+    let files = target_files(file, file_system)?;
+    if files.is_empty() {
+        // Like a missing file, so that a typo in the glob can't turn the rules off.
+        return Err(anyhow!("no file matches the glob")
+            .context(format!("target {} does not resolve", block_entry.target)));
+    }
+    Ok(files
+        .into_iter()
+        .map(|file| VirtualBlock {
+            file,
+            locator: locator.clone(),
+            attributes: attributes.clone(),
+            entry: entry.clone(),
+            is_entry_modified,
+        })
+        .collect())
+}
+
+/// The files that `file`, the file of a target, refers to:
+///
+/// - A path that exists is one file, even when it has a glob character, such as `app/[id].json`.
+///   A symlink becomes the file it points at.
+/// - A path that doesn't exist and has a glob character is a glob. It refers to every file that
+///   matches it, sorted. It can match none.
+/// - Any other path is one file, as written.
+///
+/// # Errors
+/// Returns an error if the glob is not valid, or if the repository can't be walked.
+fn target_files(file: RepoPath, file_system: &impl FileSystem) -> anyhow::Result<Vec<RepoPath>> {
+    // The walk skips a symlink, so a block on one would never be checked.
+    if let Some(file) = file_system.repo_path(file.as_path()) {
+        return Ok(vec![file]);
+    }
+    if !file.as_str().contains(['*', '?', '[', '{']) {
+        // The error about the missing file shows the path from the config.
+        return Ok(vec![file]);
+    }
+    PathsGlob::new(file.as_str())?
+        .matching_paths(file_system)?
+        .iter()
+        .map(|path| RepoPath::from_reference(path))
+        .collect()
 }
 
 /// Returns the file that `target` refers to, and how to find the block in it: the symbol of
@@ -345,17 +384,26 @@ mod tests {
 
     /// Reads `text` as the default config file, with no diff.
     fn read_text(text: &str) -> anyhow::Result<Config> {
-        read_changed_text(text, &[])
+        read_in_repository(text, &[], &[])
     }
 
     /// Reads `text` as the default config file, which the diff makes `line_changes` to.
     fn read_changed_text(text: &str, line_changes: &[LineChange]) -> anyhow::Result<Config> {
+        read_in_repository(text, &[], line_changes)
+    }
+
+    /// Reads `text` as the default config file of a repository that also holds `files`, which are
+    /// empty. The diff makes `line_changes` to the config file.
+    fn read_in_repository(
+        text: &str,
+        files: &[&str],
+        line_changes: &[LineChange],
+    ) -> anyhow::Result<Config> {
+        let mut contents = HashMap::from([(DEFAULT_FILE.to_string(), text.to_string())]);
+        contents.extend(files.iter().map(|file| (file.to_string(), String::new())));
         read(
             None,
-            &FakeFileSystem::new(HashMap::from([(
-                DEFAULT_FILE.to_string(),
-                text.to_string(),
-            )])),
+            &FakeFileSystem::new(contents),
             &HashMap::from([(
                 RepoPath::from_reference(DEFAULT_FILE)?,
                 line_changes.to_vec(),
@@ -450,6 +498,61 @@ target-pattern = '^MODEL = .*'
     }
 
     #[test]
+    fn glob_target_read_declares_a_block_in_each_matching_file() -> anyhow::Result<()> {
+        let text = r"[[block]]
+target = 'plugins/*/package.json#/version'
+name = 'version'
+";
+        let files = [
+            "package.json",
+            "plugins/red/package.json",
+            "plugins/blue/package.json",
+        ];
+
+        let config = read_in_repository(text, &files, &[])?;
+
+        let block = |file| -> anyhow::Result<VirtualBlock> {
+            Ok(VirtualBlock {
+                file: RepoPath::from_reference(file)?,
+                locator: Locator::Symbol(SymbolPath::parse("/version")?),
+                attributes: HashMap::from([("name".to_string(), "version".to_string())]),
+                entry: ConfigEntry {
+                    file: PathBuf::from(DEFAULT_FILE),
+                    line: 1,
+                },
+                is_entry_modified: false,
+            })
+        };
+        // Sorted by file.
+        assert_eq!(
+            config.blocks,
+            [
+                block("plugins/blue/package.json")?,
+                block("plugins/red/package.json")?
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn existing_file_with_glob_characters_read_is_one_target() -> anyhow::Result<()> {
+        // As a glob, `[id]` would match `app/i/meta.json`.
+        let text = r"[[block]]
+target = 'app/[id]/meta.json#/title'
+";
+
+        let config = read_in_repository(text, &["app/[id]/meta.json", "app/i/meta.json"], &[])?;
+
+        let files: Vec<&str> = config
+            .blocks
+            .iter()
+            .map(|block| block.file.as_str())
+            .collect();
+        assert_eq!(files, ["app/[id]/meta.json"]);
+        Ok(())
+    }
+
+    #[test]
     #[allow(clippy::single_range_in_vec_init)]
     fn diff_touching_an_entry_marks_only_its_block_modified() -> anyhow::Result<()> {
         let text = r"ignore = ['vendor/**']
@@ -504,6 +607,32 @@ target = 'a.json#/b'
                 "{line_change:?}"
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    #[allow(clippy::single_range_in_vec_init)]
+    fn diff_touching_a_glob_entry_marks_every_block_it_declares_modified() -> anyhow::Result<()> {
+        let text = r"[[block]]
+target = 'plugins/*/package.json#/version'
+";
+        let target_modified = LineChange {
+            line: 2,
+            kind: LineChangeKind::Modified(vec![0..6]),
+        };
+
+        let config = read_in_repository(
+            text,
+            &["plugins/red/package.json", "plugins/blue/package.json"],
+            &[target_modified],
+        )?;
+
+        let modified: Vec<bool> = config
+            .blocks
+            .iter()
+            .map(|block| block.is_entry_modified)
+            .collect();
+        assert_eq!(modified, [true, true]);
         Ok(())
     }
 
@@ -567,6 +696,24 @@ target-pattern = '^MODEL = .*'
             read_error(text),
             "invalid block at line 5 of \"blockwatch.toml\": target settings.py already has the \
              block at line 1"
+        );
+    }
+
+    #[test]
+    fn glob_target_overlapping_another_target_is_rejected() {
+        let text = r"[[block]]
+target = 'plugins/red/package.json#/version'
+
+[[block]]
+target = 'plugins/*/package.json#/version'
+";
+
+        let error = read_in_repository(text, &["plugins/red/package.json"], &[]).unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "invalid block at line 4 of \"blockwatch.toml\": target \
+             plugins/red/package.json#/version already has the block at line 1"
         );
     }
 
@@ -647,6 +794,36 @@ target-pattern = '('
             error.starts_with(
                 "invalid block at line 1 of \"blockwatch.toml\": invalid `target-pattern`: regex \
                  parse error"
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn glob_target_matching_no_file_is_rejected() {
+        let text = r"[[block]]
+target = 'plugins/*/package.json#/version'
+";
+
+        assert_eq!(
+            read_error(text),
+            "invalid block at line 1 of \"blockwatch.toml\": target \
+             plugins/*/package.json#/version does not resolve: no file matches the glob"
+        );
+    }
+
+    #[test]
+    fn glob_target_that_does_not_compile_is_rejected() {
+        let text = r"[[block]]
+target = 'plugins/{red,blue/package.json#/version'
+";
+
+        let error = read_error(text);
+
+        assert!(
+            error.starts_with(
+                "invalid block at line 1 of \"blockwatch.toml\": error parsing glob \
+                 'plugins/{red,blue/package.json'"
             ),
             "{error}"
         );

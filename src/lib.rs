@@ -23,6 +23,8 @@ mod fs;
 mod language_parsers;
 /// The paths and globs given on the command line, and the check that each selects a file.
 mod path_arguments;
+/// `PathsGlob`: a glob that lists the repository paths it matches.
+mod paths_glob;
 /// `RepoPath`: the single spelling of a repository-relative file path used as a map key.
 mod repo_path;
 /// Renders the end-of-run report describing what was scanned and checked.

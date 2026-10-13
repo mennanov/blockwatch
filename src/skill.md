@@ -279,6 +279,10 @@ same-as = 'config/models.json#/default'
   match at each line's start and end. Add `(?s)` to span lines, and write `.*?`, not `.*`, which runs to the last
   possible match. A `value` group picks the content; without one, the content is the whole match.
 - A pattern or a whole file works in any text file, even one blockwatch has no grammar for, such as `.txt`.
+- **The file in `target` can be a glob**, to put one rule on many files of the same shape, including files added
+  later: `target = 'plugins/*/package.json#/version'` with `same-as = 'package.json#/version'`. Each matching file gets
+  its own block, with its own violations, `name` and changes. `*` stops at `/`, and `**` crosses it. A path that
+  exists is never a glob. A glob that matches no file stops the run.
 - `true` stands for an attribute without a value: `keep-unique = true`. An integer counts as its digits:
   `check-lua-timeout = 30`.
 - A target has at most one entry. Put all its rules in one.

@@ -129,6 +129,39 @@ line-pattern = '^[a-z, ]+$'
     Ok(())
 }
 
+/// The config file of the `glob_target` fixture. Its block wraps the version of each plugin, which
+/// must be the root's. `plugins/red` keeps the rule, and `plugins/blue` and `plugins/green` break
+/// it.
+const GLOB_TARGET_CONFIG: &str = "tests/testdata/config/glob_target/config.toml";
+
+#[test]
+fn glob_target_violation_is_reported_in_each_matching_file_that_breaks_the_rule()
+-> anyhow::Result<()> {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args([
+        "--config",
+        GLOB_TARGET_CONFIG,
+        "tests/testdata/config/glob_target",
+    ]);
+    let output = cmd.output()?;
+
+    output.clone().assert().failure();
+    let violations: serde_json::Value = serde_json::from_slice(&output.stderr)?;
+    let files: Vec<&String> = violations
+        .as_object()
+        .expect("violations by file")
+        .keys()
+        .collect();
+    assert_eq!(
+        files,
+        [
+            "tests/testdata/config/glob_target/plugins/blue/package.json",
+            "tests/testdata/config/glob_target/plugins/green/package.json"
+        ]
+    );
+    Ok(())
+}
+
 #[test]
 fn virtual_block_in_a_non_utf8_file_fails_the_run() -> anyhow::Result<()> {
     let temp = tempfile::tempdir()?;
@@ -230,6 +263,39 @@ fn diff_touching_a_config_entry_rechecks_its_block_under_only_changed() -> anyho
         .assert()
         .failure()
         .stderr(predicate::str::contains("\"package.json\""));
+    Ok(())
+}
+
+#[test]
+fn diff_adding_a_file_that_a_glob_target_matches_checks_it_under_only_changed() -> anyhow::Result<()>
+{
+    let mut cmd = cargo_bin_cmd!();
+    cmd.args(["--config", GLOB_TARGET_CONFIG, "--diff", "--only-changed"]);
+    cmd.write_stdin(
+        r#"diff --git a/tests/testdata/config/glob_target/plugins/green/package.json b/tests/testdata/config/glob_target/plugins/green/package.json
+new file mode 100644
+--- /dev/null
++++ b/tests/testdata/config/glob_target/plugins/green/package.json
+@@ -0,0 +1,3 @@
++{
++  "version": "1.4.0"
++}
+"#,
+    );
+    let output = cmd.output()?;
+
+    output.clone().assert().failure();
+    // `plugins/blue` breaks the rule too, but the diff doesn't touch it.
+    let violations: serde_json::Value = serde_json::from_slice(&output.stderr)?;
+    let files: Vec<&String> = violations
+        .as_object()
+        .expect("violations by file")
+        .keys()
+        .collect();
+    assert_eq!(
+        files,
+        ["tests/testdata/config/glob_target/plugins/green/package.json"]
+    );
     Ok(())
 }
 

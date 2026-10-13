@@ -1,0 +1,3 @@
+[[block]]
+target = 'tests/testdata/config/glob_target/plugins/*/package.json#/version'
+same-as = 'tests/testdata/config/glob_target/package.json#/version'
