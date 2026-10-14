@@ -10,7 +10,7 @@ Some parts of a codebase have to change together: a function and its docs, or a 
 blockwatch lets you write those rules in comments, right next to the code. If they fall out of sync, your pre-commit
 hook or CI run fails.
 
-Supports [36 languages](#supported-languages) and their common file names, such as `Gemfile` or `.mjs`.
+Supports [37 languages](#supported-languages) and their common file names, such as `Gemfile` or `.mjs`.
 
 [//]: # (</block>)
 
@@ -261,6 +261,7 @@ For plain git hooks, local pre-commit setups, and sandboxing untrusted Lua scrip
 - Kotlin
 - Lean
 - Lua (with `.rockspec` support)
+- MDX
 - Makefile (with `GNUmakefile` and `.mak` support)
 - Markdown
 - Nix

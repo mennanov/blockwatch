@@ -14,8 +14,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Added
 
-- blockwatch now supports Lean (`.lean`) and OCaml (`.ml`, `.mli`) files. Before, it skipped them, so their tags were
-  never checked.
+- blockwatch now supports Lean (`.lean`), OCaml (`.ml`, `.mli`) and MDX (`.mdx`) files. Before, it skipped them, so
+  their tags were never checked. In MDX, put tags in JavaScript comments, such as `{/* <block> */}`.
 
 ## [0.11.1] - 2026-10-14
 

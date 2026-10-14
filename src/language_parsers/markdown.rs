@@ -104,7 +104,7 @@ impl MdCommentsParser {
                 };
             for mut comment in html_comments {
                 // The comment's positions are relative to the region; shift them to the source.
-                comment.shift_into_source(&node, contents);
+                comment.shift_into_source(node.start_position().row, node.start_byte(), contents);
                 comments.push(comment);
             }
         }

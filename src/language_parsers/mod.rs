@@ -20,6 +20,7 @@ mod lean;
 mod lua;
 mod makefile;
 mod markdown;
+mod mdx;
 mod nix;
 mod ocaml;
 mod php;
@@ -154,6 +155,7 @@ pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
     let lua_parser = parser(lua::parser()?);
     let makefile_parser = parser(makefile::parser()?);
     let markdown_parser = parser(markdown::parser()?);
+    let mdx_parser = parser(mdx::parser()?);
     let nix_parser = parser(nix::parser()?);
     let ocaml_parser = parser(ocaml::parser()?);
     let php_parser = parser(php::parser()?);
@@ -250,6 +252,7 @@ pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
         ("makefile".into(), Arc::clone(&makefile_parser)),
         ("markdown".into(), Arc::clone(&markdown_parser)),
         ("md".into(), markdown_parser),
+        ("mdx".into(), mdx_parser),
         ("mjs".into(), js_parser),
         ("mk".into(), makefile_parser),
         ("ml".into(), Arc::clone(&ocaml_parser)),
@@ -527,13 +530,19 @@ impl Comment {
         self.position_range.end.character = character_column_at(source, self.source_range.end);
     }
 
-    /// Shifts a comment that was parsed from the sub-region spanned by `region_node` into the
-    /// coordinates of the full `source`.
-    fn shift_into_source(&mut self, region_node: &Node, source: &str) {
-        self.position_range.start.line += region_node.start_position().row;
-        self.position_range.end.line += region_node.start_position().row;
-        self.source_range.start += region_node.start_byte();
-        self.source_range.end += region_node.start_byte();
+    /// Shifts a comment that was parsed from a region of `source` into the coordinates of the
+    /// full `source`. The region starts at byte `region_start_byte`, on the 0-based row
+    /// `region_start_row`.
+    fn shift_into_source(
+        &mut self,
+        region_start_row: usize,
+        region_start_byte: usize,
+        source: &str,
+    ) {
+        self.position_range.start.line += region_start_row;
+        self.position_range.end.line += region_start_row;
+        self.source_range.start += region_start_byte;
+        self.source_range.end += region_start_byte;
         // A region can start mid-line, so the columns from the region parse are not source columns.
         self.set_character_columns(source);
     }

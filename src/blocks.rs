@@ -3011,6 +3011,10 @@ mod supported_languages_tests {
                 "<div>\n<!-- <block> -->\n## Heading\n<!-- </block> -->\n</div>".to_string(),
             ),
             (
+                "mdx.mdx".to_string(),
+                "{/* <block> */}\n## Heading\n{/* </block> */}".to_string(),
+            ),
+            (
                 "mk.mk".to_string(),
                 "# <block>\nall:\n\t@echo \"hello\"\n# </block>".to_string(),
             ),

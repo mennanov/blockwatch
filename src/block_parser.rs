@@ -32,7 +32,7 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
 }
 
 /// Assembles [`Block`]s out of a comment stream.
-struct BlocksIterator<'source, I: Iterator<Item = Comment>> {
+pub(crate) struct BlocksIterator<'source, I: Iterator<Item = Comment>> {
     partial_blocks: PartialBlocksIterator<'source, I>,
     /// Start tags still waiting for their end tag, outermost first.
     open_blocks: Vec<BlockStart>,
@@ -46,7 +46,7 @@ struct BlocksIterator<'source, I: Iterator<Item = Comment>> {
 
 impl<'source, I: Iterator<Item = Comment>> BlocksIterator<'source, I> {
     /// Starts the block stream over the comments of `contents`, which must be in source order.
-    fn new(comments: I, contents: &'source str) -> Self {
+    pub(crate) fn new(comments: I, contents: &'source str) -> Self {
         Self {
             partial_blocks: PartialBlocksIterator::new(comments, contents),
             open_blocks: Vec::new(),
