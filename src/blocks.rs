@@ -2983,6 +2983,10 @@ mod supported_languages_tests {
                 "// <block>\nplugins { }\n// </block>".to_string(),
             ),
             (
+                "lean.lean".to_string(),
+                "-- <block>\ndef x := 1\n-- </block>".to_string(),
+            ),
+            (
                 "lua.lua".to_string(),
                 "-- <block>\nlocal x = 1\n-- </block>".to_string(),
             ),

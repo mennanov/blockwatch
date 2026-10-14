@@ -16,6 +16,7 @@ mod java;
 mod javascript;
 mod json;
 mod kotlin;
+mod lean;
 mod lua;
 mod makefile;
 mod markdown;
@@ -148,6 +149,7 @@ pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
     let js_parser = parser(javascript::parser()?);
     let json_parser = parser(json::parser()?);
     let kotlin_parser = parser(kotlin::parser()?);
+    let lean_parser = parser(lean::parser()?);
     let lua_parser = parser(lua::parser()?);
     let makefile_parser = parser(makefile::parser()?);
     let markdown_parser = parser(markdown::parser()?);
@@ -240,6 +242,7 @@ pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
         ("jsx".into(), Arc::clone(&js_parser)),
         ("kt".into(), Arc::clone(&kotlin_parser)),
         ("kts".into(), kotlin_parser),
+        ("lean".into(), lean_parser),
         ("lua".into(), Arc::clone(&lua_parser)),
         ("mak".into(), Arc::clone(&makefile_parser)),
         ("makefile".into(), Arc::clone(&makefile_parser)),
