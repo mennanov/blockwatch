@@ -1,0 +1,80 @@
+# Builds blockwatch for PyPI, as `blockwatch-cli`, and uploads it when a version tag is pushed. The pre-commit hooks
+# install that package through setup.py. release.yml builds the GitHub release from the same tag.
+#
+# Run it by hand to build without uploading.
+name: PyPI
+
+permissions:
+  contents: read
+
+on:
+  push:
+    tags:
+      - '**[0-9]+.[0-9]+.[0-9]+*'
+  workflow_dispatch:
+
+jobs:
+  wheels:
+    strategy:
+      matrix:
+        # A platform without a wheel gets the sdist, which needs Rust to build.
+        # <block same-as="dist-workspace.toml#/dist/targets" same-as-pattern="\w+-(?:apple|unknown|pc)-[\w-]+">
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-14
+            target: aarch64-apple-darwin
+          - runner: macos-14
+            target: x86_64-apple-darwin
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+        # </block>
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: pypi
+          target: ${{ matrix.target }}
+          # The same glibc as the Linux binaries in the GitHub release. See dist-workspace.toml.
+          manylinux: 2_28
+          args: --out dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheel-${{ matrix.target }}
+          path: pypi/dist
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: pypi
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sdist
+          path: pypi/dist
+
+  publish:
+    needs: [ wheels, sdist ]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # PyPI accepts an upload for blockwatch-cli only from this workflow and this environment. So no token is stored.
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
