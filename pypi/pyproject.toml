@@ -1,0 +1,16 @@
+[build-system]
+requires = ["maturin>=1.9,<2.0"]
+build-backend = "maturin"
+
+[project]
+# The name `blockwatch` on PyPI belongs to an unrelated project.
+name = "blockwatch-cli"
+dynamic = ["version", "description", "license", "keywords", "urls"]
+
+[tool.maturin]
+bindings = "bin"
+# This file can't sit next to Cargo.toml, at the repository root. pre-commit runs `pip install .` there, and pip
+# would then build from source instead of installing the root `setup.py`.
+manifest-path = "../Cargo.toml"
+# The profile that dist builds the GitHub release archives with, so pip installs the same binary as Homebrew.
+profile = "dist"

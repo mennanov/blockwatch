@@ -3,7 +3,9 @@
   description: Validate every <block> rule in the repository, and enforce `affects` on the staged changes.
   # The diff is saved first, so that a failing `git diff` fails the hook.
   entry: bash -c 'diff=$(git diff --cached --patch --unified=0) || exit; printf "%s\n" "$diff" | blockwatch --diff'
-  language: rust
+  # pre-commit installs the root setup.py, which pulls a prebuilt blockwatch from PyPI.
+  # `language: rust` would compile blockwatch on each user's machine instead.
+  language: python
   pass_filenames: false
   stages: [ pre-commit ]
 
@@ -14,6 +16,6 @@
   # necessary: pre-commit appends the message file to this argv, and `bash -c SCRIPT FILE` binds
   # FILE to $0 rather than $1. The sentinel takes the $0 slot instead.
   entry: bash -c 'diff=$(git diff --cached --patch --unified=0) || exit; printf "%s\n" "$diff" | blockwatch --diff --suppress-from "$1"' --
-  language: rust
+  language: python
   pass_filenames: true
   stages: [ commit-msg ]

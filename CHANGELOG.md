@@ -12,6 +12,12 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Changed
+
+- The pre-commit hooks now install a prebuilt blockwatch from PyPI, as `blockwatch-cli`. Before, pre-commit downloaded
+  a Rust toolchain if needed and compiled blockwatch, so the first run took minutes. Now it takes seconds
+  ([#170](https://github.com/mennanov/blockwatch/issues/170)).
+
 ## [0.11.0] - 2026-10-14
 
 ### Added
