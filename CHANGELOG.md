@@ -12,6 +12,14 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- `line-pattern-forbidden="<regex>"` fails a block when one of its lines matches the regex. For example,
+  `line-pattern-forbidden="localhost"` keeps `localhost` out of a production config. Before, this needed a `check-lua`
+  script, because the regex syntax has no look-ahead. See
+  [Forbidden text](docs/validators/line-pattern.md#forbidden-text)
+  ([#171](https://github.com/mennanov/blockwatch/issues/171)).
+
 ### Changed
 
 - blockwatch now exits with `2`, not `1`, when the run can't finish. For example: a malformed tag, a missing config

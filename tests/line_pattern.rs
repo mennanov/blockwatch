@@ -42,6 +42,17 @@ fn without_a_diff_the_whole_file_is_checked() {
 }
 
 #[test]
+fn with_a_line_matching_a_forbidden_pattern_fails() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/line_pattern/forbidden_text.py");
+    let output = cmd.output().unwrap();
+
+    output.assert().stderr(predicate::str::contains(
+        r#"has the forbidden text \"red\" on line 4"#,
+    ));
+}
+
+#[test]
 fn with_some_lines_not_matching_pattern_fails() {
     let diff_content = r#"
 diff --git a/tests/testdata/line_pattern/hex_and_word_patterns.py b/tests/testdata/line_pattern/hex_and_word_patterns.py

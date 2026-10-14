@@ -7,13 +7,16 @@ use crate::validators::{
 };
 use crate::{Position, validators};
 use anyhow::anyhow;
+use regex::Regex;
 use serde::Serialize;
+use std::ops::Range;
 use std::sync::Arc;
 
-/// Enforces `line-pattern="<regex>"`: every non-empty line in the block must match the regex.
+/// Enforces `line-pattern="<regex>"`, which every non-empty line in the block must match, and
+/// `line-pattern-forbidden="<regex>"`, which no non-empty line may match.
 ///
 /// Keeps hand-maintained lists in shape — a table of `KEY=value` settings, or entries that must
-/// all be relative paths.
+/// all be relative paths — and keeps unwanted text, such as `TODO`, out of a block.
 struct LinePatternValidator {}
 
 impl LinePatternValidator {
@@ -23,9 +26,19 @@ impl LinePatternValidator {
     }
 }
 
+/// Why a line fails. It serializes as the violation's data: `{"pattern": ...}` or
+/// `{"forbidden_pattern": ...}`.
 #[derive(Serialize)]
-struct LinePatternViolation {
-    pattern: String,
+#[serde(untagged)]
+enum LinePatternViolation<'a> {
+    /// The line doesn't match `line-pattern`.
+    NonMatching { pattern: &'a str },
+    /// The line matches `line-pattern-forbidden`. `text` is the matched part of the line.
+    Forbidden {
+        forbidden_pattern: &'a str,
+        #[serde(skip)]
+        text: &'a str,
+    },
 }
 
 impl ValidatorSync for LinePatternValidator {
@@ -36,61 +49,125 @@ impl ValidatorSync for LinePatternValidator {
         let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
-                let Some(pattern) = block_with_context.block.attributes.get("line-pattern") else {
+                let block = &block_with_context.block;
+                let required = compile_attribute(file_path, block, "line-pattern")?;
+                let forbidden = compile_attribute(file_path, block, "line-pattern-forbidden")?;
+                if required.is_none() && forbidden.is_none() {
                     continue;
-                };
-                // Compile regex and ensure it anchors to entire line. Users may pass unanchored; we enforce full-line.
-                let re = compile_pattern(pattern).map_err(|e| {
-                    anyhow!(
-                        "line-pattern expected a valid regular expression, got \"{}\" in {}:{} at {} (error: {})",
-                        pattern,
-                        file_path.display(),
-                        block_with_context.block.name_display(),
-                        block_with_context.block.declared_at(),
-                        e
-                    )
-                })?;
-                let mut block_violations = Vec::new();
-                for (line_idx, line) in block_with_context
-                    .block
-                    .content
-                    .text(&file_blocks.file_content)
-                    .lines()
-                    .enumerate()
-                {
-                    let trimmed_line = line.trim();
-                    if trimmed_line.is_empty() {
-                        continue;
-                    }
-                    if !re.is_match(trimmed_line) {
-                        let byte_offset = trimmed_line.as_ptr() as usize - line.as_ptr() as usize;
-                        let column_offset = line[..byte_offset].chars().count();
-                        let violation_start = block_with_context
-                            .block
-                            .content
-                            .position(line_idx, column_offset);
-                        let line_character_end =
-                            violation_start.character + trimmed_line.chars().count();
-                        block_violations.push(create_violation(
-                            file_path,
-                            &block_with_context.block,
-                            pattern,
-                            trimmed_line,
-                            violation_start.line,
-                            violation_start.character,
-                            line_character_end,
-                        )?);
-                        break;
-                    }
                 }
-                report.add_all(file_path, &block_with_context.block, block_violations);
+                let violation = first_violation(
+                    file_path,
+                    block,
+                    &file_blocks.file_content,
+                    required.as_ref(),
+                    forbidden.as_ref(),
+                )?;
+                report.add_all(file_path, block, violation.into_iter().collect());
             }
         }
         Ok(report)
     }
 }
 
-/// Selects [`LinePatternValidator`] for blocks carrying a `line-pattern` attribute.
+/// Compiles the regex in `attribute` of `block`, which is in `file_path`. Returns the attribute's
+/// value with its regex, or `None` when the block doesn't have the attribute.
+///
+/// # Errors
+/// Returns an error when the value is not a valid regex or has a line break.
+fn compile_attribute<'b>(
+    file_path: &RepoPath,
+    block: &'b Block,
+    attribute: &str,
+) -> anyhow::Result<Option<(&'b str, Regex)>> {
+    let Some(pattern) = block.attributes.get(attribute) else {
+        return Ok(None);
+    };
+    let re = compile_pattern(pattern).map_err(|e| {
+        anyhow!(
+            "{attribute} expected a valid regular expression, got \"{pattern}\" in {}:{} at {} (error: {e})",
+            file_path.display(),
+            block.name_display(),
+            block.declared_at(),
+        )
+    })?;
+    Ok(Some((pattern.as_str(), re)))
+}
+
+/// Returns the violation for the first non-empty line of `block` that fails a check, or `None`
+/// when every line passes. Each line is trimmed before it is checked.
+///
+/// `required` and `forbidden` are the compiled `line-pattern` and `line-pattern-forbidden`.
+fn first_violation(
+    file_path: &RepoPath,
+    block: &Block,
+    file_content: &str,
+    required: Option<&(&str, Regex)>,
+    forbidden: Option<&(&str, Regex)>,
+) -> anyhow::Result<Option<Violation>> {
+    for (line_idx, line) in block.content.text(file_content).lines().enumerate() {
+        let trimmed_line = line.trim();
+        if trimmed_line.is_empty() {
+            continue;
+        }
+        if let Some((failing_bytes, violation)) = check_line(trimmed_line, required, forbidden) {
+            let range = source_range(block, line_idx, line, trimmed_line, failing_bytes);
+            return create_violation(file_path, block, violation, trimmed_line, range).map(Some);
+        }
+    }
+    Ok(None)
+}
+
+/// Returns the first check `line` fails, `required` before `forbidden`: the bytes of `line` to
+/// report, and why it fails. Returns `None` when `line` passes both.
+fn check_line<'a>(
+    line: &'a str,
+    required: Option<&'a (&'a str, Regex)>,
+    forbidden: Option<&'a (&'a str, Regex)>,
+) -> Option<(Range<usize>, LinePatternViolation<'a>)> {
+    if let Some((pattern, re)) = required
+        && !re.is_match(line)
+    {
+        return Some((0..line.len(), LinePatternViolation::NonMatching { pattern }));
+    }
+    if let Some((forbidden_pattern, re)) = forbidden
+        && let Some(found) = re.find(line)
+    {
+        return Some((
+            found.range(),
+            LinePatternViolation::Forbidden {
+                forbidden_pattern,
+                text: found.as_str(),
+            },
+        ));
+    }
+    None
+}
+
+/// Returns where `bytes` of `trimmed_line` are in the source file.
+///
+/// `line` is line `line_idx` of the block's content, and `trimmed_line` is `line` trimmed.
+fn source_range(
+    block: &Block,
+    line_idx: usize,
+    line: &str,
+    trimmed_line: &str,
+    bytes: Range<usize>,
+) -> ViolationRange {
+    // Editors count columns in characters, so the bytes before the range, the trimmed
+    // indentation included, are turned into a character count.
+    let byte_offset = trimmed_line.as_ptr() as usize - line.as_ptr() as usize + bytes.start;
+    let start = block
+        .content
+        .position(line_idx, line[..byte_offset].chars().count());
+    let end = Position::new(
+        start.line,
+        start.character + trimmed_line[bytes].chars().count(),
+    );
+    ViolationRange::new(start, end)
+}
+
+/// Selects [`LinePatternValidator`] for blocks carrying a `line-pattern` or a
+/// `line-pattern-forbidden` attribute.
 pub(super) struct LinePatternValidatorDetector();
 
 impl LinePatternValidatorDetector {
@@ -106,10 +183,9 @@ impl<Fs: FileSystem> ValidatorDetector<Fs> for LinePatternValidatorDetector {
         block_with_context: &BlockWithContext,
         _file_system: &Arc<Fs>,
     ) -> anyhow::Result<Option<ValidatorType>> {
-        if block_with_context
-            .block
-            .attributes
-            .contains_key("line-pattern")
+        let attributes = &block_with_context.block.attributes;
+        if attributes.contains_key("line-pattern")
+            || attributes.contains_key("line-pattern-forbidden")
         {
             Ok(Some(ValidatorType::Sync(Box::new(
                 LinePatternValidator::new(),
@@ -120,28 +196,35 @@ impl<Fs: FileSystem> ValidatorDetector<Fs> for LinePatternValidatorDetector {
     }
 }
 
+/// Builds the violation of `block`, which is in `block_file_path`, for `violation_line`: the
+/// trimmed line that failed. `range` is where the failing text is in the source file.
 fn create_violation(
     block_file_path: &RepoPath,
     block: &Block,
-    pattern: &str,
+    violation: LinePatternViolation,
     violation_line: &str,
-    violation_line_number: usize,
-    violation_character_start: usize,
-    violation_character_end: usize,
+    range: ViolationRange,
 ) -> anyhow::Result<Violation> {
+    let line_number = range.start().line;
+    let failure = match &violation {
+        LinePatternViolation::NonMatching { pattern } => {
+            format!("a non-matching line {line_number} (pattern: /{pattern}/)")
+        }
+        LinePatternViolation::Forbidden {
+            forbidden_pattern,
+            text,
+        } => format!(
+            "the forbidden text \"{text}\" on line {line_number} (pattern: /{forbidden_pattern}/)"
+        ),
+    };
     let message = format!(
-        "Block {}:{} defined at {} has a non-matching line {} (pattern: /{}/)",
+        "Block {}:{} defined at {} has {failure}",
         block_file_path.display(),
         block.name_display(),
         block.declared_at(),
-        violation_line_number,
-        pattern
     );
     Violation::new(
-        ViolationRange::new(
-            Position::new(violation_line_number, violation_character_start),
-            Position::new(violation_line_number, violation_character_end),
-        ),
+        range,
         block_file_path,
         block,
         "line-pattern".to_string(),
@@ -149,9 +232,7 @@ fn create_violation(
         // Identify the violation by the offending line rather than its number, which shifts
         // whenever anything above it is added or removed.
         Some(violation_line),
-        Some(serde_json::to_value(LinePatternViolation {
-            pattern: pattern.to_string(),
-        })?),
+        Some(serde_json::to_value(violation)?),
     )
 }
 
@@ -239,6 +320,88 @@ mod validate_tests {
     }
 
     #[test]
+    fn block_with_several_forbidden_matches_returns_a_violation_at_the_first_match()
+    -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-pattern-forbidden="red">
+blue = 1
+café = "red"
+green = "red"
+# </block>"#,
+        );
+
+        let violations = LinePatternValidator::new().validate(context)?.violations;
+
+        let file_violations = violations
+            .get(&RepoPath::from_reference("example.py")?)
+            .unwrap();
+        assert_eq!(file_violations.len(), 1);
+        assert_eq!(
+            file_violations[0].message,
+            r#"Block example.py:(unnamed) defined at line 1 has the forbidden text "red" on line 3 (pattern: /red/)"#
+        );
+        assert_eq!(file_violations[0].code, "line-pattern");
+        // `red` starts at character 9, but at byte 10, because `é` takes two bytes.
+        assert_eq!(
+            file_violations[0].range,
+            ViolationRange::new(Position::new(3, 9), Position::new(3, 12))
+        );
+        assert_eq!(
+            file_violations[0].data,
+            Some(json!({
+                "forbidden_pattern": "red"
+            }))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn block_without_a_forbidden_match_returns_no_violations() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-pattern-forbidden="red">
+blue = 1
+# </block>"#,
+        );
+
+        let violations = LinePatternValidator::new().validate(context)?.violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn blocks_with_both_patterns_return_the_first_line_that_fails_either() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block name="non-matching" line-pattern="^[a-z]+$" line-pattern-forbidden="red">
+BLUE
+# </block>
+# <block name="forbidden" line-pattern="^[a-z]+$" line-pattern-forbidden="red">
+red
+# </block>"#,
+        );
+
+        let violations = LinePatternValidator::new().validate(context)?.violations;
+
+        let messages: Vec<&str> = violations
+            .get(&RepoPath::from_reference("example.py")?)
+            .unwrap()
+            .iter()
+            .map(|violation| violation.message.as_str())
+            .collect();
+        assert_eq!(
+            messages,
+            vec![
+                "Block example.py:non-matching defined at line 1 has a non-matching line 2 (pattern: /^[a-z]+$/)",
+                r#"Block example.py:forbidden defined at line 4 has the forbidden text "red" on line 5 (pattern: /red/)"#,
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn inline_block_with_a_non_matching_line_returns_violation_with_source_line_columns()
     -> anyhow::Result<()> {
         let context = validation_context(
@@ -314,6 +477,23 @@ mod validate_tests {
         let result = validator.validate(context);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn block_with_an_invalid_forbidden_regex_returns_an_error() {
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-pattern-forbidden="[a-z+">
+# </block>"#,
+        );
+
+        let err = LinePatternValidator::new().validate(context).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .starts_with("line-pattern-forbidden expected a valid regular expression"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

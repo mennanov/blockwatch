@@ -74,7 +74,7 @@ const VALIDATOR_DESCRIPTIONS: &[(&str, &str)] = &[
     ("line-count", "Constrains how many lines a block has."),
     (
         "line-pattern",
-        "Requires every line of a block to match a pattern.",
+        "Checks every line of a block against a required or a forbidden pattern.",
     ),
     (
         "same-as",

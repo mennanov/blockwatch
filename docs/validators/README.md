@@ -33,7 +33,7 @@ between two references is fine.
 | Assert two places still hold the **same value**               | [`same-as`](same-as.md)           |
 | Keep a list alphabetized or numerically ordered               | [`keep-sorted`](keep-sorted.md)   |
 | Prevent duplicate entries in a list                           | [`keep-unique`](keep-unique.md)   |
-| Require every line to match a format                          | [`line-pattern`](line-pattern.md) |
+| Require every line to match a format, or forbid some text     | [`line-pattern`](line-pattern.md) |
 | Cap or fix the number of lines in a block                     | [`line-count`](line-count.md)     |
 | Enforce a rule stated in plain English                        | [`check-ai`](check-ai.md)         |
 | Run arbitrary validation logic                                | [`check-lua`](check-lua.md)       |
