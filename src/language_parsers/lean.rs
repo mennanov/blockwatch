@@ -1,10 +1,23 @@
+//! Finds the comments in Lean 4 files with a scanner written with winnow. Other languages use a
+//! tree-sitter grammar, but no Lean grammar on crates.io works here:
+//!
+//! - `tree-sitter-lean4` 0.3.0 depends on `tree-sitter` 0.25 directly. Each `tree-sitter` version
+//!   links the same C library (`links = "tree-sitter"`), so Cargo can't build it next to the
+//!   newer `tree-sitter` that blockwatch uses.
+//! - `arborium-lean` 2.18.2 builds, but it adds about 18 MB to the binary. Its block comments
+//!   don't nest, and it reads most of a real Lean 4 file as `ERROR` nodes, because it doesn't
+//!   know newer syntax such as `module` and `public import`.
+//!
+//! Lean's rules for comments are short, so the scanner is small: `--` to the end of the line,
+//! nested `/- -/`, and the strings, chars and `«»` names that can hold comment markers.
+
 use crate::language_parsers::{Comment, CommentsParser, LanguageParser, LanguageParserImpl};
 use crate::{Position, character_column_at};
 use std::ops::Range;
 use winnow::Result as PResult;
-use winnow::combinator::{alt, delimited, eof, opt, repeat, repeat_till};
+use winnow::combinator::{alt, delimited, eof, opt, repeat_till};
 use winnow::prelude::*;
-use winnow::stream::LocatingSlice;
+use winnow::stream::{LocatingSlice, Stream};
 use winnow::token::{any, one_of, rest, take_till, take_until, take_while};
 
 /// Returns a [`LanguageParser`] for Lean 4.
@@ -14,8 +27,10 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 /// Finds the comments in Lean 4 source by Lean's own lexical rules.
 ///
-/// A string inside the braces of an interpolated string, as in `s!"{"--"}"`, ends the outer
-/// string early. A plain string can't be told from an interpolated one without parsing Lean.
+/// A string right after `!`, as in `s!"{x}"` or `println! "{x}"`, is read as an interpolated
+/// string: a `{` in it opens Lean code, which can hold comments. Lean also reads the string after
+/// some keywords, such as `throwError`, as interpolated. Here, those are plain strings, so a
+/// string inside their braces ends the outer string early.
 struct LeanCommentsParser;
 
 impl CommentsParser for LeanCommentsParser {
@@ -23,9 +38,9 @@ impl CommentsParser for LeanCommentsParser {
         &'source mut self,
         source_code: &'source str,
     ) -> impl Iterator<Item = Comment> + 'source {
-        let tokens: Vec<Option<(MarkerLengths, Range<usize>)>> = repeat(0.., token)
+        let comments = comments
             .parse(LocatingSlice::new(source_code))
-            .expect("the last choice of `token` takes any character");
+            .expect("each step of `comments` takes at least one character");
         // `Position::from_byte_offset` counts the lines from the start of the file for each
         // offset, which is slow for a file with many comments.
         let line_starts: Vec<usize> = std::iter::once(0)
@@ -37,9 +52,8 @@ impl CommentsParser for LeanCommentsParser {
                 character_column_at(source_code, offset),
             )
         };
-        tokens
+        comments
             .into_iter()
-            .flatten()
             .map(move |((opening, closing), range)| {
                 let text = &source_code[range.clone()];
                 Comment {
@@ -63,11 +77,76 @@ type Input<'source> = LocatingSlice<&'source str>;
 /// of the file cuts off.
 type MarkerLengths = (usize, usize);
 
-/// Parses one comment, or one piece of code that can't hold a comment. Returns the comment's
-/// markers and byte range, or `None` for code. Fails only at the end of the input.
-fn token(input: &mut Input<'_>) -> PResult<Option<(MarkerLengths, Range<usize>)>> {
+/// Parses the whole input and returns the markers and byte range of each comment, in source order.
+fn comments(input: &mut Input<'_>) -> PResult<Vec<(MarkerLengths, Range<usize>)>> {
+    // The interpolated strings and their code that the scanner is inside, innermost last. A stack
+    // instead of recursion, so that many nested strings can't overflow the stack.
+    let mut contexts = Vec::new();
+    let mut comments = Vec::new();
+    while input.eof_offset() > 0 {
+        match contexts.last_mut() {
+            Some(Context::String) => match string_piece.parse_next(input)? {
+                StringPiece::Text => {}
+                StringPiece::OpenBrace => contexts.push(Context::Code { open_braces: 0 }),
+                StringPiece::End => {
+                    contexts.pop();
+                }
+            },
+            Some(Context::Code { open_braces }) => match code_token.parse_next(input)? {
+                CodeToken::Comment(markers, range) => comments.push((markers, range)),
+                CodeToken::InterpolatedStringStart => contexts.push(Context::String),
+                CodeToken::OpenBrace => *open_braces += 1,
+                CodeToken::CloseBrace => match open_braces.checked_sub(1) {
+                    Some(still_open) => *open_braces = still_open,
+                    None => {
+                        contexts.pop();
+                    }
+                },
+                CodeToken::Other => {}
+            },
+            None => match code_token.parse_next(input)? {
+                CodeToken::Comment(markers, range) => comments.push((markers, range)),
+                CodeToken::InterpolatedStringStart => contexts.push(Context::String),
+                // Outside interpolated strings, braces don't change how the code is read.
+                CodeToken::OpenBrace | CodeToken::CloseBrace | CodeToken::Other => {}
+            },
+        }
+    }
+    Ok(comments)
+}
+
+/// A part of an interpolated string that the scanner is inside.
+enum Context {
+    /// The text of the string.
+    String,
+    /// The Lean code between a `{` in the string and its matching `}`, with the count of `{` in
+    /// that code that are still open.
+    Code { open_braces: usize },
+}
+
+/// One token of Lean code.
+#[derive(Clone)]
+enum CodeToken {
+    /// A comment, with its markers and byte range.
+    Comment(MarkerLengths, Range<usize>),
+    /// The opening quote of an interpolated string, with the `!` before it.
+    InterpolatedStringStart,
+    OpenBrace,
+    CloseBrace,
+    /// Code that can't hold a comment, such as a name or a plain string.
+    Other,
+}
+
+/// Parses one [`CodeToken`]. Fails only at the end of the input.
+fn code_token(input: &mut Input<'_>) -> PResult<CodeToken> {
     alt((
-        alt((line_comment, block_comment)).with_span().map(Some),
+        alt((line_comment, block_comment))
+            .with_span()
+            .map(|(markers, range)| CodeToken::Comment(markers, range)),
+        // `s!`, `m!`, `f!` and `println!` take an interpolated string.
+        ('!', take_while(0.., [' ', '\t']), '"').value(CodeToken::InterpolatedStringStart),
+        '{'.value(CodeToken::OpenBrace),
+        '}'.value(CodeToken::CloseBrace),
         alt((
             string,
             // Before `identifier`, which would read the `r` as a name.
@@ -77,7 +156,29 @@ fn token(input: &mut Input<'_>) -> PResult<Option<(MarkerLengths, Range<usize>)>
             char_literal,
             any.void(),
         ))
-        .value(None),
+        .value(CodeToken::Other),
+    ))
+    .parse_next(input)
+}
+
+/// One piece of the text of an interpolated string.
+#[derive(Clone)]
+enum StringPiece {
+    /// A character, or an escape such as `\{`.
+    Text,
+    /// The `{` that opens Lean code.
+    OpenBrace,
+    /// The closing quote.
+    End,
+}
+
+/// Parses one [`StringPiece`]. Fails only at the end of the input.
+fn string_piece(input: &mut Input<'_>) -> PResult<StringPiece> {
+    alt((
+        '"'.value(StringPiece::End),
+        '{'.value(StringPiece::OpenBrace),
+        ('\\', any).value(StringPiece::Text),
+        any.value(StringPiece::Text),
     ))
     .parse_next(input)
 }
@@ -291,6 +392,64 @@ def t := "C:\\" -- also real"#
             comment_sources("-- real\ndef s := \"open -- not\n-- not either\n"),
             ["-- real"]
         );
+    }
+
+    #[test]
+    fn interpolated_string_inner_string_does_not_end_it() {
+        assert_eq!(
+            comment_sources(r#"s!"run {if ok then " --fast" else ""} now" -- real"#),
+            ["-- real"]
+        );
+    }
+
+    #[test]
+    fn interpolated_string_comment_in_braces_is_found() {
+        assert_eq!(
+            comment_sources(r#"s!"{x /- note -/}" -- real"#),
+            ["/- note -/", "-- real"]
+        );
+    }
+
+    #[test]
+    fn interpolated_string_nested_braces_close_in_order() {
+        assert_eq!(
+            comment_sources(r#"s!"{ {a := 1}.b ++ "--" }" -- real"#),
+            ["-- real"]
+        );
+    }
+
+    #[test]
+    fn interpolated_string_in_braces_is_recognized() {
+        assert_eq!(comment_sources(r#"s!"a {s!"--"} c" -- real"#), ["-- real"]);
+    }
+
+    #[test]
+    fn interpolated_string_after_space_is_recognized() {
+        assert_eq!(comment_sources(r#"println! "{"--"}" -- real"#), ["-- real"]);
+    }
+
+    #[test]
+    fn interpolated_string_escaped_brace_is_text() {
+        assert_eq!(comment_sources(r#"s!"\{ -- not" -- real"#), ["-- real"]);
+    }
+
+    #[test]
+    fn plain_string_braces_are_text() {
+        assert_eq!(comment_sources(r#"def s := "{" -- real"#), ["-- real"]);
+    }
+
+    #[test]
+    fn unterminated_interpolation_runs_to_end_of_file() {
+        assert_eq!(
+            comment_sources("-- real\ns!\"{x -- inside\n"),
+            ["-- real", "-- inside"]
+        );
+    }
+
+    #[test]
+    fn deeply_nested_interpolation_does_not_overflow_stack() {
+        let source = format!("{}-- real", "s!\"{".repeat(100_000));
+        assert_eq!(comment_sources(&source), ["-- real"]);
     }
 
     #[test]
