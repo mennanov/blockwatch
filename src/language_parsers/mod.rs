@@ -21,6 +21,7 @@ mod lua;
 mod makefile;
 mod markdown;
 mod nix;
+mod ocaml;
 mod php;
 mod proto;
 mod python;
@@ -154,6 +155,7 @@ pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
     let makefile_parser = parser(makefile::parser()?);
     let markdown_parser = parser(markdown::parser()?);
     let nix_parser = parser(nix::parser()?);
+    let ocaml_parser = parser(ocaml::parser()?);
     let php_parser = parser(php::parser()?);
     let proto_parser = parser(proto::parser()?);
     let python_parser = parser(python::parser()?);
@@ -250,6 +252,8 @@ pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
         ("md".into(), markdown_parser),
         ("mjs".into(), js_parser),
         ("mk".into(), makefile_parser),
+        ("ml".into(), Arc::clone(&ocaml_parser)),
+        ("mli".into(), ocaml_parser),
         ("mts".into(), Arc::clone(&typescript_parser)),
         ("nix".into(), nix_parser),
         ("php".into(), Arc::clone(&php_parser)),
@@ -789,7 +793,20 @@ fn c_style_multiline_comment_processor(comment: &str) -> String {
     result.push_str(&comment[..open_idx]);
     // Replace "/*" with spaces.
     result.push_str("  ");
-    let content = &comment[open_idx + 2..close_idx];
+    result.push_str(&blank_decorative_stars(&comment[open_idx + 2..close_idx]));
+    // Replace "*/" with spaces.
+    result.push_str("  ");
+    // Add everything after the "*/".
+    result.push_str(&comment[close_idx + 2..]);
+
+    result
+}
+
+/// Returns `content`, the text between a block comment's delimiters, with the first `*` on each
+/// line blanked when only whitespace comes before it. Such a `*` only decorates the comment, as in
+/// ` * ` lines, and would otherwise break a tag that spans those lines.
+fn blank_decorative_stars(content: &str) -> String {
+    let mut result = String::with_capacity(content.len());
     for line in content.split_inclusive('\n') {
         let mut decorative_star_found = false;
 
@@ -811,11 +828,6 @@ fn c_style_multiline_comment_processor(comment: &str) -> String {
             result.push_str(line);
         }
     }
-    // Replace "*/" with spaces.
-    result.push_str("  ");
-    // Add everything after the "*/".
-    result.push_str(&comment[close_idx + 2..]);
-
     result
 }
 

@@ -14,7 +14,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Added
 
-- blockwatch now supports Lean files (`.lean`). Before, it skipped them, so their tags were never checked.
+- blockwatch now supports Lean (`.lean`) and OCaml (`.ml`, `.mli`) files. Before, it skipped them, so their tags were
+  never checked.
 
 ## [0.11.1] - 2026-10-14
 

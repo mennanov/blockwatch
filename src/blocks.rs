@@ -3027,6 +3027,14 @@ mod supported_languages_tests {
                 "# <block>\n{ pkgs = null; }\n# </block>".to_string(),
             ),
             (
+                "ml.ml".to_string(),
+                "(* <block> *)\nlet x = 1\n(* </block> *)".to_string(),
+            ),
+            (
+                "mli.mli".to_string(),
+                "(* <block> *)\nval x : int\n(* </block> *)".to_string(),
+            ),
+            (
                 "php.php".to_string(),
                 "<?php\n# <block>\necho 'hello';\n# </block>\n?>".to_string(),
             ),
