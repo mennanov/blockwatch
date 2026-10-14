@@ -12,8 +12,8 @@ It stays fast, because a file without a block tag is not parsed. To check only t
 
 ## Pre-commit Framework
 
-To use [pre-commit](https://pre-commit.com), add the hook to `.pre-commit-config.yaml`. Cargo will build `blockwatch`
-from source on the first run:
+To use [pre-commit](https://pre-commit.com), add the hook to `.pre-commit-config.yaml`. pre-commit installs a prebuilt
+`blockwatch` from PyPI, so you don't need Rust:
 
 <!-- <block name="pre-commit-rev" same-as="Cargo.toml:crate-version" same-as-mode="subset"
      same-as-pattern='rev: v(?P<value>\d+\.\d+\.\d+)'> -->
@@ -27,8 +27,7 @@ from source on the first run:
 
 <!-- </block> -->
 
-If `blockwatch` is already installed locally (e.g. via Homebrew or Cargo), use a local hook to skip building from
-source:
+To run a `blockwatch` that is already installed, such as from Homebrew, use a local hook instead:
 
 ```yaml
 - repo: local
@@ -169,13 +168,22 @@ See [Supported Diff Input](cli.md#supported-diff-input) for details.
 
 ## Checking Only Changed Blocks
 
-A full scan checks every block on every commit. Add `--only-changed` to the hook's `blockwatch --diff` when that costs
-too much:
+A full scan checks every block on every commit. Pass `--only-changed` when that costs too much:
 
 - **[`check-ai`](validators/check-ai.md)** sends every block in scope to the model: one paid API call per block, on
   every commit.
 - **[`check-lua`](validators/check-lua.md) scripts that do I/O**, such as a network call, run for every block too.
 - **A huge repository with many blocks.**
+
+The pre-commit hooks pass their `args` to blockwatch:
+
+```yaml
+  hooks:
+    - id: blockwatch
+      args: [ --only-changed ]
+```
+
+In a local hook or a plain git hook, add the flag after `--diff`.
 
 `--only-changed` checks only the blocks the diff changed, so it misses a block that a change broke elsewhere. To keep
 the full scan for every other validator, run twice: once with `-d check-ai`, and once with `--only-changed -e check-ai`.

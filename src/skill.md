@@ -363,17 +363,14 @@ means nothing changed, but stdin that is ANSI-colorized or not a diff is an erro
 The hook and the GitHub Action below check every block in the repository, and enforce `affects` on the diff. A file
 without a block tag is not parsed, so this stays fast.
 
-**pre-commit** (`.pre-commit-config.yaml`):
+**pre-commit** (`.pre-commit-config.yaml`). pre-commit installs blockwatch from PyPI, so contributors don't need to
+install it:
 
 ```yaml
-- repo: local
+- repo: https://github.com/mennanov/blockwatch
+  rev: v{{version}}
   hooks:
     - id: blockwatch
-      name: blockwatch
-      entry: bash -c 'diff=$(git diff --patch --cached --unified=0) || exit; if [ -z "$diff" ]; then exec blockwatch; fi; printf "%s\n" "$diff" | blockwatch --diff'
-      language: system
-      stages: [ pre-commit ]
-      pass_filenames: false
 ```
 
 Without the pre-commit framework, write this to `.git/hooks/pre-commit` and `chmod +x` it:
@@ -393,10 +390,11 @@ blockwatch reads the files on disk, not the staged content. The pre-commit frame
 it runs a hook, but a plain hook doesn't. So this hook stops when there are unstaged changes, instead of checking them
 in place of the commit.
 
-Both hooks run `blockwatch` without `--diff` when nothing is staged, because releases up to 0.8.1 reject an empty diff.
+The plain hook runs `blockwatch` without `--diff` when nothing is staged, because releases up to 0.8.1 reject an empty
+diff.
 
-If the project has `check-ai` blocks, add `--only-changed` after `--diff`: a full scan sends every one of them to the
-model on every commit.
+If the project has `check-ai` blocks, add `args: [ --only-changed ]` to the pre-commit hook, or `--only-changed` after
+`--diff` in the plain hook: a full scan sends every one of them to the model on every commit.
 
 **GitHub Actions** (`.github/workflows/blockwatch.yml`):
 

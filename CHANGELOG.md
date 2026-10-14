@@ -12,11 +12,20 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- blockwatch is on PyPI, as `blockwatch-cli`: `pipx install blockwatch-cli` or `uv tool install blockwatch-cli`. On
+  PyPI, `blockwatch` is a different project ([#170](https://github.com/mennanov/blockwatch/issues/170)).
+- The pre-commit hooks pass their `args` to blockwatch. For example, `args: [ --only-changed ]` checks only the blocks
+  that the commit changed. See [Checking Only Changed Blocks](docs/ci.md#checking-only-changed-blocks).
+
 ### Changed
 
 - The pre-commit hooks now install a prebuilt blockwatch from PyPI, as `blockwatch-cli`. Before, pre-commit downloaded
   a Rust toolchain if needed and compiled blockwatch, so the first run took minutes. Now it takes seconds
   ([#170](https://github.com/mennanov/blockwatch/issues/170)).
+- The skill that `blockwatch skill` prints now sets up the pre-commit hook from this repository, instead of a local
+  hook. So contributors to a project don't need to install blockwatch.
 
 ## [0.11.0] - 2026-10-14
 

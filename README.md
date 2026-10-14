@@ -126,6 +126,9 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/mennanov/blockwatch/rel
 # Windows
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/mennanov/blockwatch/releases/latest/download/blockwatch-installer.ps1 | iex"
 
+# With Python. On PyPI, `blockwatch` is a different project.
+pipx install blockwatch-cli  # or: uv tool install blockwatch-cli
+
 # From source, with Rust
 cargo install blockwatch
 ```
