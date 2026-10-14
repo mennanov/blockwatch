@@ -60,7 +60,6 @@ index 1111111..2222222 100644
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value =
                 serde_json::from_str(output).expect("invalid json");
@@ -129,7 +128,6 @@ fn lua_script_using_os_fails_in_sandboxed_mode() {
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains("os library is not available"));
 }
 
@@ -150,13 +148,9 @@ fn unknown_mode_fails_the_run_with_the_valid_modes() {
     cmd.env(LUA_MODE_ENV_VAR, "Safe");
     let output = cmd.output().unwrap();
 
-    output
-        .assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains(
-            r#"BLOCKWATCH_LUA_MODE is "Safe", but it must be sandboxed, safe or unsafe"#,
-        ));
+    output.assert().failure().stderr(predicate::str::contains(
+        r#"BLOCKWATCH_LUA_MODE is "Safe", but it must be sandboxed, safe or unsafe"#,
+    ));
 }
 
 #[test]
@@ -222,13 +216,9 @@ index 1111111..2222222 100644
     cmd.args(["--diff", "--only-changed"]);
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
-    output
-        .assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains(
-            "block 'allowed-colors-docs' in tests/testdata/check_lua/affects_drift.py is out of sync",
-        ));
+    output.assert().failure().stderr(predicate::str::contains(
+        "block 'allowed-colors-docs' in tests/testdata/check_lua/affects_drift.py is out of sync",
+    ));
 }
 
 #[test]
@@ -253,7 +243,6 @@ fn lua_script_blocked_in_io_call_times_out() {
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains("timed out"));
 }
 

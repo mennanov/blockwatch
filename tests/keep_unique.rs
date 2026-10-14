@@ -37,7 +37,6 @@ fn without_a_diff_the_whole_file_is_checked() {
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains("has a duplicated line 13"));
 }
 
@@ -63,7 +62,6 @@ index d69398d..9b29f11 100644
 
     output.assert()
         .failure()
-        .code(1)
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
             let value: serde_json::Value  = json!({

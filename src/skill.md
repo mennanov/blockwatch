@@ -347,6 +347,9 @@ fix only if your change caused it, for example when you changed one side of a `s
 one points at. Otherwise leave it, and tell the user about it. Use `blockwatch list` to confirm a tag you
 just added is parsed and seen.
 
+Exit code `1` means at least one `error` violation. Exit code `2` means blockwatch could not check the code, for example
+because of a malformed tag, a bad `blockwatch.toml` or a missing API key. Fix what the error says, then re-run.
+
 The piped diff must carry Git's standard path prefixes, which a plain `git diff` produces. If blockwatch reports that a
 diff target has no recognized prefix or does not exist, the repository sets `diff.noprefix`, a custom `diff.srcPrefix`,
 or `diff.relative`; re-run as

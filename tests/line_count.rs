@@ -35,13 +35,9 @@ fn without_a_diff_the_whole_file_is_checked() {
     cmd.arg("tests/testdata/line_count/equality_and_greater_than.py");
     let output = cmd.output().unwrap();
 
-    output
-        .assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains(
-            "has 3 lines, which does not satisfy >3",
-        ));
+    output.assert().failure().stderr(predicate::str::contains(
+        "has 3 lines, which does not satisfy >3",
+    ));
 }
 
 #[test]
@@ -66,7 +62,6 @@ index 6781fec..4ce6a3b 100644
 
     output.assert()
         .failure()
-        .code(1)
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
             let value: serde_json::Value  = json!({

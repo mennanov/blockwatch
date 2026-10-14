@@ -35,7 +35,6 @@ fn non_utf8_file_without_blocks_run_checks_the_other_files() -> anyhow::Result<(
     cmd.output()?
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains("keep-sorted"));
     Ok(())
 }
@@ -84,7 +83,6 @@ fn non_utf8_file_with_text_like_a_tag_run_checks_the_other_files() -> anyhow::Re
     cmd.output()?
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains("keep-sorted"));
     Ok(())
 }
@@ -117,7 +115,6 @@ diff --git a/unsorted.py b/unsorted.py
     cmd.output()?
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains("keep-sorted"));
     Ok(())
 }

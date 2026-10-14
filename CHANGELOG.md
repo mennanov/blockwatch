@@ -12,6 +12,13 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Changed
+
+- blockwatch now exits with `2`, not `1`, when the run can't finish. For example: a malformed tag, a missing config
+  file, or `check-ai` without an API key. So `1` now means only that an `error` violation was found, and a script can
+  tell the two apart. See [Exit Codes](docs/cli.md#exit-codes)
+  ([#146](https://github.com/mennanov/blockwatch/issues/146)).
+
 ## [0.10.5] - 2026-10-13
 
 ### Added

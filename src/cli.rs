@@ -19,22 +19,36 @@ use clap::Parser;
 use std::collections::HashMap;
 use std::io::{IsTerminal, Read, Write};
 use std::path::PathBuf;
+use std::process::ExitCode;
 use std::sync::Arc;
-use std::{env, fs, process};
+use std::{env, fs};
 
 /// Runs the program with the command-line flags of the process: validates the blocks, lists them
 /// with the `list` subcommand, or prints the agent skill with the `skill` subcommand.
 ///
-/// Returns an error if the run can't finish, such as for an invalid flag or an unreadable file.
-/// When a violation of error severity is found, it exits the process with code 1 instead of
-/// returning.
-pub fn run() -> anyhow::Result<()> {
+/// Returns the exit code of the process:
+/// - `0` when no violation fails the run.
+/// - `1` when a violation of error severity is not suppressed.
+/// - `2` when the run can't finish, such as for an invalid flag or an unreadable file. The error
+///   is written to stderr.
+///
+/// For a flag that clap can't parse, clap exits the process with 2 itself.
+pub fn run() -> ExitCode {
     let args = flags::Args::parse();
-    match &args.command {
-        Some(flags::SubCommand::List { .. }) => run_list(&args),
-        Some(flags::SubCommand::Skill) => run_skill(&args),
+    let result = match &args.command {
+        Some(flags::SubCommand::List { .. }) => run_list(&args).map(|()| ExitCode::SUCCESS),
+        Some(flags::SubCommand::Skill) => run_skill(&args).map(|()| ExitCode::SUCCESS),
         None => run_validators(&args),
-    }
+    };
+    result.unwrap_or_else(|error| {
+        // `{error:?}` adds the causes, as Rust does for an error returned from `main`. The result
+        // is ignored because there is nowhere left to report a closed stderr, and `eprintln!`
+        // would panic on it instead.
+        let _ = writeln!(std::io::stderr(), "Error: {error:?}");
+        // Not 1, so a script can tell a broken rule from a run that could not check the code.
+        // clap already uses 2 for a flag it can't parse.
+        ExitCode::from(2)
+    })
 }
 
 /// Runs the `skill` subcommand: writes the agent skill to stdout, as a complete `SKILL.md`.
@@ -70,7 +84,9 @@ fn run_list(args: &flags::Args) -> anyhow::Result<()> {
 }
 
 /// Runs the default command: validates every block in scope and reports any violations.
-fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
+///
+/// Returns exit code 1 when a violation of error severity is not suppressed, and 0 otherwise.
+fn run_validators(args: &flags::Args) -> anyhow::Result<ExitCode> {
     let file_system = Arc::new(crate::fs::FileSystemImpl::new(&repository_root()?)?);
     let (scan_mode, line_changes) = run_inputs(args, file_system.as_ref())?;
     let language_parsers = language_parsers::language_parsers()?;
@@ -118,10 +134,11 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<()> {
         &log,
     )?;
 
-    if has_error_severity {
-        process::exit(1);
-    }
-    Ok(())
+    Ok(if has_error_severity {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    })
 }
 
 /// Marks every violation covered by a `--suppress` address, so it no longer fails the run.
@@ -153,9 +170,6 @@ fn apply_suppressions(
 }
 
 /// Writes the run report to stdout at the given verbosity, and flushes it.
-///
-/// Flushing matters because an error-severity violation exits the process without unwinding, which
-/// would drop anything still held in the buffer.
 fn write_report(
     verbosity: flags::Verbosity,
     mode: report::RunMode,

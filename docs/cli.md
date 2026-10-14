@@ -886,6 +886,10 @@ agent to save it again. See [Annotating Codebases with AI Agents](agents.md).
 |------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `0`  | Success. No violations found, or every reported violation is either non-`error` [severity](validators/README.md#severity) or [suppressed](#suppressing-a-violation). |
 | `1`  | Failure. At least one unsuppressed `error`-severity violation was detected.                                                                                          |
+| `2`  | Error. The run could not finish, so the code was not checked. For example: a bad flag, config file or tag, an unreadable file, or `check-ai` without an API key.     |
+
+A script can tell `1` from `2`: the code breaks a rule, or blockwatch could not check it. The error for `2` is written
+to stderr.
 
 ---
 

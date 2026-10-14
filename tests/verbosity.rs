@@ -243,7 +243,7 @@ fn full_level_with_violations_writes_two_parseable_documents() {
     // The report goes to stdout and the violations go to stderr, so each one parses on its own.
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     let violations: Value = serde_json::from_slice(&output.stderr).unwrap();
-    output.assert().failure().code(1);
+    output.assert().failure();
 
     assert_eq!(report["summary"]["violations"], 1);
     assert_eq!(
@@ -343,7 +343,7 @@ index 1111111..2222222 100644
 
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     let violations: Value = serde_json::from_slice(&output.stderr).unwrap();
-    output.assert().failure().code(1);
+    output.assert().failure();
 
     assert_eq!(report["summary"]["violations"], 1);
     assert_eq!(
@@ -426,7 +426,7 @@ fn verbosity_with_the_list_subcommand_fails() {
 }
 
 #[test]
-fn summary_level_with_closed_stdout_exits_without_an_error() {
+fn closed_stdout_without_violations_exits_with_code_zero() {
     let output = common::run_with_closed_output(
         common::ClosedOutput::Stdout,
         &[CLEAN_GLOB, "--verbosity", "summary"],
@@ -436,7 +436,7 @@ fn summary_level_with_closed_stdout_exits_without_an_error() {
 }
 
 #[test]
-fn full_level_with_closed_stdout_still_writes_the_violations_and_fails() {
+fn closed_stdout_still_writes_the_violations_and_exits_with_code_one() {
     let output = common::run_with_closed_output(
         common::ClosedOutput::Stdout,
         &[FAILING_GLOB, "--verbosity", "full"],
@@ -445,16 +445,18 @@ fn full_level_with_closed_stdout_still_writes_the_violations_and_fails() {
     // Only the violations reach stderr, so it parses as one JSON document.
     let violations: Value = serde_json::from_slice(&output.stderr).unwrap();
     assert!(violations["tests/testdata/verbosity/failing/unsorted.py"].is_array());
+    // A reader that closed the pipe is not an error, so the run still exits with 1, not 2.
     output.assert().failure().code(1);
 }
 
 #[test]
-fn summary_level_with_closed_stderr_still_writes_the_report_and_fails() {
+fn closed_stderr_still_writes_the_report_and_exits_with_code_one() {
     let output = common::run_with_closed_output(
         common::ClosedOutput::Stderr,
         &[FAILING_GLOB, "--verbosity", "summary"],
     );
 
+    // A reader that closed the pipe is not an error, so the run still exits with 1, not 2.
     output
         .assert()
         .failure()

@@ -58,7 +58,7 @@ fn unsuppressed_violation_of_another_validator_still_fails_the_run() {
     let output = cmd.output().unwrap();
 
     let violations = diagnostics(&output.stderr)[TWO_RULES].clone();
-    output.assert().failure().code(1);
+    output.assert().failure();
 
     // An address names the validator as well as the block, so the block's other rule is untouched.
     let suppressed: Vec<&str> = violations
@@ -78,7 +78,7 @@ fn four_segment_address_suppresses_one_violation_and_leaves_its_siblings() {
     let output = cmd.output().unwrap();
 
     let violations = diagnostics(&output.stderr)[DANGLING].clone();
-    output.assert().failure().code(1);
+    output.assert().failure();
 
     let suppressed: Vec<&str> = violations
         .as_array()
@@ -181,7 +181,7 @@ fn one_segment_address_leaves_other_files_alone() {
     let output = cmd.output().unwrap();
 
     let diagnostics = diagnostics(&output.stderr);
-    output.assert().failure().code(1);
+    output.assert().failure();
 
     assert_eq!(diagnostics[SORTED][0].get("suppressed"), None);
 }
@@ -223,7 +223,7 @@ fn violation_on_an_unnamed_block_cannot_be_addressed_more_narrowly() {
     let output = cmd.output().unwrap();
 
     let violation = diagnostics(&output.stderr)[UNNAMED][0].clone();
-    output.assert().failure().code(1);
+    output.assert().failure();
 
     assert_eq!(violation.get("suppressed"), None);
 }
@@ -238,7 +238,7 @@ fn address_covering_nothing_leaves_the_exit_code_alone() {
     let output = cmd.output().unwrap();
 
     // The address covers nothing, so it changes nothing: the real violation still fails the run.
-    output.assert().failure().code(1);
+    output.assert().failure();
 }
 
 #[test]

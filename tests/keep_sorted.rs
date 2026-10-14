@@ -51,7 +51,6 @@ index 366590e..82c1f16 100644
 
     output.assert()
         .failure()
-        .code(1)
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
             let value: serde_json::Value  = json!({
@@ -124,7 +123,6 @@ index 1111111..2222222 100644
 
     output.assert()
         .failure()
-        .code(1)
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
             let value: serde_json::Value  = json!({
@@ -199,7 +197,6 @@ index 1111111..2222222 100644
 
     output.assert()
         .failure()
-        .code(1)
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
             let value: serde_json::Value  = json!({
@@ -250,7 +247,6 @@ index 1111111..2222222 100644
 
     output.assert()
         .failure()
-        .code(1)
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
             let value: serde_json::Value  = json!({

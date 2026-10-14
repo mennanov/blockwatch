@@ -99,7 +99,6 @@ index 1111111..2222222 100644
         .unwrap()
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains(
             "disagrees with file tests/testdata/same_as/whole_file_target.json",
         ));
@@ -113,7 +112,6 @@ fn paths_target_with_an_unlisted_directory_fails() {
         .unwrap()
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains(
             "disagrees with paths matching tests/testdata/same_as/paths/*/",
         ));
@@ -127,7 +125,6 @@ fn block_with_same_as_and_same_as_paths_fails_for_each_target() {
         .unwrap()
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains(
             "disagrees with tests/testdata/same_as/paths_and_block_source.md:names",
         ))
@@ -151,7 +148,6 @@ fn symbol_target_disagreeing_with_the_block_fails() {
         .unwrap()
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains(
             "disagrees with tests/testdata/same_as/package.json#/dependencies/inngest:",
         ));

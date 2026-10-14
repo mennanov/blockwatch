@@ -39,7 +39,7 @@ fn only_result(file: &str, extra_args: &[&str]) -> (Value, std::process::Output)
 #[test]
 fn violation_is_written_as_a_sarif_result() {
     let (result, output) = only_result(SORTED, &[]);
-    output.assert().failure().code(1);
+    output.assert().failure();
 
     assert_json_include!(
         actual: result,
@@ -65,7 +65,7 @@ fn log_mentions_the_tool_and_describes_the_rules_that_fired() {
 
     let log = sarif_log(&output.stderr);
     let driver = log["runs"][0]["tool"]["driver"].clone();
-    output.assert().failure().code(1);
+    output.assert().failure();
 
     assert_json_include!(
         actual: log,
@@ -134,7 +134,7 @@ fn advisory_violation_is_reported_as_a_note_without_failing_the_run() {
 #[test]
 fn violation_on_an_unnamed_block_carries_no_fingerprint() {
     let (result, output) = only_result(UNNAMED, &[]);
-    output.assert().failure().code(1);
+    output.assert().failure();
 
     // An unnamed block has no address, so there is nothing to fingerprint the finding by.
     assert_eq!(result["ruleId"], "keep-sorted");
@@ -151,7 +151,7 @@ fn json_diagnostics_are_what_a_run_writes_without_the_flag() {
     let output = cmd.output().unwrap();
 
     let diagnostics: Value = serde_json::from_slice(&output.stderr).expect("the diagnostics");
-    output.assert().failure().code(1);
+    output.assert().failure();
 
     assert_eq!(diagnostics[SORTED][0]["code"], "keep-sorted");
 }

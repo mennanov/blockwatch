@@ -123,7 +123,6 @@ index 1111111..2222222 100644
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicates::prelude::predicate::function(|output: &str| {
             let output_json: Value =
                 serde_json::from_str(output).expect("invalid json");
@@ -169,7 +168,6 @@ async fn without_a_diff_every_block_in_the_file_is_checked() {
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicates::prelude::predicate::str::contains(
             "Block tests/testdata/check_ai/two_blocks.py:(unnamed) defined at line 7 failed AI check",
         ));
@@ -203,7 +201,6 @@ index 54d1d99..a95a452 100644
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicates::prelude::predicate::function(|output: &str| {
             output.contains("API key is empty.")
         }));

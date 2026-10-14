@@ -225,8 +225,9 @@ exclusions, and custom extension mappings.
 - uses: mennanov/blockwatch-action@v1
 ```
 
-blockwatch exits with `1` when it finds at least one `error` violation, and `0` otherwise. Warnings, info, and hints
-are printed, but won't fail the run.
+blockwatch exits with `1` when it finds at least one `error` violation, and with `2` when it can't finish the run, such
+as for a malformed tag. Otherwise it exits with `0`. Warnings, info, and hints are printed, but won't fail the run. See
+[Exit Codes](docs/cli.md#exit-codes).
 
 For GitHub code scanning, `blockwatch --format sarif` writes violations as a SARIF log instead of JSON. See
 [SARIF Output](docs/cli.md#sarif-output).

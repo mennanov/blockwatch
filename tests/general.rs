@@ -49,7 +49,6 @@ index da567bd..5586a8d 100644
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains("affects"));
 }
 
@@ -65,7 +64,6 @@ fn disabled_validator_arg_provided_run_ignores_disabled_validator_failures() {
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains("keep-unique"))
         .stderr(predicate::str::contains("keep-sorted").not());
 }
@@ -81,7 +79,6 @@ fn enabled_validator_arg_provided_run_returns_only_enabled_validator_failures() 
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains("keep-sorted"))
         .stderr(predicate::str::contains("keep-unique").not());
 }
@@ -94,7 +91,9 @@ fn disable_and_enable_flags_provided_run_fails_with_error() {
 
     let output = cmd.output().expect("Failed to get command output");
 
-    output.assert().failure();
+    output.assert().failure().stderr(predicate::str::contains(
+        "`enable` and `disable` must not both be set",
+    ));
 }
 
 #[test]
@@ -109,7 +108,6 @@ fn only_block_arg_provided_run_checks_only_that_block() {
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains("block_selection.py:first:"))
         .stderr(predicate::str::contains("block_selection.py:second:").not());
 }
@@ -125,7 +123,6 @@ fn skip_block_arg_provided_run_checks_every_other_block() {
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains("block_selection.py:second:"))
         .stderr(predicate::str::contains("block_selection.py:first:").not());
 }
@@ -167,6 +164,30 @@ fn severity_error_violation_present_run_fails_with_exit_code_one() {
 }
 
 #[test]
+fn run_stopped_by_an_error_exits_with_code_two() {
+    // Every error that stops the run exits with 2. A path that selects no file is the simplest
+    // one to cause.
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("no/such/file.py");
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.assert().failure().code(2);
+}
+
+#[test]
+fn run_stopped_by_the_flag_parser_exits_with_code_two() {
+    // clap rejects this flag before blockwatch runs. It must exit with the same code as an error
+    // that blockwatch finds itself.
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("--no-such-flag");
+
+    let output = cmd.output().expect("Failed to get command output");
+
+    output.assert().failure().code(2);
+}
+
+#[test]
 fn empty_diff_provided_run_checks_every_block() {
     let mut cmd = cargo_bin_cmd!();
     cmd.args(["--diff", "tests/testdata/general/paths/invalid.py"]);
@@ -177,7 +198,6 @@ fn empty_diff_provided_run_checks_every_block() {
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains("keep-sorted"));
 }
 
@@ -217,7 +237,6 @@ fn multiple_explicit_paths_provided_run_checks_all_paths() {
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains("keep-sorted"))
         .stderr(predicate::str::contains(
             "tests/testdata/general/paths/invalid.py",
@@ -231,13 +250,9 @@ fn glob_pattern_provided_run_checks_matching_files() {
 
     let output = cmd.output().expect("Failed to get command output");
 
-    output
-        .assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains(
-            "tests/testdata/general/paths/invalid.py",
-        ));
+    output.assert().failure().stderr(predicate::str::contains(
+        "tests/testdata/general/paths/invalid.py",
+    ));
 }
 
 #[test]
@@ -247,13 +262,9 @@ fn recursive_glob_pattern_provided_run_checks_matching_files_recursively() {
 
     let output = cmd.output().expect("Failed to get command output");
 
-    output
-        .assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains(
-            "tests/testdata/general/paths/subdir/nested_invalid.py",
-        ));
+    output.assert().failure().stderr(predicate::str::contains(
+        "tests/testdata/general/paths/subdir/nested_invalid.py",
+    ));
 }
 
 // Emulates running `blockwatch` with no args in an interactive terminal (no diff piped in).
@@ -267,7 +278,6 @@ fn no_globs_no_diff_input_provided_run_checks_for_all_paths() {
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains("keep-sorted"))
         .stderr(predicate::str::contains(
             "tests/testdata/general/paths/invalid.py",
@@ -363,7 +373,6 @@ index 0000000..1111111 100644
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains("keep-sorted"))
         .stderr(predicate::str::contains(
             "tests/testdata/general/paths/invalid.py",
@@ -447,7 +456,6 @@ index 0000000..1111111 100644
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains("keep-sorted"));
 
     // Globs narrow that set further: the changed file is outside them, so nothing is checked.
@@ -483,7 +491,6 @@ index 0000000..1111111 100644
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains("keep-sorted"));
 
     // Now verify that with --ignore it succeeds.

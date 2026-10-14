@@ -286,11 +286,11 @@ secrets.
 Sandboxing controls what a validator may do, not whether it runs. `check-ai` and `check-lua` still run on every block in
 scope. When one of them cannot do its job, the result is not "skipped":
 
-| Situation                                                              | Result                                            |
-|------------------------------------------------------------------------|---------------------------------------------------|
-| `check-ai` and the API key is empty or rejected                        | the run stops with an error                       |
-| a `check-lua` script calls `os` or `io` under `sandboxed`              | the run stops with an error                       |
-| a `check-lua` script checks for `os`/`io` itself and returns a message | a violation, which looks like a real rule failure |
+| Situation                                                              | Result                                                           |
+|------------------------------------------------------------------------|------------------------------------------------------------------|
+| `check-ai` and the API key is empty or rejected                        | the run stops with an error, exit code `2`                       |
+| a `check-lua` script calls `os` or `io` under `sandboxed`              | the run stops with an error, exit code `2`                       |
+| a `check-lua` script checks for `os`/`io` itself and returns a message | a violation, exit code `1`, which looks like a real rule failure |
 
 None of these mean the code is wrong. A fork pull request that changed nothing related still gets a red check. Disable
 those validators if that's undesirable:

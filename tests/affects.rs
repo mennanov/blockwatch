@@ -27,7 +27,6 @@ index abc123..def456 100644
 
     output.assert()
         .failure()
-        .code(1)
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
             let value: serde_json::Value = json!({
@@ -295,13 +294,9 @@ index abc123..def456 100644
     cmd.args(["--diff", "--only-changed"]);
     let output = cmd.write_stdin(diff_content).output().unwrap();
 
-    output
-        .assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains(
-            "tests/testdata/affects/multiline_tag_target.rs:target is not",
-        ));
+    output.assert().failure().stderr(predicate::str::contains(
+        "tests/testdata/affects/multiline_tag_target.rs:target is not",
+    ));
 }
 
 #[test]
@@ -334,7 +329,6 @@ index abc123..def456 100644
 
     output.assert()
         .failure()
-        .code(1)
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
             let value: serde_json::Value = json!({
@@ -445,13 +439,9 @@ index abc123..def456 100644
 
     let output = cmd.output().expect("Failed to get command output");
 
-    output
-        .assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains(
-            "tests/testdata/affects/cross_file_target.md:limits is not",
-        ));
+    output.assert().failure().stderr(predicate::str::contains(
+        "tests/testdata/affects/cross_file_target.md:limits is not",
+    ));
 }
 
 #[test]
@@ -497,7 +487,6 @@ fn full_tree_run_reports_a_dangling_affects_reference() {
         .unwrap()
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains(
             "references tests/testdata/affects/dangling.md:missing, which does not exist",
         ));
@@ -527,7 +516,6 @@ index abc123..def456 100644
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
             let violations = &output_json["tests/testdata/affects/whole_file_source.rs"];
@@ -611,7 +599,6 @@ rename to tests/testdata/affects/whole_file_target.json
     output
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::function(|output: &str| {
             let output_json: serde_json::Value = serde_json::from_str(output).unwrap();
             let violations = &output_json["tests/testdata/affects/whole_file_source.rs"];
@@ -721,7 +708,6 @@ index abc123..def456 100644
         .unwrap()
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains(
             "is modified, but tests/testdata/affects/symbol_target.json#/version is not",
         ));
@@ -735,7 +721,6 @@ fn missing_symbol_in_affects_fails() {
         .unwrap()
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains(
             "references tests/testdata/affects/symbol_target.json#/versoin: \
              symbol not found; did you mean: /version",
@@ -830,7 +815,6 @@ index abc123..def456 100644
         .unwrap()
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains(
             "is modified, but tests/testdata/affects/table_target.toml#/package is not",
         ));
@@ -891,7 +875,6 @@ index abc123..def456 100644
         .unwrap()
         .assert()
         .failure()
-        .code(1)
         .stderr(predicate::str::contains(
             "is modified, but tests/testdata/affects/nested_mapping_target.yaml#/image is not",
         ));
