@@ -100,4 +100,50 @@ let between = 2;
 
         Ok(())
     }
+
+    #[test]
+    fn jsx_expression_holding_only_a_comment_covers_its_braces() -> anyhow::Result<()> {
+        let mut comments_parser = comments_parser()?;
+
+        let comments: Vec<Comment> = comments_parser
+            .parse(
+                r#"const list = (
+  <ul>
+    {/* lone */}
+    {/* with code */ items}
+    { /* first */ /* second */ }
+  </ul>
+);
+"#,
+            )
+            .collect();
+
+        assert_eq!(
+            comments,
+            vec![
+                Comment {
+                    position_range: Position::new(3, 5)..Position::new(3, 17),
+                    source_range: 26..38,
+                    comment_text: "    lone    ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(4, 6)..Position::new(4, 21),
+                    source_range: 44..59,
+                    comment_text: "   with code   ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(5, 7)..Position::new(5, 18),
+                    source_range: 73..84,
+                    comment_text: "   first   ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(5, 19)..Position::new(5, 31),
+                    source_range: 85..97,
+                    comment_text: "   second   ".to_string()
+                },
+            ]
+        );
+
+        Ok(())
+    }
 }

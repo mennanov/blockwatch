@@ -95,14 +95,14 @@ let between = 2;
                     comment_text: "   Render the component".to_string()
                 },
                 Comment {
-                    position_range: Position::new(22, 30)..Position::new(22, 59),
-                    source_range: 756..785,
-                    comment_text: "   JSX single-line comment   ".to_string()
+                    position_range: Position::new(22, 29)..Position::new(22, 60),
+                    source_range: 755..786,
+                    comment_text: "    JSX single-line comment    ".to_string()
                 },
                 Comment {
-                    position_range: Position::new(24, 30)..Position::new(25, 39),
-                    source_range: 874..931,
-                    comment_text: "   JSX multi-line \n                            comment   ".to_string()
+                    position_range: Position::new(24, 29)..Position::new(25, 40),
+                    source_range: 873..932,
+                    comment_text: "    JSX multi-line \n                            comment    ".to_string()
                 },
                 Comment {
                     position_range: Position::new(30, 1)..Position::new(30, 26),

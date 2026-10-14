@@ -672,44 +672,52 @@ fn c_style_and_doc_line_and_block_comments_parser(
     )
 }
 
-/// C-style comments parser that also handles the legacy JavaScript HTML-like comments
-/// (Annex B of the ECMAScript spec): single lines starting with `<!--` or `-->`.
-fn c_style_and_html_comments_parser(
-    language: &Language,
-    comment_node_kind: &'static str,
-    html_comment_node_kind: &'static str,
-) -> TreeSitterCommentsParser {
-    TreeSitterCommentsParser::new(
-        language,
-        comment_visitor(move |node, source_code| {
-            let kind = node.kind();
-            if kind == comment_node_kind {
-                let comment = &source_code[node.byte_range()];
-                Some(if comment.starts_with("//") {
-                    comment.replacen("//", "  ", 1)
-                } else {
-                    c_style_multiline_comment_processor(comment)
-                })
-            } else if kind == html_comment_node_kind {
-                let comment = &source_code[node.byte_range()];
-                Some(if comment.starts_with("<!--") {
-                    comment.replacen("<!--", "    ", 1)
-                } else {
-                    comment.replacen("-->", "   ", 1)
-                })
-            } else {
-                None
-            }
-        }),
-    )
+/// Comments parser shared by the ECMAScript-family grammars (JavaScript, TypeScript, TSX). All
+/// three use the same node kinds for comments, so they differ only in which grammar is loaded.
+fn ecmascript_comments_parser(language: &Language) -> TreeSitterCommentsParser {
+    TreeSitterCommentsParser::new(language, comment_visitor(ecmascript_comment_text))
 }
 
-/// Comments parser shared by the ECMAScript-family grammars (JavaScript, TypeScript, TSX). All
-/// three expose their comments under the same `comment` node kind and recognize the legacy
-/// HTML-like comments (`<!--` / `-->`) as `html_comment`, so they differ only in which grammar is
-/// loaded.
-fn ecmascript_comments_parser(language: &Language) -> TreeSitterCommentsParser {
-    c_style_and_html_comments_parser(language, "comment", "html_comment")
+/// Returns the text of `node` with its comment markers blanked, preserving its length, or `None`
+/// if `node` is not a comment. A comment is one of:
+///
+/// - a `//` or `/* */` comment;
+/// - a legacy HTML-like comment (Annex B of the ECMAScript spec): a single line starting with
+///   `<!--` or `-->`;
+/// - a JSX `{...}` that holds nothing but a comment, such as `{/* text */}`.
+fn ecmascript_comment_text(node: &Node, source_code: &str) -> Option<String> {
+    let text = &source_code[node.byte_range()];
+    match node.kind() {
+        "comment" => Some(if text.starts_with("//") {
+            text.replacen("//", "  ", 1)
+        } else {
+            c_style_multiline_comment_processor(text)
+        }),
+        "html_comment" => Some(if text.starts_with("<!--") {
+            text.replacen("<!--", "    ", 1)
+        } else {
+            text.replacen("-->", "   ", 1)
+        }),
+        // The braces join the comment, so that a block's content starts after the `}` of its start
+        // tag and ends before the `{` of its end tag.
+        "jsx_expression" => {
+            let child = node.named_child(0)?;
+            let before = &source_code[node.start_byte()..child.start_byte()];
+            let after = &source_code[child.end_byte()..node.end_byte()];
+            // Code or a second comment after the first child keeps the braces out. So does a `}`
+            // that tree-sitter made up to recover from an error, because it takes no bytes.
+            if after.trim() != "}" {
+                return None;
+            }
+            Some(format!(
+                "{}{}{}",
+                before.replace('{', " "),
+                ecmascript_comment_text(&child, source_code)?,
+                after.replace('}', " ")
+            ))
+        }
+        _ => None,
+    }
 }
 
 /// Comments parser for languages that support `#` line comments in addition to the C-style

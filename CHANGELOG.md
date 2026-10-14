@@ -17,6 +17,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - blockwatch now supports Lean (`.lean`), OCaml (`.ml`, `.mli`) and MDX (`.mdx`) files. Before, it skipped them, so
   their tags were never checked. In MDX, put tags in JavaScript comments, such as `{/* <block> */}`.
 
+### Fixed
+
+- In JSX and TSX, the braces around a `{/* <block> */}` tag are no longer block content. Before, the `}` after a start
+  tag and the `{` before an end tag were part of the block, so e.g. `keep-sorted` reported a correctly sorted list.
+
 ## [0.11.1] - 2026-10-14
 
 ### Added
