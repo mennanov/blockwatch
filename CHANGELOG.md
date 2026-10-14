@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.11.1] - 2026-10-14
+
 ### Added
 
 - blockwatch is on PyPI, as `blockwatch-cli`: `pipx install blockwatch-cli` or `uv tool install blockwatch-cli`. On
