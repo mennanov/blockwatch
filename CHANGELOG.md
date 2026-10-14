@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.11.0] - 2026-10-14
+
 ### Added
 
 - `line-pattern-forbidden="<regex>"` fails a block when one of its lines matches the regex. For example,
