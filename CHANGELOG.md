@@ -33,6 +33,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   reported on the `[//]:` line.
 - A Lua error in a `check-lua` script now shows the script and the line, such as `check.lua:3:`. Before, it showed a
   file of blockwatch's own source code: `src/validators/check_lua.rs:309:3:`.
+- `blockwatch list`, the JSON violations and the SARIF log now come out in the same order on every run. Files are
+  sorted by path, and the violations in a file by line, column and validator. Before, the order changed from run to
+  run.
 
 ## [0.11.3] - 2026-10-15
 

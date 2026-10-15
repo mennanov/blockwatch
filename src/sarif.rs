@@ -4,7 +4,7 @@ use crate::validators::{SimpleDiagnostic, Violation};
 use crate::violation_address::ViolationAddress;
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The SARIF version of every log this module writes.
 const SARIF_VERSION: &str = "2.1.0";
@@ -97,7 +97,7 @@ impl<'a> SarifLog<'a> {
     /// The log always has exactly one run, and it describes only the validators that reported
     /// something. Its results come out in a fixed order, so two runs over an unchanged tree will
     /// produce identical outputs.
-    pub(crate) fn new(violations: &'a HashMap<RepoPath, Vec<Violation>>) -> Self {
+    pub(crate) fn new(violations: &'a BTreeMap<RepoPath, Vec<Violation>>) -> Self {
         let diagnostics = diagnostics_in_stable_order(violations);
         let rules = rules_that_fired(&diagnostics);
         let results = sarif_results(&diagnostics, &rules);
@@ -115,19 +115,13 @@ impl<'a> SarifLog<'a> {
     }
 }
 
-/// Returns every violation, paired with the file it was found in.
-///
-/// Files come out in path order, and the violations of one file in the order the validators
-/// reported them.
+/// Returns every violation, paired with the file it was found in, in the order of `violations`:
+/// files by path, and the violations of a file in the order its list holds them.
 fn diagnostics_in_stable_order(
-    violations: &HashMap<RepoPath, Vec<Violation>>,
+    violations: &BTreeMap<RepoPath, Vec<Violation>>,
 ) -> Vec<(&RepoPath, SimpleDiagnostic<'_>)> {
     violations
         .iter()
-        // The files arrive in the arbitrary order of a hash map, so sort them by path to make the
-        // output reproducible.
-        .collect::<BTreeMap<_, _>>()
-        .into_iter()
         .flat_map(|(file, file_violations)| {
             file_violations
                 .iter()
@@ -459,12 +453,12 @@ mod tests {
     }
 
     /// The violations of a run, keyed the way the validators leave them.
-    fn violations(entries: Vec<(RepoPath, Vec<Violation>)>) -> HashMap<RepoPath, Vec<Violation>> {
+    fn violations(entries: Vec<(RepoPath, Vec<Violation>)>) -> BTreeMap<RepoPath, Vec<Violation>> {
         entries.into_iter().collect()
     }
 
     /// The log as a consumer receives it: serialized, then read back.
-    fn log_value(violations: &HashMap<RepoPath, Vec<Violation>>) -> Value {
+    fn log_value(violations: &BTreeMap<RepoPath, Vec<Violation>>) -> Value {
         serde_json::to_value(SarifLog::new(violations)).expect("the log serializes")
     }
 
@@ -517,7 +511,7 @@ mod tests {
 
     #[test]
     fn no_violations_produce_a_log_with_no_results() {
-        let log = log_value(&HashMap::new());
+        let log = log_value(&BTreeMap::new());
 
         // A clean run still produces a log, so a consumer can tell it apart from a run that never
         // happened. The two lists are compared exactly, because an inclusive match against an
@@ -532,7 +526,7 @@ mod tests {
 
     #[test]
     fn log_contains_correct_metadata_fields() {
-        let log = log_value(&HashMap::new());
+        let log = log_value(&BTreeMap::new());
 
         assert_json_include!(
             actual: log,

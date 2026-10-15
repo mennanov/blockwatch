@@ -267,6 +267,31 @@ fn recursive_glob_pattern_provided_run_checks_matching_files_recursively() {
     ));
 }
 
+#[test]
+fn violations_in_several_files_run_lists_files_sorted_by_path() {
+    let output = cargo_bin_cmd!()
+        .arg("tests/testdata/general")
+        .output()
+        .expect("Failed to get command output");
+
+    // Parsing the JSON would sort its keys, so the order is read from the text.
+    let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
+    let files: Vec<&str> = stderr
+        .lines()
+        .filter_map(|line| line.strip_prefix("  \"")?.strip_suffix("\": ["))
+        .collect();
+    assert_eq!(
+        files,
+        vec![
+            "tests/testdata/general/block_selection.py",
+            "tests/testdata/general/disable_enable.py",
+            "tests/testdata/general/paths/invalid.py",
+            "tests/testdata/general/paths/subdir/nested_invalid.py",
+            "tests/testdata/general/severity.py",
+        ]
+    );
+}
+
 // Emulates running `blockwatch` with no args in an interactive terminal (no diff piped in).
 #[cfg(unix)]
 #[test]

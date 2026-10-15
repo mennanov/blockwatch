@@ -16,7 +16,7 @@ use crate::violation_address::ViolationAddress;
 use crate::virtual_blocks::VirtualBlock;
 use anyhow::Context;
 use clap::Parser;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{IsTerminal, Read, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -147,7 +147,7 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<ExitCode> {
 /// both leave one behind, and neither says anything about the code being checked.
 fn apply_suppressions(
     suppressed_addresses: &[ViolationAddress],
-    violations: &mut HashMap<RepoPath, Vec<Violation>>,
+    violations: &mut BTreeMap<RepoPath, Vec<Violation>>,
 ) {
     if suppressed_addresses.is_empty() {
         return;
@@ -329,7 +329,7 @@ fn read_diff_from_stdin(
 /// Writes the violations to stderr in the requested format. Returns true if any violation has error
 /// severity.
 fn process_violations(
-    violations: &HashMap<RepoPath, Vec<Violation>>,
+    violations: &BTreeMap<RepoPath, Vec<Violation>>,
     format: flags::OutputFormat,
 ) -> anyhow::Result<bool> {
     let has_error_severity = violations.values().flatten().any(|violation| {
@@ -348,9 +348,10 @@ fn process_violations(
     Ok(has_error_severity)
 }
 
-/// Writes the violations to stderr as one JSON object of diagnostics grouped by file.
-fn write_json_violations(violations: &HashMap<RepoPath, Vec<Violation>>) -> anyhow::Result<()> {
-    let diagnostics: HashMap<&RepoPath, Vec<_>> = violations
+/// Writes the violations to stderr as one JSON object of diagnostics grouped by file, with the
+/// files sorted by path.
+fn write_json_violations(violations: &BTreeMap<RepoPath, Vec<Violation>>) -> anyhow::Result<()> {
+    let diagnostics: BTreeMap<&RepoPath, Vec<_>> = violations
         .iter()
         .map(|(file_path, file_violations)| {
             let file_diagnostics = file_violations
@@ -364,7 +365,7 @@ fn write_json_violations(violations: &HashMap<RepoPath, Vec<Violation>>) -> anyh
 }
 
 /// Writes the violations to stderr as a SARIF log.
-fn write_sarif_violations(violations: &HashMap<RepoPath, Vec<Violation>>) -> anyhow::Result<()> {
+fn write_sarif_violations(violations: &BTreeMap<RepoPath, Vec<Violation>>) -> anyhow::Result<()> {
     write_json(std::io::stderr(), &sarif::SarifLog::new(violations))
 }
 

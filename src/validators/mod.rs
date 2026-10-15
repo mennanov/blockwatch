@@ -187,8 +187,9 @@ impl ValidationReport {
 /// the validators that checked it.
 #[derive(Debug, Default)]
 pub(crate) struct ValidationLog {
-    /// Violations grouped by the file they were found in.
-    pub(crate) violations: HashMap<RepoPath, Vec<Violation>>,
+    /// Violations grouped by the file they were found in. BTreeMap is used so every output lists
+    /// the files in the same order on every run.
+    pub(crate) violations: BTreeMap<RepoPath, Vec<Violation>>,
     /// Every block that was examined, and by which validators. BTreeMap is used so the
     /// `--verbosity` report comes out in a stable order regardless of the validators order.
     pub(crate) checked_blocks: BTreeMap<RepoPath, BTreeMap<BlockKey, BTreeSet<&'static str>>>,
@@ -441,9 +442,10 @@ impl ValidationContext {
         self.line_changes.get(file_path).map(Vec::as_slice)
     }
 
-    /// Converts the validation context to a serializable report that can be displayed as JSON.
-    pub(crate) fn to_serializable_report(&self) -> HashMap<RepoPath, Vec<serde_json::Value>> {
-        let mut report = HashMap::new();
+    /// Converts the validation context to a serializable report that can be displayed as JSON,
+    /// with the files sorted by path.
+    pub(crate) fn to_serializable_report(&self) -> BTreeMap<RepoPath, Vec<serde_json::Value>> {
+        let mut report = BTreeMap::new();
         for (path, file_blocks) in &self.blocks {
             report.insert(path.clone(), file_blocks.to_serializable_report());
         }
@@ -509,30 +511,40 @@ fn run_async_validators(
 }
 
 /// Run the given sync and async validators in separate threads in parallel.
+///
+/// The violations of each file are sorted by where they start, then by validator name, then by
+/// message.
 pub(crate) fn run(
     context: Arc<ValidationContext>,
     sync_validators: SyncValidators,
     async_validators: AsyncValidators,
 ) -> anyhow::Result<ValidationLog> {
-    if async_validators.is_empty() {
-        return run_sync_validators(context, sync_validators);
+    let mut log = if async_validators.is_empty() {
+        run_sync_validators(context, sync_validators)?
+    } else {
+        // Run sync and async validators concurrently.
+        let sync_context = Arc::clone(&context);
+        let sync_violations_handle =
+            std::thread::spawn(move || run_sync_validators(sync_context, sync_validators));
+        let async_violations_handle =
+            std::thread::spawn(move || run_async_validators(context, async_validators));
+        let sync_result = sync_violations_handle
+            .join()
+            .map_err(|e| anyhow::anyhow!("Failed to join sync violations thread: {e:?}"))?;
+        let mut log = sync_result?;
+
+        let async_result = async_violations_handle
+            .join()
+            .map_err(|e| anyhow::anyhow!("Failed to join async violations thread: {e:?}"))?;
+        log.merge(async_result?);
+        log
+    };
+    // Violations arrive grouped by validator, in an order that changes between runs.
+    for violations in log.violations.values_mut() {
+        violations.sort_by(|a, b| {
+            (&a.range.start, &a.code, &a.message).cmp(&(&b.range.start, &b.code, &b.message))
+        });
     }
-    // Run sync and async validators concurrently.
-    let sync_context = Arc::clone(&context);
-    let sync_violations_handle =
-        std::thread::spawn(move || run_sync_validators(sync_context, sync_validators));
-    let async_violations_handle =
-        std::thread::spawn(move || run_async_validators(context, async_validators));
-    let sync_result = sync_violations_handle
-        .join()
-        .map_err(|e| anyhow::anyhow!("Failed to join sync violations thread: {e:?}"))?;
-    let mut log = sync_result?;
-
-    let async_result = async_violations_handle
-        .join()
-        .map_err(|e| anyhow::anyhow!("Failed to join async violations thread: {e:?}"))?;
-    log.merge(async_result?);
-
     Ok(log)
 }
 
@@ -1807,6 +1819,95 @@ fn b() {}
             ]
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn to_serializable_report_lists_files_sorted_by_path() {
+        let names = [
+            "c.rs", "a.rs", "j.rs", "e.rs", "b.rs", "h.rs", "d.rs", "g.rs", "i.rs", "f.rs",
+        ];
+        let context = merge_validation_contexts(
+            names
+                .iter()
+                .map(|name| validation_context(name, "// <block>\n// </block>\n"))
+                .collect(),
+        );
+
+        let paths: Vec<String> = context
+            .to_serializable_report()
+            .into_keys()
+            .map(|path| path.to_string())
+            .collect();
+
+        let mut sorted = names.to_vec();
+        sorted.sort();
+        assert_eq!(paths, sorted);
+    }
+
+    #[test]
+    fn run_sorts_violations_by_position_then_validator_then_message() -> anyhow::Result<()> {
+        // A validator's violations are merged in the order of the block where it was first found, so
+        // the first block puts `keep-sorted` first.
+        let contents = r#"# <block keep-sorted>
+a
+b
+# </block>
+# <block line-pattern="^[a-z]+$">
+B
+# </block>
+# <block keep-unique>
+a
+a
+# </block>
+# <block keep-sorted>
+b
+a
+# </block>
+# <block line-count="<1" same-as=":red, :blue">
+x
+# </block>
+"#;
+        let context = validation_context("example.py", contents);
+
+        let (sync_validators, async_validators) = detect_validators(
+            &context,
+            &validators::detector_factories(),
+            &HashSet::new(),
+            &HashSet::new(),
+            &Arc::new(FakeFileSystem::new(HashMap::from([(
+                "example.py".to_string(),
+                contents.to_string(),
+            )]))),
+        )?;
+        let violations = validators::run(context, sync_validators, async_validators)?.violations;
+
+        let order: Vec<(usize, &str, &str)> = violations[&RepoPath::from_reference("example.py")?]
+            .iter()
+            .map(|violation| {
+                (
+                    violation.range.start.line,
+                    violation.code.as_str(),
+                    violation.message.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            order
+                .iter()
+                .map(|(line, code, _)| (*line, *code))
+                .collect::<Vec<_>>(),
+            vec![
+                (6, "line-pattern"),
+                (10, "keep-unique"),
+                (14, "keep-sorted"),
+                (16, "line-count"),
+                (16, "same-as"),
+                (16, "same-as"),
+            ]
+        );
+        assert!(order[4].2.contains(":blue"), "{order:?}");
+        assert!(order[5].2.contains(":red"), "{order:?}");
         Ok(())
     }
 
