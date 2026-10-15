@@ -36,6 +36,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - `blockwatch list`, the JSON violations and the SARIF log now come out in the same order on every run. Files are
   sorted by path, and the violations in a file by line, column and validator. Before, the order changed from run to
   run.
+- A pattern with its `value` group in one branch, such as `^(?:none|(?P<value>\w+))$`, now skips a match of the other
+  branch, such as `none`. This applies to `keep-sorted-pattern`, `keep-unique`, `same-as-pattern`, `check-ai-pattern`
+  and `check-lua-pattern`. Before, such a match gave its whole text as a value, so `keep-unique` could report a false
+  duplicate ([#173](https://github.com/mennanov/blockwatch/issues/173)). A `target-pattern` match like that now stops
+  the run. Before, the block's content was the whole match.
 
 ## [0.11.3] - 2026-10-15
 

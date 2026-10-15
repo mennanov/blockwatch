@@ -36,7 +36,8 @@ ids = [
 ```
 
 Without a `value` group the whole match is compared. Lines that do not match are skipped, as are
-lines whose match is empty.
+lines whose match is empty. So is a line that matches a branch without the `value` group: `^(?:none|(?P<value>\w+))$`
+skips the line `none`.
 
 ## Notes
 

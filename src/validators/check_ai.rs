@@ -553,6 +553,26 @@ b22
     }
 
     #[tokio::test]
+    async fn check_ai_pattern_with_a_value_group_not_in_the_match_skips_the_match()
+    -> anyhow::Result<()> {
+        let validator = CheckAiValidator::with_client(FakeClient::new(HashMap::from([(
+            ("must list colors".into(), "red".into()),
+            FakeAiResponse::None,
+        )])));
+        // The `none` line matches the branch without the `value` group.
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-ai="must list colors" check-ai-pattern="(?m)^(?:none|(?P<value>\w+))$">
+none
+red
+# </block>"#,
+        );
+        let violations = validator.validate(context).await?.violations;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn block_with_a_check_ai_pattern_that_matches_nothing_returns_a_violation()
     -> anyhow::Result<()> {
         let validator = CheckAiValidator::with_client(FakeClient::default());

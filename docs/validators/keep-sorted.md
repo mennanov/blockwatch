@@ -93,7 +93,8 @@ A separator must sit between two digits — `_1`, `1_`, `1__0` and `1_.0` are ty
 ## Notes
 
 - Blank lines and lines the pattern does not match are ignored, not treated as out of order. A line whose match is empty
-  is ignored as well.
+  is ignored as well. So is a line that matches a branch without the `value` group: `^(?:none|(?P<value>\w+))$`
+  ignores the line `none`.
 - Comparison is on the trimmed line, so indentation does not affect ordering. A pattern is applied to the trimmed line
   too, so `^` and `$` anchor to the entry rather than to the indentation.
 - An unrecognized `keep-sorted` or `keep-sorted-format` value is a hard error, not a violation.

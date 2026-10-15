@@ -274,7 +274,7 @@ fn reference_violation<Fs: FileSystem>(
 /// With a `same-as-pattern` attribute, every match on every content line contributes its `value`
 /// named group (or the whole match, if there is no such group) as one item; lines that do not match
 /// are skipped. A pattern selects which parts of a block take part in the comparison.
-/// Matches whose value is empty carry nothing to compare and are skipped.
+/// Matches that give no value, or an empty one, carry nothing to compare and are skipped.
 ///
 /// The regex runs against each trimmed line rather than the whole block, so `^` and `$` anchor to
 /// the entry rather than to its indentation, and the items stay in the order the two sides list
@@ -302,7 +302,9 @@ fn extract_items_from(content: &str, pattern: Option<&String>) -> anyhow::Result
         .flat_map(|line| {
             regex
                 .captures_iter(line.trim())
-                .filter_map(|captures| value_match(&captures).map(|matched| matched.as_str()))
+                .filter_map(|captures| {
+                    value_match(&regex, &captures).map(|matched| matched.as_str())
+                })
                 .filter(|value| !value.is_empty())
                 .map(str::to_string)
         })
@@ -892,6 +894,24 @@ mod validate_tests {
                 "[//]: # (<block name=\"langs\" same-as-pattern=\"[a-z]*\">)\n\ngo\nrust\n\n[//]: # (</block>)",
             ),
         ]);
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_with_a_value_group_not_in_the_match_skips_the_match() -> anyhow::Result<()> {
+        // The `none` line matches the branch without the `value` group.
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-pattern="^(?:none|(?P<value>\w+))$">
+none
+red
+# </block>
+# <block name="b">
+red
+# </block>
+"#,
+        );
         assert!(validator(&[]).validate(context)?.violations.is_empty());
         Ok(())
     }

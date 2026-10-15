@@ -63,7 +63,8 @@ impl TargetPattern {
     /// whole match, and of the `value` group or else the whole match.
     ///
     /// # Errors
-    /// Returns an error when the pattern matches no text in `source`, or more than once.
+    /// Returns an error when the pattern matches no text in `source`, or more than once, or when
+    /// it has a `value` group that is not in the match.
     fn find_once(&self, source: &str) -> anyhow::Result<(Range<usize>, Range<usize>)> {
         let matches: Vec<Captures> = self.0.captures_iter(source).collect();
         let captures = match matches.as_slice() {
@@ -92,10 +93,16 @@ impl TargetPattern {
             }
         };
         let whole_match = captures.get_match().range();
-        // As in the `*-pattern` attributes, a `value` group picks the text that counts.
-        let value = captures
-            .name("value")
-            .map_or(whole_match.clone(), |value| value.range());
+        // As in the `*-pattern` attributes, a `value` group picks the text that counts. Those skip a
+        // match without the group, but this match is the block, so it can't be skipped.
+        let value = match captures.name("value") {
+            Some(value) => value.range(),
+            None if self.0.capture_names().any(|name| name == Some("value")) => bail!(
+                "target-pattern matches at line {}, but its value group does not",
+                Position::from_byte_offset(source, whole_match.start).line
+            ),
+            None => whole_match.clone(),
+        };
         Ok((whole_match, value))
     }
 }
@@ -594,6 +601,23 @@ MODELS = [
                 )
             );
         }
+    }
+
+    #[test]
+    fn pattern_with_a_value_group_not_in_the_match_resolve_returns_error() {
+        // `none` matches the branch without the `value` group.
+        let error = resolved_in_text(
+            pattern(r#"^MODEL = (?:none|"(?P<value>[^"]+)")"#),
+            "TIMEOUT = 5\nMODEL = none\n",
+            &[],
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "invalid block at line 7 of \"blockwatch.toml\": target notes.txt does not resolve: \
+             target-pattern matches at line 2, but its value group does not"
+        );
     }
 
     #[test]

@@ -394,6 +394,7 @@ same-as-pattern = 'os\.environ\["(?P<value>[A-Z_]+)"\]'
 - **A match can span lines with `(?s)`.** `(?s)^CREATE TABLE users \(.*?^\);` matches the whole statement. Write
   `.*?`, not `.*`. A `.*` runs to the last `);` in the file, and that still counts as one match.
 - **A `value` group picks the content**, as in the `*-pattern` attributes. Without one, the content is the whole match.
+  A match of a branch without the group stops the run, such as `MODEL = none` for `^MODEL = (?:none|"(?P<value>.+)")`.
 
 A virtual block is a block of the file it wraps:
 

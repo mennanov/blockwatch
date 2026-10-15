@@ -56,8 +56,9 @@ Usually, though, the two places don't hold the same text. Then each block says *
 ## Pick values with `same-as-pattern`
 
 Each block has its own regex. Every match is a value: the `(?P<value>…)` group if there is one, otherwise the whole
-match. A line can hold several values. Lines without a match are skipped, and so are empty matches. This lets you
-compare blocks written in different formats:
+match. A line can hold several values. Lines without a match are skipped, and so are empty matches. So is a match of a
+branch without the `value` group: `^(?:none|(?P<value>\w+))$` skips the line `none`. This lets you compare blocks
+written in different formats:
 
 ```rust
 // <block same-as="README.md:supported-env-vars" same-as-pattern="BLOCKWATCH_AI_[A-Z_]+">

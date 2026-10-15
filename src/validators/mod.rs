@@ -918,9 +918,20 @@ fn file_content<'c, Fs: FileSystem>(
     }
 }
 
-/// Returns the captured named regexp group `value`, or the whole match if there is no named group.
-fn value_match<'h>(captures: &regex::Captures<'h>) -> Option<regex::Match<'h>> {
-    captures.name("value").or_else(|| captures.get(0))
+/// Returns the value that `captures`, a match of `regex`, gives: the named group `value` when
+/// `regex` has one, or else the whole match. Returns `None` when `regex` has a `value` group that is
+/// not in this match.
+fn value_match<'h>(
+    regex: &regex::Regex,
+    captures: &regex::Captures<'h>,
+) -> Option<regex::Match<'h>> {
+    // Decided by the pattern, not by the match. A pattern can put the group in one branch only,
+    // such as `^(?:none|(?P<value>\w+))$`, so that a match of the other branch gives no value.
+    if regex.capture_names().any(|name| name == Some("value")) {
+        captures.name("value")
+    } else {
+        captures.get(0)
+    }
 }
 
 /// Returns the non-empty trimmed content of `line` together with its 0-based character-column
@@ -946,15 +957,15 @@ fn trimmed_line_value(line: &str) -> Option<(&str, Range<usize>)> {
 /// itself rather than to its indentation, which is what makes a pattern keep working once the
 /// entries are nested inside a list or a block of code.
 ///
-/// A blank line, an unmatched line, and a line whose match is empty all return `None`: none of them
-/// carry a value.
+/// A blank line, an unmatched line, and a line whose match gives no value or an empty one all return
+/// `None`: none of them carry a value.
 fn regex_value<'a>(line: &'a str, regex: &regex::Regex) -> Option<(&'a str, Range<usize>)> {
     let trimmed_line = line.trim();
     if trimmed_line.is_empty() {
         return None;
     }
     let caps = regex.captures(trimmed_line)?;
-    let m = value_match(&caps)?;
+    let m = value_match(regex, &caps)?;
     if m.is_empty() {
         return None;
     }
@@ -1004,7 +1015,7 @@ fn block_content_for_pattern<'c>(
         .with_context(|| format!("{pattern_attribute} is not a valid regex"))?;
     Ok(PatternContent::Matches(
         re.captures_iter(content)
-            .filter_map(|captures| value_match(&captures).map(|matched| matched.as_str()))
+            .filter_map(|captures| value_match(&re, &captures).map(|matched| matched.as_str()))
             .filter(|value| !value.is_empty())
             .collect(),
     ))

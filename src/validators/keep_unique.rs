@@ -347,6 +347,25 @@ ID:1 C
     }
 
     #[test]
+    fn pattern_with_a_value_group_not_in_the_match_skips_the_line() -> anyhow::Result<()> {
+        let validator = KeepUniqueValidator::new();
+        // The `none` lines match the branch without the `value` group.
+        let context = validation_context(
+            "example.py",
+            r#"# <block keep-unique="^(?:none|(?P<value>\w+))$">
+none
+none
+red
+# </block>"#,
+        );
+
+        let violations = validator.validate(context)?.violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn pattern_without_a_named_group_returns_a_violation_for_a_duplicate_whole_match()
     -> anyhow::Result<()> {
         let validator = KeepUniqueValidator::new();
