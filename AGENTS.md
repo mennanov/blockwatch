@@ -279,8 +279,8 @@ needs belongs in this file.
 ## Release
 
 The GitHub Actions workflows in `.github/workflows/` build releases with `cargo-dist`, configured in
-`dist-workspace.toml`. The version is bumped in `Cargo.toml`, in a commit titled
-`chore: Release blockwatch version X.Y.Z`.
+`dist-workspace.toml`. `cargo release` bumps the version in `Cargo.toml`, in a commit titled `chore: Release`, and
+tags that commit `vX.Y.Z`.
 
 `pypi.yml` builds the same tag for PyPI, as `blockwatch-cli`. The pre-commit hooks install that package through the
 root `setup.py`. So if the upload for a tag fails, the hooks at that tag can't install.
