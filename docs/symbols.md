@@ -29,7 +29,7 @@ declares, instead of tags in a comment.
 | JSON     | `.json`, `.jsonc`, `.webmanifest` | [JSON](#json)         |
 | TOML     | `.toml`, `Pipfile`                | [TOML](#toml)         |
 | YAML     | `.yaml`, `.yml`, `.cff`           | [YAML](#yaml)         |
-| Markdown | `.md`, `.markdown`                | [Markdown](#markdown) |
+| Markdown | `.md`, `.markdown`, `.mdx`        | [Markdown](#markdown) |
 
 <!-- </block> -->
 
@@ -227,6 +227,9 @@ Clone the repository.
   `### Example` sections under different `##` headings are fine.
 - **Escape a heading like any key.** `## Input/Output` is `#/Input~1Output`, and `## Step 1: build` is
   `#/Step 1%3A build`.
+- **An `.mdx` file gets the same paths.** The text of a JSX element in a heading counts, and so does the code in
+  braces: `## Red <Badge>new</Badge> {version}` is `#/Red new version`. A heading inside a JSX element doesn't count.
+  A file that isn't valid MDX stops the run.
 
 <!-- </block> -->
 

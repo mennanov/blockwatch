@@ -157,7 +157,7 @@ the file cannot hold a comment. To put rules on the value itself, wrap it in a `
 <!-- extensions-with-symbols -->
 
 Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`.toml`, `Pipfile`), YAML (`.yaml`,
-`.yml`, `.cff`) and Markdown (`.md`, `.markdown`). A path into any other file fails the run.
+`.yml`, `.cff`) and Markdown (`.md`, `.markdown`, `.mdx`). A path into any other file fails the run.
 
 <!-- /extensions-with-symbols -->
 
@@ -220,6 +220,8 @@ level. Its path is the text of each heading it is under, then its own, the top `
 - Headings underlined with `===` or `---` count. A `#` line in a code block doesn't, and neither does a heading in a
   quote, a list item or an HTML block.
 - The same heading twice under one parent is a violation.
+- An `.mdx` file gets the same paths. JSX text and the code in braces count as heading text. A heading inside a JSX
+  element doesn't count.
 
 <!-- /markdown-paths -->
 

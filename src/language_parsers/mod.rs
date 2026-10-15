@@ -903,6 +903,7 @@ mod tests {
             "jsonc",
             "markdown",
             "md",
+            "mdx",
             "toml",
             "webmanifest",
             "yaml",

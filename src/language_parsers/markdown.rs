@@ -86,7 +86,7 @@ impl OpenSection {
 
 /// The symbols of the sections in `root`, the syntax tree of `source`, in the order of their
 /// headings. [`SectionsParser`] describes them.
-fn section_symbols(root: &Node, source: &str) -> Vec<Symbol> {
+pub(super) fn section_symbols(root: &Node, source: &str) -> Vec<Symbol> {
     let mut sections = Sections::new(source);
     for node in root.children().map_or(&[][..], Vec::as_slice) {
         sections.read(node);

@@ -6,6 +6,7 @@
 
 use crate::block_parser::BlocksIterator;
 use crate::blocks::Block;
+use crate::language_parsers::markdown::section_symbols;
 use crate::language_parsers::{
     Comment, CommentsParser, LanguageParser, TreeSitterCommentsParser, c_style_comments_parser,
 };
@@ -18,7 +19,7 @@ use markdown::mdast::{
 use markdown::{Constructs, MdxSignal, ParseOptions};
 use std::ops::Range;
 
-/// Returns a [`LanguageParser`] for MDX.
+/// Returns a [`LanguageParser`] for MDX. Its symbols are the sections of a file, as in Markdown.
 pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
     Ok(MdxParser::new())
 }
@@ -83,8 +84,8 @@ impl LanguageParser for MdxParser {
         }
     }
 
-    fn parse_symbols(&mut self, _contents: &str) -> anyhow::Result<Vec<Symbol>> {
-        anyhow::bail!("symbols are not supported for this language")
+    fn parse_symbols(&mut self, contents: &str) -> anyhow::Result<Vec<Symbol>> {
+        Ok(section_symbols(&parse_mdx(contents)?, contents))
     }
 }
 
@@ -429,4 +430,45 @@ title: <3 # not a comment
 
         Ok(())
     }
+
+    // <block affects="docs/symbols.md:markdown-paths, src/skill.md:markdown-paths">
+    #[test]
+    fn document_with_esm_and_jsx_parse_symbols_returns_its_sections() -> anyhow::Result<()> {
+        let source = r"import {Badge} from './badge.js'
+
+# Colors
+
+<Note>
+## Inside JSX
+</Note>
+
+## Red <Badge>new</Badge> {version}
+
+Warm.
+";
+
+        let paths: Vec<String> = parser()?
+            .parse_symbols(source)?
+            .iter()
+            .map(|symbol| symbol.path.to_string())
+            .collect();
+
+        assert_eq!(paths, ["/Colors", "/Colors/Red new version"]);
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_mdx_parse_symbols_returns_error() -> anyhow::Result<()> {
+        // MDX 2 and later have no HTML comments.
+        let error = parser()?
+            .parse_symbols("# Colors\n\n<!-- a comment -->\n")
+            .unwrap_err();
+
+        assert!(
+            error.to_string().contains("Unexpected character `!`"),
+            "unexpected error: {error}"
+        );
+        Ok(())
+    }
+    // </block>
 }
