@@ -243,6 +243,14 @@ impl VirtualBlock {
         };
         // The content is what a reference to the symbol reads, so that the two always agree.
         let content = match &symbol.value {
+            // A value written as is, such as a number or a Markdown section, keeps the position of
+            // each of its lines.
+            Some(value) if source.get(value.byte_range.clone()) == Some(value.text.as_str()) => {
+                Content::source(
+                    value.byte_range.clone(),
+                    position_range(source, &value.byte_range),
+                )
+            }
             Some(value) => Content::decoded(
                 value.text.clone(),
                 position_range(source, &value.byte_range),
@@ -382,6 +390,36 @@ mod tests {
         assert_eq!(
             block.start_tag_position_range,
             Position::new(2, 3)..Position::new(2, 16)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn section_target_resolve_returns_its_body_with_the_position_of_each_line() -> anyhow::Result<()>
+    {
+        let source = r"# Colors
+
+## Names
+
+- blue
+- red
+- green
+";
+
+        let block = resolved("colors.md", "/Colors/Names", source, &[])?.block;
+
+        assert_eq!(block.content.text(source), "- blue\n- red\n- green");
+        // The body is written as is, so a line of it has its own position, unlike a decoded value.
+        let position = block.content.position(2, 2);
+        let line = source
+            .lines()
+            .nth(position.line - 1)
+            .expect("a line of the source");
+        let text: String = line.chars().skip(position.character - 1).collect();
+        assert_eq!(text, "green");
+        assert_eq!(
+            block.start_tag_position_range,
+            Position::new(3, 1)..Position::new(3, 9)
         );
         Ok(())
     }

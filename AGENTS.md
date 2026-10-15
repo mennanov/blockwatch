@@ -203,8 +203,9 @@ The main modules:
 - `src/virtual_blocks.rs` — `VirtualBlock`, a block that the config file declares in one file, instead of tags in a
   comment. A file that can't or must not hold a tag, such as `package.json` or a prompt, can only get blocks this way.
   It is a block of the file it wraps. Its `Locator` says how to find it:
-  - `Symbol`: the content is what a reference to the symbol reads: a scalar's decoded value
-    (`ContentText::Decoded`), or else the definition's text.
+  - `Symbol`: the content is what a reference to the symbol reads: its value, or else the definition's text. A value
+    written as is, such as a number or a Markdown section, keeps its place in the file. A value with quotes or escapes
+    is decoded (`ContentText::Decoded`), so every line of it reports the value's start.
   - `Pattern`: the `target-pattern` regex must match once. The content is its `value` group, or else the whole match.
   - `File`: the content is the whole file.
 

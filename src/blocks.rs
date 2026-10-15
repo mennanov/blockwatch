@@ -52,8 +52,9 @@ pub(crate) struct Content {
 /// The text of a block's [`Content`].
 #[derive(Debug, PartialEq, Eq, Clone)]
 enum ContentText {
-    /// The source text in this byte range: the lines between the block's tags, or the definition
-    /// of the object, list or table that a virtual block wraps.
+    /// The source text in this byte range: the lines between the block's tags, or the part of the
+    /// file that a virtual block wraps when it is written as is, such as a JSON object or a
+    /// Markdown section.
     Source(Range<usize>),
     /// The decoded value of the scalar that a virtual block wraps. Its quotes and escapes are
     /// gone, so it is not a part of the source text.
