@@ -16,6 +16,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 - A `blockwatch-suppress:` line with no address now fails the run with `invalid suppression address`. Before,
   blockwatch ignored it.
+- Messages now show a non-ASCII key in a symbol path as written, such as `data.toml#/täble/key`. Before, they showed
+  `data.toml#/t%C3%A4ble/key`. An `affects` or `same-as` violation on such a key gets a new hash, so update any
+  `--suppress` address with four parts that points at it.
 
 ### Fixed
 

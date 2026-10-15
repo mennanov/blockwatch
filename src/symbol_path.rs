@@ -93,10 +93,10 @@ impl SymbolPath {
     }
 }
 
-/// Characters that must be percent-encoded when formatting a symbol path segment.
+/// The ASCII characters that must be percent-encoded when formatting a symbol path segment.
 ///
-/// In addition to ASCII control characters and non-ASCII bytes, encodes characters that have
-/// special meaning in blockwatch attributes and URI fragments:
+/// In addition to ASCII control characters, encodes characters that have special meaning in
+/// blockwatch attributes and URI fragments:
 /// - `%`: prefix for percent-encoded bytes; raw `%` must be `%25` to avoid ambiguity.
 /// - `,`: separates multiple references in block attributes.
 /// - `:`: separates file and block names in references.
@@ -135,7 +135,23 @@ impl fmt::Display for Segment {
 /// Escapes `text`, a key or a filter's key or value, so that [`SymbolPath::parse`] reads it back
 /// as the same text.
 fn encode(text: &str) -> String {
-    utf8_percent_encode(&escape_rfc6901(text), FRAGMENT_ENCODE_SET).to_string()
+    let escaped = escape_rfc6901(text);
+    let mut encoded = String::with_capacity(escaped.len());
+    let mut buffer = [0; 4];
+    for char in escaped.chars() {
+        // Other non-ASCII characters stay as written, so a message shows `/café`, not
+        // `/caf%C3%A9`. Whitespace is encoded because references are trimmed, and control
+        // characters because they are invisible.
+        if char.is_ascii() || char.is_whitespace() || char.is_control() {
+            encoded.extend(utf8_percent_encode(
+                char.encode_utf8(&mut buffer),
+                FRAGMENT_ENCODE_SET,
+            ));
+        } else {
+            encoded.push(char);
+        }
+    }
+    encoded
 }
 
 /// Parses one segment of a symbol path, after percent-decoding: a filter such as
@@ -453,6 +469,20 @@ mod tests {
         let path = SymbolPath::parse("/items/\"double\"/'single'")?;
         assert_eq!(path.segments(), keys(&["items", "\"double\"", "'single'"]));
         assert_eq!(path.to_string(), "/items/%22double%22/%27single%27");
+
+        let reparsed = SymbolPath::parse(&path.to_string())?;
+        assert_eq!(reparsed, path);
+        Ok(())
+    }
+
+    #[test]
+    fn non_ascii_key_displays_as_written_except_whitespace_and_controls() -> anyhow::Result<()> {
+        let path = SymbolPath::from_segments(vec![
+            "café".to_string(),
+            "\u{9b}".to_string(),
+            "end\u{a0}".to_string(),
+        ]);
+        assert_eq!(path.to_string(), "/café/%C2%9B/end%C2%A0");
 
         let reparsed = SymbolPath::parse(&path.to_string())?;
         assert_eq!(reparsed, path);

@@ -846,17 +846,17 @@ mod tests {
             ranges,
             vec![
                 (
-                    "/%C3%A9".to_string(),
+                    "/é".to_string(),
                     vec![4..17],
                     vec![Position::new(2, 3)..Position::new(2, 15)]
                 ),
                 (
-                    "/%C3%A9/0".to_string(),
+                    "/é/0".to_string(),
                     vec![11..12],
                     vec![Position::new(2, 9)..Position::new(2, 10)]
                 ),
                 (
-                    "/%C3%A9/1".to_string(),
+                    "/é/1".to_string(),
                     vec![14..16],
                     vec![Position::new(2, 12)..Position::new(2, 14)]
                 ),
