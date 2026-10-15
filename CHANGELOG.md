@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.13.0] - 2026-10-15
+
 ### Added
 
 - A symbol path can point at a section of a Markdown file (`.md`, `.markdown`, `.mdx`) by its headings. For example,
