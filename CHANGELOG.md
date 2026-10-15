@@ -12,6 +12,13 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Fixed
+
+- The skill that `blockwatch skill` prints no longer adds blocks to the project that saves it. Before, a saved skill
+  added six named blocks, such as `validator-catalog` and `json-paths`, to `blockwatch list` and to the
+  `--verbosity summary` counts. Save the skill again with `blockwatch skill` to remove them
+  ([#174](https://github.com/mennanov/blockwatch/issues/174)).
+
 ## [0.12.0] - 2026-10-15
 
 ### Changed

@@ -49,7 +49,7 @@ Then run `git diff --patch | blockwatch --diff` to confirm the new tags pass (se
 
 ### Where blocks add value (catalog)
 
-[//]: # (<block name="validator-catalog">)
+<!-- validator-catalog -->
 
 | You see...                                                                                                                                   | Add                      | Why                                                                        |
 |----------------------------------------------------------------------------------------------------------------------------------------------|--------------------------|----------------------------------------------------------------------------|
@@ -63,7 +63,7 @@ Then run `git diff --patch | blockwatch --diff` to confirm the new tags pass (se
 | Prose or config with a natural-language rule ("must mention X", "no TODOs left")                                                             | `check-ai="..."`         | Rules regex can't express                                                  |
 | Domain logic too complex for regex                                                                                                           | `check-lua="script.lua"` | Custom programmable checks                                                 |
 
-[//]: # (</block>)
+<!-- /validator-catalog -->
 
 Prefer the deterministic validators (`keep-sorted`, `keep-unique`, `affects`, `same-as`, `line-pattern`, `line-count`)
 first — they are free, fast, and need no API keys. Reserve `check-ai` for rules the cheaper validators genuinely can't
@@ -121,7 +121,7 @@ pub enum Language { Rust, Python }
 
 ## Validator reference
 
-<!-- <block name="validator-reference" same-as-pattern="^\|\s*`(?P<value>[a-z-]+)`"> -->
+<!-- validator-reference -->
 
 | Attribute                | Syntax                                                                                                                                | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 |--------------------------|---------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -146,7 +146,7 @@ pub enum Language { Rust, Python }
 | `check-lua-timeout`      | `check-lua-timeout="60"`                                                                                                              | Wall-clock budget for the script, in whole seconds; default `30`. A script that runs past it fails the run with an error, not a violation. A value below `1` is a hard error.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `severity`               | `severity="error"` (default) `/ warning / info / hint`                                                                                | Only `error` fails the run (exit 1); the others are reported but exit 0.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
-<!-- </block> -->
+<!-- /validator-reference -->
 
 ## Symbols
 
@@ -154,12 +154,12 @@ A symbol is one value inside a file, such as the `version` key in `package.json`
 with `file#/path`, or with `#/path` for the block's own file. Use a symbol when only one key in a file matters, or when
 the file cannot hold a comment. To put rules on the value itself, wrap it in a `[[block]]` entry in `blockwatch.toml`.
 
-<!-- <block name="extensions-with-symbols" same-as-pattern="`\.?(?P<value>[A-Za-z]+)`"> -->
+<!-- extensions-with-symbols -->
 
 Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`.toml`, `Pipfile`) and YAML (`.yaml`,
 `.yml`, `.cff`). A path into any other file fails the run.
 
-<!-- </block> -->
+<!-- /extensions-with-symbols -->
 
 - **Paths follow RFC 6901.** `/` separates keys. An array item is its position, counted from 0: `#/files/0`.
 - **Pick a list item by a key's value when items can be added above it:** `#/services/~[name=web]/port` is the `port`
@@ -170,7 +170,7 @@ Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`
 - **A missing key is a violation.** The message suggests similar paths.
 - **A missing or broken file fails the run.** blockwatch does not guess what a broken file meant.
 
-<!-- <block name="json-paths"> -->
+<!-- json-paths -->
 
 **JSON.** Every key and every array item is a symbol.
 
@@ -178,9 +178,9 @@ Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`
 - A trailing comma breaks the file, even in `.jsonc`.
 - A key written twice is a violation, because blockwatch can't tell which copy you mean.
 
-<!-- </block> -->
+<!-- /json-paths -->
 
-<!-- <block name="toml-paths"> -->
+<!-- toml-paths -->
 
 **TOML.** Every key, every table and every array item is a symbol.
 
@@ -192,9 +192,9 @@ Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`
   each place, in order.
 - A key written twice breaks the file.
 
-<!-- </block> -->
+<!-- /toml-paths -->
 
-<!-- <block name="yaml-paths"> -->
+<!-- yaml-paths -->
 
 **YAML.** Every key and every list item is a symbol. Block style and flow style give the same paths.
 
@@ -206,7 +206,7 @@ Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`
 - A key written twice is a violation.
 - A file with several documents fails the run. Use a named block there instead.
 
-<!-- </block> -->
+<!-- /yaml-paths -->
 
 ## The config file (`blockwatch.toml`)
 

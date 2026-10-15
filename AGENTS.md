@@ -269,8 +269,10 @@ skill this project ships, so that agents can add blocks to **other** repositorie
 They are not instructions for working on blockwatch, and changing them changes what users get. This file is the
 guidance for working on blockwatch.
 
-A block tag in `src/skill.md` can have a name and a pattern, but no rule. A project that saves the skill parses its
-tags too, and a rule's target exists only in this repository. Put the rule on the block at the other end instead.
+`src/skill.md` must not hold block tags. A project that saves the skill parses it too, so each tag would become a block
+in that project. To point a block at a section of the skill, put the section between two plain comments, such as
+`<!-- json-paths -->` and `<!-- /json-paths -->`. Then add a `[[block]]` entry that matches them to `blockwatch.toml`,
+next to the others for `src/skill.md`.
 
 Each agent's local config directory is left out of git on purpose: `.claude/`, `.cursor/`, `.gemini/`, `.windsurf/`,
 `.aider*`, and the others listed in `.gitignore`. Don't commit agent-specific settings. Anything a future contributor

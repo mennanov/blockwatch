@@ -20,7 +20,7 @@ fn outside_a_repository_skill_prints_the_skill_with_this_version() -> anyhow::Re
 }
 
 #[test]
-fn project_with_the_saved_skill_passes() -> anyhow::Result<()> {
+fn shipped_skill_does_not_contain_block_tags() -> anyhow::Result<()> {
     let project = tempfile::tempdir()?;
     std::fs::create_dir(project.path().join(".git"))?;
     let skill_dir = project.path().join(".agents/skills/blockwatch");
@@ -30,10 +30,10 @@ fn project_with_the_saved_skill_passes() -> anyhow::Result<()> {
 
     let mut cmd = cargo_bin_cmd!();
     // The path argument makes the run fail if it skips the file, so it can't pass by accident.
-    cmd.arg(".agents/skills/blockwatch/SKILL.md")
+    cmd.args(["list", ".agents/skills/blockwatch/SKILL.md"])
         .current_dir(project.path());
 
-    cmd.output()?.assert().success();
+    cmd.output()?.assert().success().stdout("{}\n");
     Ok(())
 }
 
