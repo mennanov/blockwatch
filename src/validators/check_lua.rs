@@ -307,6 +307,9 @@ fn run_lua_script_sync(inputs: LuaScriptInputs, mode: LuaMode) -> anyhow::Result
     install_timeout_hook(&lua, inputs.timeout)?;
 
     lua.load(lua_chunk(&inputs.script_content))
+        // Without a name, mlua names the chunk after the Rust line that loads it, so errors would
+        // show `src/validators/check_lua.rs`. The `@` makes Lua show the name as a file path.
+        .set_name(format!("@{}", inputs.script_path))
         .exec()
         .with_context(|| format!("failed to execute Lua script: {}", inputs.script_path))?;
 
@@ -1543,6 +1546,35 @@ end
         assert!(
             err_chain.contains(":3:"),
             "expected the error to name line 3: {err_chain}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn script_runtime_error_shows_script_path_and_line() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-lua="scripts/check.lua">
+some content
+# </block>"#,
+        );
+
+        let err = validator(&[(
+            "scripts/check.lua",
+            r#"function validate(ctx, content)
+    local items = nil
+    return items.first
+end
+"#,
+        )])
+        .validate(context)
+        .await
+        .unwrap_err();
+
+        let err_chain = format!("{err:#}");
+        assert!(
+            err_chain.contains("scripts/check.lua:3:"),
+            "expected the error to show the script and line 3: {err_chain}"
         );
         Ok(())
     }
