@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.11.3] - 2026-10-15
+
 ### Fixed
 
 - A block with `keep-unique-pattern` now fails the run with ``unrecognized attribute `keep-unique-pattern` ``. Before,
