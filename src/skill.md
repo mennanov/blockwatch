@@ -156,8 +156,8 @@ the file cannot hold a comment. To put rules on the value itself, wrap it in a `
 
 <!-- extensions-with-symbols -->
 
-Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`.toml`, `Pipfile`) and YAML (`.yaml`,
-`.yml`, `.cff`). A path into any other file fails the run.
+Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`.toml`, `Pipfile`), YAML (`.yaml`,
+`.yml`, `.cff`) and Markdown (`.md`, `.markdown`). A path into any other file fails the run.
 
 <!-- /extensions-with-symbols -->
 
@@ -207,6 +207,21 @@ Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`
 - A file with several documents fails the run. Use a named block there instead.
 
 <!-- /yaml-paths -->
+
+<!-- markdown-paths -->
+
+**Markdown.** Every section is a symbol: a heading and everything up to the next heading of the same or a higher
+level. Its path is the text of each heading it is under, then its own, the top `#` title included:
+`README.md#/My project/Install/From source`.
+
+- A section holds its subsections. `affects` counts a change to any of its lines, the heading included.
+- `same-as` compares the section's text without its heading line.
+- A heading counts as a reader sees it: ``## The `--diff` flag`` is `#/The --diff flag`.
+- Headings underlined with `===` or `---` count. A `#` line in a code block doesn't, and neither does a heading in a
+  quote, a list item or an HTML block.
+- The same heading twice under one parent is a violation.
+
+<!-- /markdown-paths -->
 
 ## The config file (`blockwatch.toml`)
 

@@ -73,3 +73,8 @@ name = 'toml-paths'
 target = 'src/skill.md'
 target-pattern = '(?s)<!-- yaml-paths -->.*<!-- /yaml-paths -->'
 name = 'yaml-paths'
+
+[[block]]
+target = 'src/skill.md'
+target-pattern = '(?s)<!-- markdown-paths -->.*<!-- /markdown-paths -->'
+name = 'markdown-paths'

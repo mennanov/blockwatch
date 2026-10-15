@@ -2,11 +2,194 @@ use crate::language_parsers::{
     Comment, CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
     blank_preserving_line_breaks, node_text, xml_style_comments_parser,
 };
+use crate::symbol_path::SymbolPath;
+use crate::symbols::{ScalarValue, Symbol, SymbolsParser};
+use markdown::mdast::Node;
+use markdown::{Constructs, ParseOptions};
+use std::ops::Range;
 use tree_sitter::StreamingIterator;
 
-/// Returns a [`LanguageParser`] for Markdown.
+/// Returns a [`LanguageParser`] for Markdown. Its symbols are the sections of a file.
 pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(MdCommentsParser::new()))
+    Ok(LanguageParserImpl::new(MdCommentsParser::new()).with_symbols(SectionsParser))
+}
+
+/// A [`SymbolsParser`] whose symbols are the sections of a Markdown file, in the order of their
+/// headings.
+///
+/// A section is a heading and everything up to the next heading of the same or a higher level, so
+/// it holds its subsections. For each section:
+/// - Its path is the text of each heading it is under, the top title included, then its own. The
+///   text is what a reader sees: ``## The `x` flag`` is `The x flag`.
+/// - Its definition runs from its heading to the end of its last line of text.
+/// - Its value is the same text without the heading. It is empty when the heading is all there is.
+///
+/// Only a heading at the top level of the file starts a section. One in a quote, a list item or an
+/// HTML block does not.
+struct SectionsParser;
+
+impl SymbolsParser for SectionsParser {
+    fn parse(&mut self, source: &str) -> anyhow::Result<Vec<Symbol>> {
+        // tree-sitter-md, which finds the comments, nests sections too, but not the way a reader
+        // sees them: a setext heading starts no section, and a heading in a quote or a list item
+        // starts one.
+        let options = ParseOptions {
+            constructs: Constructs {
+                // Without it, the `---` that closes the front matter makes the line above it a
+                // heading.
+                frontmatter: true,
+                ..Constructs::gfm()
+            },
+            ..ParseOptions::default()
+        };
+        let root = markdown::to_mdast(source, &options)
+            .expect("only MDX has syntax errors, and these options leave it off");
+        Ok(section_symbols(&root, source))
+    }
+}
+
+/// A section whose heading has been read, but not the heading that ends it.
+struct OpenSection {
+    /// The level of its heading, from 1 for `#` to 6 for `######`.
+    depth: u8,
+    /// The text of each heading it is under, then of its own.
+    path: Vec<String>,
+    /// The byte range of its heading.
+    heading: Range<usize>,
+    /// Where the first node after its heading starts, or `None` before that node is read.
+    body_start: Option<usize>,
+}
+
+impl OpenSection {
+    /// The symbol of this section, which ends at `end` in `source`.
+    fn into_symbol(self, end: usize, source: &str) -> Symbol {
+        let body = match self.body_start {
+            Some(start) => start..end,
+            None => self.heading.end..self.heading.end,
+        };
+        #[expect(
+            clippy::string_slice,
+            reason = "markdown-rs gives offsets of whole characters"
+        )]
+        let text = source[body.clone()].to_string();
+        let definition = self.heading.start..end;
+        Symbol {
+            path: SymbolPath::from_segments(self.path),
+            def_byte_ranges: vec![definition],
+            value: Some(ScalarValue {
+                text,
+                byte_range: body,
+            }),
+        }
+    }
+}
+
+/// The symbols of the sections in `root`, the syntax tree of `source`, in the order of their
+/// headings. [`SectionsParser`] describes them.
+fn section_symbols(root: &Node, source: &str) -> Vec<Symbol> {
+    let mut sections = Sections::new(source);
+    for node in root.children().map_or(&[][..], Vec::as_slice) {
+        sections.read(node);
+    }
+    sections.into_symbols()
+}
+
+/// The sections of a Markdown file, found by reading the top-level nodes of its syntax tree in
+/// order.
+struct Sections<'s> {
+    /// The text of the file.
+    source: &'s str,
+    /// The symbols of the sections that have ended, in the order they ended.
+    symbols: Vec<Symbol>,
+    /// The sections that the next node is in, the outermost first.
+    open: Vec<OpenSection>,
+    /// Where the last node read ends.
+    end: usize,
+}
+
+impl<'s> Sections<'s> {
+    fn new(source: &'s str) -> Self {
+        Self {
+            source,
+            symbols: Vec::new(),
+            open: Vec::new(),
+            end: 0,
+        }
+    }
+
+    /// Reads `node`, the next top-level node of the file.
+    fn read(&mut self, node: &Node) {
+        let position = node
+            .position()
+            .expect("markdown-rs gives every node it parses a position");
+        let range = position.start.offset..position.end.offset;
+        match heading_depth(node) {
+            Some(depth) => {
+                self.close(depth);
+                // A heading one level down is the first node of its parent's body too.
+                self.start_body(range.start);
+                self.open(depth, node.to_string(), range.clone());
+            }
+            None => self.start_body(range.start),
+        }
+        self.end = range.end;
+    }
+
+    /// Ends each open section whose heading is at `depth` or deeper.
+    fn close(&mut self, depth: u8) {
+        // A section ends where the last node before the heading that ends it ends, so the blank
+        // lines before that heading are not part of it.
+        while let Some(section) = self.open.pop_if(|section| section.depth >= depth) {
+            self.symbols
+                .push(section.into_symbol(self.end, self.source));
+        }
+    }
+
+    /// Starts the body of the innermost open section at `start`, unless it has started already.
+    fn start_body(&mut self, start: usize) {
+        if let Some(section) = self.open.last_mut()
+            && section.body_start.is_none()
+        {
+            section.body_start = Some(start);
+        }
+    }
+
+    /// Opens a section inside the innermost open one. Its heading, at `depth`, reads `text` and is
+    /// written at `heading`.
+    fn open(&mut self, depth: u8, text: String, heading: Range<usize>) {
+        let mut path = self
+            .open
+            .last()
+            .map_or_else(Vec::new, |parent| parent.path.clone());
+        path.push(text);
+        self.open.push(OpenSection {
+            depth,
+            path,
+            heading,
+            body_start: None,
+        });
+    }
+
+    /// The symbols of every section, in the order of their headings.
+    fn into_symbols(mut self) -> Vec<Symbol> {
+        // `#` is the highest level, so this ends every section.
+        self.close(1);
+        // A section's symbol is made when the section ends, so a subsection's comes first.
+        self.symbols
+            .sort_by_key(|symbol| symbol.def_byte_ranges[0].start);
+        self.symbols
+    }
+}
+
+/// The level of `node` if it is a heading, from 1 for `#` to 6 for `######`. `None` for any other
+/// node.
+fn heading_depth(node: &Node) -> Option<u8> {
+    match node {
+        Node::Heading(heading) => Some(heading.depth),
+        // Both kinds of Markdown heading, `#` and underlined, are `Node::Heading`, so a new kind
+        // of node would not be a heading either.
+        _ => None,
+    }
 }
 
 /// Parses Markdown `[//]:` comments and the HTML comments embedded in Markdown.
@@ -186,6 +369,249 @@ mod tests {
     use crate::blocks::{Block, Content, Declaration};
     use crate::{Position, test_utils};
     use std::collections::HashMap;
+
+    /// The symbols `source` derives, as `(path, value)` pairs in the order they were derived.
+    fn derived_symbols(source: &str) -> anyhow::Result<Vec<(SymbolPath, String)>> {
+        Ok(parser()?
+            .parse_symbols(source)?
+            .into_iter()
+            .map(|symbol| {
+                let value = symbol.value.expect("every section has a value").text;
+                (symbol.path, value)
+            })
+            .collect())
+    }
+
+    /// The same pairs, with each path parsed as a reference writes it, so a space is a space.
+    fn expected_symbols(symbols: &[(&str, &str)]) -> anyhow::Result<Vec<(SymbolPath, String)>> {
+        symbols
+            .iter()
+            .map(|(path, value)| Ok((SymbolPath::parse(path)?, value.to_string())))
+            .collect()
+    }
+
+    // <block affects="docs/symbols.md:markdown-paths, src/skill.md:markdown-paths">
+    #[test]
+    fn nested_sections_parse_symbols_returns_each_section_with_its_body() -> anyhow::Result<()> {
+        let source = r"Text before the first heading.
+
+# Colors
+
+Intro.
+
+## Red
+
+Warm.
+
+### Dark red
+
+Deep.
+
+## Blue
+
+#### Navy
+
+Deep blue.
+
+# Shapes
+";
+
+        assert_eq!(
+            derived_symbols(source)?,
+            expected_symbols(&[
+                (
+                    "/Colors",
+                    r"Intro.
+
+## Red
+
+Warm.
+
+### Dark red
+
+Deep.
+
+## Blue
+
+#### Navy
+
+Deep blue."
+                ),
+                (
+                    "/Colors/Red",
+                    r"Warm.
+
+### Dark red
+
+Deep."
+                ),
+                ("/Colors/Red/Dark red", "Deep."),
+                (
+                    "/Colors/Blue",
+                    r"#### Navy
+
+Deep blue."
+                ),
+                ("/Colors/Blue/Navy", "Deep blue."),
+                ("/Shapes", ""),
+            ])?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn section_parse_symbols_returns_byte_ranges_without_the_blank_lines_after_it()
+    -> anyhow::Result<()> {
+        let source = r"# Café
+
+Crème.
+
+
+# Tea
+";
+
+        let symbols = parser()?.parse_symbols(source)?;
+
+        assert_eq!(
+            symbols[0].def_byte_ranges,
+            vec![test_utils::substr_range(source, "# Café\n\nCrème.")]
+        );
+        assert_eq!(
+            symbols[0].value,
+            Some(ScalarValue {
+                text: "Crème.".to_string(),
+                byte_range: test_utils::substr_range(source, "Crème."),
+            })
+        );
+        let tea_end = test_utils::substr_range(source, "# Tea").end;
+        assert_eq!(
+            symbols[1].def_byte_ranges,
+            vec![test_utils::substr_range(source, "# Tea")]
+        );
+        assert_eq!(
+            symbols[1].value,
+            Some(ScalarValue {
+                text: String::new(),
+                byte_range: tea_end..tea_end,
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn heading_with_markup_parse_symbols_returns_the_text_a_reader_sees() -> anyhow::Result<()> {
+        let source = r"## The `--diff` flag
+
+## *Red* **and** ~~blue~~ ##
+
+## [Shapes](shapes.md) \#1
+";
+
+        assert_eq!(
+            derived_symbols(source)?,
+            expected_symbols(&[
+                ("/The --diff flag", ""),
+                ("/Red and blue", ""),
+                ("/Shapes #1", ""),
+            ])?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn setext_heading_parse_symbols_ends_the_deeper_section_above_it() -> anyhow::Result<()> {
+        let source = r"# Colors
+
+### Red
+
+Warm.
+
+Blue
+----
+
+Cool.
+";
+
+        assert_eq!(
+            derived_symbols(source)?,
+            expected_symbols(&[
+                (
+                    "/Colors",
+                    r"### Red
+
+Warm.
+
+Blue
+----
+
+Cool."
+                ),
+                ("/Colors/Red", "Warm."),
+                ("/Colors/Blue", "Cool."),
+            ])?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn heading_lookalikes_parse_symbols_returns_no_section_for_them() -> anyhow::Result<()> {
+        let source = r"---
+title: Colors
+---
+
+# Colors
+
+```sh
+# Comment
+```
+
+> ## Quoted
+
+- ## Listed
+
+<div>
+## Inside HTML
+</div>
+";
+
+        assert_eq!(
+            derived_symbols(source)?,
+            expected_symbols(&[(
+                "/Colors",
+                r"```sh
+# Comment
+```
+
+> ## Quoted
+
+- ## Listed
+
+<div>
+## Inside HTML
+</div>"
+            )])?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn same_heading_twice_parse_symbols_returns_one_symbol_each() -> anyhow::Result<()> {
+        let source = r"## Example
+
+One.
+
+## Example
+
+Two.
+";
+
+        assert_eq!(
+            derived_symbols(source)?,
+            expected_symbols(&[("/Example", "One."), ("/Example", "Two.")])?
+        );
+        Ok(())
+    }
+    // </block>
 
     #[test]
     fn parses_markdown_blocks_correctly() -> anyhow::Result<()> {

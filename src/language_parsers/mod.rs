@@ -901,6 +901,8 @@ mod tests {
             "cff",
             "json",
             "jsonc",
+            "markdown",
+            "md",
             "toml",
             "webmanifest",
             "yaml",

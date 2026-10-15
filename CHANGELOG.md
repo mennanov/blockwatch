@@ -12,6 +12,13 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- A symbol path can point at a section of a Markdown file (`.md`, `.markdown`) by its headings. For example,
+  `docs/cli.md#/CLI Reference/Run Modes` is the `## Run Modes` section under the `# CLI Reference` title. So
+  `affects` and `same-as` can point at a section, and a `[[block]]` entry can wrap one, with no tags in the file. See
+  [Markdown](docs/symbols.md#markdown) ([#175](https://github.com/mennanov/blockwatch/issues/175)).
+
 ### Fixed
 
 - The skill that `blockwatch skill` prints no longer adds blocks to the project that saves it. Before, a saved skill

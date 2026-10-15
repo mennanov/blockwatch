@@ -24,11 +24,12 @@ declares, instead of tags in a comment.
 <!-- <block name="extensions-with-symbols" same-as="src/language_parsers/mod.rs:extensions-with-symbols"
      same-as-pattern="`\.?(?P<value>[A-Za-z]+)`"> -->
 
-| Language | Files                             | Paths         |
-|----------|-----------------------------------|---------------|
-| JSON     | `.json`, `.jsonc`, `.webmanifest` | [JSON](#json) |
-| TOML     | `.toml`, `Pipfile`                | [TOML](#toml) |
-| YAML     | `.yaml`, `.yml`, `.cff`           | [YAML](#yaml) |
+| Language | Files                             | Paths                 |
+|----------|-----------------------------------|-----------------------|
+| JSON     | `.json`, `.jsonc`, `.webmanifest` | [JSON](#json)         |
+| TOML     | `.toml`, `Pipfile`                | [TOML](#toml)         |
+| YAML     | `.yaml`, `.yml`, `.cff`           | [YAML](#yaml)         |
+| Markdown | `.md`, `.markdown`                | [Markdown](#markdown) |
 
 <!-- </block> -->
 
@@ -186,6 +187,46 @@ jobs:
 - **A key written twice is a violation**, because blockwatch can't tell which copy you mean.
 - **A file with several documents stops the run.** A path can't say which document it means. Put the value in a named
   block instead.
+
+<!-- </block> -->
+
+## Markdown
+
+<!-- <block name="markdown-paths"> -->
+
+Every section is a symbol. A section is a heading and everything up to the next heading of the same or a higher level.
+Its path is the text of each heading it is under, then its own:
+
+```markdown
+# Guide
+
+## Install
+
+Run `cargo install blockwatch`.
+
+### From source
+
+Clone the repository.
+```
+
+| Path                          | Points at                                   |
+|-------------------------------|---------------------------------------------|
+| `#/Guide`                     | everything below `# Guide`                  |
+| `#/Guide/Install`             | `Run …` and the whole `From source` section |
+| `#/Guide/Install/From source` | `Clone the repository.`                     |
+
+- **The top `#` title is part of every path**, as above.
+- **A section holds its subsections.** `affects` counts a change to any of its lines, the heading included.
+- **A section's value is its text without the heading line.** `same-as` compares that text. The blank lines around it
+  don't count.
+- **A heading counts as a reader sees it.** ``## The `--diff` flag`` is `#/The --diff flag`. Code, emphasis and links
+  lose their markup.
+- **Headings underlined with `===` or `---` count.** A `#` line in a code block doesn't. Neither does a heading in a
+  quote, a list item or an HTML block.
+- **The same heading twice under one parent is a violation**, because blockwatch can't tell which one you mean. Two
+  `### Example` sections under different `##` headings are fine.
+- **Escape a heading like any key.** `## Input/Output` is `#/Input~1Output`, and `## Step 1: build` is
+  `#/Step 1%3A build`.
 
 <!-- </block> -->
 

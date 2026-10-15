@@ -224,6 +224,8 @@ The main modules:
     syntax tree is nested.
   - YAML walks its syntax tree itself. An alias has a position in a sequence but can't be addressed, and a query can't
     express that.
+  - Markdown finds its sections with the `markdown` crate. The `section` nodes of `tree-sitter-md` don't end at a
+    heading underlined with `---`.
 
   Each language's tests list every symbol it finds. When you give a language symbols, also document its paths in
   `docs/symbols.md` and in the "Symbols" section of the skill, `src/skill.md`. A test in `language_parsers/mod.rs` and the

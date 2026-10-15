@@ -68,3 +68,17 @@ fn yml_target_resolves() {
     cmd.arg("tests/testdata/symbol_references/yml_source.rs");
     cmd.output().unwrap().assert().success();
 }
+
+#[test]
+fn md_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/md_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
+fn markdown_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/markdown_source.rs");
+    cmd.output().unwrap().assert().success();
+}

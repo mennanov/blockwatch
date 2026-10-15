@@ -6,10 +6,11 @@ use std::collections::HashMap;
 use std::ops::Range;
 use tree_sitter::StreamingIterator;
 
-/// An addressable element of a source file, such as a JSON key or an array item.
+/// An addressable element of a source file, such as a JSON key, an array item or a Markdown
+/// section.
 ///
-/// Contains the rooted [`SymbolPath`], the byte ranges where the symbol is written, and the
-/// scalar value if the symbol represents a scalar.
+/// Contains the rooted [`SymbolPath`], the byte ranges where the symbol is written, and its value
+/// if it has one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Symbol {
     /// The symbol path of this symbol (e.g. `/dependencies/inngest`).
@@ -17,7 +18,8 @@ pub(crate) struct Symbol {
     /// The byte ranges of the source where the symbol is written, in document order and not
     /// overlapping. Never empty. A symbol written in several places has one range for each.
     pub(crate) def_byte_ranges: Vec<Range<usize>>,
-    /// The scalar value, or `None` if the symbol represents a container or composite node.
+    /// The value: a scalar, or the body of a Markdown section. `None` for a container, such as a
+    /// JSON object.
     pub(crate) value: Option<ScalarValue>,
 }
 
@@ -75,14 +77,13 @@ impl Symbol {
     }
 }
 
-/// The value of a [`Symbol`] that represents a scalar.
+/// The value of a [`Symbol`]: a scalar, or the body of a Markdown section.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ScalarValue {
-    /// The text of the value. A string has no quotes and its escapes are decoded. Any other
-    /// scalar is kept as written.
+    /// The text of the value. A string has no quotes and its escapes are decoded. Anything else
+    /// is kept as written.
     pub(crate) text: String,
     /// The byte range of the source where the value is written, quotes included.
-    /// It covers the whole literal as returned by the grammar.
     pub(crate) byte_range: Range<usize>,
 }
 
