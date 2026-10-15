@@ -55,7 +55,9 @@ impl CommentsParser for LeanCommentsParser {
         comments
             .into_iter()
             .map(move |((opening, closing), range)| {
+                #[expect(clippy::string_slice, reason = "the scanner reads whole characters")]
                 let text = &source_code[range.clone()];
+                #[expect(clippy::string_slice, reason = "comment markers are ASCII")]
                 Comment {
                     position_range: position_at(range.start)..position_at(range.end),
                     comment_text: format!(

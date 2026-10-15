@@ -55,6 +55,7 @@ impl SymbolPath {
         }
 
         // A rooted path always has a leading `/`, so the segment slice starts after index 1.
+        #[expect(clippy::string_slice, reason = "`decoded` starts with `/`")]
         let segments: Vec<Segment> = decoded[1..]
             .split('/')
             .map(parse_segment)

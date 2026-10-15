@@ -71,6 +71,7 @@ impl<'source> WinnowBlockTagParser<'source> {
     /// Returns `None` if the text there is not a tag, and an error if it looks like one but does
     /// not parse (see [`looks_like_tag_attempt`]). The cursor moves only when a tag is returned.
     fn parse_tag_at(&mut self, start: usize) -> Result<Option<BlockTag>, BlockTagParseError> {
+        #[expect(clippy::string_slice, reason = "`start` is the index of a `<`")]
         let input = &self.source[start..];
         if let Ok((remaining, attributes)) = parse_start_tag.parse_peek(input) {
             self.cursor = self.source.len() - remaining.len();
@@ -97,7 +98,16 @@ impl<'source> WinnowBlockTagParser<'source> {
 impl<'source> BlockTagParser for WinnowBlockTagParser<'source> {
     fn next(&mut self) -> Result<Option<BlockTag>, BlockTagParseError> {
         let mut position = self.cursor;
-        while let Some(offset) = find_tag_start(&self.source[position..]) {
+        loop {
+            #[expect(
+                clippy::string_slice,
+                reason = "`position` is the cursor or right after a `<`"
+            )]
+            let rest = &self.source[position..];
+            let offset = match find_tag_start(rest) {
+                Some(offset) => offset,
+                None => break,
+            };
             let start = position + offset;
             if let Some(tag) = self.parse_tag_at(start)? {
                 return Ok(Some(tag));
@@ -115,7 +125,16 @@ impl<'source> BlockTagParser for WinnowBlockTagParser<'source> {
 fn find_tag_start(input: &str) -> Option<usize> {
     let mut position = 0;
     loop {
-        position += input[position..].find(['<', '`'])?;
+        #[expect(
+            clippy::string_slice,
+            reason = "`position` is at a `<` or after backticks"
+        )]
+        let offset = input[position..].find(['<', '`'])?;
+        position += offset;
+        #[expect(
+            clippy::string_slice,
+            reason = "`position` is the index of a `<` or a backtick"
+        )]
         let rest = &input[position..];
         if rest.starts_with('<') {
             return Some(position);
@@ -142,11 +161,19 @@ fn find_tag_start(input: &str) -> Option<usize> {
 fn code_span_len(input: &str) -> usize {
     debug_assert!(input.starts_with('`'));
     // A span ends on its own line, so a stray backtick can't hide a tag on a later line.
+    #[expect(clippy::string_slice, reason = "`find` returns the index of a `\\n`")]
     let line = &input[..input.find('\n').unwrap_or(input.len())];
     let fence_len = line.len() - line.trim_start_matches('`').len();
     let mut cursor = fence_len;
-    while let Some(pos) = line[cursor..].find('`') {
-        let run = &line[cursor + pos..];
+    loop {
+        #[expect(clippy::string_slice, reason = "`cursor` is right after a backtick")]
+        let rest = &line[cursor..];
+        let pos = match rest.find('`') {
+            Some(pos) => pos,
+            None => break,
+        };
+        #[expect(clippy::string_slice, reason = "`pos` is the index of a backtick")]
+        let run = &rest[pos..];
         let run_len = run.len() - run.trim_start_matches('`').len();
         cursor += pos + run_len;
         if run_len == fence_len {

@@ -65,6 +65,7 @@ impl PathsGlob {
         for file in file_system.walk(self.base.as_ref()) {
             let file = file?;
             for (end, _) in file.as_str().match_indices('/') {
+                #[expect(clippy::string_slice, reason = "`end` is the index of a `/`")]
                 let directory = &file.as_str()[..end];
                 if self.matcher.is_match(directory) {
                     directories.insert(format!("{directory}/"));

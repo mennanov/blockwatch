@@ -1,5 +1,6 @@
 use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser, comment_visitor,
+    node_text,
 };
 
 /// Returns a [`LanguageParser`] for Ruby.
@@ -15,7 +16,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
             if node.kind() != "comment" {
                 return None;
             }
-            let comment = &source_code[node.byte_range()];
+            let comment = node_text(node, source_code);
             Some(if comment.starts_with('#') {
                 comment.replacen('#', " ", 1)
             } else {
@@ -37,9 +38,14 @@ fn multiline_comment_processor(comment: &str) -> String {
         .rfind('\n')
         .expect("expected '\\n' in a multiline comment")
         + 1;
+    #[expect(
+        clippy::string_slice,
+        reason = "`=begin` is ASCII, and `last_line_idx` follows a `\\n`"
+    )]
     result.push_str(&comment[6..last_line_idx]);
     // Replace "=end" with spaces.
     result.push_str("    ");
+    #[expect(clippy::string_slice, reason = "`=end` is ASCII")]
     result.push_str(&comment[last_line_idx + 4..]);
     result
 }

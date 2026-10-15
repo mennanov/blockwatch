@@ -156,9 +156,17 @@ fn source_range(
     // Editors count columns in characters, so the bytes before the range, the trimmed
     // indentation included, are turned into a character count.
     let byte_offset = trimmed_line.as_ptr() as usize - line.as_ptr() as usize + bytes.start;
+    #[expect(
+        clippy::string_slice,
+        reason = "`trimmed_line` is in `line`, and `bytes` is a match"
+    )]
     let start = block
         .content
         .position(line_idx, line[..byte_offset].chars().count());
+    #[expect(
+        clippy::string_slice,
+        reason = "`bytes` is a regex match in `trimmed_line`"
+    )]
     let end = Position::new(
         start.line,
         start.character + trimmed_line[bytes].chars().count(),

@@ -1,6 +1,6 @@
 use crate::Position;
 use crate::language_parsers::{
-    CommentsParser, LanguageParser, LanguageParserImpl, python_style_comments_parser,
+    CommentsParser, LanguageParser, LanguageParserImpl, node_text, python_style_comments_parser,
 };
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{ScalarValue, Symbol, SymbolsParser, ensure_no_syntax_error};
@@ -264,10 +264,11 @@ impl<'s> Walk<'s> {
     /// Where `node` is written. A node on several lines also covers its last line break.
     fn written_range(&self, node: Node) -> Range<usize> {
         let range = node.byte_range();
-        if !self.source[range.clone()].contains('\n') {
+        if !node_text(&node, self.source).contains('\n') {
             return range;
         }
         // Covering the line break makes deleting a mapping's last line count as a change to it.
+        #[expect(clippy::string_slice, reason = "`range` is a tree-sitter node's range")]
         let end = self.source[range.end..]
             .find('\n')
             .map_or(self.source.len(), |offset| range.end + offset + 1);
@@ -281,7 +282,7 @@ impl<'s> Walk<'s> {
     fn decoded(&self, scalar: Node, style: ScalarStyle) -> anyhow::Result<String> {
         // The `saphyr-parser` crate was tried instead, but it decodes a scalar read on its own
         // wrongly (`v: ---` gives an empty string), and it is slower.
-        let text = &self.source[scalar.byte_range()];
+        let text = node_text(&scalar, self.source);
         let decoded = match style {
             ScalarStyle::Plain => Ok(folded(text)),
             ScalarStyle::SingleQuoted => Ok(folded(unquoted(text)).replace("''", "'")),
@@ -300,6 +301,7 @@ impl<'s> Walk<'s> {
 
 /// `text` without its quotes.
 fn unquoted(text: &str) -> &str {
+    #[expect(clippy::string_slice, reason = "quotes are ASCII")]
     &text[1..text.len() - 1]
 }
 
@@ -393,6 +395,10 @@ fn double_quoted_decoded(text: &str) -> anyhow::Result<String> {
                 escaped_end = decoded.len();
             }
             '\n' => {
+                #[expect(
+                    clippy::string_slice,
+                    reason = "`escaped_end` was the length of `decoded`"
+                )]
                 let kept = decoded[escaped_end..].trim_end_matches([' ', '\t']).len();
                 decoded.truncate(escaped_end + kept);
                 let empty_lines = skip_line_prefixes(&mut chars);
@@ -433,6 +439,10 @@ fn hex_escape(chars: &mut impl Iterator<Item = char>, digits: usize) -> anyhow::
 /// The text of a `|` or `>` block.
 fn block_scalar_decoded(source: &str, scalar: Node) -> String {
     let start = scalar.start_byte();
+    #[expect(
+        clippy::string_slice,
+        reason = "`start` is where a tree-sitter node starts"
+    )]
     let header_line = source[start..]
         .split_inclusive('\n')
         .next()
@@ -477,6 +487,7 @@ impl BlockHeader {
         } else {
             BlockStyle::Folded
         };
+        #[expect(clippy::string_slice, reason = "a header starts with `|` or `>`")]
         let indicators = header[1..]
             .split([' ', '\t', '#'])
             .next()
@@ -544,7 +555,12 @@ impl Chomping {
 /// block's `end` and then on through the empty lines after it, since `+` keeps those.
 fn block_lines(source: &str, mut offset: usize, end: usize) -> Vec<&str> {
     let mut lines = Vec::new();
-    for line in source[offset..].split_inclusive('\n') {
+    #[expect(
+        clippy::string_slice,
+        reason = "`offset` is right after the header line"
+    )]
+    let rest = &source[offset..];
+    for line in rest.split_inclusive('\n') {
         if offset >= end && !line.trim().is_empty() {
             break;
         }
@@ -559,6 +575,10 @@ fn block_lines(source: &str, mut offset: usize, end: usize) -> Vec<&str> {
 fn block_indent(source: &str, start: usize, extra_indent: Option<usize>, lines: &[&str]) -> usize {
     match extra_indent {
         // The digit counts from the indentation of the header's line.
+        #[expect(
+            clippy::string_slice,
+            reason = "`start` is where a tree-sitter node starts"
+        )]
         Some(extra) => line_indent(source[..start].rsplit('\n').next().unwrap_or_default()) + extra,
         // Otherwise the first line with text sets it.
         None => lines

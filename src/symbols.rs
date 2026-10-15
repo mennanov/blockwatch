@@ -59,7 +59,15 @@ impl Symbol {
     pub(crate) fn value_or_definition<'s>(&'s self, source: &'s str) -> Cow<'s, str> {
         match (&self.value, self.def_byte_ranges.as_slice()) {
             (Some(value), _) => Cow::Borrowed(&value.text),
+            #[expect(
+                clippy::string_slice,
+                reason = "parsers give symbol ranges of whole characters"
+            )]
             (None, [range]) => Cow::Borrowed(&source[range.clone()]),
+            #[expect(
+                clippy::string_slice,
+                reason = "parsers give symbol ranges of whole characters"
+            )]
             (None, ranges) => {
                 Cow::Owned(ranges.iter().map(|range| &source[range.clone()]).collect())
             }

@@ -57,7 +57,12 @@ impl MdxParser {
         let mut comments = Vec::new();
         for javascript in javascript_ranges(&tree) {
             let start_row = line_at(&line_starts, javascript.start) - 1;
-            for mut comment in self.js_comments_parser.parse(&source[javascript.clone()]) {
+            #[expect(
+                clippy::string_slice,
+                reason = "markdown-rs gives offsets of whole characters"
+            )]
+            let javascript_source = &source[javascript.clone()];
+            for mut comment in self.js_comments_parser.parse(javascript_source) {
                 comment.shift_into_source(start_row, javascript.start, source);
                 widen_lone_comment_to_braces(&mut comment, &javascript, source, &line_starts);
                 comments.push(comment);
@@ -136,7 +141,15 @@ fn widen_lone_comment_to_braces(
     source: &str,
     line_starts: &[usize],
 ) {
+    #[expect(
+        clippy::string_slice,
+        reason = "markdown-rs and tree-sitter give these ranges"
+    )]
     let before = &source[expression.start..comment.source_range.start];
+    #[expect(
+        clippy::string_slice,
+        reason = "markdown-rs and tree-sitter give these ranges"
+    )]
     let after = &source[comment.source_range.end..expression.end];
     // Only a `{...}` expression can hold nothing but a comment: an `import` or `export` block
     // always holds code.
@@ -145,15 +158,14 @@ fn widen_lone_comment_to_braces(
     }
     // The `}` can come after the end of `expression`: markdown-rs leaves out the indent or `> `
     // that starts the last line, when nothing else is on it.
+    #[expect(clippy::string_slice, reason = "markdown-rs gives `expression`")]
     let close = expression.end
         + source[expression.end..]
             .find('}')
             .expect("a `{...}` expression ends with `}`");
-    comment.comment_text = format!(
-        " {before}{}{} ",
-        comment.comment_text,
-        &source[comment.source_range.end..close]
-    );
+    #[expect(clippy::string_slice, reason = "`close` is the index of a `}`")]
+    let closing = &source[comment.source_range.end..close];
+    comment.comment_text = format!(" {before}{}{closing} ", comment.comment_text);
     comment.source_range = expression.start - 1..close + 1;
     comment.position_range.start.line = line_at(line_starts, expression.start - 1);
     comment.position_range.end.line = line_at(line_starts, close + 1);

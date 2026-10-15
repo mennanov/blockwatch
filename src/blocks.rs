@@ -166,6 +166,10 @@ impl Content {
     /// Returns the content's text. `source` must be the text of the block's file.
     pub(crate) fn text<'a>(&'a self, source: &'a str) -> &'a str {
         match &self.text {
+            #[expect(
+                clippy::string_slice,
+                reason = "a comment, a symbol or a match sets `range`"
+            )]
             ContentText::Source(range) => &source[range.clone()],
             ContentText::Decoded(text) => text,
         }
@@ -1002,6 +1006,7 @@ pub(crate) fn parser_for_file_path<'p>(
     let file_name = file_path.file_name()?.to_str()?;
 
     for (i, _) in file_name.match_indices('.').rev() {
+        #[expect(clippy::string_slice, reason = "`i` is the index of a `.`")]
         let extension = &file_name[i + 1..];
         let ext_os = OsString::from(extension);
 

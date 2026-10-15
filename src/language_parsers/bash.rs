@@ -1,5 +1,6 @@
 use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser, comment_visitor,
+    node_text,
 };
 
 /// Returns a [`LanguageParser`] for Bash.
@@ -15,7 +16,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
             if node.kind() != "comment" {
                 return None;
             }
-            let comment = &source[node.byte_range()];
+            let comment = node_text(node, source);
             if comment.starts_with("#!") {
                 // Skip shebang.
                 None

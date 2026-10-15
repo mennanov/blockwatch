@@ -219,6 +219,10 @@ impl<'s> Walk<'s> {
             Value::Integer(_) | Value::Float(_) | Value::Boolean(_) | Value::Datetime(_) => {
                 let written = require_span(value.span())?;
                 let range = start..written.end;
+                #[expect(
+                    clippy::string_slice,
+                    reason = "`toml_edit` gives spans of whole characters"
+                )]
                 let scalar = ScalarValue {
                     text: self.source[written.clone()].to_string(),
                     byte_range: written,
@@ -272,6 +276,10 @@ impl<'s> Walk<'s> {
         // `range_intersects_any` places a deleted line at the start of the line after it. Ending
         // after the line break puts that point inside the range, so deleting a table's last pair
         // counts as touching the table.
+        #[expect(
+            clippy::string_slice,
+            reason = "`range` ends where a `toml_edit` span does"
+        )]
         let end = self.source[range.end..]
             .find('\n')
             .map_or(self.source.len(), |offset| range.end + offset + 1);

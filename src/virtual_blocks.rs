@@ -181,6 +181,10 @@ impl VirtualBlock {
         let definition_positions = position_range(source, &definition);
         // A violation of the whole block is shown on this range. Its first line is enough to find
         // the block, and it keeps a violation from covering a whole object or file.
+        #[expect(
+            clippy::string_slice,
+            reason = "`definition` is a symbol, a match or the file"
+        )]
         let first_line_end = source[definition.clone()]
             .find('\n')
             .map_or(definition.end, |offset| definition.start + offset);

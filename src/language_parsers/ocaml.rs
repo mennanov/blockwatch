@@ -1,6 +1,6 @@
 use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
-    blank_decorative_stars, comment_visitor,
+    blank_decorative_stars, comment_visitor, node_text,
 };
 
 /// Returns a [`LanguageParser`] for OCaml.
@@ -16,7 +16,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
             if node.kind() != "comment" {
                 return None;
             }
-            Some(comment_text(&source_code[node.byte_range()]))
+            Some(comment_text(node_text(node, source_code)))
         }),
     );
     Ok(parser)

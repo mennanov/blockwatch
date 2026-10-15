@@ -1,6 +1,7 @@
 use crate::language_parsers;
 use crate::language_parsers::{
     Comment, CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
+    node_text,
 };
 use tree_sitter::StreamingIterator;
 
@@ -81,9 +82,8 @@ impl CommentsParser for PhpCommentsParser {
                 .expect("Empty Tree-sitter region query match")
                 .node;
             if node.kind() == "comment" {
-                let text = language_parsers::hash_and_c_style_comment_text(
-                    &source_code[node.byte_range()],
-                );
+                let text =
+                    language_parsers::hash_and_c_style_comment_text(node_text(&node, source_code));
                 comments.push(Comment::from_node(&node, source_code, text));
             } else if let Some(view) = html_view.as_mut() {
                 // A `text` node: copy the HTML template section back into the blanked view.

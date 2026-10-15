@@ -1,5 +1,6 @@
 use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser, comment_visitor,
+    node_text,
 };
 use tree_sitter::Node;
 
@@ -13,8 +14,8 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let parser = TreeSitterCommentsParser::new(
         &cmake_language,
         comment_visitor(|node, source_code| match node.kind() {
-            "line_comment" => Some(source_code[node.byte_range()].replacen('#', " ", 1)),
-            "bracket_comment" => Some(bracket_comment_text(node, &source_code[node.byte_range()])),
+            "line_comment" => Some(node_text(node, source_code).replacen('#', " ", 1)),
+            "bracket_comment" => Some(bracket_comment_text(node, node_text(node, source_code))),
             _ => None,
         }),
     );
@@ -31,6 +32,10 @@ fn bracket_comment_text(node: &Node, comment: &str) -> String {
         .map(|child| child.start_byte() - node.start_byte()..child.end_byte() - node.start_byte())
         .unwrap_or(0..0);
     let mut result = " ".repeat(content_range.start);
+    #[expect(
+        clippy::string_slice,
+        reason = "`content_range` is a tree-sitter node's range"
+    )]
     result.push_str(&comment[content_range.clone()]);
     result.push_str(&" ".repeat(comment.len() - content_range.end));
     result

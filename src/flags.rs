@@ -377,8 +377,7 @@ fn parse_suppressions(content: &str, path: &Path) -> anyhow::Result<Vec<Violatio
     let mut addresses = Vec::new();
     for (line_idx, line) in content.lines().enumerate() {
         let trimmed = line.trim();
-        // Slicing a `str` panics when the prefix's length falls inside a multi-byte character, so
-        // compare bytes. A matched prefix is ASCII, so slicing after it is safe.
+        // Bytes, because the prefix's length can fall inside a multi-byte character.
         if trimmed.len() < SUPPRESS_TRAILER_PREFIX.len()
             || !trimmed.as_bytes()[..SUPPRESS_TRAILER_PREFIX.len()]
                 .eq_ignore_ascii_case(SUPPRESS_TRAILER_PREFIX.as_bytes())
@@ -386,6 +385,7 @@ fn parse_suppressions(content: &str, path: &Path) -> anyhow::Result<Vec<Violatio
             // Non-matching line.
             continue;
         }
+        #[expect(clippy::string_slice, reason = "the prefix just matched is ASCII")]
         let address_str = trimmed[SUPPRESS_TRAILER_PREFIX.len()..].trim();
         let address = ViolationAddress::parse(address_str).with_context(|| {
             format!(

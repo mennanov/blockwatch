@@ -1,4 +1,6 @@
-use crate::language_parsers::{LanguageParser, LanguageParserImpl, c_style_comments_parser};
+use crate::language_parsers::{
+    LanguageParser, LanguageParserImpl, c_style_comments_parser, node_text,
+};
 use crate::symbols::QuerySymbolsParser;
 use anyhow::Context;
 
@@ -16,7 +18,7 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 /// # Errors
 /// Returns an error if a string literal is not valid JSON, e.g. because it holds a raw tab.
 fn decode_node(node: &tree_sitter::Node, source: &str) -> anyhow::Result<String> {
-    let raw = &source[node.byte_range()];
+    let raw = node_text(node, source);
     match node.kind() {
         "string" => serde_json::from_str::<String>(raw)
             .with_context(|| format!("failed to unescape JSON string: {raw}")),

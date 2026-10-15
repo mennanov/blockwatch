@@ -731,6 +731,7 @@ pub(crate) fn parse_single_reference(raw: &str) -> anyhow::Result<TargetReferenc
         );
     }
     if let Some((file_part, _)) = reference.split_once('#') {
+        #[expect(clippy::string_slice, reason = "`file_part` ends right before a `#`")]
         return parse_symbol_reference(file_part, &reference[file_part.len()..], reference);
     }
     if let Some((file_part, name_part)) = reference.split_once(':') {
@@ -919,6 +920,7 @@ fn trimmed_line_value(line: &str) -> Option<(&str, Range<usize>)> {
         None
     } else {
         let byte_offset = trimmed_line.as_ptr() as usize - line.as_ptr() as usize;
+        #[expect(clippy::string_slice, reason = "`trimmed_line` is a slice of `line`")]
         let start = line[..byte_offset].chars().count();
         let end = start + trimmed_line.chars().count();
         Some((trimmed_line, start..end))
@@ -945,6 +947,10 @@ fn regex_value<'a>(line: &'a str, regex: &regex::Regex) -> Option<(&'a str, Rang
         return None;
     }
     let trimmed_byte_offset = trimmed_line.as_ptr() as usize - line.as_ptr() as usize;
+    #[expect(
+        clippy::string_slice,
+        reason = "`m` is a match in `trimmed_line`, a slice of `line`"
+    )]
     let start = line[..trimmed_byte_offset + m.start()].chars().count();
     let end = start + m.as_str().chars().count();
     Some((m.as_str(), start..end))

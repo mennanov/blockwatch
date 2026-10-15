@@ -412,6 +412,15 @@ where
     )
 }
 
+/// The text of `node` in `source`, the text that tree-sitter parsed.
+fn node_text<'source>(node: &Node, source: &'source str) -> &'source str {
+    #[expect(
+        clippy::string_slice,
+        reason = "tree-sitter nodes start and end on whole characters"
+    )]
+    &source[node.byte_range()]
+}
+
 struct CommentsIterator<'source> {
     cursor: TreeCursor<'source>,
     node_visitor: &'source NodeVisitor,
@@ -590,11 +599,12 @@ fn c_style_line_and_block_comments_parser(
         comment_visitor(move |node, source_code| {
             let kind = node.kind();
             if kind == line_comment_node_kind {
-                Some(source_code[node.byte_range()].replacen("//", "  ", 1))
+                Some(node_text(node, source_code).replacen("//", "  ", 1))
             } else if kind == block_comment_node_kind {
-                Some(c_style_multiline_comment_processor(
-                    &source_code[node.byte_range()],
-                ))
+                Some(c_style_multiline_comment_processor(node_text(
+                    node,
+                    source_code,
+                )))
             } else {
                 None
             }
@@ -614,7 +624,7 @@ fn c_style_and_doc_comments_parser(
             if node.kind() != comment_node_kind {
                 return None;
             }
-            let comment = &source_code[node.byte_range()];
+            let comment = node_text(node, source_code);
             Some(if comment.starts_with("///") {
                 comment.replacen("///", "   ", 1)
             } else if comment.starts_with("//") {
@@ -636,16 +646,17 @@ fn c_style_and_doc_line_and_block_comment_text(
 ) -> Option<String> {
     let kind = node.kind();
     if kind == line_comment_node_kind {
-        let comment = &source_code[node.byte_range()];
+        let comment = node_text(node, source_code);
         Some(if comment.starts_with("///") {
             comment.replacen("///", "   ", 1)
         } else {
             comment.replacen("//", "  ", 1)
         })
     } else if kind == block_comment_node_kind {
-        Some(c_style_multiline_comment_processor(
-            &source_code[node.byte_range()],
-        ))
+        Some(c_style_multiline_comment_processor(node_text(
+            node,
+            source_code,
+        )))
     } else {
         None
     }
@@ -686,7 +697,7 @@ fn ecmascript_comments_parser(language: &Language) -> TreeSitterCommentsParser {
 ///   `<!--` or `-->`;
 /// - a JSX `{...}` that holds nothing but a comment, such as `{/* text */}`.
 fn ecmascript_comment_text(node: &Node, source_code: &str) -> Option<String> {
-    let text = &source_code[node.byte_range()];
+    let text = node_text(node, source_code);
     match node.kind() {
         "comment" => Some(if text.starts_with("//") {
             text.replacen("//", "  ", 1)
@@ -702,7 +713,15 @@ fn ecmascript_comment_text(node: &Node, source_code: &str) -> Option<String> {
         // tag and ends before the `{` of its end tag.
         "jsx_expression" => {
             let child = node.named_child(0)?;
+            #[expect(
+                clippy::string_slice,
+                reason = "tree-sitter nodes start and end on whole characters"
+            )]
             let before = &source_code[node.start_byte()..child.start_byte()];
+            #[expect(
+                clippy::string_slice,
+                reason = "tree-sitter nodes start and end on whole characters"
+            )]
             let after = &source_code[child.end_byte()..node.end_byte()];
             // Code or a second comment after the first child keeps the braces out. So does a `}`
             // that tree-sitter made up to recover from an error, because it takes no bytes.
@@ -744,9 +763,7 @@ fn hash_and_c_style_comments_parser(
             if node.kind() != comment_node_kind {
                 return None;
             }
-            Some(hash_and_c_style_comment_text(
-                &source_code[node.byte_range()],
-            ))
+            Some(hash_and_c_style_comment_text(node_text(node, source_code)))
         }),
     )
 }
@@ -762,7 +779,7 @@ fn python_style_comments_parser(
             if node.kind() != comment_node_kind {
                 return None;
             }
-            let comment = &source_code[node.byte_range()];
+            let comment = node_text(node, source_code);
             Some(if comment.starts_with('#') {
                 comment.replacen('#', " ", 1)
             } else {
@@ -783,16 +800,19 @@ fn xml_style_comments_parser(
         language,
         comment_visitor(move |node, source_code| {
             if node.kind() == comment_node_kind {
-                let comment = &source_code[node.byte_range()];
+                let comment = node_text(node, source_code);
                 let open_idx = comment.find("<!--").expect("open comment tag is expected");
                 let close_idx = comment.rfind("-->").expect("close comment tag is expected");
                 let mut result = String::with_capacity(comment.len());
+                #[expect(clippy::string_slice, reason = "`open_idx` is the index of `<!--`")]
                 result.push_str(&comment[..open_idx]);
                 // Replace "<!--" with spaces.
                 result.push_str("    ");
+                #[expect(clippy::string_slice, reason = "`<!--` and `-->` are ASCII")]
                 result.push_str(&comment[open_idx + 4..close_idx]);
                 // Replace "-->" with spaces.
                 result.push_str("   ");
+                #[expect(clippy::string_slice, reason = "`-->` is ASCII")]
                 result.push_str(&comment[close_idx + 3..]);
                 Some(result)
             } else {
@@ -825,15 +845,24 @@ fn blank_decorative_stars(content: &str) -> String {
 
         // Find the index of the first non-whitespace character
         if let Some(first_non_whitespace_idx) = line.find(|c: char| !c.is_whitespace()) {
+            #[expect(
+                clippy::string_slice,
+                reason = "`find` returns where a character starts"
+            )]
+            let rest = &line[first_non_whitespace_idx..];
             // Check if that first non-whitespace character is a '*'
-            if line[first_non_whitespace_idx..].starts_with('*') {
+            if let Some(after_star) = rest.strip_prefix('*') {
                 decorative_star_found = true;
                 // Add leading whitespace.
+                #[expect(
+                    clippy::string_slice,
+                    reason = "`find` returns where a character starts"
+                )]
                 result.push_str(&line[..first_non_whitespace_idx]);
                 // Replace "*" with a space.
                 result.push(' ');
                 // Add the rest of the line.
-                result.push_str(&line[first_non_whitespace_idx + 1..]);
+                result.push_str(after_star);
             }
         }
         if !decorative_star_found {

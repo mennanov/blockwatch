@@ -1,6 +1,6 @@
 use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
-    c_style_multiline_comment_processor, comment_visitor,
+    c_style_multiline_comment_processor, comment_visitor, node_text,
 };
 
 /// Returns a [`LanguageParser`] for SQL.
@@ -13,10 +13,11 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let parser = TreeSitterCommentsParser::new(
         &sql_language,
         comment_visitor(|node, source_code| match node.kind() {
-            "comment" => Some(source_code[node.byte_range()].replacen("--", "  ", 1)),
-            "marginalia" => Some(c_style_multiline_comment_processor(
-                &source_code[node.byte_range()],
-            )),
+            "comment" => Some(node_text(node, source_code).replacen("--", "  ", 1)),
+            "marginalia" => Some(c_style_multiline_comment_processor(node_text(
+                node,
+                source_code,
+            ))),
             _ => None,
         }),
     );

@@ -206,6 +206,10 @@ impl<'source, I: Iterator<Item = Comment>> PartialBlocksIterator<'source, I> {
     fn take_adjacent_comment(&mut self, comment: &Comment) -> Option<Comment> {
         let contents = self.contents;
         self.comments.next_if(|next| {
+            #[expect(
+                clippy::string_slice,
+                reason = "parsers give comment ranges of whole characters"
+            )]
             contents[comment.source_range.end..next.source_range.start]
                 .trim()
                 .is_empty()
@@ -217,6 +221,10 @@ impl<'source, I: Iterator<Item = Comment>> PartialBlocksIterator<'source, I> {
 fn join_comments(comment: Comment, next: Comment, contents: &str) -> Comment {
     // The text between the comments is copied from the source, so an offset into the joined text
     // maps onto the source as it does for a single comment.
+    #[expect(
+        clippy::string_slice,
+        reason = "parsers give comment ranges of whole characters"
+    )]
     let between = &contents[comment.source_range.end..next.source_range.start];
     Comment {
         position_range: comment.position_range.start..next.position_range.end,
@@ -315,9 +323,14 @@ impl BlockStart {
     /// Columns count characters, so the offset is converted by counting the characters it skips
     /// rather than the bytes: the two differ on any line holding a multi-byte character.
     fn source_position_at(position_in_comment: usize, comment: &Comment) -> Position {
+        #[expect(
+            clippy::string_slice,
+            reason = "a tag starts at a `<` and ends after a `>`"
+        )]
         let text_before = &comment.comment_text[..position_in_comment];
         match text_before.rfind('\n') {
             // Past the comment's first line, so the column is measured from that line's start.
+            #[expect(clippy::string_slice, reason = "`line_break` is the index of a `\\n`")]
             Some(line_break) => Position::new(
                 comment.position_range.start.line + text_before.matches('\n').count(),
                 text_before[line_break + 1..].chars().count() + 1,

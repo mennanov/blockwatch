@@ -1,6 +1,9 @@
 // blockwatch is a program, not a library. The library exists only for the binary and the fuzz
 // targets, so nothing but `run` and `count_rust_blocks` may be `pub`. This lint catches any other.
 #![warn(unreachable_pub)]
+// Slicing a `str` panics when an index falls inside a multi-byte character, such as `é`. So each
+// slice outside tests needs an `expect` that says why its indexes are on character boundaries.
+#![cfg_attr(not(test), warn(clippy::string_slice))]
 
 use serde::Serialize;
 use std::ffi::OsString;
@@ -88,6 +91,10 @@ impl Position {
     /// # Panics
     /// Panics if `byte_offset` is past the end of `text` or not on a character boundary.
     pub(crate) fn from_byte_offset(text: &str, byte_offset: usize) -> Self {
+        #[expect(
+            clippy::string_slice,
+            reason = "callers give an offset on a character boundary"
+        )]
         let line = text[..byte_offset].matches('\n').count() + 1;
         Self::new(line, character_column_at(text, byte_offset))
     }
@@ -95,8 +102,17 @@ impl Position {
 
 /// The 1-based character column of `byte_offset` within its line in `text`.
 pub(crate) fn character_column_at(text: &str, byte_offset: usize) -> usize {
+    #[expect(
+        clippy::string_slice,
+        reason = "callers give an offset on a character boundary"
+    )]
     let line_start = text[..byte_offset].rfind('\n').map_or(0, |i| i + 1);
-    text[line_start..byte_offset].chars().count() + 1
+    #[expect(
+        clippy::string_slice,
+        reason = "`line_start` is right after a `\\n` or at 0"
+    )]
+    let before = &text[line_start..byte_offset];
+    before.chars().count() + 1
 }
 
 #[cfg(test)]

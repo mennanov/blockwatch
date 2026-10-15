@@ -448,6 +448,7 @@ fn lua_chunk(script: &str) -> &str {
     // The shebang line is emptied rather than dropped, so the line numbers Lua reports in syntax
     // and runtime errors keep matching the lines of the file on disk.
     match script.find('\n') {
+        #[expect(clippy::string_slice, reason = "`line_end` is the index of a `\\n`")]
         Some(line_end) => &script[line_end..],
         None => "",
     }

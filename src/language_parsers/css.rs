@@ -1,6 +1,6 @@
 use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
-    c_style_multiline_comment_processor, comment_visitor,
+    c_style_multiline_comment_processor, comment_visitor, node_text,
 };
 
 /// Returns a [`LanguageParser`] for CSS.
@@ -14,9 +14,10 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
         &css_language,
         comment_visitor(|node, source_code| {
             if node.kind() == "comment" {
-                Some(c_style_multiline_comment_processor(
-                    &source_code[node.byte_range()],
-                ))
+                Some(c_style_multiline_comment_processor(node_text(
+                    node,
+                    source_code,
+                )))
             } else {
                 None
             }

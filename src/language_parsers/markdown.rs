@@ -1,6 +1,6 @@
 use crate::language_parsers::{
     Comment, CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
-    blank_preserving_line_breaks, xml_style_comments_parser,
+    blank_preserving_line_breaks, node_text, xml_style_comments_parser,
 };
 use tree_sitter::StreamingIterator;
 
@@ -73,7 +73,7 @@ impl MdCommentsParser {
                 .first()
                 .expect("Empty Tree-sitter region query match")
                 .node;
-            let region = &contents[node.byte_range()];
+            let region = node_text(&node, contents);
 
             // `[//]:` comments are direct nodes of the Markdown tree, so their positions are
             // already the source positions.
@@ -168,7 +168,7 @@ fn link_reference_definition_comment_text(
             _ => {}
         }
     }
-    if &contents[label?.byte_range()] != "[//]" {
+    if node_text(&label?, contents) != "[//]" {
         return None;
     }
     // A title is read from the tree, not found in the text, because its delimiters, such as `'`,
