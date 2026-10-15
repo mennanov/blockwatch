@@ -20,7 +20,7 @@ To use [pre-commit](https://pre-commit.com), add the hook to `.pre-commit-config
 
 ```yaml
 - repo: https://github.com/mennanov/blockwatch
-  rev: v0.11.1  # Use latest release
+  rev: v0.11.2  # Use latest release
   hooks:
     - id: blockwatch
 ```
@@ -61,7 +61,7 @@ The `blockwatch` hook runs before the commit message exists, so it cannot see a 
 
 ```yaml
 - repo: https://github.com/mennanov/blockwatch
-  rev: v0.11.1  # Use latest release
+  rev: v0.11.2  # Use latest release
   hooks:
     - id: blockwatch-commit-msg
 ```

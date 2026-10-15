@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.11.2] - 2026-10-15
+
 ### Added
 
 - blockwatch now supports Lean (`.lean`), OCaml (`.ml`, `.mli`) and MDX (`.mdx`) files. Before, it skipped them, so

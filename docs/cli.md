@@ -546,15 +546,15 @@ Nothing else about the run changes: the same violations are found, and the exit 
       "tool": {
         "driver": {
           "name": "blockwatch",
-          "version": "0.11.1",
-          "semanticVersion": "0.11.1",
+          "version": "0.11.2",
+          "semanticVersion": "0.11.2",
           "informationUri": "https://github.com/mennanov/blockwatch",
           "rules": [
             {
               "id": "keep-sorted",
               "name": "keep-sorted",
               "shortDescription": { "text": "Requires the lines of a block to stay in order." },
-              "helpUri": "https://github.com/mennanov/blockwatch/blob/v0.11.1/docs/validators/keep-sorted.md"
+              "helpUri": "https://github.com/mennanov/blockwatch/blob/v0.11.2/docs/validators/keep-sorted.md"
             }
           ]
         }
