@@ -12,6 +12,12 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Fixed
+
+- A block with `keep-unique-pattern` now fails the run with ``unrecognized attribute `keep-unique-pattern` ``. Before,
+  blockwatch accepted the attribute and ignored it, so `keep-unique` compared whole lines. Put the regex in
+  `keep-unique` itself: `keep-unique="(?P<value>\w+)"`.
+
 ## [0.11.2] - 2026-10-15
 
 ### Added

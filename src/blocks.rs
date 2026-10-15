@@ -909,7 +909,6 @@ const RECOGNIZED_ATTRIBUTES: &[&str] = &[
     "keep-sorted-format",
     "keep-sorted-pattern",
     "keep-unique",
-    "keep-unique-pattern",
     "line-count",
     "line-pattern",
     "line-pattern-forbidden",
