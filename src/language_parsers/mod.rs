@@ -803,20 +803,16 @@ fn xml_style_comments_parser(
 }
 
 fn c_style_multiline_comment_processor(comment: &str) -> String {
-    let mut result = String::with_capacity(comment.len());
-    let open_idx = comment.find("/*").expect("expected '/*' in a comment");
-    let close_idx = comment.rfind("*/").expect("expected '*/' in a comment");
-    // Add everything before the "/*"
-    result.push_str(&comment[..open_idx]);
-    // Replace "/*" with spaces.
-    result.push_str("  ");
-    result.push_str(&blank_decorative_stars(&comment[open_idx + 2..close_idx]));
-    // Replace "*/" with spaces.
-    result.push_str("  ");
-    // Add everything after the "*/".
-    result.push_str(&comment[close_idx + 2..]);
-
-    result
+    let (before, rest) = comment
+        .split_once("/*")
+        .expect("expected '/*' in a comment");
+    // Scala's grammar ends a comment that is never closed at the end of the file, so the `*/`
+    // can be missing.
+    let (content, closing) = match rest.rsplit_once("*/") {
+        Some((content, after)) => (content, format!("  {after}")),
+        None => (rest, String::new()),
+    };
+    format!("{before}  {}{closing}", blank_decorative_stars(content))
 }
 
 /// Returns `content`, the text between a block comment's delimiters, with the first `*` on each

@@ -87,4 +87,19 @@ object Main {
 
         Ok(())
     }
+
+    #[test]
+    fn unclosed_block_comment_runs_to_end_of_file() -> anyhow::Result<()> {
+        // The `*/` in `/*/` overlaps the `/*`, so it does not close the comment.
+        let contents = r#"// <block name="a">
+val value = 1
+/*/ </block>
+"#;
+        let blocks = parser()?
+            .parse_blocks(contents)
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].content.text(contents), "\nval value = 1\n");
+        Ok(())
+    }
 }

@@ -22,6 +22,12 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - `--suppress-from` no longer crashes on a line with a non-ASCII character, such as `❌` or `—`, near its start.
   Before, such a line could make blockwatch exit with code 101, even when the code had no violations
   ([#172](https://github.com/mennanov/blockwatch/issues/172)).
+- blockwatch no longer crashes on a file that holds a tag and one of these:
+  - in Scala, a `/*` comment that is never closed;
+  - in Markdown, a `[//]:` line with no title, such as `[//]: #`, or with a quote in its destination, such as
+    `[//]: it's (text)`.
+- In Markdown, a tag in a `[//]:` title that starts on the next line is now reported on that line. Before, it was
+  reported on the `[//]:` line.
 
 ## [0.11.3] - 2026-10-15
 

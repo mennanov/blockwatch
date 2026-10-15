@@ -78,7 +78,7 @@ impl MdCommentsParser {
             // `[//]:` comments are direct nodes of the Markdown tree, so their positions are
             // already the source positions.
             if node.kind() == "link_reference_definition" {
-                if let Some(text) = link_reference_definition_comment_text(region) {
+                if let Some(text) = link_reference_definition_comment_text(&node, contents) {
                     comments.push(Comment::from_node(&node, contents, text));
                 }
                 continue;
@@ -151,40 +151,33 @@ impl CommentsParser for MdCommentsParser {
     }
 }
 
-/// Extracts the content of a Markdown `[//]:` comment (a link reference definition used as a
-/// comment), blanking the `[//]:` prefix and the title delimiters so the length is preserved.
-/// Returns `None` for a link reference definition that is not a `[//]:` comment.
-fn link_reference_definition_comment_text(comment: &str) -> Option<String> {
-    let prefix_idx = comment.find("[//]:")?;
-    let start_search = prefix_idx + 5;
-    let (open_offset, open_char) = comment[start_search..]
-        .char_indices()
-        .find(|&(_, c)| ['(', '"', '\''].contains(&c))
-        .expect("comment is expected to have a title delimiter");
-    let open_idx = open_offset + start_search;
-    // Of the three title delimiters only `(` closes on a different character; `"` and `'` close
-    // on themselves.
-    let close_char = if open_char == '(' { ')' } else { open_char };
-
-    let close_idx = comment
-        .rfind(close_char)
-        .expect("comment is expected to end with matching delimiter");
-
-    let mut result = String::with_capacity(comment.len());
-    result.push_str(&comment[..prefix_idx]);
-    // Replace "[//]:" with spaces.
-    result.push_str("     ");
-    // Replace everything before the open delimiter with spaces (including the delimiter).
-    result.push_str(" ".repeat(open_idx - (prefix_idx + 5) + 1).as_str());
-    // Copy the comment's content.
-    result.push_str(&comment[open_idx + 1..close_idx]);
-    // Replace the close delimiter with a space.
-    result.push(' ');
-    if close_idx + 1 < comment.len() {
-        // Copy the rest of the comment after the close delimiter.
-        result.push_str(&comment[close_idx + 1..]);
+/// Returns the text of `node`, a link reference definition in `contents`, with everything but its
+/// title blanked, so the length is preserved. Returns `None` when `node` is not a `[//]:` comment,
+/// or has no title.
+fn link_reference_definition_comment_text(
+    node: &tree_sitter::Node,
+    contents: &str,
+) -> Option<String> {
+    let mut cursor = node.walk();
+    let mut label = None;
+    let mut title = None;
+    for child in node.named_children(&mut cursor) {
+        match child.kind() {
+            "link_label" => label = Some(child),
+            "link_title" => title = Some(child),
+            _ => {}
+        }
     }
-    Some(result)
+    if &contents[label?.byte_range()] != "[//]" {
+        return None;
+    }
+    // A title is read from the tree, not found in the text, because its delimiters, such as `'`,
+    // can also appear in the destination.
+    let title = title?;
+    let mut text = contents.as_bytes()[node.byte_range()].to_vec();
+    blank_preserving_line_breaks(&mut text[..title.start_byte() - node.start_byte()]);
+    blank_preserving_line_breaks(&mut text[title.end_byte() - node.start_byte()..]);
+    Some(String::from_utf8(text).expect("only whole characters are blanked"))
 }
 
 #[cfg(test)]
@@ -276,6 +269,64 @@ Text
         assert_eq!(blocks[0].attributes["name"], "unicode_title");
         assert_eq!(blocks[0].content.text(content), "Text\n\n");
 
+        Ok(())
+    }
+
+    #[test]
+    fn link_reference_comment_with_quote_in_destination_reads_title() -> anyhow::Result<()> {
+        let mut parser = parser()?;
+        let content = r#"[//]: it's (<block name="a">)
+Text
+
+[//]: # (</block>)
+"#;
+        let blocks = parser
+            .parse_blocks(content)
+            .collect::<anyhow::Result<Vec<_>>>()?;
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].attributes["name"], "a");
+        assert_eq!(blocks[0].content.text(content), "Text\n\n");
+        Ok(())
+    }
+
+    #[test]
+    fn link_reference_comment_with_title_on_next_line_reports_tag_line() -> anyhow::Result<()> {
+        let mut parser = parser()?;
+        let content = r#"[//]: #
+(<block name="a">)
+Text
+
+[//]: # (</block>)
+"#;
+        let blocks = parser
+            .parse_blocks(content)
+            .collect::<anyhow::Result<Vec<_>>>()?;
+
+        assert_eq!(
+            blocks[0].start_tag_position_range,
+            Position::new(2, 2)..Position::new(2, 18)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn link_reference_without_title_or_with_another_label_is_ignored() -> anyhow::Result<()> {
+        let mut parser = parser()?;
+        let content = r#"<!-- <block name="a"> -->
+Text
+
+[//]: #
+[other]: /url (<block name="b">)
+
+<!-- </block> -->
+"#;
+        let blocks = parser
+            .parse_blocks(content)
+            .collect::<anyhow::Result<Vec<_>>>()?;
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].attributes["name"], "a");
         Ok(())
     }
 
