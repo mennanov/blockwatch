@@ -377,9 +377,11 @@ fn parse_suppressions(content: &str, path: &Path) -> anyhow::Result<Vec<Violatio
     let mut addresses = Vec::new();
     for (line_idx, line) in content.lines().enumerate() {
         let trimmed = line.trim();
-        if trimmed.len() <= SUPPRESS_TRAILER_PREFIX.len()
-            || !trimmed[..SUPPRESS_TRAILER_PREFIX.len()]
-                .eq_ignore_ascii_case(SUPPRESS_TRAILER_PREFIX)
+        // Slicing a `str` panics when the prefix's length falls inside a multi-byte character, so
+        // compare bytes. A matched prefix is ASCII, so slicing after it is safe.
+        if trimmed.len() < SUPPRESS_TRAILER_PREFIX.len()
+            || !trimmed.as_bytes()[..SUPPRESS_TRAILER_PREFIX.len()]
+                .eq_ignore_ascii_case(SUPPRESS_TRAILER_PREFIX.as_bytes())
         {
             // Non-matching line.
             continue;
@@ -598,6 +600,36 @@ mod tests {
             ]
         );
         Ok(())
+    }
+
+    #[test]
+    fn multibyte_character_across_prefix_length_is_ignored() -> anyhow::Result<()> {
+        // `é` is 2 bytes: 19 and 20. The trailer prefix is 20 bytes long.
+        let content = format!(
+            "{0}é\n\
+             {0}é and more text\n\
+             blockwatch-suppress: docs/cli.md:cli-docs:keep-sorted\n",
+            "a".repeat(19)
+        );
+
+        assert_eq!(
+            parse_suppressions(&content, Path::new("commit_msg.txt"))?
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec!["docs/cli.md:cli-docs:keep-sorted".to_string()]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn trailer_without_address_fails() {
+        let error = parse_suppressions("blockwatch-suppress:\n", Path::new("commit_msg.txt"))
+            .expect_err("a trailer without an address must be rejected");
+        assert!(
+            error.to_string().contains("invalid suppression address"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

@@ -12,6 +12,17 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Changed
+
+- A `blockwatch-suppress:` line with no address now fails the run with `invalid suppression address`. Before,
+  blockwatch ignored it.
+
+### Fixed
+
+- `--suppress-from` no longer crashes on a line with a non-ASCII character, such as `❌` or `—`, near its start.
+  Before, such a line could make blockwatch exit with code 101, even when the code had no violations
+  ([#172](https://github.com/mennanov/blockwatch/issues/172)).
+
 ## [0.11.3] - 2026-10-15
 
 ### Fixed
