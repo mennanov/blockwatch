@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 /// Directory names a version control system keeps its own state in.
 ///
 /// A superset of the markers that identify a repository root.
-// <block name="vcs-metadata-directories">
+// <block name="vcs-metadata-directories" same-as-pattern='"(?P<value>\.[a-z]+)"'>
 const VCS_METADATA_DIRECTORY_NAMES: [&str; 4] = [".git", ".hg", ".jj", ".svn"];
 // </block>
 

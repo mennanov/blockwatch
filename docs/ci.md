@@ -15,8 +15,7 @@ It stays fast, because a file without a block tag is not parsed. To check only t
 To use [pre-commit](https://pre-commit.com), add the hook to `.pre-commit-config.yaml`. pre-commit installs a prebuilt
 `blockwatch` from PyPI, so you don't need Rust:
 
-<!-- <block name="pre-commit-rev" same-as="Cargo.toml:crate-version" same-as-mode="subset"
-     same-as-pattern='rev: v(?P<value>\d+\.\d+\.\d+)'> -->
+<!-- <block name="pre-commit-rev" same-as-pattern='rev: v(?P<value>\d+\.\d+\.\d+)'> -->
 
 ```yaml
 - repo: https://github.com/mennanov/blockwatch
@@ -56,8 +55,7 @@ The `blockwatch` hook runs before the commit message exists, so it cannot see a 
 `blockwatch-commit-msg` hook runs one stage later, at `commit-msg`, and hands the message Git is about to use to
 [`--suppress-from`](cli.md#suppressing-from-a-file):
 
-<!-- <block name="commit-msg-rev" same-as="Cargo.toml:crate-version" same-as-mode="subset"
-     same-as-pattern='rev: v(?P<value>\d+\.\d+\.\d+)'> -->
+<!-- <block name="commit-msg-rev" same-as-pattern='rev: v(?P<value>\d+\.\d+\.\d+)'> -->
 
 ```yaml
 - repo: https://github.com/mennanov/blockwatch

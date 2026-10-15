@@ -37,6 +37,10 @@ pub(crate) struct Config {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ConfigFile {
+    // The error example in the docs also shows `block` and a misspelled key, so the docs only have
+    // to hold each of these keys.
+    /* <block name="config-keys" same-as="docs/cli.md:config-keys, docs/cli.md:config-key-error"
+    same-as-mode="subset" same-as-format="identifier" same-as-pattern="^(?P<value>[a-z_]+):"> */
     #[serde(default)]
     ignore: Vec<String>,
     #[serde(default)]
@@ -49,6 +53,7 @@ struct ConfigFile {
     only_blocks: Vec<String>,
     #[serde(default, rename = "skip-blocks")]
     skip_blocks: Vec<String>,
+    // </block>
     /// The `[[block]]` entries, each with the byte range of its header.
     #[serde(default)]
     block: Vec<Spanned<BlockEntry>>,

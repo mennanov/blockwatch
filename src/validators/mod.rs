@@ -550,7 +550,7 @@ type DetectorFactory<Fs> = fn() -> Box<dyn ValidatorDetector<Fs>>;
 pub(crate) fn detector_factories<Fs: FileSystem + 'static>()
 -> Vec<(&'static str, DetectorFactory<Fs>)> {
     vec![
-        /* <block name="validator-registry" affects="README.md:available-validators"
+        /* <block name="validator-registry"
         keep-unique='\("(?P<value>[^"]+)"'
            same-as="README.md:available-validators, docs/validators/README.md:validators-index"
            same-as-pattern='^\("(?P<value>[a-z-]+)"'> */

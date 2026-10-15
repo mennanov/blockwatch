@@ -125,8 +125,9 @@ Source files here contain real `<block ...>` tags. Two runs check them:
   the code here.
 
 The hook and CI read `blockwatch.toml`. It skips `tests/testdata/`, where the fixtures break rules on purpose. It also
-turns off `check-lua`, because the `check-lua` block here needs the network. `.github/workflows/trusted-checks.yml`
-runs that block on a schedule.
+skips the `latest-model` block, because its `check-lua` script needs the network. `.github/workflows/trusted-checks.yml`
+runs that block on a schedule. The `[[block]]` entries in `blockwatch.toml` hold rules too, with no tag in the file
+they check, such as the version and the dependencies in `Cargo.toml`.
 
 No test checks these blocks, so `cargo test` can pass while the hook fails. `tests/general.rs` also runs the linter on
 the whole tree, but with an empty config, so the fixtures fail that run on purpose. To check the blocks before you

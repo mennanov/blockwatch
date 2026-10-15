@@ -15,7 +15,9 @@ const DEV_NULL: &str = "/dev/null";
 /// The one-component prefixes Git puts ahead of a diff path: `a/` and `b/` by default, and the
 /// four `diff.mnemonicPrefix` spellings. Any other prefix, or none, is rejected — see
 /// [`RepoPath::from_diff_target`].
+// <block same-as="docs/cli.md:diff-input" same-as-pattern='"(?P<value>[a-z]/)"'>
 const DIFF_PATH_PREFIXES: [&str; 6] = ["a/", "b/", "i/", "w/", "c/", "o/"];
+// </block>
 
 /// A file inside the repository, in the one spelling the whole program uses.
 ///
@@ -67,7 +69,6 @@ impl RepoPath {
         Self::from_relative(Path::new(reference))
     }
 
-    // <block name="diff-target-resolution" affects="docs/cli.md:diff-input">
     /// Resolves a diff header's target to the repository path it points at.
     ///
     /// Exactly one of the prefixes Git writes ahead of a diff path is removed; a target carrying
@@ -75,7 +76,6 @@ impl RepoPath {
     ///
     /// The path is returned whether or not it points at an existing file; `parse_blocks` decides
     /// whether an absent one matters.
-    // </block>
     pub(crate) fn from_diff_target(
         source: &str,
         target: &str,

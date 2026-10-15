@@ -294,7 +294,8 @@ impl Block {
 #[derive(Clone, Copy, Serialize_repr, EnumString, Debug, PartialEq)]
 #[strum(ascii_case_insensitive)]
 #[repr(u8)]
-// <block name="block-severity" affects="docs/validators/README.md:severity-levels">
+/* <block name="block-severity" same-as="docs/validators/README.md:severity-levels"
+same-as-format="identifier" same-as-pattern="^(?P<value>[A-Z][a-z]+) = \d"> */
 pub(crate) enum BlockSeverity {
     /// The default. A violation at this level makes the run exit non-zero, failing a hook or CI.
     Error = 1,
@@ -898,7 +899,8 @@ fn virtual_blocks_in_file(
 }
 
 const RECOGNIZED_ATTRIBUTES: &[&str] = &[
-    // <block keep-sorted>
+    /* <block keep-sorted same-as="src/skill.md:validator-reference"
+    same-as-pattern='"(?P<value>[a-z-]+)"'> */
     "affects",
     "check-ai",
     "check-ai-pattern",
@@ -2814,7 +2816,7 @@ mod supported_languages_tests {
                 "/* <block> */\nint main() { return 0; }\n/* </block> */".to_string(),
             ),
             (
-                "cc.cpp".to_string(),
+                "cc.cc".to_string(),
                 "// <block>\nint main() { return 0; }\n// </block>".to_string(),
             ),
             (

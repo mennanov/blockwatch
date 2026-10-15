@@ -96,16 +96,16 @@ have to nitpick in code review.
      same-as="src/validators/mod.rs:validator-registry, docs/validators/README.md:validators-index"
      same-as-pattern='^\|\s*\[`(?P<value>[a-z-]+)`\]'> -->
 
-| Validator                                         | Description                                                                                  | Attributes                                                     |
-|---------------------------------------------------|----------------------------------------------------------------------------------------------|----------------------------------------------------------------|
-| [`affects`](docs/validators/affects.md)           | Forces linked blocks to be edited together (e.g. code and its docs); needs a diff            | `affects`                                                      |
-| [`same-as`](docs/validators/same-as.md)           | Asserts two or more blocks hold the same value, across languages and formats; no diff needed | `same-as`, `same-as-pattern`, `same-as-mode`, `same-as-format` |
-| [`keep-sorted`](docs/validators/keep-sorted.md)   | Enforces alphabetical or numerical ordering on list items                                    | `keep-sorted`, `keep-sorted-pattern`, `keep-sorted-format`     |
-| [`keep-unique`](docs/validators/keep-unique.md)   | Prevents duplicate lines within a block                                                      | `keep-unique`                                                  |
-| [`line-pattern`](docs/validators/line-pattern.md) | Enforces that every line matches a regex, or that no line matches a forbidden one            | `line-pattern`, `line-pattern-forbidden`                       |
-| [`line-count`](docs/validators/line-count.md)     | Enforces lower or upper bounds on the number of lines in a block                             | `line-count`                                                   |
-| [`check-ai`](docs/validators/check-ai.md)         | Validates content against natural language rules using an LLM                                | `check-ai`, `check-ai-pattern`                                 |
-| [`check-lua`](docs/validators/check-lua.md)       | Runs custom validation logic written in Lua                                                  | `check-lua`, `check-lua-pattern`, `check-lua-timeout`          |
+| Validator                                         | Description                                                                                  | Attributes                                                                      |
+|---------------------------------------------------|----------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
+| [`affects`](docs/validators/affects.md)           | Forces linked blocks to be edited together (e.g. code and its docs); needs a diff            | `affects`                                                                       |
+| [`same-as`](docs/validators/same-as.md)           | Asserts two or more blocks hold the same value, across languages and formats; no diff needed | `same-as`, `same-as-paths`, `same-as-pattern`, `same-as-mode`, `same-as-format` |
+| [`keep-sorted`](docs/validators/keep-sorted.md)   | Enforces alphabetical or numerical ordering on list items                                    | `keep-sorted`, `keep-sorted-pattern`, `keep-sorted-format`                      |
+| [`keep-unique`](docs/validators/keep-unique.md)   | Prevents duplicate lines within a block                                                      | `keep-unique`                                                                   |
+| [`line-pattern`](docs/validators/line-pattern.md) | Enforces that every line matches a regex, or that no line matches a forbidden one            | `line-pattern`, `line-pattern-forbidden`                                        |
+| [`line-count`](docs/validators/line-count.md)     | Enforces lower or upper bounds on the number of lines in a block                             | `line-count`                                                                    |
+| [`check-ai`](docs/validators/check-ai.md)         | Validates content against natural language rules using an LLM                                | `check-ai`, `check-ai-pattern`                                                  |
+| [`check-lua`](docs/validators/check-lua.md)       | Runs custom validation logic written in Lua                                                  | `check-lua`, `check-lua-pattern`, `check-lua-timeout`                           |
 
 <!-- </block> -->
 
@@ -210,8 +210,7 @@ exclusions, and custom extension mappings.
 
 **pre-commit** (`.pre-commit-config.yaml`):
 
-<!-- <block name="pre-commit-rev" same-as="Cargo.toml:crate-version" same-as-mode="subset"
-     same-as-pattern='rev: v(?P<value>\d+\.\d+\.\d+)'> -->
+<!-- <block name="pre-commit-rev" same-as-pattern='rev: v(?P<value>\d+\.\d+\.\d+)'> -->
 
 ```yaml
 - repo: https://github.com/mennanov/blockwatch
@@ -240,7 +239,8 @@ For plain git hooks, local pre-commit setups, and sandboxing untrusted Lua scrip
 
 ## Supported Languages
 
-<!-- <block name="supported-grammar" keep-sorted="asc" keep-sorted-pattern="^- (?P<value>.+)" affects=":pitch"> -->
+<!-- <block name="supported-grammar" keep-sorted="asc" keep-sorted-pattern="^- (?P<value>.+)" affects=":pitch"
+     check-lua="scripts/check_language_count.lua" check-lua-pattern="(?m)^- (?P<value>.+)"> -->
 
 - Bash (with `.zsh`, `.bashrc`, `.bash_profile`, `.zshrc` and `.envrc` support)
 - C#

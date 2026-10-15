@@ -72,7 +72,7 @@ along with the rest of their file.
 Controls how a violation is reported. Mirrors
 [LSP diagnostic severities](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#diagnostic).
 
-<!-- <block name="severity-levels" affects="src/blocks.rs:block-severity"> -->
+<!-- <block name="severity-levels" same-as-pattern="^\|\s*`(?P<value>[a-z]+)`"> -->
 
 | Value             | Reported | Exit code |
 |-------------------|----------|-----------|

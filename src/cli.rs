@@ -376,7 +376,8 @@ fn write_sarif_violations(violations: &HashMap<RepoPath, Vec<Violation>>) -> any
 fn repository_root_path(current_path: PathBuf) -> anyhow::Result<PathBuf> {
     current_path
         .ancestors()
-        // <block affects="src/fs.rs:vcs-metadata-directories">
+        /* <block same-as="src/fs.rs:vcs-metadata-directories" same-as-mode="subset"
+        same-as-pattern='"(?P<value>\.[a-z]+)"'> */
         .find(|path| path.join(".git").exists() || path.join(".hg").exists())
         // </block>
         .map(|path| path.to_path_buf())

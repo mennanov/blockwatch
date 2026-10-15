@@ -36,9 +36,9 @@ exactly = 1
 
 # The version is spelled out in the docs as well: the `rev:` of the pre-commit
 # snippets, and the `blockwatch` version and `helpUri` of the SARIF sample
-# output. The `crate-version` block in Cargo.toml lists them all and fails
-# a run once any of them goes stale, so they are rewritten here to keep that
-# check green. `exactly` aborts the release before publishing to crates.io if a
+# output. The `[[block]]` entry for `Cargo.toml#/package/version` in
+# blockwatch.toml lists them all and fails a run once any of them goes stale,
+# so they are rewritten here to keep that check green. `exactly` aborts the release before publishing to crates.io if a
 # snippet is ever reworded past these patterns.
 [[pre-release-replacements]]
 file = "README.md"

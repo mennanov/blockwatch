@@ -140,7 +140,7 @@ much — see [Checking Only Changed Blocks](ci.md#checking-only-changed-blocks).
 
 ### Supported Diff Input
 
-[//]: # (<block name="diff-input" affects="src/repo_path.rs:diff-target-resolution">)
+<!-- <block name="diff-input" same-as-pattern="`(?P<value>[a-z]/)`"> -->
 
 Each diff header points at a file, and `blockwatch` resolves that path against the repository:
 
@@ -165,7 +165,7 @@ A diff with a file that does not exist in the repository is an error too — but
 Entries whose extension maps to no language, such as binary assets or lockfiles, contribute no blocks and are passed
 over, so a diff carrying them alongside source changes still validates normally.
 
-[//]: # (</block>)
+<!-- </block> -->
 
 In each case `blockwatch` stops rather than check the wrong file, reporting the diff target at fault. The messages
 describe the input rather than the command that produced it, since a diff need not come from Git:
@@ -275,6 +275,8 @@ Write globs in single quotes. TOML then takes them as written, backslashes inclu
 
 Each key matches a flag:
 
+<!-- <block name="config-keys" same-as-pattern="^\|\s*`(?P<value>[a-z-]+)`"> -->
+
 | Key           | Flag           | When the flag is given too                        |
 |---------------|----------------|---------------------------------------------------|
 | `ignore`      | `--ignore`     | Both lists apply.                                 |
@@ -283,6 +285,8 @@ Each key matches a flag:
 | `disable`     | `--disable`    | The flags' selection replaces the config's.       |
 | `only-blocks` | `--only-block` | The flags' selection replaces the config's.       |
 | `skip-blocks` | `--skip-block` | The flags' selection replaces the config's.       |
+
+<!-- </block> -->
 
 So `blockwatch -e keep-sorted` runs only `keep-sorted`, whatever the config enables or disables. An extra `--ignore`
 still skips the files the config skips.
@@ -293,6 +297,8 @@ unsupported language, a block address that is not `FILE:BLOCK_NAME`, or both `en
 cannot turn a setting off without anyone noticing. The error quotes the bad key or value. For an unknown key or a value
 of the wrong type, it also shows the line and column:
 
+<!-- <block name="config-key-error" same-as-pattern="`(?P<value>[a-z-]+)`"> -->
+
 ```text
 Error: invalid config file "blockwatch.toml"
 
@@ -301,8 +307,10 @@ Caused by:
       |
     1 | ignor = ['x']
       | ^^^^^
-    unknown field `ignor`, expected one of `ignore`, `extensions`, `enable`, `disable`, `block`
+    unknown field `ignor`, expected one of `ignore`, `extensions`, `enable`, `disable`, `only-blocks`, `skip-blocks`, `block`
 ```
+
+<!-- </block> -->
 
 Everything else stays out of the file:
 

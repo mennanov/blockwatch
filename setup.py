@@ -5,7 +5,7 @@ from setuptools import setup
 setup(
     name='blockwatch-pre-commit-placeholder',
     version='0.0.0',
-    # <block same-as="Cargo.toml:crate-version" same-as-pattern="blockwatch-cli==(?P<value>\d+\.\d+\.\d+)">
+    # <block name="blockwatch-cli-version" same-as-pattern="blockwatch-cli==(?P<value>\d+\.\d+\.\d+)">
     install_requires=['blockwatch-cli==0.11.2'],
     # </block>
     # Without it, setuptools takes the directories under src/ for Python packages.

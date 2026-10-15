@@ -1,8 +1,6 @@
 [package]
 name = "blockwatch"
-# <block name="crate-version" same-as="docs/cli.md:sarif-example" same-as-mode="subset" same-as-pattern='version = "(?P<value>\d+\.\d+\.\d+)"'>
 version = "0.11.2"
-# </block>
 edition = "2024"
 repository = "https://github.com/mennanov/blockwatch"
 description = "Language agnostic linter that keeps your code and documentation in sync and valid"
@@ -47,7 +45,6 @@ strum_macros = "0.28"
 tokio = { version = "1.52", features = ["full"] }
 toml_edit = { version = "0.25", default-features = false, features = ["parse", "serde"] }
 # The grammar crates the language parsers are built from.
-# <block keep-sorted keep-unique>
 tree-sitter = "0.27.0"
 tree-sitter-bash = "0.25"
 tree-sitter-c = "0.24"
@@ -85,7 +82,6 @@ tree-sitter-toml-ng = "0.7"
 tree-sitter-typescript = "0.23"
 tree-sitter-xml = "0.7"
 tree-sitter-yaml = "0.7"
-# </block>
 unidiff = "0.4.1"
 winnow = "1.0"
 

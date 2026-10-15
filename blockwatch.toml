@@ -4,3 +4,37 @@ ignore = ['tests/testdata/**']
 # This block runs on a schedule in .github/workflows/trusted-checks.yml as it needs network access and ideally should
 # be avoided in a precommit hook.
 skip-blocks = ['src/validators/check_ai.rs:latest-model']
+
+# A block listed in `skip-blocks` is checked only by the scheduled run, so that run must list it too.
+[[block]]
+target = 'blockwatch.toml#/skip-blocks'
+same-as = '.github/workflows/trusted-checks.yml#/jobs/blockwatch/steps/0/with/only_blocks'
+same-as-pattern = '(?P<value>[\w./-]+\.\w+:[\w-]+)'
+
+# Users copy the version from the docs, and the pre-commit hooks install the PyPI package that setup.py pins. So each
+# copy must be the version being released. `cargo release` rewrites them with the replacements in release.toml.
+# The SARIF example also holds the version of the SARIF format, so the version only has to be one of its values.
+[[block]]
+target = 'Cargo.toml#/package/version'
+same-as = '''README.md:pre-commit-rev,
+    docs/ci.md:pre-commit-rev,
+    docs/ci.md:commit-msg-rev,
+    docs/cli.md:sarif-example,
+    setup.py:blockwatch-cli-version'''
+same-as-mode = 'subset'
+
+# The pattern skips the lines that are not a dependency, such as a comment or the items of a `features` list.
+[[block]]
+target = 'Cargo.toml#/dependencies'
+keep-sorted = true
+keep-sorted-pattern = '^(?P<value>[\w-]+) = '
+
+# Dependabot updates actions/checkout in the workflows, but not this pin, which dist copies into release.yml.
+# The pattern reads both the pin, `v7`, and each `actions/checkout@v7` in the workflows.
+[[block]]
+target = 'dist-workspace.toml#/dist/github-action-commits/actions~1checkout'
+same-as = '''.github/workflows/codeql.yml,
+    .github/workflows/markdownlint.yml,
+    .github/workflows/pypi.yml,
+    .github/workflows/rust.yml'''
+same-as-pattern = '(?:actions/checkout@|^)(?P<value>v\d+)$'
