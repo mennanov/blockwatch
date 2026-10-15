@@ -19,6 +19,14 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   `affects` and `same-as` can point at a section, and a `[[block]]` entry can wrap one, with no tags in the file. See
   [Markdown](docs/symbols.md#markdown) ([#175](https://github.com/mennanov/blockwatch/issues/175)).
 
+### Changed
+
+- Messages now show a space inside a key of a symbol path as written. Markdown headings almost always hold spaces, so
+  a path to a section reads like the file: `docs/cli.md#/CLI Reference/Run Modes`, not
+  `docs/cli.md#/CLI%20Reference/Run%20Modes`. A space at the start or end of a key still shows as `%20`. In any file,
+  an `affects` or `same-as` violation on a key with a space gets a new hash, so update any `--suppress` address with
+  four parts that points at it.
+
 ### Fixed
 
 - The skill that `blockwatch skill` prints no longer adds blocks to the project that saves it. Before, a saved skill

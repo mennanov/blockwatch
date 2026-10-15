@@ -137,19 +137,27 @@ impl fmt::Display for Segment {
 /// as the same text.
 fn encode(text: &str) -> String {
     let escaped = escape_rfc6901(text);
+    let inner_start = escaped.len() - escaped.trim_start_matches(' ').len();
+    let inner_end = escaped.trim_end_matches(' ').len();
     let mut encoded = String::with_capacity(escaped.len());
     let mut buffer = [0; 4];
-    for char in escaped.chars() {
-        // Other non-ASCII characters stay as written, so a message shows `/café`, not
-        // `/caf%C3%A9`. Whitespace is encoded because references are trimmed, and control
-        // characters because they are invisible.
-        if char.is_ascii() || char.is_whitespace() || char.is_control() {
+    for (index, char) in escaped.char_indices() {
+        // A space between other characters stays as written, so a key such as `Dark red` reads
+        // as it does in the file. One at the end would be lost, because references are trimmed,
+        // and one at the start is hard to see after the `/`. Other non-ASCII characters stay as
+        // written too, so a message shows `/café`, not `/caf%C3%A9`. Other whitespace and
+        // control characters are encoded because they are hard to see.
+        let as_written = match char {
+            ' ' => (inner_start..inner_end).contains(&index),
+            _ => !(char.is_ascii() || char.is_whitespace() || char.is_control()),
+        };
+        if as_written {
+            encoded.push(char);
+        } else {
             encoded.extend(utf8_percent_encode(
                 char.encode_utf8(&mut buffer),
                 FRAGMENT_ENCODE_SET,
             ));
-        } else {
-            encoded.push(char);
         }
     }
     encoded
@@ -484,6 +492,21 @@ mod tests {
             "end\u{a0}".to_string(),
         ]);
         assert_eq!(path.to_string(), "/café/%C2%9B/end%C2%A0");
+
+        let reparsed = SymbolPath::parse(&path.to_string())?;
+        assert_eq!(reparsed, path);
+        Ok(())
+    }
+
+    #[test]
+    fn key_with_spaces_display_encodes_only_those_at_its_ends() -> anyhow::Result<()> {
+        let path = SymbolPath::from_segments(vec![
+            "Dark red".to_string(),
+            " start".to_string(),
+            "end  ".to_string(),
+            " ".to_string(),
+        ]);
+        assert_eq!(path.to_string(), "/Dark red/%20start/end%20%20/%20");
 
         let reparsed = SymbolPath::parse(&path.to_string())?;
         assert_eq!(reparsed, path);
