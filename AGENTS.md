@@ -62,7 +62,10 @@ For example:
 - *Prefer* the harness's editing tools to one-off scripts.
 - *Always* handle the variants of an enum with an exhaustive `match`. A `let ... else`, or an `if` that handles one
   variant and sends the rest to a single branch, quietly gives any new variant whatever that branch does. With a
-  `match`, the compiler makes you decide what to do with each new variant.
+  `match`, the compiler makes you decide what to do with each new variant. One exception: a `match` on another
+  crate's enum can end with `_` when it only asks whether a value is one variant, and no new variant could be that
+  one. For example, every Markdown heading is `mdast::Node::Heading`, so the other node types can go to `_ => None`.
+  Say why in a comment next to the `_`.
 - *Always* give an item the narrowest visibility that compiles: private, then `pub(super)`, then `pub(crate)`.
   blockwatch is a program, not a library. Only `run` and `count_rust_blocks` in `lib.rs` are `pub`, for `main.rs` and
   the fuzz target. The `unreachable_pub` lint makes `cargo clippy -- -D warnings` fail on any other `pub`.
