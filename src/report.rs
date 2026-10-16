@@ -172,7 +172,7 @@ mod tests {
     use crate::blocks::{ScanMode, parse_blocks};
     use crate::diff_parser::DiffChanges;
     use crate::fs::test_utils::{FakeFileSystem, FakePathChecker};
-    use crate::language_parsers::language_parsers;
+    use crate::language_parsers::{LanguageParsers, language_parsers};
     use crate::repo_path::RepoPath;
     use crate::test_utils::{validation_context, virtual_block};
     use crate::validators::{
@@ -408,14 +408,12 @@ mod tests {
             )])),
             &FakePathChecker::allow_all(),
             &language_parsers()?,
-            &HashMap::new(),
             &[virtual_block("a.toml#/a", &[])?, inner],
         )?;
         let context = ValidationContext::new(
             parsed.blocks,
-            HashMap::new(),
+            LanguageParsers::default(),
             DiffChanges::default(),
-            HashMap::new(),
             Vec::new(),
         );
         let mut log = ValidationLog::default();

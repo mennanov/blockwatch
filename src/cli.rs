@@ -252,7 +252,7 @@ fn read_config(
     let settings = Settings::resolve(
         args.raw_settings(),
         config.settings,
-        &language_parsers.keys().collect(),
+        &language_parsers.extensions().collect(),
     )?;
     Ok((settings, config.blocks))
 }
@@ -272,6 +272,7 @@ fn build_context(
         path_arguments.allowed_globs()?,
         settings.ignored_globs().clone(),
     );
+    let language_parsers = language_parsers.with_extension_mappings(settings.extensions().clone());
 
     let parsed = blocks::parse_blocks(
         &modified_lines_by_file,
@@ -279,7 +280,6 @@ fn build_context(
         file_system,
         &path_checker,
         &language_parsers,
-        settings.extensions(),
         &virtual_blocks,
     )?;
     let scanned_files = parsed.scanned_files.iter().cloned().map(Ok);
@@ -292,7 +292,6 @@ fn build_context(
                 file_system,
                 &path_checker,
                 &language_parsers,
-                settings.extensions(),
                 &virtual_blocks,
             )))?
         }
@@ -302,7 +301,6 @@ fn build_context(
             parsed.blocks,
             language_parsers,
             modified_lines_by_file,
-            settings.extensions().clone(),
             virtual_blocks,
         ),
         parsed.stats,

@@ -46,8 +46,9 @@ use crate::symbols::{Symbol, SymbolsParser};
 use crate::{Position, character_column_at};
 use anyhow::Context;
 use std::collections::HashMap;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::ops::Range;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tree_sitter::{Language, Node, Parser, Tree, TreeCursor};
 
@@ -122,16 +123,78 @@ impl<C: CommentsParser> LanguageParser for LanguageParserImpl<C> {
 ///
 /// Each parser owns a mutable tree-sitter `Parser` and is therefore behind a `Mutex`; the `Arc`
 /// lets languages that share a grammar (`.cc` and `.cpp`, `.yaml` and `.yml`) share one instance.
-pub(crate) type SharedLanguageParser = Arc<Mutex<Box<dyn LanguageParser>>>;
+pub(crate) type SharedLanguageParser = Arc<Mutex<dyn LanguageParser>>;
 
-/// Parsers keyed by file extension (or by the whole filename for extensionless files such as
-/// `Dockerfile`). Also serves as the list of extensions the CLI recognizes.
-pub(crate) type LanguageParsers = HashMap<OsString, SharedLanguageParser>;
+/// The language parsers of a run, and how a file name selects one.
+#[derive(Clone, Default)]
+pub(crate) struct LanguageParsers {
+    /// Parsers keyed by file extension, or by the whole file name for files such as `Dockerfile`.
+    by_extension: HashMap<OsString, SharedLanguageParser>,
+    /// Maps an extension to a supported one. For example, `ino` to `cpp` makes `.ino` files parse
+    /// as C++.
+    extension_mappings: HashMap<OsString, OsString>,
+}
 
-/// Returns a map of all available language parsers by their file extensions.
+impl From<HashMap<OsString, SharedLanguageParser>> for LanguageParsers {
+    /// The parsers by extension, with no extension mappings.
+    fn from(by_extension: HashMap<OsString, SharedLanguageParser>) -> Self {
+        Self {
+            by_extension,
+            extension_mappings: HashMap::new(),
+        }
+    }
+}
+
+impl LanguageParsers {
+    /// Uses `extension_mappings` to select a parser for the extensions they map.
+    pub(crate) fn with_extension_mappings(
+        self,
+        extension_mappings: HashMap<OsString, OsString>,
+    ) -> Self {
+        Self {
+            extension_mappings,
+            ..self
+        }
+    }
+
+    /// The extensions, and whole file names, that have a parser. The extension mappings are not
+    /// included.
+    pub(crate) fn extensions(&self) -> impl Iterator<Item = &OsString> {
+        self.by_extension.keys()
+    }
+
+    /// The parser for `file_path`, or `None` if neither its extension nor its file name has one.
+    ///
+    /// Tries the extensions from the shortest, then the whole file name.
+    pub(crate) fn parser_for(&self, file_path: &Path) -> Option<&SharedLanguageParser> {
+        let file_name = file_path.file_name()?.to_str()?;
+
+        for (i, _) in file_name.match_indices('.').rev() {
+            #[expect(clippy::string_slice, reason = "`i` is the index of a `.`")]
+            let extension = &file_name[i + 1..];
+
+            if let Some(parser) = self.for_extension(OsStr::new(extension)) {
+                return Some(parser);
+            }
+        }
+
+        self.for_extension(OsStr::new(file_name))
+    }
+
+    /// The parser for `extension`, after the extension mappings are applied.
+    pub(crate) fn for_extension(&self, extension: &OsStr) -> Option<&SharedLanguageParser> {
+        let extension = self
+            .extension_mappings
+            .get(extension)
+            .map_or(extension, OsString::as_os_str);
+        self.by_extension.get(extension)
+    }
+}
+
+/// Returns all available language parsers, with no extension mappings.
 pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
     fn parser<P: LanguageParser + 'static>(p: P) -> SharedLanguageParser {
-        Arc::new(Mutex::new(Box::new(p) as Box<dyn LanguageParser>))
+        Arc::new(Mutex::new(p))
     }
 
     let bash_parser = parser(bash::parser()?);
@@ -174,7 +237,7 @@ pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
     let xml_parser = parser(xml::parser()?);
     let yaml_parser = parser(yaml::parser()?);
 
-    Ok(HashMap::from([
+    Ok(LanguageParsers::from(HashMap::from([
         /* <block name="language-extensions"
         affects="README.md:supported-grammar, src/blocks.rs:supported-extensions"
         keep-sorted keep-unique='\("(?P<value>[^"]+)"'> */
@@ -300,7 +363,7 @@ pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
         ("zsh".into(), Arc::clone(&bash_parser)),
         ("zshrc".into(), bash_parser),
         // </block>
-    ]))
+    ])))
 }
 
 /// Parses comment string from a source code by returning an iterator of `Comment`s.
@@ -890,10 +953,14 @@ mod tests {
     #[test]
     fn extensions_with_symbols_match_the_documented_list() -> anyhow::Result<()> {
         let mut extensions_with_symbols = Vec::new();
-        for (extension, parser) in language_parsers()? {
+        for (extension, parser) in language_parsers()?.by_extension {
             // A parser without symbols refuses every source with the same error, so an empty
             // source is enough to tell. A parser with symbols may accept it or report it as broken.
-            let has_symbols = match parser.lock().expect("no active locks").parse_symbols("") {
+            let has_symbols = match parser
+                .lock()
+                .expect("a thread panicked while it held the parser")
+                .parse_symbols("")
+            {
                 Ok(_) => true,
                 Err(err) => err.to_string() != "symbols are not supported for this language",
             };

@@ -10,7 +10,6 @@ mod same_as;
 use crate::Position;
 use crate::blocks::{
     self, Block, BlockAddress, BlockKey, BlockSeverity, BlockWithContext, FileBlocks, every_block,
-    parser_for_file_path,
 };
 use crate::diff_parser::DiffChanges;
 use crate::fs::FileSystem;
@@ -27,7 +26,6 @@ use bigdecimal::BigDecimal;
 use serde::Serialize;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::ffi::OsString;
 use std::ops::Range;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
@@ -420,8 +418,6 @@ pub(crate) struct ValidationContext {
     parsers: LanguageParsers,
     /// Every line change from the diff (if any).
     line_changes: DiffChanges,
-    /// Extension remappings from the command line.
-    extra_file_extensions: HashMap<OsString, OsString>,
     /// The declarations of every virtual block in the config file, in its order. Unlike `blocks`,
     /// they are not resolved, and they cover the files the run did not keep too.
     virtual_blocks: Vec<VirtualBlock>,
@@ -433,14 +429,12 @@ impl ValidationContext {
         blocks: HashMap<RepoPath, FileBlocks>,
         parsers: LanguageParsers,
         line_changes: DiffChanges,
-        extra_file_extensions: HashMap<OsString, OsString>,
         virtual_blocks: Vec<VirtualBlock>,
     ) -> Self {
         Self {
             blocks,
             parsers,
             line_changes,
-            extra_file_extensions,
             virtual_blocks,
         }
     }
@@ -526,7 +520,6 @@ impl ValidationContext {
             self.line_changes.for_file(file_path),
             every_block,
             &self.parsers,
-            &self.extra_file_extensions,
             &virtual_blocks,
         )
     }
@@ -904,15 +897,14 @@ impl<'a, Fs: FileSystem> TargetFiles<'a, Fs> {
         let symbols = match self.symbols.entry(file.clone()) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
-                let parser = parser_for_file_path(
-                    file.as_path(),
-                    &self.context.parsers,
-                    &self.context.extra_file_extensions,
-                )
-                .context("file format is unsupported")?;
+                let parser = self
+                    .context
+                    .parsers
+                    .parser_for(file.as_path())
+                    .context("file format is unsupported")?;
                 let symbols = parser
                     .lock()
-                    .expect("no active locks")
+                    .expect("a thread panicked while it held the parser")
                     .parse_symbols(content)?;
                 entry.insert(symbols)
             }
@@ -2137,7 +2129,6 @@ mod test_utils {
             context.blocks,
             context.parsers,
             context.line_changes,
-            context.extra_file_extensions,
             virtual_blocks,
         ))
     }
@@ -2175,7 +2166,6 @@ mod test_utils {
             merged_modified_blocks,
             parsers,
             merged_line_changes.into_iter().collect(),
-            HashMap::new(),
             Vec::new(),
         ))
     }

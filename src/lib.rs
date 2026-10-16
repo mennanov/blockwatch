@@ -6,7 +6,7 @@
 #![cfg_attr(not(test), warn(clippy::string_slice))]
 
 use serde::Serialize;
-use std::ffi::OsString;
+use std::ffi::OsStr;
 
 mod block_parser;
 /// The `Block` type and the repository scan that turns source files into blocks to validate.
@@ -58,9 +58,12 @@ pub use cli::run;
 /// functions.
 pub fn count_rust_blocks(source: &str) -> anyhow::Result<usize> {
     let parsers = language_parsers::language_parsers()?;
-    parsers[&OsString::from("rs")]
+    let rust_parser = parsers
+        .for_extension(OsStr::new("rs"))
+        .expect("Rust has a parser");
+    rust_parser
         .lock()
-        .expect("no active locks")
+        .expect("a thread panicked while it held the parser")
         .parse_blocks(source)
         .try_fold(0, |count, block| block.map(|_| count + 1))
 }
@@ -210,14 +213,12 @@ mod test_utils {
                 &file_system,
                 &FakePathChecker::allow_all(),
                 &parsers,
-                &HashMap::new(),
                 &[],
             )
             .unwrap()
             .blocks,
             parsers,
             line_changes_by_file,
-            HashMap::new(),
             Vec::new(),
         ))
     }

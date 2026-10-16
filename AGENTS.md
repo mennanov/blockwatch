@@ -220,8 +220,9 @@ The main modules:
   always the same map key.
 - `src/language_parsers/` — one tree-sitter grammar for each language. Each language has a `parser()` that returns a
   `LanguageParser`, which knows which syntax nodes are comments. `src/block_parser.rs` turns those comments into
-  blocks. `language_parsers()` in `language_parsers/mod.rs` returns the map from extension to parser. **To add a
-  language, add a module here and register it in that function.**
+  blocks. `language_parsers()` in `language_parsers/mod.rs` returns `LanguageParsers`: the parser of each extension.
+  Its `parser_for` picks the parser of a file, using the settings' extension mappings too. **To add a language, add a
+  module here and register it in that function.**
 
   Some languages also have symbols. Such a language has a `SymbolsParser`, which its `parser()` passes to
   `.with_symbols(...)`:

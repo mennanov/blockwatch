@@ -312,7 +312,6 @@ mod tests {
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::language_parsers::language_parsers;
     use crate::test_utils::virtual_block;
-    use std::ffi::OsString;
     use std::path::Path;
 
     /// The block that a [`virtual_block`] around `path` in `file` declares in `source`, the text of
@@ -326,9 +325,11 @@ mod tests {
         let extension = Path::new(file)
             .extension()
             .expect("the file has an extension");
-        let symbols = language_parsers()?[&OsString::from(extension)]
+        let symbols = language_parsers()?
+            .for_extension(extension)
+            .expect("the extension has a parser")
             .lock()
-            .expect("no active locks")
+            .expect("a thread panicked while it held the parser")
             .parse_symbols(source)?;
         virtual_block(&format!("{file}#{path}"), &[])?.resolve(
             &symbols,

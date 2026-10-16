@@ -481,7 +481,6 @@ mod validate_tests {
             file_system,
             &crate::fs::test_utils::FakePathChecker::allow_only("source.py"),
             &parsers,
-            &HashMap::new(),
             &[],
         )?;
         assert!(
@@ -494,7 +493,6 @@ mod validate_tests {
             parsed.blocks,
             parsers,
             line_changes,
-            HashMap::new(),
             Vec::new(),
         )))
     }
@@ -1081,14 +1079,12 @@ pass
             &file_system,
             &crate::fs::test_utils::FakePathChecker::allow_all(),
             &parsers,
-            &HashMap::new(),
             &[],
         )?;
         Ok(Arc::new(validators::ValidationContext::new(
             parsed.blocks,
             parsers,
             line_changes,
-            HashMap::new(),
             Vec::new(),
         )))
     }

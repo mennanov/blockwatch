@@ -9,7 +9,6 @@ use serde_repr::Serialize_repr;
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::ops::Range;
 use std::path::Path;
@@ -443,8 +442,7 @@ pub(crate) enum ScanMode {
 /// - `line_changes_by_file` maps file paths to sorted line changes.
 /// - `scan_mode` chooses which set of files is read; see [`ScanMode`].
 /// - `file_system` provides access to file contents within a root path.
-/// - `parsers` maps file extensions to language-specific block parsers.
-/// - `extra_file_extensions` allows remapping unknown extensions to supported ones (e.g., "ino" -> "cpp").
+/// - `parsers` selects the language-specific block parser of a file.
 /// - `virtual_blocks` are the blocks the config file declares. Each joins the blocks of the file
 ///   it wraps, when that file is read.
 ///
@@ -460,16 +458,9 @@ pub(crate) fn parse_blocks(
     file_system: &impl FileSystem,
     path_checker: &impl PathChecker,
     parsers: &LanguageParsers,
-    extra_file_extensions: &HashMap<OsString, OsString>,
     virtual_blocks: &[VirtualBlock],
 ) -> anyhow::Result<ParsedBlocks> {
-    ensure_diff_has_valid_paths(
-        line_changes_by_file,
-        file_system,
-        path_checker,
-        parsers,
-        extra_file_extensions,
-    )?;
+    ensure_diff_has_valid_paths(line_changes_by_file, file_system, path_checker, parsers)?;
     let mut virtual_blocks_by_file: HashMap<&RepoPath, Vec<&VirtualBlock>> = HashMap::new();
     for virtual_block in virtual_blocks {
         virtual_blocks_by_file
@@ -485,7 +476,6 @@ pub(crate) fn parse_blocks(
                 file_system,
                 path_checker,
                 parsers,
-                extra_file_extensions,
                 &virtual_blocks_by_file,
             )
         }
@@ -502,7 +492,6 @@ pub(crate) fn parse_blocks(
                 file_system,
                 path_checker,
                 parsers,
-                extra_file_extensions,
                 &virtual_blocks_by_file,
             )
         }
@@ -537,7 +526,6 @@ fn ensure_diff_has_valid_paths(
     file_system: &impl FileSystem,
     path_checker: &impl PathChecker,
     parsers: &LanguageParsers,
-    extra_file_extensions: &HashMap<OsString, OsString>,
 ) -> anyhow::Result<()> {
     let mut invalid_path: Option<&RepoPath> = None;
     for file_path in line_changes_by_file.files() {
@@ -547,7 +535,7 @@ fn ensure_diff_has_valid_paths(
         {
             continue;
         }
-        if parser_for_file_path(file_path.as_path(), parsers, extra_file_extensions).is_none() {
+        if parsers.parser_for(file_path.as_path()).is_none() {
             continue;
         }
         if file_system.exists(file_path.as_path()) {
@@ -574,7 +562,6 @@ fn parse_all_files(
     file_system: &impl FileSystem,
     path_checker: &impl PathChecker,
     parsers: &LanguageParsers,
-    extra_file_extensions: &HashMap<OsString, OsString>,
     virtual_blocks_by_file: &HashMap<&RepoPath, Vec<&VirtualBlock>>,
 ) -> anyhow::Result<ParsedBlocks> {
     let mut parsed = ParsedBlocks::default();
@@ -592,7 +579,6 @@ fn parse_all_files(
             line_changes_by_file.for_file(&file_path),
             every_block,
             parsers,
-            extra_file_extensions,
             virtual_blocks_by_file
                 .get(&file_path)
                 .map_or(&[][..], Vec::as_slice),
@@ -609,7 +595,6 @@ pub(crate) fn checkable_files<'a>(
     file_system: &'a impl FileSystem,
     path_checker: &'a impl PathChecker,
     parsers: &'a LanguageParsers,
-    extra_file_extensions: &'a HashMap<OsString, OsString>,
     virtual_blocks: &'a [VirtualBlock],
 ) -> impl Iterator<Item = anyhow::Result<RepoPath>> + 'a {
     let virtual_block_files: HashSet<&RepoPath> = virtual_blocks
@@ -621,8 +606,7 @@ pub(crate) fn checkable_files<'a>(
         .filter(move |file_path| match file_path {
             Ok(file_path) => {
                 !path_checker.should_ignore(file_path.as_path())
-                    && (parser_for_file_path(file_path.as_path(), parsers, extra_file_extensions)
-                        .is_some()
+                    && (parsers.parser_for(file_path.as_path()).is_some()
                         || virtual_block_files.contains(file_path))
             }
             Err(_) => true,
@@ -636,7 +620,6 @@ fn parse_changed_files(
     file_system: &impl FileSystem,
     path_checker: &impl PathChecker,
     parsers: &LanguageParsers,
-    extra_file_extensions: &HashMap<OsString, OsString>,
     virtual_blocks_by_file: &HashMap<&RepoPath, Vec<&VirtualBlock>>,
 ) -> anyhow::Result<ParsedBlocks> {
     // A changed entry in the config file changes the rules of its block, as a changed tag does. So
@@ -663,7 +646,6 @@ fn parse_changed_files(
             line_changes_by_file.for_file(file_path),
             modified_blocks,
             parsers,
-            extra_file_extensions,
             virtual_blocks_by_file
                 .get(file_path)
                 .map_or(&[][..], Vec::as_slice),
@@ -732,10 +714,9 @@ pub(crate) fn parse_file(
     line_changes: &LineChanges,
     block_predicate: impl Fn(&BlockWithContext) -> bool,
     parsers: &LanguageParsers,
-    extra_file_extensions: &HashMap<OsString, OsString>,
     virtual_blocks: &[&VirtualBlock],
 ) -> anyhow::Result<Option<FileBlocks>> {
-    let parser = parser_for_file_path(file_path, parsers, extra_file_extensions);
+    let parser = parsers.parser_for(file_path);
     if parser.is_none() && virtual_blocks.is_empty() {
         return Ok(None);
     }
@@ -868,7 +849,7 @@ fn tag_blocks(
     // iterator borrowing it does.
     parser
         .lock()
-        .expect("no active locks")
+        .expect("a thread panicked while it held the parser")
         .parse_blocks(source)
         .map(|block| {
             let block = block?;
@@ -919,7 +900,7 @@ fn virtual_blocks_in_file(
         (None, _) => Vec::new(),
         (Some(first), Some(parser)) => parser
             .lock()
-            .expect("no active locks")
+            .expect("a thread panicked while it held the parser")
             .parse_symbols(source)
             .map_err(|error| first.unresolved(error))?,
         (Some(first), None) => {
@@ -1008,43 +989,6 @@ fn reject_duplicate_name(
             Ok(())
         }
     }
-}
-
-/// Resolves the language parser for `file_path` considering configured extension remappings.
-///
-/// Returns `None` if the file extension or filename is not supported by any registered parser.
-pub(crate) fn parser_for_file_path<'p>(
-    file_path: &Path,
-    parsers: &'p LanguageParsers,
-    extra_file_extensions: &HashMap<OsString, OsString>,
-) -> Option<&'p SharedLanguageParser> {
-    let file_name = file_path.file_name()?.to_str()?;
-
-    for (i, _) in file_name.match_indices('.').rev() {
-        #[expect(clippy::string_slice, reason = "`i` is the index of a `.`")]
-        let extension = &file_name[i + 1..];
-
-        if let Some(parser) =
-            try_parser_for_extension(OsStr::new(extension), parsers, extra_file_extensions)
-        {
-            return Some(parser);
-        }
-    }
-
-    try_parser_for_extension(OsStr::new(file_name), parsers, extra_file_extensions)
-}
-
-fn try_parser_for_extension<'p>(
-    extension: &OsStr,
-    parsers: &'p LanguageParsers,
-    extra_file_extensions: &HashMap<OsString, OsString>,
-) -> Option<&'p SharedLanguageParser> {
-    let ext = if let Some(ext) = extra_file_extensions.get(extension) {
-        ext.as_os_str()
-    } else {
-        extension
-    };
-    parsers.get(ext)
 }
 
 #[cfg(test)]
@@ -1218,7 +1162,6 @@ mod parse_blocks_tests {
             &file_system,
             &FakePathChecker::allow_all(),
             &parsers,
-            &HashMap::new(),
             &[],
         )?;
 
@@ -1240,14 +1183,8 @@ mod parse_blocks_tests {
         let path_checker =
             FakePathChecker::with_ignored_paths(HashSet::from(["ignored.py".to_string()]));
 
-        let files = checkable_files(
-            &file_system,
-            &path_checker,
-            &language_parsers()?,
-            &HashMap::new(),
-            &[],
-        )
-        .collect::<anyhow::Result<Vec<_>>>()?;
+        let files = checkable_files(&file_system, &path_checker, &language_parsers()?, &[])
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(files, [RepoPath::from_reference("kept.py")?]);
         Ok(())
@@ -1265,7 +1202,6 @@ mod parse_blocks_tests {
             &file_system,
             &FakePathChecker::allow_all(),
             &language_parsers()?,
-            &HashMap::new(),
             &[],
         )
         .collect::<anyhow::Result<Vec<_>>>();
@@ -1443,7 +1379,6 @@ mod parse_blocks_tests {
             &file_system,
             &FakePathChecker::allow_all(),
             &parsers,
-            &HashMap::new(),
             &[],
         )?
         .blocks;
@@ -1512,7 +1447,6 @@ mod parse_blocks_tests {
             &file_system,
             &FakePathChecker::allow_all(),
             &language_parsers()?,
-            &HashMap::new(),
             &[],
         )?
         .blocks;
@@ -1805,7 +1739,6 @@ mod parse_blocks_tests {
             &file_system,
             &FakePathChecker::allow_all(),
             &parsers,
-            &HashMap::new(),
             &[],
         )?
         .blocks;
@@ -1869,7 +1802,6 @@ mod parse_blocks_tests {
             &file_system,
             &FakePathChecker::allow_all(),
             &parsers,
-            &HashMap::new(),
             &[],
         )?
         .blocks;
@@ -1918,7 +1850,6 @@ mod parse_blocks_tests {
             &file_system,
             &FakePathChecker::allow_all(),
             &parsers,
-            &HashMap::new(),
             &[],
         )?
         .blocks;
@@ -1938,7 +1869,8 @@ mod parse_blocks_tests {
         // </block>"#
                 .to_string(),
         )]));
-        let parsers = language_parsers()?;
+        let parsers = language_parsers()?
+            .with_extension_mappings(HashMap::from([("rust".into(), "rs".into())]));
 
         let blocks_by_file = parse_blocks(
             &DiffChanges::default(),
@@ -1946,7 +1878,6 @@ mod parse_blocks_tests {
             &file_system,
             &FakePathChecker::allow_all(),
             &parsers,
-            &HashMap::from([("rust".into(), "rs".into())]),
             &[],
         )?
         .blocks;
@@ -1970,8 +1901,7 @@ mod parse_blocks_tests {
             ScanMode::All,
             &FakeFileSystem::new(files),
             &FakePathChecker::allow_all(),
-            &HashMap::new(),
-            &HashMap::new(),
+            &LanguageParsers::default(),
             &[],
         )?
         .blocks;
@@ -2012,7 +1942,6 @@ mod parse_blocks_tests {
             &file_system,
             &path_checker,
             &language_parsers()?,
-            &HashMap::new(),
             &[],
         )?
         .blocks;
@@ -2049,7 +1978,6 @@ mod parse_blocks_tests {
             &file_system,
             &FakePathChecker::allow_only("src/**"),
             &language_parsers()?,
-            &HashMap::new(),
             &[],
         )?
         .blocks;
@@ -2078,7 +2006,6 @@ mod parse_blocks_tests {
             &file_system,
             &FakePathChecker::allow_all(),
             &language_parsers()?,
-            &HashMap::new(),
             &[],
         )?;
 
@@ -2108,7 +2035,6 @@ mod parse_blocks_tests {
             &FakeFileSystem::new(HashMap::from([("src/rules.py".to_string(), String::new())])),
             &FakePathChecker::allow_all(),
             &language_parsers()?,
-            &HashMap::new(),
             &[],
         )
         .unwrap_err();
@@ -2131,7 +2057,6 @@ mod parse_blocks_tests {
             &FakeFileSystem::new(HashMap::from([("src/rules.py".to_string(), String::new())])),
             &FakePathChecker::allow_all(),
             &language_parsers()?,
-            &HashMap::new(),
             &[],
         )
         .unwrap_err();
@@ -2157,7 +2082,6 @@ mod parse_blocks_tests {
             )])),
             &FakePathChecker::allow_only("src/**"),
             &language_parsers()?,
-            &HashMap::new(),
             &[],
         )?
         .blocks;
@@ -2183,7 +2107,6 @@ mod parse_blocks_tests {
             &FakeFileSystem::new(HashMap::new()),
             &FakePathChecker::with_ignored_paths(HashSet::from(["vendor/gone.py".to_string()])),
             &language_parsers()?,
-            &HashMap::new(),
             &[],
         )?
         .blocks;
@@ -2208,7 +2131,6 @@ mod parse_blocks_tests {
             &FakeFileSystem::new(HashMap::new()),
             &FakePathChecker::allow_all(),
             &language_parsers()?,
-            &HashMap::new(),
             &[],
         )?
         .blocks;
@@ -2224,8 +2146,7 @@ mod parse_blocks_tests {
             ScanMode::All,
             &FakeFileSystem::new(HashMap::default()),
             &FakePathChecker::allow_all(),
-            &HashMap::new(),
-            &HashMap::new(),
+            &LanguageParsers::default(),
             &[],
         )?
         .blocks;
@@ -2247,7 +2168,6 @@ mod parse_blocks_tests {
             &LineChanges::default(),
             every_block,
             &parsers,
-            &HashMap::new(),
             &[],
         )?
         .expect("python is supported");
@@ -2268,7 +2188,6 @@ mod parse_blocks_tests {
             &LineChanges::default(),
             every_block,
             &parsers,
-            &HashMap::new(),
             &[],
         );
 
@@ -2293,7 +2212,6 @@ mod parse_blocks_tests {
             &LineChanges::default(),
             every_block,
             &parsers,
-            &HashMap::new(),
             &[],
         );
 
@@ -2318,7 +2236,6 @@ mod parse_blocks_tests {
             &LineChanges::default(),
             every_block,
             &parsers,
-            &HashMap::new(),
             &[],
         );
 
@@ -2344,7 +2261,6 @@ mod parse_blocks_tests {
             &LineChanges::default(),
             every_block,
             &parsers,
-            &HashMap::new(),
             &[],
         );
 
@@ -2370,7 +2286,6 @@ mod parse_blocks_tests {
             &LineChanges::default(),
             every_block,
             &parsers,
-            &HashMap::new(),
             &[],
         );
 
@@ -2402,7 +2317,6 @@ mod parse_blocks_tests {
             &file_system,
             &FakePathChecker::allow_all(),
             &parsers,
-            &HashMap::new(),
             &[],
         )?
         .blocks;
@@ -2428,7 +2342,6 @@ mod parse_blocks_tests {
             &FakeFileSystem::new(files),
             path_checker,
             &language_parsers()?,
-            &HashMap::new(),
             virtual_blocks,
         )?
         .blocks)
@@ -2486,7 +2399,6 @@ mod parse_blocks_tests {
             &file_system,
             &FakePathChecker::allow_all(),
             &language_parsers()?,
-            &HashMap::new(),
             &virtual_blocks,
         )?
         .blocks;
@@ -2535,7 +2447,6 @@ mod parse_blocks_tests {
             &file_system,
             &FakePathChecker::allow_only("{a,b}.json"),
             &language_parsers()?,
-            &HashMap::new(),
             &virtual_blocks,
         )?;
 
@@ -2565,7 +2476,6 @@ mod parse_blocks_tests {
             &FakeFileSystem::new(HashMap::new()),
             &FakePathChecker::allow_all(),
             &language_parsers()?,
-            &HashMap::new(),
             &[virtual_block],
         )
         .unwrap_err();
@@ -3262,7 +3172,6 @@ mod supported_languages_tests {
             &file_system,
             &FakePathChecker::allow_all(),
             &parsers,
-            &HashMap::new(),
             &[],
         )?
         .blocks;
