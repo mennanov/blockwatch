@@ -145,11 +145,11 @@ fn lua_script_using_os_succeeds_in_safe_mode() {
 fn unknown_mode_fails_the_run_with_the_valid_modes() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg(MODE_FIXTURE);
-    cmd.env(LUA_MODE_ENV_VAR, "Safe");
+    cmd.env(LUA_MODE_ENV_VAR, "sandbox");
     let output = cmd.output().unwrap();
 
     output.assert().failure().stderr(predicate::str::contains(
-        r#"BLOCKWATCH_LUA_MODE is "Safe", but it must be sandboxed, safe or unsafe"#,
+        r#"invalid BLOCKWATCH_LUA_MODE "sandbox" (expected sandboxed, safe or unsafe)"#,
     ));
 }
 
@@ -157,7 +157,7 @@ fn unknown_mode_fails_the_run_with_the_valid_modes() {
 fn unknown_mode_with_check_lua_disabled_succeeds() {
     let mut cmd = cargo_bin_cmd!();
     cmd.args([MODE_FIXTURE, "--disable", "check-lua"]);
-    cmd.env(LUA_MODE_ENV_VAR, "Safe");
+    cmd.env(LUA_MODE_ENV_VAR, "sandbox");
     let output = cmd.output().unwrap();
 
     output.assert().success();

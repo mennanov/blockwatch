@@ -4,7 +4,7 @@ use crate::repo_path::RepoPath;
 use crate::target_reference::{TargetKind, TargetReference};
 use crate::validators::{
     AsyncValidator, PatternContent, TargetFiles, ValidationContext, ValidationReport, Validator,
-    ValidatorType, Violation, block_content_for_pattern,
+    ValidatorType, Violation, block_content_for_pattern, parse_keyword,
 };
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -14,6 +14,7 @@ use std::ffi::OsStr;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use strum_macros::{Display, EnumIter, EnumString};
 use tokio::task::{JoinSet, spawn_blocking};
 
 const LUA_STDLIB_ENV_VAR: &str = "BLOCKWATCH_LUA_MODE";
@@ -36,10 +37,11 @@ const CHECK_LUA_INSTRUCTION_HOOK_INTERVAL: u32 = 1_000;
 const CHECK_LUA_TIMEOUT_BACKSTOP_GRACE: Duration = Duration::from_secs(1);
 
 /* <block name="lua-safety-modes" affects="docs/validators/check-lua.md:lua-safety-modes"
-same-as="docs/validators/check-lua.md:lua-safety-modes"
-same-as-pattern='"(?P<value>[a-z]+)"\) =>'> */
+same-as="docs/validators/check-lua.md:lua-safety-modes" same-as-format="identifier"
+same-as-pattern='^\s*(?P<value>[A-Z][a-z]+),$'> */
 /// Which Lua standard libraries a `check-lua` script can use, set by `BLOCKWATCH_LUA_MODE`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumString, EnumIter, Display)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 enum LuaMode {
     /// Only `coroutine`, `table`, `string`, `utf8` and `math`, so no file or OS access.
     Sandboxed,
@@ -56,15 +58,12 @@ impl LuaMode {
     /// Returns an error that lists the valid modes for any other value, including one that is not
     /// valid Unicode.
     fn parse(value: &OsStr) -> anyhow::Result<Self> {
-        match value.to_str() {
-            // CI systems often set a variable to an empty string instead of leaving it unset.
-            Some("" | "sandboxed") => Ok(Self::Sandboxed),
-            Some("safe") => Ok(Self::Safe),
-            Some("unsafe") => Ok(Self::Unsafe),
-            _ => Err(anyhow!(
-                "{LUA_STDLIB_ENV_VAR} is {value:?}, but it must be sandboxed, safe or unsafe"
-            )),
+        // CI systems often set a variable to an empty string instead of leaving it unset.
+        if value.is_empty() {
+            return Ok(Self::Sandboxed);
         }
+        // A value that is not valid Unicode matches no mode, and shows its replacement characters.
+        parse_keyword(LUA_STDLIB_ENV_VAR, &value.to_string_lossy())
     }
 
     /// Starts a Lua VM with the libraries of this mode.
@@ -1406,6 +1405,7 @@ some content
                 LuaMode::Unsafe => "unsafe",
             };
             assert_eq!(LuaMode::parse(OsStr::new(value))?, mode);
+            assert_eq!(LuaMode::parse(OsStr::new(&value.to_uppercase()))?, mode);
         }
         Ok(())
     }
@@ -1418,12 +1418,12 @@ some content
 
     #[test]
     fn unknown_lua_mode_returns_an_error_with_the_valid_modes() {
-        for value in ["Safe", "sandbox", " safe", "unsafe "] {
+        for value in ["sandbox", " safe", "unsafe "] {
             let error = LuaMode::parse(OsStr::new(value)).unwrap_err();
             assert_eq!(
                 error.to_string(),
                 format!(
-                    "BLOCKWATCH_LUA_MODE is {value:?}, but it must be sandboxed, safe or unsafe"
+                    "invalid BLOCKWATCH_LUA_MODE \"{value}\" (expected sandboxed, safe or unsafe)"
                 )
             );
         }

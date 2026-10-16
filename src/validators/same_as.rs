@@ -6,7 +6,7 @@ use crate::symbol_path::SymbolPath;
 use crate::target_reference::{TargetKind, TargetReference};
 use crate::validators::{
     self, SyncValidator, TargetFiles, TargetResult, ValidationReport, Validator, ValidatorType,
-    Violation, compile_pattern, parse_number,
+    Violation, compile_pattern, parse_keyword, parse_number,
 };
 use anyhow::{Context, anyhow, bail};
 use heck::ToSnakeCase;
@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::hash::Hash;
 use std::sync::Arc;
+use strum_macros::{Display, EnumIter, EnumString};
 
 /// Enforces `same-as="file:name"`: the block's content must equal that of the blocks it names.
 ///
@@ -532,9 +533,12 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
 }
 
 /// How extracted items are canonicalized before comparison.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumString, EnumIter, Display)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 enum Format {
-    /// Compare items as extracted (the default).
+    /// Compare items as extracted (the default). The attribute has no keyword for it: leaving the
+    /// attribute out, or a group out of it, does this.
+    #[strum(disabled)]
     Verbatim,
     /// Parse each item as a number so different spellings (`"10"`, `"10.0"`) compare equal.
     Numeric,
@@ -544,19 +548,6 @@ enum Format {
     /// Keep only the lower-cased letters and digits of each item, so names whose words break in
     /// different places (`"DarkRed"`, `"darkred"`) compare equal.
     Flat,
-}
-
-/// Parses one format, such as `numeric`. An unrecognized value is an error, mirroring
-/// [`parse_mode`].
-fn parse_format(value: &str) -> anyhow::Result<Format> {
-    match value {
-        "numeric" => Ok(Format::Numeric),
-        "identifier" => Ok(Format::Identifier),
-        "flat" => Ok(Format::Flat),
-        other => Err(anyhow!(
-            "invalid same-as-format \"{other}\" (expected numeric, identifier or flat)"
-        )),
-    }
 }
 
 /// The format of each group of a block's records.
@@ -590,7 +581,7 @@ fn parse_formats(block: &Block) -> anyhow::Result<Formats> {
         return Ok(Formats::All(Format::Verbatim));
     };
     if !attribute.contains(':') {
-        return Ok(Formats::All(parse_format(attribute)?));
+        return Ok(Formats::All(parse_keyword("same-as-format", attribute)?));
     }
     let groups = pattern_groups(block.attributes.get("same-as-pattern").map(String::as_str))?;
     attribute
@@ -609,7 +600,7 @@ fn parse_formats(block: &Block) -> anyhow::Result<Formats> {
                     "same-as-format refers to group \"{group}\", which same-as-pattern doesn't have"
                 );
             }
-            Ok((group.to_string(), parse_format(format)?))
+            Ok((group.to_string(), parse_keyword("same-as-format", format)?))
         })
         .collect::<anyhow::Result<_>>()
         .map(Formats::ByGroup)
@@ -664,7 +655,8 @@ fn canonicalize_value(value: String, format: Format) -> Result<String, String> {
 }
 
 /// How two item lists are compared.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumString, EnumIter, Display)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 enum Mode {
     /// Order- and duplicate-insensitive set equality (the default).
     Set,
@@ -678,14 +670,9 @@ enum Mode {
 
 /// Reads a block's `same-as-mode` attribute, defaulting to [`Mode::Set`].
 fn parse_mode(block: &Block) -> anyhow::Result<Mode> {
-    match block.attributes.get("same-as-mode").map(String::as_str) {
-        None | Some("set") => Ok(Mode::Set),
-        Some("sequence") => Ok(Mode::Sequence),
-        Some("single") => Ok(Mode::Single),
-        Some("subset") => Ok(Mode::Subset),
-        Some(other) => Err(anyhow!(
-            "invalid same-as-mode \"{other}\" (expected set, sequence, single, or subset)"
-        )),
+    match block.attributes.get("same-as-mode") {
+        None => Ok(Mode::Set),
+        Some(value) => parse_keyword("same-as-mode", value),
     }
 }
 
@@ -1881,6 +1868,47 @@ red: 1
             ),
             "unexpected error: {error:#}"
         );
+    }
+
+    #[test]
+    fn unknown_mode_returns_an_error() {
+        let context = validation_context(
+            "a.rs",
+            "// <block same-as=\":b\" same-as-mode=\"sorted\">\n1\n// </block>\n// <block name=\"b\">\n1\n// </block>",
+        );
+
+        let error = validator(&[]).validate(context).unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "invalid same-as attributes on block a.rs:(unnamed) at line 1: invalid same-as-mode \
+             \"sorted\" (expected set, sequence, single or subset)"
+        );
+    }
+
+    #[test]
+    fn mode_in_capitals_is_read_like_the_lowercase_mode() -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.rs",
+            "// <block same-as=\":b\" same-as-pattern=\"(?P<value>[0-9]+)\" same-as-mode=\"SEQUENCE\">\n1\n2\n// </block>\n// <block name=\"b\">\n2\n1\n// </block>",
+        );
+
+        let violations = validator(&[]).validate(context)?.violations;
+
+        let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
+        assert_eq!(file.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn format_in_capitals_is_read_like_the_lowercase_format() -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.rs",
+            "// <block same-as=\":b\" same-as-pattern=\"(?P<value>[0-9.]+)\" same-as-format=\"Numeric\">\n1\n// </block>\n// <block name=\"b\">\n1.0\n// </block>",
+        );
+
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        Ok(())
     }
 
     #[test]

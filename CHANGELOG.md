@@ -12,6 +12,14 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Changed
+
+- The error for a wrong `keep-sorted`, `keep-sorted-format`, `same-as-mode`, `same-as-format` or `BLOCKWATCH_LUA_MODE`
+  value now has one form, such as `invalid keep-sorted "up" (expected asc or desc)`. It lists the valid values.
+  `keep-sorted-format` did not list them before.
+- `same-as-mode`, `same-as-format` and `BLOCKWATCH_LUA_MODE` ignore upper and lower case, so `Numeric` and `Safe` work
+  like `numeric` and `safe`. `keep-sorted` and `keep-sorted-format` already did.
+
 ## [0.14.0] - 2026-10-16
 
 ### Added

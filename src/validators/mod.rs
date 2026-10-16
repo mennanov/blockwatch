@@ -21,13 +21,14 @@ use crate::symbol_path::SymbolPath;
 use crate::symbols::{Symbol, resolve};
 use crate::violation_address::ViolationAddress;
 use crate::virtual_blocks::VirtualBlock;
-use anyhow::{Context, bail};
+use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
 use serde::Serialize;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ops::Range;
+use std::str::FromStr;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString, IntoStaticStr};
@@ -910,6 +911,28 @@ fn block_content_for_pattern<'c>(
             .filter(|value| !value.is_empty())
             .collect(),
     ))
+}
+
+/// Parses `value`, the value of `attribute`, as one of the keywords of `T`. `T` decides the case of
+/// the keywords it accepts.
+///
+/// # Errors
+/// Returns an error that quotes the value and lists the keywords, such as
+/// `invalid keep-sorted "up" (expected asc or desc)`.
+fn parse_keyword<T>(attribute: &str, value: &str) -> anyhow::Result<T>
+where
+    T: FromStr + IntoEnumIterator + ToString,
+{
+    T::from_str(value).map_err(|_| {
+        let keywords: Vec<String> = T::iter().map(|keyword| keyword.to_string()).collect();
+        let (last, others) = keywords
+            .split_last()
+            .expect("a keyword type has at least one keyword");
+        anyhow!(
+            "invalid {attribute} \"{value}\" (expected {} or {last})",
+            others.join(", ")
+        )
+    })
 }
 
 /// Parses a numeric value from string.

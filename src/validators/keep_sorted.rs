@@ -2,19 +2,27 @@ use crate::blocks::{Block, BlockWithContext};
 use crate::repo_path::RepoPath;
 use crate::validators::{
     SyncValidator, ValidationReport, Validator, ValidatorType, Violation, ViolationRange,
-    compile_pattern, parse_number, regex_value, trimmed_line_value,
+    compile_pattern, parse_keyword, parse_number, regex_value, trimmed_line_value,
 };
 use crate::{Position, validators};
 use anyhow::{Context, anyhow};
 use serde::Serialize;
 use std::cmp::Ordering;
 use std::ops::Range;
-use std::str::FromStr;
 use std::sync::Arc;
-use strum_macros::EnumString;
+use strum_macros::{Display, EnumIter, EnumString};
 
-#[derive(Default, EnumString)]
-#[strum(ascii_case_insensitive)]
+/// The direction of a `keep-sorted` block.
+#[derive(Default, Clone, Copy, EnumString, EnumIter, Display)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
+enum SortOrder {
+    #[default]
+    Asc,
+    Desc,
+}
+
+#[derive(Default, EnumString, EnumIter, Display)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 enum SortFormat {
     #[default]
     Lexicographic,
@@ -56,20 +64,19 @@ impl SyncValidator for KeepSortedValidator {
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
                 if let Some(keep_sorted) = block_with_context.block.attributes.get("keep-sorted") {
-                    let keep_sorted_cleaned = keep_sorted.trim();
-                    let keep_sorted_normalized = if keep_sorted_cleaned.is_empty() {
-                        "asc".to_string()
-                    } else {
-                        keep_sorted.to_lowercase()
-                    };
-                    if keep_sorted_normalized != "asc" && keep_sorted_normalized != "desc" {
-                        return Err(anyhow!(
-                            "keep-sorted expected values are \"asc\" or \"desc\", got \"{}\" in {file_path}:{} at {}",
-                            keep_sorted,
+                    let located = |error: anyhow::Error| {
+                        anyhow!(
+                            "{error} in {file_path}:{} at {}",
                             block_with_context.block.name_display(),
                             block_with_context.block.declared_at()
-                        ));
-                    }
+                        )
+                    };
+                    let order = if keep_sorted.trim().is_empty() {
+                        SortOrder::default()
+                    } else {
+                        parse_keyword("keep-sorted", keep_sorted).map_err(located)?
+                    };
+                    let order_name = order.to_string();
                     // Optional regex pattern similar to keep-unique: if provided, we compare extracted matches.
                     let pattern = block_with_context
                         .block
@@ -92,20 +99,12 @@ impl SyncValidator for KeepSortedValidator {
                     let sort_format = if format_raw.is_empty() {
                         SortFormat::default()
                     } else {
-                        SortFormat::from_str(format_raw).map_err(|_| {
-                            anyhow!(
-                                "keep-sorted-format has an unsupported value \"{}\" in {file_path}:{} at {}",
-                                format_raw,
-                                block_with_context.block.name_display(),
-                                block_with_context.block.declared_at()
-                            )
-                        })?
+                        parse_keyword("keep-sorted-format", format_raw).map_err(located)?
                     };
 
-                    let violating_ord = if keep_sorted_normalized == "asc" {
-                        Ordering::Greater
-                    } else {
-                        Ordering::Less
+                    let violating_ord = match order {
+                        SortOrder::Asc => Ordering::Greater,
+                        SortOrder::Desc => Ordering::Less,
                     };
                     let mut block_violations = Vec::new();
                     // Keep previous value and its range for violation location purposes
@@ -151,7 +150,7 @@ impl SyncValidator for KeepSortedValidator {
                                     block_violations.push(create_violation(
                                         file_path,
                                         &block_with_context.block,
-                                        keep_sorted_normalized.as_str(),
+                                        &order_name,
                                         line.trim(),
                                         violation_start.line,
                                         violation_start.character,
@@ -483,8 +482,24 @@ mod validate_tests {
             r#"# <block keep-sorted="invalid">
         # </block>"#,
         );
-        let result = validator.validate(context);
-        assert!(result.is_err());
+        let error = validator.validate(context).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "invalid keep-sorted \"invalid\" (expected asc or desc) in example.py:(unnamed) at line 1"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn order_and_format_in_capitals_are_read_like_lowercase() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            "# <block keep-sorted=\"DESC\" keep-sorted-format=\"Numeric\">\n2\n10\n# </block>",
+        );
+
+        let report = KeepSortedValidator.validate(context)?;
+
+        assert_eq!(violation_count(&report), 1);
         Ok(())
     }
 
@@ -1013,12 +1028,10 @@ mod validate_tests {
         );
         let result = validator.validate(context);
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("keep-sorted-format has an unsupported value")
-        );
+        assert!(result.unwrap_err().to_string().contains(
+            "invalid keep-sorted-format \"alphabetical\" (expected lexicographic or numeric) \
+                     in example.py:(unnamed) at line 1"
+        ));
         Ok(())
     }
 
