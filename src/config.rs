@@ -8,7 +8,7 @@ use crate::repo_path::RepoPath;
 use crate::settings::RawSettings;
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{self, Symbol};
-use crate::validators::{TargetReference, parse_single_reference};
+use crate::target_reference::TargetReference;
 use crate::virtual_blocks::{ConfigEntry, Locator, TargetPattern, VirtualBlock};
 use anyhow::{Context, anyhow, bail};
 use serde::Deserialize;
@@ -331,7 +331,7 @@ fn parse_target(
     target: &str,
     target_pattern: Option<String>,
 ) -> anyhow::Result<(RepoPath, Locator)> {
-    Ok(match (parse_single_reference(target)?, target_pattern) {
+    Ok(match (TargetReference::parse(target)?, target_pattern) {
         (
             TargetReference::Symbol {
                 file: Some(file),

@@ -2,10 +2,10 @@ use crate::blocks::{Block, BlockWithContext, FileBlocks};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
+use crate::target_reference::{ResolvedTarget, TargetKind, TargetReference};
 use crate::validators;
 use crate::validators::{
-    TargetFiles, TargetReference, TargetResult, ValidationReport, Validator, ValidatorType,
-    Violation, target_display,
+    TargetFiles, TargetResult, ValidationReport, Validator, ValidatorType, Violation,
 };
 use anyhow::{Context, anyhow};
 use serde::Serialize;
@@ -184,26 +184,17 @@ fn reference_violations<Fs: FileSystem>(
 ) -> anyhow::Result<Vec<Violation>> {
     let mut violations = Vec::new();
     for reference in parse_references(file_path, &block_with_context.block, affects)? {
-        let violation = match reference {
-            TargetReference::Block { file, name } => block_reference_violation(
-                targets,
-                file_path,
-                block_with_context,
-                // A reference like ":foo" is resolved relative to the file the block is in.
-                &file.unwrap_or_else(|| file_path.clone()),
-                &name,
-            )?,
-            TargetReference::File(target_file) => {
-                file_reference_violation(targets, file_path, block_with_context, &target_file)?
+        let target = reference.resolve(file_path);
+        let violation = match &target.kind {
+            TargetKind::Block(name) => {
+                block_reference_violation(targets, file_path, block_with_context, &target, name)?
             }
-            TargetReference::Symbol { file, path } => symbol_reference_violation(
-                targets,
-                file_path,
-                block_with_context,
-                // A reference like "#/foo" is resolved in the file the block is in.
-                &file.unwrap_or_else(|| file_path.clone()),
-                &path,
-            )?,
+            TargetKind::WholeFile => {
+                file_reference_violation(targets, file_path, block_with_context, &target)?
+            }
+            TargetKind::Symbol(path) => {
+                symbol_reference_violation(targets, file_path, block_with_context, &target, path)?
+            }
         };
         violations.extend(violation);
     }
@@ -217,7 +208,7 @@ fn parse_references(
     block: &Block,
     affects: &str,
 ) -> anyhow::Result<Vec<TargetReference>> {
-    validators::parse_target_references(affects).with_context(|| {
+    TargetReference::parse_list(affects).with_context(|| {
         format!(
             "invalid affects reference on block {}:{} at {}",
             file_path,
@@ -227,20 +218,19 @@ fn parse_references(
     })
 }
 
-/// The violation a reference to a named block produces, if any.
+/// The violation a reference to the block `target_name` produces, if any.
 fn block_reference_violation<Fs: FileSystem>(
     targets: &mut TargetIndex<'_, Fs>,
     file_path: &RepoPath,
     block_with_context: &BlockWithContext,
-    target_file: &RepoPath,
+    target: &ResolvedTarget,
     target_name: &str,
 ) -> anyhow::Result<Option<Violation>> {
-    let Some(target_modified) = targets.block_modified(target_file, target_name)? else {
+    let Some(target_modified) = targets.block_modified(&target.file, target_name)? else {
         return Ok(Some(dangling_reference_violation(
             file_path,
             &block_with_context.block,
-            target_file,
-            Some(target_name),
+            target,
         )?));
     };
     // The "affects" only applies when this block's content changed: an unchanged block places no
@@ -249,49 +239,35 @@ fn block_reference_violation<Fs: FileSystem>(
         return Ok(Some(create_violation(
             file_path,
             &block_with_context.block,
-            target_file,
-            Some(target_name),
+            target,
         )?));
     }
     Ok(None)
 }
 
-/// The violation a symbol reference produces, if any.
+/// The violation a reference to the symbol at `path` produces, if any.
 fn symbol_reference_violation<Fs: FileSystem>(
     targets: &mut TargetIndex<'_, Fs>,
     file_path: &RepoPath,
     block_with_context: &BlockWithContext,
-    target_file: &RepoPath,
+    target: &ResolvedTarget,
     path: &SymbolPath,
 ) -> anyhow::Result<Option<Violation>> {
     let block = &block_with_context.block;
-    let target_name = format!("#{path}");
-    let target_modified = match targets.modifies_symbol(target_file, path)? {
+    let target_modified = match targets.modifies_symbol(&target.file, path)? {
         Ok(target_modified) => target_modified,
         Err(reason) => {
             let message = format!(
-                "Block {file_path}:{} at {} references {}: {reason}",
+                "Block {file_path}:{} at {} references {target}: {reason}",
                 block.name_display(),
                 block.declared_at(),
-                target_display(target_file, Some(&target_name)),
             );
-            return Ok(Some(affects_violation(
-                file_path,
-                block,
-                target_file,
-                Some(&target_name),
-                message,
-            )?));
+            return Ok(Some(affects_violation(file_path, block, target, message)?));
         }
     };
     // As for a named block, only a change to this block's content obliges the target to change.
     if block_with_context.is_content_modified && !target_modified {
-        return Ok(Some(create_violation(
-            file_path,
-            block,
-            target_file,
-            Some(&target_name),
-        )?));
+        return Ok(Some(create_violation(file_path, block, target)?));
     }
     Ok(None)
 }
@@ -301,19 +277,21 @@ fn file_reference_violation<Fs: FileSystem>(
     targets: &TargetIndex<'_, Fs>,
     file_path: &RepoPath,
     block_with_context: &BlockWithContext,
-    target_file: &RepoPath,
+    target: &ResolvedTarget,
 ) -> anyhow::Result<Option<Violation>> {
     // A whole-file target is never parsed, so its existence is the only integrity signal there is;
     // a missing one aborts the run, as a missing file holding a named target does.
-    if !targets.file_exists(target_file) {
-        return Err(anyhow!("affects target file does not exist: {target_file}"));
+    if !targets.file_exists(&target.file) {
+        return Err(anyhow!(
+            "affects target file does not exist: {}",
+            target.file
+        ));
     }
-    if block_with_context.is_content_modified && !targets.file_modified(target_file) {
+    if block_with_context.is_content_modified && !targets.file_modified(&target.file) {
         return Ok(Some(create_violation(
             file_path,
             &block_with_context.block,
-            target_file,
-            None,
+            target,
         )?));
     }
     Ok(None)
@@ -351,22 +329,14 @@ pub(super) fn detect<Fs: FileSystem + 'static>(
 fn create_violation(
     modified_block_file_path: &RepoPath,
     modified_block: &Block,
-    affected_block_file_path: &RepoPath,
-    affected_block_name: Option<&str>,
+    target: &ResolvedTarget,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {modified_block_file_path}:{} at {} is modified, but {} is not",
+        "Block {modified_block_file_path}:{} at {} is modified, but {target} is not",
         modified_block.name_display(),
         modified_block.declared_at(),
-        target_display(affected_block_file_path, affected_block_name),
     );
-    affects_violation(
-        modified_block_file_path,
-        modified_block,
-        affected_block_file_path,
-        affected_block_name,
-        message,
-    )
+    affects_violation(modified_block_file_path, modified_block, target, message)
 }
 
 /// A reference whose target block no longer exists (renamed or deleted). Reported instead of
@@ -375,20 +345,17 @@ fn create_violation(
 fn dangling_reference_violation(
     referencing_block_file_path: &RepoPath,
     referencing_block: &Block,
-    target_file_path: &RepoPath,
-    target_name: Option<&str>,
+    target: &ResolvedTarget,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {referencing_block_file_path}:{} at {} references {}, which does not exist",
+        "Block {referencing_block_file_path}:{} at {} references {target}, which does not exist",
         referencing_block.name_display(),
         referencing_block.declared_at(),
-        target_display(target_file_path, target_name),
     );
     affects_violation(
         referencing_block_file_path,
         referencing_block,
-        target_file_path,
-        target_name,
+        target,
         message,
     )
 }
@@ -399,13 +366,13 @@ fn dangling_reference_violation(
 fn affects_violation(
     file_path: &RepoPath,
     block: &Block,
-    affected_block_file_path: &RepoPath,
-    affected_block_name: Option<&str>,
+    target: &ResolvedTarget,
     message: String,
 ) -> anyhow::Result<Violation> {
+    let name = target.name();
     let details = serde_json::to_value(AffectsViolation {
-        affected_block_file_path,
-        affected_block_name,
+        affected_block_file_path: &target.file,
+        affected_block_name: name.as_deref(),
     })?;
     Ok(Violation::new(
         block.start_tag_position_range.clone().into(),
@@ -414,10 +381,7 @@ fn affects_violation(
         Validator::Affects,
         message,
         // A block may reference several targets, so the target identifies this violation.
-        Some(&target_display(
-            affected_block_file_path,
-            affected_block_name,
-        )),
+        Some(&target.to_string()),
         Some(details),
     ))
 }

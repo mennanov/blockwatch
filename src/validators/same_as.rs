@@ -3,9 +3,10 @@ use crate::fs::FileSystem;
 use crate::paths_glob::PathsGlob;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
+use crate::target_reference::{TargetKind, TargetReference};
 use crate::validators::{
-    self, SyncValidator, TargetFiles, TargetReference, TargetResult, ValidationReport, Validator,
-    ValidatorType, Violation, compile_pattern, parse_number, target_display,
+    self, SyncValidator, TargetFiles, TargetResult, ValidationReport, Validator, ValidatorType,
+    Violation, compile_pattern, parse_number,
 };
 use anyhow::{Context, anyhow, bail};
 use heck::ToSnakeCase;
@@ -220,7 +221,7 @@ fn parse_references(
     block: &Block,
     same_as: &str,
 ) -> anyhow::Result<Vec<TargetReference>> {
-    validators::parse_target_references(same_as).with_context(|| {
+    TargetReference::parse_list(same_as).with_context(|| {
         format!(
             "invalid same-as reference on {}",
             block_display(file_path, block)
@@ -239,38 +240,30 @@ fn reference_violation<Fs: FileSystem>(
     block: &Block,
     reference: TargetReference,
 ) -> anyhow::Result<Option<Violation>> {
-    // A reference without a file, like ":foo" or "#/foo", points into the file the block is in.
-    let (target_file, target_name, resolution) = match reference {
-        TargetReference::Block { file, name } => {
-            let target_file = file.unwrap_or_else(|| file_path.clone());
-            let resolution = targets.named_block_items(&target_file, &name)?;
-            (target_file, Some(name), resolution)
+    let target = reference.resolve(file_path);
+    let resolution = match &target.kind {
+        TargetKind::Block(name) => targets.named_block_items(&target.file, name)?,
+        TargetKind::WholeFile => {
+            Ok(targets.whole_file_items(&target.file, comparison.pattern.as_deref())?)
         }
-        TargetReference::File(target_file) => {
-            let items = targets.whole_file_items(&target_file, comparison.pattern.as_deref())?;
-            (target_file, None, Ok(items))
-        }
-        TargetReference::Symbol { file, path } => {
-            let target_file = file.unwrap_or_else(|| file_path.clone());
-            let resolution =
-                targets.symbol_items(&target_file, &path, comparison.pattern.as_deref())?;
-            (target_file, Some(format!("#{path}")), resolution)
+        TargetKind::Symbol(path) => {
+            targets.symbol_items(&target.file, path, comparison.pattern.as_deref())?
         }
     };
-    let target_name = target_name.as_deref();
     let reason = match resolution {
         Ok(target_items) => comparison.disagreement_with(target_items),
         Err(reason) => Some(reason),
     };
+    let target_name = target.name();
     reason
         .map(|reason| {
             create_violation(
                 file_path,
                 block,
-                &target_display(&target_file, target_name),
+                &target.to_string(),
                 SameAsViolation {
-                    target_file: Some(&target_file),
-                    target_name,
+                    target_file: Some(&target.file),
+                    target_name: target_name.as_deref(),
                     target_paths: None,
                     reason: &reason,
                 },

@@ -44,6 +44,9 @@ mod symbol_path;
 /// Derives the symbols of a file: the elements a symbol reference can address.
 mod symbols;
 mod tag_parser;
+/// The reference to a block, a symbol or a file that `affects`, `check-lua` and `same-as` write in
+/// an attribute, and the target it points at.
+mod target_reference;
 /// The rules enforced on blocks (`affects`, `keep-sorted`, …) and the machinery that runs them.
 mod validators;
 /// Unique violation address.

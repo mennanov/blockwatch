@@ -1,10 +1,10 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
-use crate::validators::parse_target_references;
+use crate::target_reference::{TargetKind, TargetReference};
 use crate::validators::{
-    AsyncValidator, PatternContent, TargetFiles, TargetReference, ValidationContext,
-    ValidationReport, Validator, ValidatorType, Violation, block_content_for_pattern,
+    AsyncValidator, PatternContent, TargetFiles, ValidationContext, ValidationReport, Validator,
+    ValidatorType, Violation, block_content_for_pattern,
 };
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -506,7 +506,7 @@ fn resolve_affected_targets<Fs: FileSystem>(
     let Some(affects) = block.attributes.get("affects") else {
         return Ok(result);
     };
-    let references = parse_target_references(affects).with_context(|| {
+    let references = TargetReference::parse_list(affects).with_context(|| {
         format!(
             "invalid affects reference on block {}:{} at {}",
             current_file_path,
@@ -516,17 +516,17 @@ fn resolve_affected_targets<Fs: FileSystem>(
     })?;
     let mut files = TargetFiles::new(context, file_system);
     for reference in references {
-        match reference {
-            TargetReference::Block { file, name } => {
-                let file = file.unwrap_or_else(|| current_file_path.clone());
-                let Some(file_blocks) = context.blocks.get(&file) else {
+        let target = reference.resolve(current_file_path);
+        match &target.kind {
+            TargetKind::Block(name) => {
+                let Some(file_blocks) = context.blocks.get(&target.file) else {
                     continue;
                 };
                 for block_with_context in &file_blocks.blocks_with_context {
                     if block_with_context.block.name() == Some(name.as_str()) {
                         result.push(AffectedTarget {
-                            file: file.clone(),
-                            name: Some(name.clone()),
+                            file: target.file.clone(),
+                            name: target.name(),
                             content: block_with_context
                                 .block
                                 .content
@@ -537,24 +537,22 @@ fn resolve_affected_targets<Fs: FileSystem>(
                     }
                 }
             }
-            TargetReference::File(file) => {
-                let content = match context.blocks.get(&file) {
+            TargetKind::WholeFile => {
+                let content = match context.blocks.get(&target.file) {
                     Some(file_blocks) => file_blocks.file_content.clone(),
-                    None => match file_system.read_to_string(file.as_path()) {
+                    None => match file_system.read_to_string(target.file.as_path()) {
                         Ok(content) => content,
                         Err(_) => continue,
                     },
                 };
                 result.push(AffectedTarget {
-                    file,
-                    name: None,
+                    name: target.name(),
+                    file: target.file,
                     content: content.trim().to_string(),
                 });
             }
-            TargetReference::Symbol { file, path } => {
-                // A reference like "#/foo" is resolved in the file the block is in.
-                let file = file.unwrap_or_else(|| current_file_path.clone());
-                let (content, resolution) = files.resolve_symbol(&file, &path)?;
+            TargetKind::Symbol(path) => {
+                let (content, resolution) = files.resolve_symbol(&target.file, path)?;
                 let symbol = match resolution {
                     Ok(symbol) => symbol,
                     // A missing or ambiguous symbol is skipped: the `affects` validator reports it.
@@ -562,8 +560,8 @@ fn resolve_affected_targets<Fs: FileSystem>(
                 };
                 result.push(AffectedTarget {
                     content: symbol.value_or_definition(content).trim().to_string(),
-                    name: Some(format!("#{path}")),
-                    file,
+                    name: target.name(),
+                    file: target.file,
                 });
             }
         }
