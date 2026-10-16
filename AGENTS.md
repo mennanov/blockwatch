@@ -194,9 +194,10 @@ The main modules:
 - `src/fs.rs` — the `FileSystem` and `PathChecker` traits, and their real implementations. Tests use these traits to
   swap in fakes: `FakeFileSystem` and `FakePathChecker` in `fs::test_utils`.
 - `src/settings.rs` — `RawSettings` holds the settings read from one place: the config file or the flags. `Settings` is
-  the validated and merged result. `RawSettings::validate` is the only place the rules for a setting live, so the
-  flags and the config file can't drift apart. Its errors quote the bad value but don't show a line and column.
-  Tracking where each value is written would cost more code than it saves the reader.
+  the validated and merged result. `RawSettings::parse` is the only place the rules for a setting live, so the flags
+  and the config file can't drift apart. It returns the parsed values, so nothing is parsed twice. Its errors quote the
+  bad value but don't show a line and column. Tracking where each value is written would cost more code than it saves
+  the reader.
 - `src/config.rs` — reads the config file into a `RawSettings` and the virtual blocks, using `toml_edit`'s serde
   support. Only the errors that `toml_edit` raises itself, such as an unknown key, show a line and column. An error
   about a `[[block]]` entry shows the line of its header, which `serde_spanned` gives.

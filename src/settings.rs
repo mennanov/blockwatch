@@ -8,7 +8,7 @@ use std::ffi::OsString;
 /// Project-wide raw settings.
 ///
 /// Can be constructed from a config file or the command line.
-/// The values are not guaranteed to be valid. The [`RawSettings::validate`] method validates them.
+/// The values are not guaranteed to be valid. The [`RawSettings::parse`] method parses them.
 #[derive(Debug, Default)]
 pub(crate) struct RawSettings {
     /// Glob patterns of files to leave out.
@@ -26,33 +26,45 @@ pub(crate) struct RawSettings {
 }
 
 impl RawSettings {
-    /// Validates all the setting values.
+    /// Checks all the setting values and returns them parsed.
     ///
     /// `supported_extensions` is a set of supported file extensions.
-    /// If `Ok` is returned, then all the values are valid.
-    fn validate(&self, supported_extensions: &HashSet<&OsString>) -> anyhow::Result<()> {
-        for glob in &self.ignore {
-            Glob::new(glob).with_context(|| format!("Invalid ignore glob pattern: {glob}"))?;
-        }
-        for (key, value) in &self.extensions {
-            if !supported_extensions.contains(&OsString::from(value)) {
-                bail!("Unsupported extension mapping: {key}={value}");
-            }
-        }
-        for name in self.enable.iter().chain(&self.disable) {
-            parse_validator(name)?;
-        }
-        if !self.enable.is_empty() && !self.disable.is_empty() {
-            bail!("`enable` and `disable` must not both be set");
-        }
-        for address in self.only_blocks.iter().chain(&self.skip_blocks) {
-            BlockAddress::parse(address)?;
-        }
-        if !self.only_blocks.is_empty() && !self.skip_blocks.is_empty() {
-            bail!("`only-block` and `skip-block` must not both be set");
-        }
-        Ok(())
+    fn parse(&self, supported_extensions: &HashSet<&OsString>) -> anyhow::Result<ParsedSettings> {
+        let ignore = self
+            .ignore
+            .iter()
+            .map(|glob| {
+                Glob::new(glob).with_context(|| format!("Invalid ignore glob pattern: {glob}"))
+            })
+            .collect::<anyhow::Result<_>>()?;
+        let extensions = self
+            .extensions
+            .iter()
+            .map(|(key, value)| {
+                let language = OsString::from(value);
+                if !supported_extensions.contains(&language) {
+                    bail!("Unsupported extension mapping: {key}={value}");
+                }
+                Ok((OsString::from(key), language))
+            })
+            .collect::<anyhow::Result<_>>()?;
+        Ok(ParsedSettings {
+            ignore,
+            extensions,
+            validator_selection: validator_selection(self)?,
+            block_selection: block_selection(self)?,
+        })
     }
+}
+
+/// The settings from one place, after [`RawSettings::parse`]. [`Settings::resolve`] merges two of
+/// them, so the merge has no value left to check.
+#[derive(Debug)]
+struct ParsedSettings {
+    ignore: Vec<Glob>,
+    extensions: HashMap<OsString, OsString>,
+    validator_selection: ValidatorSelection,
+    block_selection: BlockSelection,
 }
 
 /// The validated settings for a run: the config file merged with the flags.
@@ -86,34 +98,30 @@ impl Settings {
         config_file: RawSettings,
         supported_extensions: &HashSet<&OsString>,
     ) -> anyhow::Result<Settings> {
-        flags
-            .validate(supported_extensions)
+        let flags = flags
+            .parse(supported_extensions)
             .context("invalid command-line flags")?;
-        config_file
-            .validate(supported_extensions)
+        let config_file = config_file
+            .parse(supported_extensions)
             .context("invalid config file")?;
 
         // `-e keep-sorted` usually means "run only keep-sorted this time". Adding it to the config
         // file's lists would not do that. It could also mix `enable` with `disable`, which is not
         // allowed.
-        let validator_lists = if flags.enable.is_empty() && flags.disable.is_empty() {
-            &config_file
-        } else {
-            &flags
+        let validator_selection = match flags.validator_selection {
+            ValidatorSelection::All => config_file.validator_selection,
+            selection @ (ValidatorSelection::Only(_) | ValidatorSelection::Skip(_)) => selection,
         };
-        let validator_selection = validator_selection(validator_lists)?;
         // `--only-block` usually means "check only this block this time", even a block that the
         // config file skips.
-        let block_lists = if flags.only_blocks.is_empty() && flags.skip_blocks.is_empty() {
-            &config_file
-        } else {
-            &flags
+        let block_selection = match flags.block_selection {
+            BlockSelection::All => config_file.block_selection,
+            selection @ (BlockSelection::Only(_) | BlockSelection::Skip(_)) => selection,
         };
-        let block_selection = block_selection(block_lists)?;
 
         let mut ignored_globs = GlobSetBuilder::new();
-        for glob in config_file.ignore.iter().chain(&flags.ignore) {
-            ignored_globs.add(Glob::new(glob)?);
+        for glob in config_file.ignore.into_iter().chain(flags.ignore) {
+            ignored_globs.add(glob);
         }
         // If an extension is mapped twice, the later mapping wins. The flags go last so that they
         // win.
@@ -121,7 +129,6 @@ impl Settings {
             .extensions
             .into_iter()
             .chain(flags.extensions)
-            .map(|(key, value)| (OsString::from(key), OsString::from(value)))
             .collect();
 
         Ok(Settings {
@@ -156,41 +163,42 @@ impl Settings {
     }
 }
 
-/// The validators that `settings` selects. `settings` must be validated, so that at most one of
-/// its lists is set.
+/// The validators that `settings` selects. Returns an error if a name is not a validator, or if
+/// both lists are set.
 fn validator_selection(settings: &RawSettings) -> anyhow::Result<ValidatorSelection> {
     let parse = |names: &[String]| {
         names
             .iter()
             .map(|name| parse_validator(name))
-            .collect::<anyhow::Result<_>>()
+            .collect::<anyhow::Result<HashSet<_>>>()
     };
-    let selection = match (settings.enable.is_empty(), settings.disable.is_empty()) {
-        (true, true) => ValidatorSelection::All,
-        (false, _) => ValidatorSelection::Only(parse(&settings.enable)?),
-        (true, false) => ValidatorSelection::Skip(parse(&settings.disable)?),
-    };
-    Ok(selection)
+    let enable = parse(&settings.enable)?;
+    let disable = parse(&settings.disable)?;
+    match (enable.is_empty(), disable.is_empty()) {
+        (true, true) => Ok(ValidatorSelection::All),
+        (false, true) => Ok(ValidatorSelection::Only(enable)),
+        (true, false) => Ok(ValidatorSelection::Skip(disable)),
+        (false, false) => bail!("`enable` and `disable` must not both be set"),
+    }
 }
 
-/// The blocks that `settings` selects. `settings` must be validated, so that at most one of its
-/// lists is set.
+/// The blocks that `settings` selects. Returns an error if an address is not valid, or if both
+/// lists are set.
 fn block_selection(settings: &RawSettings) -> anyhow::Result<BlockSelection> {
     let parse = |addresses: &[String]| {
         addresses
             .iter()
             .map(|address| BlockAddress::parse(address))
-            .collect::<anyhow::Result<_>>()
+            .collect::<anyhow::Result<Vec<_>>>()
     };
-    let selection = match (
-        settings.only_blocks.is_empty(),
-        settings.skip_blocks.is_empty(),
-    ) {
-        (true, true) => BlockSelection::All,
-        (false, _) => BlockSelection::Only(parse(&settings.only_blocks)?),
-        (true, false) => BlockSelection::Skip(parse(&settings.skip_blocks)?),
-    };
-    Ok(selection)
+    let only = parse(&settings.only_blocks)?;
+    let skip = parse(&settings.skip_blocks)?;
+    match (only.is_empty(), skip.is_empty()) {
+        (true, true) => Ok(BlockSelection::All),
+        (false, true) => Ok(BlockSelection::Only(only)),
+        (true, false) => Ok(BlockSelection::Skip(skip)),
+        (false, false) => bail!("`only-block` and `skip-block` must not both be set"),
+    }
 }
 
 /// Which validators a run uses.
@@ -243,7 +251,7 @@ mod tests {
     fn check_error(settings: RawSettings) -> String {
         let cpp = OsString::from("cpp");
         let error = settings
-            .validate(&HashSet::from([&cpp]))
+            .parse(&HashSet::from([&cpp]))
             .expect_err("the settings must be rejected");
         format!("{error:#}")
     }
