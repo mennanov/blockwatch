@@ -606,6 +606,31 @@ impl Comment {
         }
     }
 
+    /// Maps `offset`, a byte offset within `comment_text`, onto its position in the source file.
+    ///
+    /// Columns count characters, so the offset is converted by counting the characters it skips
+    /// rather than the bytes: the two differ on any line holding a multi-byte character.
+    pub(crate) fn position_at(&self, offset: usize) -> Position {
+        #[expect(
+            clippy::string_slice,
+            reason = "a tag starts at a `<` and ends after a `>`"
+        )]
+        let text_before = &self.comment_text[..offset];
+        match text_before.rfind('\n') {
+            // Past the comment's first line, so the column is measured from that line's start.
+            #[expect(clippy::string_slice, reason = "`line_break` is the index of a `\\n`")]
+            Some(line_break) => Position::new(
+                self.position_range.start.line + text_before.matches('\n').count(),
+                text_before[line_break + 1..].chars().count() + 1,
+            ),
+            // Still on the comment's first line, which starts at the comment's own column.
+            None => Position::new(
+                self.position_range.start.line,
+                self.position_range.start.character + text_before.chars().count(),
+            ),
+        }
+    }
+
     /// Sets the columns from where the comment's bytes fall in `source`.
     fn set_character_columns(&mut self, source: &str) {
         self.position_range.start.character = character_column_at(source, self.source_range.start);

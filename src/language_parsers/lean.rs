@@ -11,8 +11,8 @@
 //! Lean's rules for comments are short, so the scanner is small: `--` to the end of the line,
 //! nested `/- -/`, and the strings, chars and `«»` names that can hold comment markers.
 
+use crate::LineIndex;
 use crate::language_parsers::{Comment, CommentsParser, LanguageParser, LanguageParserImpl};
-use crate::{Position, character_column_at};
 use std::ops::Range;
 use winnow::Result as PResult;
 use winnow::combinator::{alt, delimited, eof, opt, repeat_till};
@@ -41,17 +41,7 @@ impl CommentsParser for LeanCommentsParser {
         let comments = comments
             .parse(LocatingSlice::new(source_code))
             .expect("each step of `comments` takes at least one character");
-        // `Position::from_byte_offset` counts the lines from the start of the file for each
-        // offset, which is slow for a file with many comments.
-        let line_starts: Vec<usize> = std::iter::once(0)
-            .chain(source_code.match_indices('\n').map(|(i, _)| i + 1))
-            .collect();
-        let position_at = move |offset: usize| {
-            Position::new(
-                line_starts.partition_point(|&start| start <= offset),
-                character_column_at(source_code, offset),
-            )
-        };
+        let lines = LineIndex::new(source_code);
         comments
             .into_iter()
             .map(move |((opening, closing), range)| {
@@ -59,7 +49,7 @@ impl CommentsParser for LeanCommentsParser {
                 let text = &source_code[range.clone()];
                 #[expect(clippy::string_slice, reason = "comment markers are ASCII")]
                 Comment {
-                    position_range: position_at(range.start)..position_at(range.end),
+                    position_range: lines.range(&range),
                     comment_text: format!(
                         "{}{}{}",
                         " ".repeat(opening),
@@ -263,6 +253,7 @@ fn char_literal(input: &mut Input<'_>) -> PResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Position;
 
     /// The source text of each comment that [`LeanCommentsParser`] finds in `source`.
     fn comment_sources(source: &str) -> Vec<&str> {

@@ -7,6 +7,7 @@
 
 use serde::Serialize;
 use std::ffi::OsStr;
+use std::ops::Range;
 
 mod block_parser;
 /// The `Block` type and the other types that describe the blocks of a file.
@@ -90,21 +91,45 @@ impl Position {
     pub(crate) fn new(line: usize, character: usize) -> Self {
         Self { line, character }
     }
+}
 
-    /// The position of `byte_offset` in `text`.
-    ///
-    /// Takes time proportional to `byte_offset`, since it counts every line break before it. It
-    /// suits the few positions a message needs, not a position for every node of a file.
+/// Finds the [`Position`] of a byte offset in a text.
+///
+/// It finds where the lines start once. Counting the line breaks before each offset would scan
+/// the text from its start every time, which is slow for a file with many comments.
+#[derive(Debug)]
+pub(crate) struct LineIndex<'a> {
+    text: &'a str,
+    /// The byte offset where each line of `text` starts, in order.
+    line_starts: Vec<usize>,
+}
+
+impl<'a> LineIndex<'a> {
+    pub(crate) fn new(text: &'a str) -> Self {
+        let line_starts = std::iter::once(0)
+            .chain(text.match_indices('\n').map(|(i, _)| i + 1))
+            .collect();
+        Self { text, line_starts }
+    }
+
+    /// The position of `byte_offset` in the text.
     ///
     /// # Panics
-    /// Panics if `byte_offset` is past the end of `text` or not on a character boundary.
-    pub(crate) fn from_byte_offset(text: &str, byte_offset: usize) -> Self {
-        #[expect(
-            clippy::string_slice,
-            reason = "callers give an offset on a character boundary"
-        )]
-        let line = text[..byte_offset].matches('\n').count() + 1;
-        Self::new(line, character_column_at(text, byte_offset))
+    /// Panics if `byte_offset` is past the end of the text or not on a character boundary.
+    pub(crate) fn position(&self, byte_offset: usize) -> Position {
+        let line = self
+            .line_starts
+            .partition_point(|&start| start <= byte_offset);
+        Position::new(line, character_column_at(self.text, byte_offset))
+    }
+
+    /// The positions of the start and the end of `byte_range`.
+    ///
+    /// # Panics
+    /// Panics if an end of `byte_range` is past the end of the text or not on a character
+    /// boundary.
+    pub(crate) fn range(&self, byte_range: &Range<usize>) -> Range<Position> {
+        self.position(byte_range.start)..self.position(byte_range.end)
     }
 }
 

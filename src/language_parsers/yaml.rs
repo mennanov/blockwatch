@@ -1,4 +1,4 @@
-use crate::Position;
+use crate::LineIndex;
 use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, node_text, python_style_comments_parser,
     tree_sitter_parser,
@@ -288,7 +288,7 @@ impl<'s> Walk<'s> {
             ScalarStyle::Block => Ok(block_scalar_decoded(self.source, scalar)),
         };
         decoded.with_context(|| {
-            let position = Position::from_byte_offset(self.source, scalar.start_byte());
+            let position = LineIndex::new(self.source).position(scalar.start_byte());
             format!(
                 "the string at line {}, column {} is not valid YAML",
                 position.line, position.character

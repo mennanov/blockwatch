@@ -83,8 +83,7 @@ impl<'source, I: Iterator<Item = Comment>> Blocks<'source, I> {
     /// Pairs an end tag with the innermost tag still open, completing one block.
     fn close_block(&mut self, block_end: BlockEnd) {
         let Some(block_start) = self.open_blocks.pop() else {
-            let position =
-                BlockStart::source_position_at(block_end.start_position, &block_end.comment);
+            let position = block_end.comment.position_at(block_end.start_position);
             self.error = Some(anyhow::anyhow!(
                 "Unexpected closed block at line {}, column {}. {NOT_A_TAG_HINT}",
                 position.line,
@@ -256,7 +255,7 @@ fn to_partial_block(
             start_position,
         ))),
         Err(malformed) => {
-            let position = BlockStart::source_position_at(malformed.position, comment);
+            let position = comment.position_at(malformed.position);
             Err(anyhow::anyhow!(
                 "Malformed block tag at line {}, column {}. {NOT_A_TAG_HINT}",
                 position.line,
@@ -311,38 +310,12 @@ impl BlockStart {
         attributes: HashMap<String, String>,
         position_in_comment_range: Range<usize>,
     ) -> Self {
-        let start_tag_position_range =
-            Self::source_position_at(position_in_comment_range.start, &comment)
-                ..Self::source_position_at(position_in_comment_range.end, &comment);
+        let start_tag_position_range = comment.position_at(position_in_comment_range.start)
+            ..comment.position_at(position_in_comment_range.end);
         Self {
             comment,
             attributes,
             start_tag_position_range,
-        }
-    }
-
-    /// Maps a byte offset within a comment's text onto its position in the source file.
-    ///
-    /// Columns count characters, so the offset is converted by counting the characters it skips
-    /// rather than the bytes: the two differ on any line holding a multi-byte character.
-    fn source_position_at(position_in_comment: usize, comment: &Comment) -> Position {
-        #[expect(
-            clippy::string_slice,
-            reason = "a tag starts at a `<` and ends after a `>`"
-        )]
-        let text_before = &comment.comment_text[..position_in_comment];
-        match text_before.rfind('\n') {
-            // Past the comment's first line, so the column is measured from that line's start.
-            #[expect(clippy::string_slice, reason = "`line_break` is the index of a `\\n`")]
-            Some(line_break) => Position::new(
-                comment.position_range.start.line + text_before.matches('\n').count(),
-                text_before[line_break + 1..].chars().count() + 1,
-            ),
-            // Still on the comment's first line, which starts at the comment's own column.
-            None => Position::new(
-                comment.position_range.start.line,
-                comment.position_range.start.character + text_before.chars().count(),
-            ),
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::Position;
+use crate::LineIndex;
 use crate::blocks::{BlockSeverity, validate_attributes};
 use crate::diff_parser::{DiffChanges, LineChanges};
 use crate::fs::FileSystem;
@@ -190,16 +190,17 @@ fn virtual_blocks(
     file_system: &impl FileSystem,
 ) -> anyhow::Result<Vec<VirtualBlock>> {
     let symbols = toml::parse_symbols(text)?;
+    let lines = LineIndex::new(text);
     let blocks: Vec<VirtualBlock> = entries
         .into_iter()
         .enumerate()
         .map(|(index, block_entry)| {
             let entry = ConfigEntry {
                 file: path.to_path_buf(),
-                line: Position::from_byte_offset(text, block_entry.span().start).line,
+                line: lines.position(block_entry.span().start).line,
             };
             let context = entry.error_context();
-            let is_entry_modified = is_entry_modified(text, &symbols, index, line_changes)?;
+            let is_entry_modified = is_entry_modified(text, &lines, &symbols, index, line_changes)?;
             entry_blocks(
                 block_entry.into_inner(),
                 entry,
@@ -242,9 +243,10 @@ fn reject_duplicate_blocks(blocks: &[VirtualBlock]) -> anyhow::Result<()> {
 }
 
 /// Whether `line_changes` touch the `[[block]]` entry at `index` of `text`, the config file.
-/// `symbols` are the symbols of `text`.
+/// `symbols` are the symbols of `text`, and `lines` indexes it.
 fn is_entry_modified(
     text: &str,
+    lines: &LineIndex,
     symbols: &[Symbol],
     index: usize,
     line_changes: &LineChanges,
@@ -252,11 +254,10 @@ fn is_entry_modified(
     // The symbol covers every line of the entry. The span that serde gives covers only its header.
     let path = SymbolPath::parse(&format!("/block/{index}"))?;
     let symbol = symbols::resolve(symbols, &path).map_err(|error| anyhow!(error.reason(text)))?;
-    Ok(symbol.def_byte_ranges.iter().any(|range| {
-        let positions = Position::from_byte_offset(text, range.start)
-            ..Position::from_byte_offset(text, range.end);
-        line_changes.touches(&positions)
-    }))
+    Ok(symbol
+        .def_byte_ranges
+        .iter()
+        .any(|range| line_changes.touches(&lines.range(range))))
 }
 
 /// The virtual blocks that `block_entry`, written as `entry` of the config file, declares: one in

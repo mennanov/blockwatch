@@ -4,6 +4,7 @@
 //! crates.io, so the `markdown` crate finds those spans, and tree-sitter-javascript finds the
 //! comments in each one.
 
+use crate::LineIndex;
 use crate::block_parser::Blocks;
 use crate::blocks::Block;
 use crate::language_parsers::markdown::section_symbols;
@@ -52,12 +53,10 @@ impl MdxParser {
     /// Returns an error if `source` is not valid MDX.
     fn comments(&mut self, source: &str) -> anyhow::Result<Vec<Comment>> {
         let tree = parse_mdx(source)?;
-        let line_starts: Vec<usize> = std::iter::once(0)
-            .chain(source.match_indices('\n').map(|(i, _)| i + 1))
-            .collect();
+        let lines = LineIndex::new(source);
         let mut comments = Vec::new();
         for javascript in javascript_ranges(&tree) {
-            let start_row = line_at(&line_starts, javascript.start) - 1;
+            let start_row = lines.position(javascript.start).line - 1;
             #[expect(
                 clippy::string_slice,
                 reason = "markdown-rs gives offsets of whole characters"
@@ -65,7 +64,7 @@ impl MdxParser {
             let javascript_source = &source[javascript.clone()];
             for mut comment in self.js_comments_parser.parse(javascript_source) {
                 comment.shift_into_source(start_row, javascript.start, source);
-                widen_lone_comment_to_braces(&mut comment, &javascript, source, &line_starts);
+                widen_lone_comment_to_braces(&mut comment, &javascript, source, &lines);
                 comments.push(comment);
             }
         }
@@ -140,7 +139,7 @@ fn widen_lone_comment_to_braces(
     comment: &mut Comment,
     expression: &Range<usize>,
     source: &str,
-    line_starts: &[usize],
+    lines: &LineIndex,
 ) {
     #[expect(
         clippy::string_slice,
@@ -168,15 +167,7 @@ fn widen_lone_comment_to_braces(
     let closing = &source[comment.source_range.end..close];
     comment.comment_text = format!(" {before}{}{closing} ", comment.comment_text);
     comment.source_range = expression.start - 1..close + 1;
-    comment.position_range.start.line = line_at(line_starts, expression.start - 1);
-    comment.position_range.end.line = line_at(line_starts, close + 1);
-    comment.set_character_columns(source);
-}
-
-/// Returns the 1-based line of the byte at `offset`. `line_starts` holds the offset where each
-/// line starts, in order.
-fn line_at(line_starts: &[usize], offset: usize) -> usize {
-    line_starts.partition_point(|&line_start| line_start <= offset)
+    comment.position_range = lines.range(&comment.source_range);
 }
 
 /// Returns the JavaScript that `node` itself holds, not counting its children: each span's value

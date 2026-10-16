@@ -1,4 +1,4 @@
-use crate::Position;
+use crate::LineIndex;
 use crate::blocks::{Block, BlockSeverity, BlockWithContext, Content, Declaration};
 use crate::diff_parser::LineChanges;
 use crate::repo_path::RepoPath;
@@ -75,11 +75,13 @@ impl TargetPattern {
             several => {
                 // A broad pattern can match every line of a long file. A few lines are enough to
                 // find the mistake.
+                let index = LineIndex::new(source);
                 let lines: Vec<String> = several
                     .iter()
                     .take(5)
                     .map(|captures| {
-                        Position::from_byte_offset(source, captures.get_match().start())
+                        index
+                            .position(captures.get_match().start())
                             .line
                             .to_string()
                     })
@@ -101,7 +103,7 @@ impl TargetPattern {
             Some(value) => value.range(),
             None if self.0.capture_names().any(|name| name == Some("value")) => bail!(
                 "target-pattern matches at line {}, but its value group does not",
-                Position::from_byte_offset(source, whole_match.start).line
+                LineIndex::new(source).position(whole_match.start).line
             ),
             None => whole_match.clone(),
         };
@@ -178,16 +180,17 @@ impl VirtualBlock {
         source: &str,
         line_changes: &LineChanges,
     ) -> anyhow::Result<BlockWithContext> {
+        let lines = LineIndex::new(source);
         let (definition, content) = match &self.locator {
-            Locator::Symbol(path) => self.symbol_definition(path, symbols, source)?,
-            Locator::Pattern(pattern) => self.pattern_match(pattern, source)?,
+            Locator::Symbol(path) => self.symbol_definition(path, symbols, source, &lines)?,
+            Locator::Pattern(pattern) => self.pattern_match(pattern, source, &lines)?,
             Locator::File => {
                 let file = 0..source.len();
-                let content = Content::source(file.clone(), position_range(source, &file));
+                let content = Content::source(file.clone(), lines.range(&file));
                 (file, content)
             }
         };
-        let definition_positions = position_range(source, &definition);
+        let definition_positions = lines.range(&definition);
         // A violation of the whole block is shown on this range. Its first line is enough to find
         // the block, and it keeps a violation from covering a whole object or file.
         #[expect(
@@ -197,8 +200,7 @@ impl VirtualBlock {
         let first_line_end = source[definition.clone()]
             .find('\n')
             .map_or(definition.end, |offset| definition.start + offset);
-        let start_tag_position_range =
-            definition_positions.start..Position::from_byte_offset(source, first_line_end);
+        let start_tag_position_range = definition_positions.start..lines.position(first_line_end);
         Ok(BlockWithContext {
             block: Block {
                 attributes: self.attributes.clone(),
@@ -219,8 +221,8 @@ impl VirtualBlock {
         })
     }
 
-    /// Finds the symbol at `path` among `symbols`, the symbols of `source`. Returns the byte range
-    /// of its definition, key included, and the block's content.
+    /// Finds the symbol at `path` among `symbols`, the symbols of `source`, which `lines` indexes.
+    /// Returns the byte range of its definition, key included, and the block's content.
     ///
     /// # Errors
     /// Returns an error when `symbols` have no symbol at `path`, or two of them, or when the
@@ -230,6 +232,7 @@ impl VirtualBlock {
         path: &SymbolPath,
         symbols: &[Symbol],
         source: &str,
+        lines: &LineIndex,
     ) -> anyhow::Result<(Range<usize>, Content)> {
         let symbol = resolve(symbols, path)
             .map_err(|error| self.unresolved(anyhow!(error.reason(source))))?;
@@ -249,22 +252,16 @@ impl VirtualBlock {
             // A value written as is, such as a number or a Markdown section, keeps the position of
             // each of its lines.
             Some(value) if source.get(value.byte_range.clone()) == Some(value.text.as_str()) => {
-                Content::source(
-                    value.byte_range.clone(),
-                    position_range(source, &value.byte_range),
-                )
+                Content::source(value.byte_range.clone(), lines.range(&value.byte_range))
             }
-            Some(value) => Content::decoded(
-                value.text.clone(),
-                position_range(source, &value.byte_range),
-            ),
-            None => Content::source(definition.clone(), position_range(source, definition)),
+            Some(value) => Content::decoded(value.text.clone(), lines.range(&value.byte_range)),
+            None => Content::source(definition.clone(), lines.range(definition)),
         };
         Ok((definition.clone(), content))
     }
 
-    /// Finds the one place in `source` that `pattern` matches. Returns the byte range of the whole
-    /// match, and the block's content.
+    /// Finds the one place in `source` that `pattern` matches, with `lines` indexing `source`.
+    /// Returns the byte range of the whole match, and the block's content.
     ///
     /// # Errors
     /// Returns an error when `pattern` matches no text in `source`, or more than once.
@@ -272,13 +269,14 @@ impl VirtualBlock {
         &self,
         pattern: &TargetPattern,
         source: &str,
+        lines: &LineIndex,
     ) -> anyhow::Result<(Range<usize>, Content)> {
         let (whole_match, value) = pattern
             .find_once(source)
             .map_err(|error| self.unresolved(error))?;
         Ok((
             whole_match,
-            Content::source(value.clone(), position_range(source, &value)),
+            Content::source(value.clone(), lines.range(&value)),
         ))
     }
 
@@ -300,15 +298,11 @@ impl VirtualBlock {
     }
 }
 
-/// The positions in `source` of the bytes in `range`.
-fn position_range(source: &str, range: &Range<usize>) -> Range<Position> {
-    Position::from_byte_offset(source, range.start)..Position::from_byte_offset(source, range.end)
-}
-
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use super::*;
+    use crate::Position;
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::language_parsers::language_parsers;
     use crate::test_utils::virtual_block;

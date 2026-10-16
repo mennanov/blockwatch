@@ -1,5 +1,5 @@
-use crate::Position;
 use crate::symbol_path::{Segment, SymbolPath};
+use crate::{LineIndex, Position};
 use anyhow::{Context, bail};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -37,18 +37,16 @@ impl Symbol {
     /// The 1-based line and character range of each of the symbol's byte ranges in `source`,
     /// which must be the text the symbol was derived from.
     ///
-    /// Takes time proportional to the definition's offset in `source`, so it suits the symbol a
-    /// reference resolves to rather than every symbol a file derives.
+    /// Takes time proportional to the length of `source`, so it suits the symbol a reference
+    /// resolves to rather than every symbol a file derives.
     ///
     /// # Panics
     /// Panics if a byte range does not fit `source`.
     pub(crate) fn position_ranges(&self, source: &str) -> Vec<Range<Position>> {
+        let lines = LineIndex::new(source);
         self.def_byte_ranges
             .iter()
-            .map(|range| {
-                Position::from_byte_offset(source, range.start)
-                    ..Position::from_byte_offset(source, range.end)
-            })
+            .map(|range| lines.range(range))
             .collect()
     }
 
@@ -499,7 +497,7 @@ pub(crate) fn ensure_no_syntax_error(tree: &tree_sitter::Tree, source: &str) -> 
     // as an empty one.
     match first_syntax_error(tree) {
         Some(error) => {
-            let position = Position::from_byte_offset(source, error.start_byte());
+            let position = LineIndex::new(source).position(error.start_byte());
             bail!(
                 "file has a syntax error at line {}, column {}, and a path into it could resolve to the wrong value",
                 position.line,

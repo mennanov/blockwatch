@@ -1,4 +1,4 @@
-use crate::Position;
+use crate::LineIndex;
 use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, python_style_comments_parser,
 };
@@ -54,7 +54,7 @@ impl SymbolsParser for TomlSymbolsParser {
 fn toml_error(source: &str, error: &toml_edit::TomlError) -> anyhow::Error {
     match error.span() {
         Some(span) => {
-            let position = Position::from_byte_offset(source, span.start);
+            let position = LineIndex::new(source).position(span.start);
             anyhow!(
                 "file is not valid TOML at line {}, column {}: {}",
                 position.line,
