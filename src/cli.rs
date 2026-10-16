@@ -274,26 +274,20 @@ fn build_context(
     );
     let language_parsers = language_parsers.with_extension_mappings(settings.extensions().clone());
 
-    let parsed = blocks::parse_blocks(
-        &modified_lines_by_file,
-        scan_mode,
+    let scan = blocks::Scan::new(
         file_system,
         &path_filter,
         &language_parsers,
         &virtual_blocks,
-    )?;
+    );
+    let parsed = scan.parse_blocks(&modified_lines_by_file, scan_mode)?;
     let scanned_files = parsed.scanned_files.iter().cloned().map(Ok);
     match scan_mode {
         blocks::ScanMode::All => path_arguments.ensure_each_matches(scanned_files)?,
         // The scan read only the files in the diff. An argument that selects none of them still
         // passes when it selects a file that the diff doesn't touch.
         blocks::ScanMode::OnlyChanged => {
-            path_arguments.ensure_each_matches(scanned_files.chain(blocks::checkable_files(
-                file_system,
-                &path_filter,
-                &language_parsers,
-                &virtual_blocks,
-            )))?
+            path_arguments.ensure_each_matches(scanned_files.chain(scan.checkable_files()))?
         }
     }
     Ok((

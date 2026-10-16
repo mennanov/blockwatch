@@ -475,14 +475,13 @@ mod validate_tests {
     ) -> anyhow::Result<Arc<validators::ValidationContext>> {
         let line_changes = diff_changes(line_changes);
         let parsers = crate::language_parsers::language_parsers()?;
-        let parsed = crate::blocks::parse_blocks(
-            &line_changes,
-            crate::blocks::ScanMode::OnlyChanged,
+        let parsed = crate::blocks::Scan::new(
             file_system,
             &crate::fs::PathFilter::allow_only("source.py"),
             &parsers,
             &[],
-        )?;
+        )
+        .parse_blocks(&line_changes, crate::blocks::ScanMode::OnlyChanged)?;
         assert!(
             !parsed
                 .blocks
@@ -1073,14 +1072,13 @@ pass
         }
         let line_changes = diff_changes(line_changes);
         let parsers = crate::language_parsers::language_parsers()?;
-        let parsed = crate::blocks::parse_blocks(
-            &line_changes,
-            crate::blocks::ScanMode::All,
+        let parsed = crate::blocks::Scan::new(
             &file_system,
             &crate::fs::PathFilter::allow_all(),
             &parsers,
             &[],
-        )?;
+        )
+        .parse_blocks(&line_changes, crate::blocks::ScanMode::All)?;
         Ok(Arc::new(validators::ValidationContext::new(
             parsed.blocks,
             parsers,

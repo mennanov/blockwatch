@@ -160,7 +160,7 @@ fn counted(count: usize, one: &str, many: &str) -> String {
 mod tests {
     use super::*;
     use crate::Position;
-    use crate::blocks::{ScanMode, parse_blocks};
+    use crate::blocks::{Scan, ScanMode};
     use crate::diff_parser::DiffChanges;
     use crate::fs::PathFilter;
     use crate::fs::test_utils::FakeFileSystem;
@@ -391,9 +391,7 @@ mod tests {
         let file_path = RepoPath::from_reference("a.toml")?;
         let mut inner = virtual_block("a.toml#/a/b", &[])?;
         inner.entry.line = 9;
-        let parsed = parse_blocks(
-            &DiffChanges::default(),
-            ScanMode::All,
+        let parsed = Scan::new(
             &FakeFileSystem::new(HashMap::from([(
                 "a.toml".to_string(),
                 "a.b = 1\n".to_string(),
@@ -401,7 +399,8 @@ mod tests {
             &PathFilter::allow_all(),
             &language_parsers()?,
             &[virtual_block("a.toml#/a", &[])?, inner],
-        )?;
+        )
+        .parse_blocks(&DiffChanges::default(), ScanMode::All)?;
         let context = ValidationContext::new(
             parsed.blocks,
             LanguageParsers::default(),
