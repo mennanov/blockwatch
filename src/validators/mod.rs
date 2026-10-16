@@ -19,14 +19,6 @@ use crate::repo_path::RepoPath;
 use crate::settings::BlockSelection;
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{Symbol, resolve};
-use crate::validators::affects::AffectsValidatorDetector;
-use crate::validators::check_ai::CheckAiValidatorDetector;
-use crate::validators::check_lua::CheckLuaValidatorDetector;
-use crate::validators::keep_sorted::KeepSortedValidatorDetector;
-use crate::validators::keep_unique::KeepUniqueValidatorDetector;
-use crate::validators::line_count::LineCountValidatorDetector;
-use crate::validators::line_pattern::LinePatternValidatorDetector;
-use crate::validators::same_as::SameAsValidatorDetector;
 use crate::violation_address::ViolationAddress;
 use crate::virtual_blocks::VirtualBlock;
 use anyhow::{Context, bail};
@@ -52,17 +44,6 @@ pub(crate) trait AsyncValidator: Send + Sync {
 /// validators are involved.
 pub(crate) trait SyncValidator: Send + Sync {
     fn validate(&self, context: Arc<ValidationContext>) -> anyhow::Result<ValidationReport>;
-}
-
-/// Detects a [`ValidatorType`] for the given `block` (if any).
-///
-/// This is used to determine whether an async runtime (e.g. Tokio) is needed to run the validators.
-pub(crate) trait ValidatorDetector<Fs: FileSystem> {
-    fn detect(
-        &self,
-        block_with_context: &BlockWithContext,
-        file_system: &Arc<Fs>,
-    ) -> anyhow::Result<Option<ValidatorType>>;
 }
 
 /// Validator type (sync or async).
@@ -133,6 +114,32 @@ impl Validator {
             | Validator::LineCount
             | Validator::LinePattern
             | Validator::SameAs => false,
+        }
+    }
+
+    /// Creates this validator if `block_with_context` carries one of its attributes. Returns
+    /// `None` otherwise.
+    ///
+    /// The `match` has no `_` arm, so a new validator can't be left out. The result says whether
+    /// the validator is sync or async, which lets the caller start a Tokio runtime only when an
+    /// async validator exists.
+    ///
+    /// Returns an error when the validator can't be set up, such as `check-lua` with an unknown
+    /// `BLOCKWATCH_LUA_MODE`.
+    pub(crate) fn detect<Fs: FileSystem + 'static>(
+        self,
+        block_with_context: &BlockWithContext,
+        file_system: &Arc<Fs>,
+    ) -> anyhow::Result<Option<ValidatorType>> {
+        match self {
+            Validator::Affects => Ok(affects::detect(block_with_context, file_system)),
+            Validator::CheckAi => Ok(check_ai::detect(block_with_context)),
+            Validator::CheckLua => check_lua::detect(block_with_context, file_system),
+            Validator::KeepSorted => Ok(keep_sorted::detect(block_with_context)),
+            Validator::KeepUnique => Ok(keep_unique::detect(block_with_context)),
+            Validator::LineCount => Ok(line_count::detect(block_with_context)),
+            Validator::LinePattern => Ok(line_pattern::detect(block_with_context)),
+            Validator::SameAs => Ok(same_as::detect(block_with_context, file_system)),
         }
     }
 
@@ -639,43 +646,6 @@ pub(crate) fn run(
 type SyncValidators = Vec<(Validator, Box<dyn SyncValidator>)>;
 type AsyncValidators = Vec<(Validator, Box<dyn AsyncValidator>)>;
 
-type DetectorFactory<Fs> = fn() -> Box<dyn ValidatorDetector<Fs>>;
-
-/// Builds the ordered detector registry for a concrete filesystem `Fs`.
-///
-/// This is a generic function rather than a `const` because each [`DetectorFactory`] is now
-/// parameterized by the filesystem type its detectors receive, so the registry has to be
-/// instantiated per `Fs` (the production `FileSystemImpl`, a `FakeFileSystem` in tests).
-pub(crate) fn detector_factories<Fs: FileSystem + 'static>() -> Vec<(Validator, DetectorFactory<Fs>)>
-{
-    vec![
-        (Validator::Affects, || {
-            Box::new(AffectsValidatorDetector::new())
-        }),
-        (Validator::KeepSorted, || {
-            Box::new(KeepSortedValidatorDetector::new())
-        }),
-        (Validator::KeepUnique, || {
-            Box::new(KeepUniqueValidatorDetector::new())
-        }),
-        (Validator::LinePattern, || {
-            Box::new(LinePatternValidatorDetector::new())
-        }),
-        (Validator::LineCount, || {
-            Box::new(LineCountValidatorDetector::new())
-        }),
-        (Validator::CheckAi, || {
-            Box::new(CheckAiValidatorDetector::new())
-        }),
-        (Validator::CheckLua, || {
-            Box::new(CheckLuaValidatorDetector::new())
-        }),
-        (Validator::SameAs, || {
-            Box::new(SameAsValidatorDetector::new())
-        }),
-    ]
-}
-
 /// Whether a validator is enabled/disabled.
 fn is_validator_active(
     validator: Validator,
@@ -723,43 +693,42 @@ pub(crate) fn diff_gated_block_count(
 ///
 /// `enabled_validators` takes precedence over `disabled_validators`: when it is non-empty, only the
 /// validators it names are considered. Passing both is rejected earlier, when the flags are parsed.
+///
+/// `detect` decides whether a validator applies to a block, as [`Validator::detect`] does. It is a
+/// parameter so that a test can use validators that don't call a model or read the environment.
 pub(crate) fn detect_validators<Fs: FileSystem + 'static>(
     context: &ValidationContext,
-    detectors: &[(Validator, DetectorFactory<Fs>)],
+    detect: impl Fn(Validator, &BlockWithContext, &Arc<Fs>) -> anyhow::Result<Option<ValidatorType>>,
     disabled_validators: &HashSet<Validator>,
     enabled_validators: &HashSet<Validator>,
     file_system: &Arc<Fs>,
 ) -> anyhow::Result<(SyncValidators, AsyncValidators)> {
-    let mut validator_detectors: Vec<(Validator, Box<dyn ValidatorDetector<Fs>>)> = detectors
-        .iter()
-        .filter(|(validator, _)| {
+    let mut undetected: Vec<Validator> = Validator::iter()
+        .filter(|validator| {
             is_validator_active(*validator, disabled_validators, enabled_validators)
         })
-        .map(|(validator, factory)| (*validator, factory()))
         .collect();
     let mut sync_validators = Vec::new();
     let mut async_validators = Vec::new();
     'outer: for file_blocks in context.blocks.values() {
         for block in &file_blocks.blocks_with_context {
-            let mut undetected = Vec::new();
-            while let Some((name, detector)) = validator_detectors.pop() {
-                match detector.detect(block, file_system)? {
-                    Some(ValidatorType::Sync(validator)) => {
-                        sync_validators.push((name, validator));
+            let mut still_undetected = Vec::new();
+            for validator in undetected {
+                match detect(validator, block, file_system)? {
+                    Some(ValidatorType::Sync(sync_validator)) => {
+                        sync_validators.push((validator, sync_validator));
                     }
-                    Some(ValidatorType::Async(validator)) => {
-                        async_validators.push((name, validator));
+                    Some(ValidatorType::Async(async_validator)) => {
+                        async_validators.push((validator, async_validator));
                     }
-                    None => {
-                        undetected.push((name, detector));
-                    }
+                    None => still_undetected.push(validator),
                 }
             }
+            undetected = still_undetected;
             if undetected.is_empty() {
                 // All validators have been detected.
                 break 'outer;
             }
-            validator_detectors.extend(undetected);
         }
     }
     Ok((sync_validators, async_validators))
@@ -1455,8 +1424,8 @@ mod tests {
     use crate::test_utils::{validation_context, virtual_block};
     use crate::validators::test_utils::{merge_validation_contexts, with_virtual_blocks};
     use crate::validators::{
-        AsyncValidator, DetectorFactory, SyncValidator, ValidationContext, ValidationReport,
-        Validator, ValidatorDetector, ValidatorType, Violation, ViolationRange, detect_validators,
+        AsyncValidator, SyncValidator, ValidationContext, ValidationReport, Validator,
+        ValidatorType, Violation, ViolationRange, detect_validators,
     };
     use crate::{Position, validators};
     use async_trait::async_trait;
@@ -1546,54 +1515,32 @@ mod tests {
         }
     }
 
-    struct FakeAsyncValidatorDetector();
-
-    impl<Fs: FileSystem> ValidatorDetector<Fs> for FakeAsyncValidatorDetector {
-        fn detect(
-            &self,
-            block_with_context: &BlockWithContext,
-            _file_system: &Arc<Fs>,
-        ) -> anyhow::Result<Option<ValidatorType>> {
-            if block_with_context.block.attributes.contains_key("check-ai") {
-                Ok(Some(ValidatorType::Async(Box::new(FakeAsyncValidator {
+    /// Detects the fakes above in place of `keep-sorted` and `check-ai`. No other validator is
+    /// detected.
+    fn detect_fakes<Fs: FileSystem>(
+        validator: Validator,
+        block_with_context: &BlockWithContext,
+        _file_system: &Arc<Fs>,
+    ) -> anyhow::Result<Option<ValidatorType>> {
+        let attributes = &block_with_context.block.attributes;
+        Ok(match validator {
+            Validator::KeepSorted => attributes.contains_key("keep-sorted").then(|| {
+                ValidatorType::Sync(Box::new(FakeSyncValidator {
                     testing_block: Arc::new(empty_testing_block()),
-                }))))
-            } else {
-                Ok(None)
-            }
-        }
-    }
-
-    struct FakeSyncValidatorDetector();
-    impl<Fs: FileSystem> ValidatorDetector<Fs> for FakeSyncValidatorDetector {
-        fn detect(
-            &self,
-            block_with_context: &BlockWithContext,
-            _file_system: &Arc<Fs>,
-        ) -> anyhow::Result<Option<ValidatorType>> {
-            if block_with_context
-                .block
-                .attributes
-                .contains_key("keep-sorted")
-            {
-                Ok(Some(ValidatorType::Sync(Box::new(FakeSyncValidator {
+                }))
+            }),
+            Validator::CheckAi => attributes.contains_key("check-ai").then(|| {
+                ValidatorType::Async(Box::new(FakeAsyncValidator {
                     testing_block: Arc::new(empty_testing_block()),
-                }))))
-            } else {
-                Ok(None)
-            }
-        }
-    }
-
-    fn detector_factories<Fs: FileSystem + 'static>() -> Vec<(Validator, DetectorFactory<Fs>)> {
-        vec![
-            (Validator::KeepSorted, || {
-                Box::new(FakeSyncValidatorDetector {}) as Box<dyn ValidatorDetector<Fs>>
+                }))
             }),
-            (Validator::CheckAi, || {
-                Box::new(FakeAsyncValidatorDetector {}) as Box<dyn ValidatorDetector<Fs>>
-            }),
-        ]
+            Validator::Affects
+            | Validator::CheckLua
+            | Validator::KeepUnique
+            | Validator::LineCount
+            | Validator::LinePattern
+            | Validator::SameAs => None,
+        })
     }
 
     #[test]
@@ -1614,7 +1561,7 @@ mod tests {
 
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            &detector_factories(),
+            detect_fakes,
             &HashSet::new(),
             &HashSet::new(),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
@@ -1662,7 +1609,7 @@ mod tests {
 
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            &detector_factories(),
+            detect_fakes,
             &HashSet::new(),
             &HashSet::new(),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
@@ -1706,7 +1653,7 @@ mod tests {
         ]);
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            &detector_factories(),
+            detect_fakes,
             &HashSet::new(),
             &HashSet::new(),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
@@ -1743,7 +1690,7 @@ mod tests {
         );
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            &detector_factories(),
+            detect_fakes,
             &HashSet::from([Validator::CheckAi]),
             &HashSet::new(),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
@@ -1773,7 +1720,7 @@ mod tests {
 
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            &detector_factories(),
+            detect_fakes,
             &HashSet::new(),
             &HashSet::from([Validator::CheckAi]),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
@@ -1802,7 +1749,7 @@ mod tests {
         );
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            &detector_factories(),
+            detect_fakes,
             &HashSet::from([Validator::KeepSorted]),
             &HashSet::new(),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
@@ -1832,7 +1779,7 @@ mod tests {
 
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            &detector_factories(),
+            detect_fakes,
             &HashSet::new(),
             &HashSet::from([Validator::KeepSorted]),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
@@ -1962,7 +1909,7 @@ x
 
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            &validators::detector_factories(),
+            Validator::detect,
             &HashSet::new(),
             &HashSet::new(),
             &Arc::new(FakeFileSystem::new(HashMap::from([(

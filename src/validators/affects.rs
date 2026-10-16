@@ -338,29 +338,15 @@ fn name_index(file_blocks: &FileBlocks) -> HashMap<String, bool> {
 /// It does not gate on whether the block was modified: the validator also checks that each
 /// referenced target still resolves, and a dangling reference has to be reported even when the
 /// referencing block itself is untouched.
-pub(super) struct AffectsValidatorDetector();
-
-impl AffectsValidatorDetector {
-    /// Creates the detector. Registered in [`validators::detector_factories`].
-    pub(super) fn new() -> Self {
-        Self {}
-    }
-}
-
-impl<Fs: FileSystem + 'static> validators::ValidatorDetector<Fs> for AffectsValidatorDetector {
-    fn detect(
-        &self,
-        block_with_context: &BlockWithContext,
-        file_system: &Arc<Fs>,
-    ) -> anyhow::Result<Option<ValidatorType>> {
-        if block_with_context.block.attributes.contains_key("affects") {
-            Ok(Some(ValidatorType::Sync(Box::new(AffectsValidator::new(
-                Arc::clone(file_system),
-            )))))
-        } else {
-            Ok(None)
-        }
-    }
+pub(super) fn detect<Fs: FileSystem + 'static>(
+    block_with_context: &BlockWithContext,
+    file_system: &Arc<Fs>,
+) -> Option<ValidatorType> {
+    block_with_context
+        .block
+        .attributes
+        .contains_key("affects")
+        .then(|| ValidatorType::Sync(Box::new(AffectsValidator::new(Arc::clone(file_system)))))
 }
 
 fn create_violation(

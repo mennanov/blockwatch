@@ -104,7 +104,7 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<ExitCode> {
     context.apply_block_selection(settings.block_selection(), file_system.as_ref())?;
     let (sync_validators, async_validators) = validators::detect_validators(
         &context,
-        &validators::detector_factories::<crate::fs::FileSystemImpl>(),
+        validators::Validator::detect,
         settings.disabled_validators(),
         settings.enabled_validators(),
         &file_system,

@@ -4,8 +4,7 @@ use crate::repo_path::RepoPath;
 use crate::validators::parse_target_references;
 use crate::validators::{
     AsyncValidator, PatternContent, TargetFiles, TargetReference, ValidationContext,
-    ValidationReport, Validator, ValidatorDetector, ValidatorType, Violation,
-    block_content_for_pattern,
+    ValidationReport, Validator, ValidatorType, Violation, block_content_for_pattern,
 };
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -576,36 +575,23 @@ fn resolve_affected_targets<Fs: FileSystem>(
 /// Selects [`CheckLuaValidator`] for blocks carrying a `check-lua` attribute.
 ///
 /// Detecting such a block returns an error when `BLOCKWATCH_LUA_MODE` has an unknown value.
-pub(super) struct CheckLuaValidatorDetector;
-
-impl CheckLuaValidatorDetector {
-    /// Creates the detector. Registered in [`crate::validators::detector_factories`].
-    pub(super) fn new() -> Self {
-        Self
+pub(super) fn detect<Fs: FileSystem + 'static>(
+    block_with_context: &BlockWithContext,
+    file_system: &Arc<Fs>,
+) -> anyhow::Result<Option<ValidatorType>> {
+    if !block_with_context
+        .block
+        .attributes
+        .contains_key("check-lua")
+    {
+        return Ok(None);
     }
-}
-
-impl<Fs: FileSystem + 'static> ValidatorDetector<Fs> for CheckLuaValidatorDetector {
-    fn detect(
-        &self,
-        block_with_context: &BlockWithContext,
-        file_system: &Arc<Fs>,
-    ) -> anyhow::Result<Option<ValidatorType>> {
-        if block_with_context
-            .block
-            .attributes
-            .contains_key("check-lua")
-        {
-            // Read here, not at startup, so a run without a check-lua block never fails over a
-            // variable it doesn't use.
-            let mode = LuaMode::parse(&std::env::var_os(LUA_STDLIB_ENV_VAR).unwrap_or_default())?;
-            Ok(Some(ValidatorType::Async(Box::new(
-                CheckLuaValidator::new(Arc::clone(file_system), mode),
-            ))))
-        } else {
-            Ok(None)
-        }
-    }
+    // Read here, not at startup, so a run without a check-lua block never fails over a
+    // variable it doesn't use.
+    let mode = LuaMode::parse(&std::env::var_os(LUA_STDLIB_ENV_VAR).unwrap_or_default())?;
+    Ok(Some(ValidatorType::Async(Box::new(
+        CheckLuaValidator::new(Arc::clone(file_system), mode),
+    ))))
 }
 
 #[derive(Serialize)]

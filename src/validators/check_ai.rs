@@ -1,9 +1,8 @@
 use crate::blocks::{Block, BlockWithContext};
-use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    AsyncValidator, PatternContent, ValidationContext, ValidationReport, Validator,
-    ValidatorDetector, ValidatorType, Violation, block_content_for_pattern,
+    AsyncValidator, PatternContent, ValidationContext, ValidationReport, Validator, ValidatorType,
+    Violation, block_content_for_pattern,
 };
 use anyhow::{Context, anyhow};
 use async_openai::Client;
@@ -98,8 +97,7 @@ impl<C: AiClient + 'static> AsyncValidator for CheckAiValidator<C> {
                     };
 
                     let result = client.check_block(condition, &content).await;
-                    let violation =
-                        Self::process_ai_response(&file_path, block_with_context, result)?;
+                    let violation = process_ai_response(&file_path, block_with_context, result)?;
                     anyhow::Ok((file_path, Vec::from_iter(violation)))
                 });
             }
@@ -114,29 +112,16 @@ impl<C: AiClient + 'static> AsyncValidator for CheckAiValidator<C> {
 
 /// Selects [`CheckAiValidator`] for blocks carrying a `check-ai` attribute, building a client from
 /// the `BLOCKWATCH_AI_*` environment variables.
-pub(super) struct CheckAiValidatorDetector();
-
-impl CheckAiValidatorDetector {
-    /// Creates the detector. Registered in [`crate::validators::detector_factories`].
-    pub(super) fn new() -> Self {
-        Self {}
-    }
-}
-
-impl<Fs: FileSystem> ValidatorDetector<Fs> for CheckAiValidatorDetector {
-    fn detect(
-        &self,
-        block_with_context: &BlockWithContext,
-        _file_system: &Arc<Fs>,
-    ) -> anyhow::Result<Option<ValidatorType>> {
-        if block_with_context.block.attributes.contains_key("check-ai") {
-            Ok(Some(ValidatorType::Async(Box::new(
-                CheckAiValidator::with_client(OpenAiClient::from_env()),
-            ))))
-        } else {
-            Ok(None)
-        }
-    }
+pub(super) fn detect(block_with_context: &BlockWithContext) -> Option<ValidatorType> {
+    block_with_context
+        .block
+        .attributes
+        .contains_key("check-ai")
+        .then(|| {
+            ValidatorType::Async(Box::new(CheckAiValidator::with_client(
+                OpenAiClient::from_env(),
+            )))
+        })
 }
 
 fn create_violation(
@@ -222,25 +207,25 @@ impl<C: AiClient> CheckAiValidator<C> {
             client: Arc::new(client),
         }
     }
+}
 
-    /// Turns one AI answer into a violation, or into nothing when the block satisfied the check.
-    fn process_ai_response(
-        file_path: &RepoPath,
-        block_with_context: &BlockWithContext,
-        result: anyhow::Result<Option<String>>,
-    ) -> anyhow::Result<Option<Violation>> {
-        match result.context(format!(
-            "check-ai API error in {file_path}:{} at {}",
-            block_with_context.block.name_display(),
-            block_with_context.block.declared_at()
-        ))? {
-            None => Ok(None),
-            Some(msg) => Ok(Some(create_violation(
-                file_path,
-                &block_with_context.block,
-                &msg,
-            )?)),
-        }
+/// Turns one AI answer into a violation, or into nothing when the block satisfied the check.
+fn process_ai_response(
+    file_path: &RepoPath,
+    block_with_context: &BlockWithContext,
+    result: anyhow::Result<Option<String>>,
+) -> anyhow::Result<Option<Violation>> {
+    match result.context(format!(
+        "check-ai API error in {file_path}:{} at {}",
+        block_with_context.block.name_display(),
+        block_with_context.block.declared_at()
+    ))? {
+        None => Ok(None),
+        Some(msg) => Ok(Some(create_violation(
+            file_path,
+            &block_with_context.block,
+            &msg,
+        )?)),
     }
 }
 

@@ -5,7 +5,7 @@ use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
 use crate::validators::{
     self, SyncValidator, TargetFiles, TargetReference, TargetResult, ValidationReport, Validator,
-    ValidatorDetector, ValidatorType, Violation, compile_pattern, parse_number, target_display,
+    ValidatorType, Violation, compile_pattern, parse_number, target_display,
 };
 use anyhow::{Context, anyhow, bail};
 use heck::ToSnakeCase;
@@ -848,30 +848,13 @@ fn create_violation(
 }
 
 /// Selects [`SameAsValidator`] for blocks carrying a `same-as` or a `same-as-paths` attribute.
-pub(super) struct SameAsValidatorDetector();
-
-impl SameAsValidatorDetector {
-    /// Creates the detector. Registered in [`validators::detector_factories`].
-    pub(super) fn new() -> Self {
-        Self()
-    }
-}
-
-impl<Fs: FileSystem + 'static> ValidatorDetector<Fs> for SameAsValidatorDetector {
-    fn detect(
-        &self,
-        block_with_context: &BlockWithContext,
-        file_system: &Arc<Fs>,
-    ) -> anyhow::Result<Option<ValidatorType>> {
-        let attributes = &block_with_context.block.attributes;
-        if attributes.contains_key("same-as") || attributes.contains_key("same-as-paths") {
-            Ok(Some(ValidatorType::Sync(Box::new(SameAsValidator::new(
-                Arc::clone(file_system),
-            )))))
-        } else {
-            Ok(None)
-        }
-    }
+pub(super) fn detect<Fs: FileSystem + 'static>(
+    block_with_context: &BlockWithContext,
+    file_system: &Arc<Fs>,
+) -> Option<ValidatorType> {
+    let attributes = &block_with_context.block.attributes;
+    (attributes.contains_key("same-as") || attributes.contains_key("same-as-paths"))
+        .then(|| ValidatorType::Sync(Box::new(SameAsValidator::new(Arc::clone(file_system)))))
 }
 
 #[cfg(test)]

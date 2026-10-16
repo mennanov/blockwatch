@@ -175,9 +175,9 @@ The whole pipeline is in `src/cli.rs`. `src/main.rs` only calls `blockwatch::run
    touches, even when the diff does not touch that file. The result is a `blocks::FileBlocks` for each file, kept in a
    `validators::ValidationContext`. Each path or glob argument must select at least one parsed file, or the run
    stops. Under `--only-changed`, an argument that selects no file in the diff is checked against a walk of the tree.
-7. `validators::detect_validators` passes each block to the `ValidatorDetector`s, one for each validator. A detector
-   returns either `ValidatorType::Sync` or `ValidatorType::Async`. Async validators, such as `check-ai`, run on Tokio.
-   The Tokio runtime only starts if at least one async validator is needed.
+7. `validators::detect_validators` asks `Validator::detect` about each block, once for each validator. It returns
+   either `ValidatorType::Sync` or `ValidatorType::Async`. Async validators, such as `check-ai`, run on Tokio. The Tokio
+   runtime only starts if at least one async validator is needed.
 8. Validators produce `Violation`s, each with a `ViolationRange` and a `BlockSeverity` (error or warning). A symbol
    reference such as `file#/path` is found with `symbols::resolve`. It searches the symbols that
    `LanguageParser::parse_symbols` finds in the target file, once per file. A missing or ambiguous symbol is a
@@ -241,8 +241,8 @@ The main modules:
   a file with a syntax error, instead of resolving a path through tree-sitter's error recovery. It doesn't check the
   query itself.
 - `src/validators/` — one file for each validator (`affects`, `check_ai`, `check_lua`, `keep_sorted`, `keep_unique`,
-  `line_count`, `line_pattern`, `same_as`). Each file exports a `*ValidatorDetector`. `validators/mod.rs` registers
-  all of them.
+  `line_count`, `line_pattern`, `same_as`). Each file exports a `detect` function. `Validator::detect` in
+  `validators/mod.rs` calls them from one `match`.
 - `src/diff_parser.rs` — wraps `unidiff` to produce `LineChange`s. `range_intersects_any` decides whether they touch a
   range of the file, such as a block's start tag or a symbol's definition. A block's content has its own check in
   `blocks.rs`, because a deletion right where the content starts removes content. The results end up in

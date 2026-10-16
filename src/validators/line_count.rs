@@ -1,10 +1,7 @@
 use crate::blocks::{Block, BlockWithContext};
-use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators;
-use crate::validators::{
-    SyncValidator, ValidationReport, Validator, ValidatorDetector, ValidatorType, Violation,
-};
+use crate::validators::{SyncValidator, ValidationReport, Validator, ValidatorType, Violation};
 use anyhow::anyhow;
 use serde::Serialize;
 use std::sync::Arc;
@@ -14,14 +11,7 @@ use std::sync::Arc;
 ///
 /// Useful for keeping a section from silently growing past the size it was designed for — a code
 /// sample that must stay readable, or a list with a hard limit.
-struct LineCountValidator {}
-
-impl LineCountValidator {
-    /// Creates the validator. It is stateless; all input arrives through the validation context.
-    fn new() -> Self {
-        Self {}
-    }
-}
+struct LineCountValidator;
 
 #[derive(Serialize)]
 struct LineCountViolation {
@@ -121,33 +111,12 @@ fn create_violation(
 }
 
 /// Selects [`LineCountValidator`] for blocks carrying a `line-count` attribute.
-pub(super) struct LineCountValidatorDetector();
-
-impl LineCountValidatorDetector {
-    /// Creates the detector. Registered in [`validators::detector_factories`].
-    pub(super) fn new() -> Self {
-        Self {}
-    }
-}
-
-impl<Fs: FileSystem> ValidatorDetector<Fs> for LineCountValidatorDetector {
-    fn detect(
-        &self,
-        block_with_context: &BlockWithContext,
-        _file_system: &Arc<Fs>,
-    ) -> anyhow::Result<Option<ValidatorType>> {
-        if block_with_context
-            .block
-            .attributes
-            .contains_key("line-count")
-        {
-            Ok(Some(ValidatorType::Sync(Box::new(
-                LineCountValidator::new(),
-            ))))
-        } else {
-            Ok(None)
-        }
-    }
+pub(super) fn detect(block_with_context: &BlockWithContext) -> Option<ValidatorType> {
+    block_with_context
+        .block
+        .attributes
+        .contains_key("line-count")
+        .then(|| ValidatorType::Sync(Box::new(LineCountValidator)))
 }
 
 #[derive(Copy, Clone)]
@@ -203,7 +172,7 @@ mod tests {
 
     #[test]
     fn validate_with_incorrect_number_of_lines_returns_violations() -> anyhow::Result<()> {
-        let validator = LineCountValidator::new();
+        let validator = LineCountValidator;
         let context = validation_context(
             "example.py",
             r#"# <block line-count="<3">
@@ -333,7 +302,7 @@ mod tests {
 
     #[test]
     fn validate_with_correct_number_of_lines_returns_no_violations() -> anyhow::Result<()> {
-        let validator = LineCountValidator::new();
+        let validator = LineCountValidator;
         let context = validation_context(
             "example.py",
             r#"# <block line-count="<3">
@@ -376,7 +345,7 @@ mod tests {
 
     #[test]
     fn validate_with_blank_and_whitespace_only_lines_returns_no_violations() -> anyhow::Result<()> {
-        let validator = LineCountValidator::new();
+        let validator = LineCountValidator;
         let context = validation_context(
             "example.py",
             r#"# <block line-count="<=4">
@@ -426,7 +395,7 @@ c = 3
 # </block>"#,
         );
 
-        let report = LineCountValidator::new().validate(context)?;
+        let report = LineCountValidator.validate(context)?;
 
         // The block without a line-count attribute is not checked, so it records nothing.
         assert_eq!(checked_lines(&report), vec![1, 4]);

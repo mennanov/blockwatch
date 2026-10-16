@@ -1,9 +1,8 @@
 use crate::blocks::{Block, BlockWithContext};
-use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    SyncValidator, ValidationReport, Validator, ValidatorDetector, ValidatorType, Violation,
-    ViolationRange, compile_pattern, regex_value, trimmed_line_value,
+    SyncValidator, ValidationReport, Validator, ValidatorType, Violation, ViolationRange,
+    compile_pattern, regex_value, trimmed_line_value,
 };
 use crate::{Position, validators};
 use std::collections::HashSet;
@@ -13,14 +12,7 @@ use std::sync::Arc;
 ///
 /// The attribute's value optionally supplies a regex selecting the part of each line that must be
 /// unique, which is how lists of ids or keys are checked without regard to the rest of the line.
-struct KeepUniqueValidator {}
-
-impl KeepUniqueValidator {
-    /// Creates a validator that ensures lines (or regex matches) within a block are unique.
-    fn new() -> Self {
-        Self {}
-    }
-}
+struct KeepUniqueValidator;
 
 impl SyncValidator for KeepUniqueValidator {
     fn validate(
@@ -100,33 +92,12 @@ impl SyncValidator for KeepUniqueValidator {
 }
 
 /// Selects [`KeepUniqueValidator`] for blocks carrying a `keep-unique` attribute.
-pub(super) struct KeepUniqueValidatorDetector();
-
-impl KeepUniqueValidatorDetector {
-    /// Creates the detector. Registered in [`validators::detector_factories`].
-    pub(super) fn new() -> Self {
-        Self {}
-    }
-}
-
-impl<Fs: FileSystem> ValidatorDetector<Fs> for KeepUniqueValidatorDetector {
-    fn detect(
-        &self,
-        block_with_context: &BlockWithContext,
-        _file_system: &Arc<Fs>,
-    ) -> anyhow::Result<Option<ValidatorType>> {
-        if block_with_context
-            .block
-            .attributes
-            .contains_key("keep-unique")
-        {
-            Ok(Some(ValidatorType::Sync(Box::new(
-                KeepUniqueValidator::new(),
-            ))))
-        } else {
-            Ok(None)
-        }
-    }
+pub(super) fn detect(block_with_context: &BlockWithContext) -> Option<ValidatorType> {
+    block_with_context
+        .block
+        .attributes
+        .contains_key("keep-unique")
+        .then(|| ValidatorType::Sync(Box::new(KeepUniqueValidator)))
 }
 
 fn create_violation(
@@ -169,7 +140,7 @@ mod validate_tests {
 
     #[test]
     fn block_with_a_duplicate_line_returns_a_violation_on_the_repeat() -> anyhow::Result<()> {
-        let validator = KeepUniqueValidator::new();
+        let validator = KeepUniqueValidator;
         let context = validation_context(
             "example.py",
             r#"# <block keep-unique>
@@ -205,7 +176,7 @@ BB
     #[test]
     fn duplicated_line_holding_non_ascii_returns_a_range_measured_in_characters()
     -> anyhow::Result<()> {
-        let validator = KeepUniqueValidator::new();
+        let validator = KeepUniqueValidator;
         let context = validation_context(
             "example.py",
             "# <block keep-unique>\ncafé\ncafé\n# </block>",
@@ -226,7 +197,7 @@ BB
 
     #[test]
     fn block_with_all_unique_lines_returns_no_violations() -> anyhow::Result<()> {
-        let validator = KeepUniqueValidator::new();
+        let validator = KeepUniqueValidator;
         let context = validation_context(
             "example.py",
             r#"# <block keep-unique>
@@ -250,7 +221,7 @@ C
             "/* <block\nkeep-unique> */\nA\nA\n/* </block> */",
         );
 
-        let violations = KeepUniqueValidator::new().validate(context)?.violations;
+        let violations = KeepUniqueValidator.validate(context)?.violations;
 
         let file_violations = violations
             .get(&RepoPath::from_reference("example.rs")?)
@@ -267,7 +238,7 @@ C
     #[test]
     fn pattern_with_a_named_group_returns_a_violation_for_a_duplicate_group_value()
     -> anyhow::Result<()> {
-        let validator = KeepUniqueValidator::new();
+        let validator = KeepUniqueValidator;
         let context = validation_context(
             "example.py",
             r#"# <block keep-unique="^ID:(?P<value>\d+)">
@@ -293,7 +264,7 @@ ID:1 C
 
     #[test]
     fn pattern_matches_within_the_trimmed_line() -> anyhow::Result<()> {
-        let validator = KeepUniqueValidator::new();
+        let validator = KeepUniqueValidator;
         // `^` and `$` anchor to the trimmed line, so entries keep matching once they are nested
         // inside a list or a block of code.
         let context = validation_context(
@@ -316,7 +287,7 @@ ID:1 C
 
     #[test]
     fn pattern_matching_empty_text_skips_blank_lines() -> anyhow::Result<()> {
-        let validator = KeepUniqueValidator::new();
+        let validator = KeepUniqueValidator;
         let context = validation_context(
             "example.py",
             "# <block keep-unique=\"(?P<value>.*)\">\nA\n\nB\n\n# </block>",
@@ -330,7 +301,7 @@ ID:1 C
 
     #[test]
     fn pattern_matching_empty_text_skips_the_line() -> anyhow::Result<()> {
-        let validator = KeepUniqueValidator::new();
+        let validator = KeepUniqueValidator;
         // An empty match carries no value to compare, so the line counts as unmatched rather than
         // as an entry that is equal to every other empty match.
         let context = validation_context(
@@ -346,7 +317,7 @@ ID:1 C
 
     #[test]
     fn pattern_with_a_value_group_not_in_the_match_skips_the_line() -> anyhow::Result<()> {
-        let validator = KeepUniqueValidator::new();
+        let validator = KeepUniqueValidator;
         // The `none` lines match the branch without the `value` group.
         let context = validation_context(
             "example.py",
@@ -366,7 +337,7 @@ red
     #[test]
     fn pattern_without_a_named_group_returns_a_violation_for_a_duplicate_whole_match()
     -> anyhow::Result<()> {
-        let validator = KeepUniqueValidator::new();
+        let validator = KeepUniqueValidator;
         let context = validation_context(
             "example.py",
             r#"# <block keep-unique="^ID:\d+">
@@ -392,7 +363,7 @@ ID:1 C
 
     #[test]
     fn pattern_with_a_line_break_returns_an_error() {
-        let validator = KeepUniqueValidator::new();
+        let validator = KeepUniqueValidator;
         let context = validation_context(
             "example.py",
             "# <block keep-unique=\"id = (?P<value>\\w+)\n# ok\">\nid = a ok\nid = a ok\n# </block>",
@@ -407,7 +378,7 @@ ID:1 C
 
     #[test]
     fn block_with_lines_not_matching_the_pattern_returns_no_violations() -> anyhow::Result<()> {
-        let validator = KeepUniqueValidator::new();
+        let validator = KeepUniqueValidator;
         let context = validation_context(
             "example.py",
             r#"# <block keep-unique="^ID:(?P<value>\d+)">
@@ -424,7 +395,7 @@ ID:2
 
     #[test]
     fn pattern_spaces_match_within_the_trimmed_line() -> anyhow::Result<()> {
-        let validator = KeepUniqueValidator::new();
+        let validator = KeepUniqueValidator;
         // Spaces the pattern asks for still have to be there inside the entry; the padding around
         // the entry is not part of what the pattern sees, so the same value written with and
         // without padding is one value.
@@ -450,7 +421,7 @@ ID:2
 
     #[test]
     fn block_with_blank_and_whitespace_only_lines_returns_no_violations() -> anyhow::Result<()> {
-        let validator = KeepUniqueValidator::new();
+        let validator = KeepUniqueValidator;
         let context = validation_context(
             "example.py",
             r#"# <block keep-unique>
@@ -472,7 +443,7 @@ C
 
     #[test]
     fn block_with_empty_content_returns_no_violations() -> anyhow::Result<()> {
-        let validator = KeepUniqueValidator::new();
+        let validator = KeepUniqueValidator;
         let context = validation_context(
             "example.py",
             r#"# <block keep-unique>
@@ -487,7 +458,7 @@ C
 
     #[test]
     fn context_without_any_blocks_returns_no_violations() -> anyhow::Result<()> {
-        let validator = KeepUniqueValidator::new();
+        let validator = KeepUniqueValidator;
         let context = Arc::new(validators::ValidationContext::new(
             HashMap::new(),
             HashMap::new(),
@@ -521,7 +492,7 @@ C
 # </block>"#,
         );
 
-        let report = KeepUniqueValidator::new().validate(context)?;
+        let report = KeepUniqueValidator.validate(context)?;
 
         // The block without a keep-unique attribute is not checked, so it records nothing.
         assert_eq!(checked_lines(&report), vec![1, 5]);
