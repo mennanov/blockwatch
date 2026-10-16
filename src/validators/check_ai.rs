@@ -58,8 +58,7 @@ impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
                 if let Some(condition) = block_with_context.block.attributes.get("check-ai") {
                     if condition.trim().is_empty() {
                         return Err(anyhow!(
-                            "check-ai requires a non-empty condition in {}:{} at {}",
-                            file_path.display(),
+                            "check-ai requires a non-empty condition in {file_path}:{} at {}",
                             block_with_context.block.name_display(),
                             block_with_context.block.declared_at()
                         ));
@@ -146,8 +145,7 @@ fn create_violation(
     ai_message: &str,
 ) -> anyhow::Result<Violation> {
     let error_message = format!(
-        "Block {}:{} defined at {} failed AI check: {ai_message}",
-        file_path.display(),
+        "Block {file_path}:{} defined at {} failed AI check: {ai_message}",
         block.name_display(),
         block.declared_at(),
     );
@@ -170,8 +168,7 @@ fn create_pattern_no_match_violation(
     pattern: &str,
 ) -> anyhow::Result<Violation> {
     let error_message = format!(
-        "Block {}:{} defined at {} was not checked: check-ai-pattern \"{pattern}\" matched nothing in the block",
-        file_path.display(),
+        "Block {file_path}:{} defined at {} was not checked: check-ai-pattern \"{pattern}\" matched nothing in the block",
         block.name_display(),
         block.declared_at(),
     );
@@ -233,8 +230,7 @@ impl<C: AiClient> CheckAiValidator<C> {
         result: anyhow::Result<Option<String>>,
     ) -> anyhow::Result<Option<Violation>> {
         match result.context(format!(
-            "check-ai API error in {}:{} at {}",
-            file_path.display(),
+            "check-ai API error in {file_path}:{} at {}",
             block_with_context.block.name_display(),
             block_with_context.block.declared_at()
         ))? {

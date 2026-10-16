@@ -479,8 +479,8 @@ fn ensure_target_files_exist<'v>(
 ) -> anyhow::Result<()> {
     for virtual_block in virtual_blocks {
         let file = &virtual_block.file;
-        if path_checker.should_allow(file)
-            && !path_checker.should_ignore(file)
+        if path_checker.should_allow(file.as_path())
+            && !path_checker.should_ignore(file.as_path())
             && !file_system.exists(file.as_path())
         {
             return Err(virtual_block.unresolved(anyhow!("file does not exist")));
@@ -504,7 +504,9 @@ fn ensure_diff_has_valid_paths(
     let mut invalid_path: Option<&RepoPath> = None;
     for file_path in line_changes_by_file.keys() {
         // Only paths this run would have opened count: past the filters, with a known extension.
-        if !path_checker.should_allow(file_path) || path_checker.should_ignore(file_path) {
+        if !path_checker.should_allow(file_path.as_path())
+            || path_checker.should_ignore(file_path.as_path())
+        {
             continue;
         }
         if parser_for_file_path(file_path.as_path(), parsers, extra_file_extensions).is_none() {
@@ -541,7 +543,9 @@ fn parse_all_files(
     for repo_path_result in file_system.walk(None) {
         let file_path =
             repo_path_result.map_err(|err| anyhow!("Failed to walk directory: {err}"))?;
-        if !path_checker.should_allow(&file_path) || path_checker.should_ignore(&file_path) {
+        if !path_checker.should_allow(file_path.as_path())
+            || path_checker.should_ignore(file_path.as_path())
+        {
             continue;
         }
         let line_changes = line_changes_by_file
@@ -581,7 +585,7 @@ pub(crate) fn checkable_files<'a>(
         .walk(None)
         .filter(move |file_path| match file_path {
             Ok(file_path) => {
-                !path_checker.should_ignore(file_path)
+                !path_checker.should_ignore(file_path.as_path())
                     && (parser_for_file_path(file_path.as_path(), parsers, extra_file_extensions)
                         .is_some()
                         || virtual_block_files.contains(file_path))
@@ -613,7 +617,9 @@ fn parse_changed_files(
     let files: HashSet<&RepoPath> = line_changes_by_file.keys().chain(entry_files).collect();
     let mut parsed = ParsedBlocks::default();
     for file_path in files {
-        if !path_checker.should_allow(file_path) || path_checker.should_ignore(file_path) {
+        if !path_checker.should_allow(file_path.as_path())
+            || path_checker.should_ignore(file_path.as_path())
+        {
             continue;
         }
         let line_changes = line_changes_by_file

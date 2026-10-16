@@ -72,9 +72,8 @@ impl ValidatorSync for KeepSortedValidator {
                     };
                     if keep_sorted_normalized != "asc" && keep_sorted_normalized != "desc" {
                         return Err(anyhow!(
-                            "keep-sorted expected values are \"asc\" or \"desc\", got \"{}\" in {}:{} at {}",
+                            "keep-sorted expected values are \"asc\" or \"desc\", got \"{}\" in {file_path}:{} at {}",
                             keep_sorted,
-                            file_path.display(),
                             block_with_context.block.name_display(),
                             block_with_context.block.declared_at()
                         ));
@@ -103,9 +102,8 @@ impl ValidatorSync for KeepSortedValidator {
                     } else {
                         SortFormat::from_str(format_raw).map_err(|_| {
                             anyhow!(
-                                "keep-sorted-format has an unsupported value \"{}\" in {}:{} at {}",
+                                "keep-sorted-format has an unsupported value \"{}\" in {file_path}:{} at {}",
                                 format_raw,
-                                file_path.display(),
                                 block_with_context.block.name_display(),
                                 block_with_context.block.declared_at()
                             )
@@ -133,8 +131,7 @@ impl ValidatorSync for KeepSortedValidator {
                             Some(Ok(regex)) => regex_value(line, regex),
                             Some(Err(e)) => {
                                 return Err(anyhow!(
-                                    "Invalid keep-sorted-pattern expression in block {}:{} defined at {}: {}",
-                                    file_path.display(),
+                                    "Invalid keep-sorted-pattern expression in block {file_path}:{} defined at {}: {}",
                                     block_with_context.block.name_display(),
                                     block_with_context.block.declared_at(),
                                     e
@@ -147,8 +144,7 @@ impl ValidatorSync for KeepSortedValidator {
                                 let cmp =
                                     sort_format.cmp(prev_val, curr_val).with_context(|| {
                                         format!(
-                                            "in block {}:{} defined at {}",
-                                            file_path.display(),
+                                            "in block {file_path}:{} defined at {}",
                                             block_with_context.block.name_display(),
                                             block_with_context.block.declared_at(),
                                         )
@@ -224,8 +220,7 @@ fn create_violation(
     violation_character_end: usize,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {}:{} defined at {} has an out-of-order line {violation_line_number} ({keep_sorted_value})",
-        block_file_path.display(),
+        "Block {block_file_path}:{} defined at {} has an out-of-order line {violation_line_number} ({keep_sorted_value})",
         block.name_display(),
         block.declared_at(),
     );

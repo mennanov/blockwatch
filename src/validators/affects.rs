@@ -118,10 +118,7 @@ impl<'a, Fs: FileSystem> TargetIndex<'a, Fs> {
                     .context
                     .parse_file(self.file_system, target_file)?
                     .ok_or_else(|| {
-                        anyhow!(
-                            "affects target file format is unsupported: {}",
-                            target_file.display()
-                        )
+                        anyhow!("affects target file format is unsupported: {target_file}")
                     })?;
                 entry.insert(name_index(&parsed))
             }
@@ -274,8 +271,7 @@ fn symbol_reference_violation<Fs: FileSystem>(
         Ok(target_modified) => target_modified,
         Err(reason) => {
             let message = format!(
-                "Block {}:{} at {} references {}: {reason}",
-                file_path.display(),
+                "Block {file_path}:{} at {} references {}: {reason}",
                 block.name_display(),
                 block.declared_at(),
                 target_display(target_file, Some(&target_name)),
@@ -311,10 +307,7 @@ fn file_reference_violation<Fs: FileSystem>(
     // A whole-file target is never parsed, so its existence is the only integrity signal there is;
     // a missing one aborts the run, as a missing file holding a named target does.
     if !targets.file_exists(target_file) {
-        return Err(anyhow!(
-            "affects target file does not exist: {}",
-            target_file.display()
-        ));
+        return Err(anyhow!("affects target file does not exist: {target_file}"));
     }
     if block_with_context.is_content_modified && !targets.file_modified(target_file) {
         return Ok(Some(create_violation(
@@ -377,8 +370,7 @@ fn create_violation(
     affected_block_name: Option<&str>,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {}:{} at {} is modified, but {} is not",
-        modified_block_file_path.display(),
+        "Block {modified_block_file_path}:{} at {} is modified, but {} is not",
         modified_block.name_display(),
         modified_block.declared_at(),
         target_display(affected_block_file_path, affected_block_name),
@@ -402,8 +394,7 @@ fn dangling_reference_violation(
     target_name: Option<&str>,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {}:{} at {} references {}, which does not exist",
-        referencing_block_file_path.display(),
+        "Block {referencing_block_file_path}:{} at {} references {}, which does not exist",
         referencing_block.name_display(),
         referencing_block.declared_at(),
         target_display(target_file_path, target_name),

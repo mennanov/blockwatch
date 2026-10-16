@@ -2,7 +2,6 @@ use crate::fs::FileSystem;
 use anyhow::{Context, anyhow, bail};
 use serde::{Serialize, Serializer};
 use std::fmt;
-use std::ops::Deref;
 use std::path::{Component, Path};
 use winnow::Result as PResult;
 use winnow::combinator::{alt, delimited, preceded, repeat};
@@ -145,10 +144,8 @@ impl RepoPath {
     }
 }
 
-impl Deref for RepoPath {
-    type Target = Path;
-
-    fn deref(&self) -> &Self::Target {
+impl AsRef<Path> for RepoPath {
+    fn as_ref(&self) -> &Path {
         self.as_path()
     }
 }
@@ -490,9 +487,12 @@ mod repo_path_tests {
     }
 
     #[test]
-    fn dereferences_to_a_path() -> anyhow::Result<()> {
+    fn borrows_as_a_path() -> anyhow::Result<()> {
         let path = RepoPath::from_relative(Path::new("a/b.py"))?;
-        assert_eq!(path.extension().and_then(|e| e.to_str()), Some("py"));
+        assert_eq!(
+            path.as_ref().extension().and_then(|e| e.to_str()),
+            Some("py")
+        );
         Ok(())
     }
 

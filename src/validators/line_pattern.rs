@@ -84,8 +84,7 @@ fn compile_attribute<'b>(
     };
     let re = compile_pattern(pattern).map_err(|e| {
         anyhow!(
-            "{attribute} expected a valid regular expression, got \"{pattern}\" in {}:{} at {} (error: {e})",
-            file_path.display(),
+            "{attribute} expected a valid regular expression, got \"{pattern}\" in {file_path}:{} at {} (error: {e})",
             block.name_display(),
             block.declared_at(),
         )
@@ -226,8 +225,7 @@ fn create_violation(
         ),
     };
     let message = format!(
-        "Block {}:{} defined at {} has {failure}",
-        block_file_path.display(),
+        "Block {block_file_path}:{} defined at {} has {failure}",
         block.name_display(),
         block.declared_at(),
     );

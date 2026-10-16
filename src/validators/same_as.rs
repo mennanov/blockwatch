@@ -489,10 +489,7 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
                     .context
                     .parse_file(self.file_system, target_file)?
                     .ok_or_else(|| {
-                        anyhow!(
-                            "same-as target file format is unsupported: {}",
-                            target_file.display()
-                        )
+                        anyhow!("same-as target file format is unsupported: {target_file}")
                     })?;
                 entry.insert(parsed)
             }
@@ -512,12 +509,10 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
         target_file: &RepoPath,
         pattern: Option<&String>,
     ) -> anyhow::Result<Vec<Record>> {
-        let content = self.files.content(target_file).with_context(|| {
-            format!(
-                "failed to read same-as target file: {}",
-                target_file.display()
-            )
-        })?;
+        let content = self
+            .files
+            .content(target_file)
+            .with_context(|| format!("failed to read same-as target file: {target_file}"))?;
         extract_items_from(content, pattern)
     }
 
@@ -833,8 +828,7 @@ fn create_violation(
     data: SameAsViolation<'_>,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {}:{} at {} disagrees with {target}: {}",
-        file_path.display(),
+        "Block {file_path}:{} at {} disagrees with {target}: {}",
         block.name_display(),
         block.declared_at(),
         data.reason,

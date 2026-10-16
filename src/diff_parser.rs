@@ -178,10 +178,7 @@ pub(crate) fn line_changes_from_diff(
             continue;
         }
         let changes = line_changes(&patched_file).with_context(|| {
-            format!(
-                "failed to extract line changes from the diff for \"{}\"",
-                target_path.display()
-            )
+            format!("failed to extract line changes from the diff for \"{target_path}\"")
         })?;
         result.insert(target_path, changes);
     }
@@ -778,7 +775,7 @@ index e69de29..215ed53 100644
         assert_eq!(
             line_changes
                 .keys()
-                .map(|k| k.to_str().unwrap())
+                .map(RepoPath::as_str)
                 .collect::<HashSet<_>>(),
             HashSet::from(["Cargo.toml", "src/main.rs", "src/differ.rs"])
         );

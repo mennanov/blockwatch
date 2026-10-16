@@ -63,8 +63,7 @@ impl ValidatorSync for KeepUniqueValidator {
                         Some(Err(e)) => {
                             // Invalid regex: return an error for the validator
                             return Err(anyhow::anyhow!(
-                                "Invalid keep-unique regex pattern for block {}:{} defined at {}: {}",
-                                file_path.display(),
+                                "Invalid keep-unique regex pattern for block {file_path}:{} defined at {}: {}",
                                 block_with_context.block.name_display(),
                                 block_with_context.block.declared_at(),
                                 e
@@ -139,8 +138,7 @@ fn create_violation(
     violation_character_end: usize,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {}:{} defined at {} has a duplicated line {}",
-        block_file_path.display(),
+        "Block {block_file_path}:{} defined at {} has a duplicated line {}",
         block.name_display(),
         block.declared_at(),
         violation_line_number,

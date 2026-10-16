@@ -818,9 +818,9 @@ fn parse_optional_repo_path(file_part: &str) -> anyhow::Result<Option<RepoPath>>
 fn target_display(file: &RepoPath, name: Option<&str>) -> String {
     match name {
         // A symbol path keeps its `#`, which already separates it from the file.
-        Some(name) if name.starts_with('#') => format!("{}{name}", file.display()),
-        Some(name) => format!("{}:{name}", file.display()),
-        None => format!("file {}", file.display()),
+        Some(name) if name.starts_with('#') => format!("{file}{name}"),
+        Some(name) => format!("{file}:{name}"),
+        None => format!("file {file}"),
     }
 }
 
@@ -871,12 +871,9 @@ impl<'a, Fs: FileSystem> TargetFiles<'a, Fs> {
         file: &RepoPath,
         path: &SymbolPath,
     ) -> anyhow::Result<(&str, TargetResult<&Symbol>)> {
-        let (content, symbols) = self.content_and_symbols(file).with_context(|| {
-            format!(
-                "failed to resolve symbol reference {}#{path}",
-                file.display()
-            )
-        })?;
+        let (content, symbols) = self
+            .content_and_symbols(file)
+            .with_context(|| format!("failed to resolve symbol reference {file}#{path}"))?;
         let resolution = resolve(symbols, path).map_err(|error| error.reason(content));
         Ok((content, resolution))
     }

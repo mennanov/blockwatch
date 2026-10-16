@@ -112,8 +112,7 @@ impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
                 if let Some(script_path) = block_with_context.block.attributes.get("check-lua") {
                     if script_path.trim().is_empty() {
                         return Err(anyhow!(
-                            "check-lua requires a non-empty script path in {}:{} at {}",
-                            file_path.display(),
+                            "check-lua requires a non-empty script path in {file_path}:{} at {}",
                             block_with_context.block.name_display(),
                             block_with_context.block.declared_at()
                         ));
@@ -163,8 +162,7 @@ impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
                     .await;
 
                     let block_violations = match result.context(format!(
-                        "check-lua script error in {}:{} at {}",
-                        file_path.display(),
+                        "check-lua script error in {file_path}:{} at {}",
                         block_with_context.block.name_display(),
                         block_with_context.block.declared_at()
                     ))? {
@@ -465,8 +463,7 @@ fn create_violation(
     })
     .context("failed to serialize CheckLuaDetails")?;
     let message = format!(
-        "Block {}:{} defined at {} failed Lua check: {error_message}",
-        file_path.display(),
+        "Block {file_path}:{} defined at {} failed Lua check: {error_message}",
         block.name_display(),
         block.declared_at(),
     );
