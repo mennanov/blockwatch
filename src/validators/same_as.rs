@@ -72,7 +72,7 @@ impl<Fs: FileSystem + 'static> ValidatorSync for SameAsValidator<Fs> {
 /// are held to. Built once per block and reused for each of its references.
 struct Comparison {
     mode: Mode,
-    format: Format,
+    formats: Formats,
     /// `Err` carries the reason the block's own items could not be canonicalized. It is reported
     /// against every reference the block makes rather than aborting the run, since content that does
     /// not meet the asserted shape is a violation like any other.
@@ -84,12 +84,12 @@ struct Comparison {
 
 impl Comparison {
     fn new(block: &Block, file_content: &str) -> anyhow::Result<Self> {
-        let format = parse_format(block)?;
+        let formats = parse_formats(block)?;
         Ok(Self {
             mode: parse_mode(block)?,
-            source_items: canonicalize(extract_items(block, file_content)?, &format),
+            source_items: canonicalize(extract_items(block, file_content)?, &formats),
             pattern: block.attributes.get("same-as-pattern").cloned(),
-            format,
+            formats,
         })
     }
 
@@ -99,7 +99,7 @@ impl Comparison {
             Err(reason) => Some(reason.clone()),
             Ok(source) => {
                 groups_disagreement(source, &target_items).or_else(|| {
-                    match canonicalize(target_items, &self.format) {
+                    match canonicalize(target_items, &self.formats) {
                         Err(reason) => Some(reason),
                         Ok(target) => disagreement(source, &target, &self.mode),
                     }
@@ -117,7 +117,12 @@ fn block_violations<Fs: FileSystem>(
     file_content: &str,
     block: &Block,
 ) -> anyhow::Result<Vec<Violation>> {
-    let comparison = Comparison::new(block, file_content)?;
+    let comparison = Comparison::new(block, file_content).with_context(|| {
+        format!(
+            "invalid same-as attributes on {}",
+            block_display(file_path, block)
+        )
+    })?;
     let mut violations = Vec::new();
     if let Some(same_as) = block.attributes.get("same-as") {
         for reference in parse_references(file_path, block, same_as)? {
@@ -275,6 +280,10 @@ fn reference_violation<Fs: FileSystem>(
         .transpose()
 }
 
+/// The group of a whole match, or of a block's whole content. It is the name of the group that
+/// picks the value in every `*-pattern` attribute, so `(?P<value>\d+)` and `\d+` give equal records.
+const WHOLE_GROUP: &str = "value";
+
 /// One match of a `same-as-pattern`: the text of each of its named groups.
 ///
 /// A pattern without named groups, or no pattern at all, gives the one group `value`, so it can be
@@ -291,7 +300,7 @@ impl Record {
     /// The record of a whole match, or of a block's whole content: the one group `value`.
     fn whole(text: String) -> Self {
         Self {
-            values: BTreeMap::from([("value".to_string(), text)]),
+            values: BTreeMap::from([(WHOLE_GROUP.to_string(), text)]),
         }
     }
 
@@ -353,8 +362,7 @@ fn extract_items_from(content: &str, pattern: Option<&String>) -> anyhow::Result
     let Some(pattern) = pattern else {
         return Ok(vec![Record::whole(normalize_content(content))]);
     };
-    let regex = compile_pattern(pattern)
-        .map_err(|e| anyhow!("same-as-pattern is not a valid regex ({pattern}): {e}"))?;
+    let regex = same_as_regex(pattern)?;
     let groups: Vec<&str> = regex.capture_names().flatten().collect();
     Ok(content
         .lines()
@@ -364,6 +372,30 @@ fn extract_items_from(content: &str, pattern: Option<&String>) -> anyhow::Result
                 .filter_map(|captures| record(&groups, &captures))
         })
         .collect())
+}
+
+/// Compiles a `same-as-pattern`.
+fn same_as_regex(pattern: &str) -> anyhow::Result<regex::Regex> {
+    compile_pattern(pattern)
+        .map_err(|e| anyhow!("same-as-pattern is not a valid regex ({pattern}): {e}"))
+}
+
+/// The groups of every record that `pattern` gives: its named groups, or [`WHOLE_GROUP`] when it
+/// has none or when there is no pattern.
+fn pattern_groups(pattern: Option<&String>) -> anyhow::Result<Vec<String>> {
+    let groups: Vec<String> = match pattern {
+        Some(pattern) => same_as_regex(pattern)?
+            .capture_names()
+            .flatten()
+            .map(str::to_string)
+            .collect(),
+        None => Vec::new(),
+    };
+    Ok(if groups.is_empty() {
+        vec![WHOLE_GROUP.to_string()]
+    } else {
+        groups
+    })
 }
 
 /// The record of one match: the text of each group in `groups`, or the whole match when `groups`
@@ -526,30 +558,88 @@ enum Format {
     Flat,
 }
 
-/// Reads a block's `same-as-format` attribute, defaulting to [`Format::Verbatim`]. An unrecognized
-/// value is an error, mirroring [`parse_mode`].
-fn parse_format(block: &Block) -> anyhow::Result<Format> {
-    match block.attributes.get("same-as-format").map(String::as_str) {
-        None => Ok(Format::Verbatim),
-        Some("numeric") => Ok(Format::Numeric),
-        Some("identifier") => Ok(Format::Identifier),
-        Some("flat") => Ok(Format::Flat),
-        Some(other) => Err(anyhow!(
+/// Parses one format, such as `numeric`. An unrecognized value is an error, mirroring
+/// [`parse_mode`].
+fn parse_format(value: &str) -> anyhow::Result<Format> {
+    match value {
+        "numeric" => Ok(Format::Numeric),
+        "identifier" => Ok(Format::Identifier),
+        "flat" => Ok(Format::Flat),
+        other => Err(anyhow!(
             "invalid same-as-format \"{other}\" (expected numeric, identifier or flat)"
         )),
     }
 }
 
-/// Canonicalizes every value of `records` under `format` ahead of comparison (see
+/// The format of each group of a block's records.
+enum Formats {
+    /// One format for every group.
+    All(Format),
+    /// A format for some groups, by group name. Every other group is compared as written, which
+    /// is the strictest comparison, so a group left out can't hide a difference.
+    ByGroup(HashMap<String, Format>),
+}
+
+impl Formats {
+    /// The format of `group`.
+    fn of(&self, group: &str) -> &Format {
+        match self {
+            Formats::All(format) => format,
+            Formats::ByGroup(formats) => formats.get(group).unwrap_or(&Format::Verbatim),
+        }
+    }
+}
+
+/// Reads a block's `same-as-format` attribute: one format for every group, such as `numeric`, or
+/// a format for some groups, such as `name:identifier,value:numeric`. Without the attribute, every
+/// group is compared as written.
+///
+/// # Errors
+/// Returns an error for an unknown format, for an attribute that mixes the two forms, and for a
+/// group that the block's `same-as-pattern` doesn't have.
+fn parse_formats(block: &Block) -> anyhow::Result<Formats> {
+    let Some(attribute) = block.attributes.get("same-as-format") else {
+        return Ok(Formats::All(Format::Verbatim));
+    };
+    if !attribute.contains(':') {
+        return Ok(Formats::All(parse_format(attribute)?));
+    }
+    let groups = pattern_groups(block.attributes.get("same-as-pattern"))?;
+    attribute
+        .split(',')
+        .map(|entry| {
+            let (group, format) = entry.trim().split_once(':').ok_or_else(|| {
+                anyhow!(
+                    "invalid same-as-format \"{attribute}\" (expected one format, or group:format \
+                     entries such as value:numeric)"
+                )
+            })?;
+            // A typo in a group would otherwise compare that group as written, with no sign that
+            // its format is lost.
+            if !groups.iter().any(|known| known == group) {
+                bail!(
+                    "same-as-format refers to group \"{group}\", which same-as-pattern doesn't have"
+                );
+            }
+            Ok((group.to_string(), parse_format(format)?))
+        })
+        .collect::<anyhow::Result<_>>()
+        .map(Formats::ByGroup)
+}
+
+/// Canonicalizes every value of `records` under the format of its group ahead of comparison (see
 /// [`canonicalize_value`]). Returns `Err` with the reason of the first value that fails.
-fn canonicalize(records: Vec<Record>, format: &Format) -> Result<Vec<Record>, String> {
+fn canonicalize(records: Vec<Record>, formats: &Formats) -> Result<Vec<Record>, String> {
     records
         .into_iter()
         .map(|record| {
             let values = record
                 .values
                 .into_iter()
-                .map(|(group, value)| Ok((group, canonicalize_value(value, format)?)))
+                .map(|(group, value)| {
+                    let value = canonicalize_value(value, formats.of(&group))?;
+                    Ok((group, value))
+                })
                 .collect::<Result<_, String>>()?;
             Ok(Record { values })
         })
@@ -1231,8 +1321,8 @@ ids = 1, 2
 
         let err = validator(&[]).validate(context).unwrap_err();
         assert!(
-            err.to_string().contains("line break"),
-            "unexpected error: {err}"
+            format!("{err:#}").contains("line break"),
+            "unexpected error: {err:#}"
         );
     }
 
@@ -1650,15 +1740,179 @@ cafe
     }
 
     #[test]
-    fn unknown_same_as_format_value_returns_an_error() -> anyhow::Result<()> {
+    fn unknown_same_as_format_value_returns_an_error() {
         // Unlike bad content, an unrecognized `same-as-format` value is an authoring error and
-        // aborts the run, mirroring how an unknown `same-as-mode` is handled.
+        // aborts the run, mirroring how an unknown `same-as-mode` is handled. The error shows the
+        // block, because nothing else in it leads to the tag.
         let context = validation_context(
             "a.rs",
             "// <block same-as=\":b\" same-as-format=\"number\">\n1\n// </block>\n// <block name=\"b\">\n1\n// </block>",
         );
-        assert!(validator(&[]).validate(context).is_err());
+
+        let error = validator(&[]).validate(context).unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "invalid same-as attributes on block a.rs:(unnamed) at line 1: invalid same-as-format \
+             \"number\" (expected numeric, identifier or flat)"
+        );
+    }
+
+    #[test]
+    fn one_format_with_several_groups_applies_to_every_group() -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-format="numeric" same-as-pattern="(?P<name>\w+) = (?P<value>\d+)">
+red = 1
+# </block>
+# <block name="b" same-as-pattern="(?P<name>\w+): (?P<value>\d+)">
+red: 1
+# </block>
+"#,
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0]
+                .message
+                .ends_with(r#"same-as-format=numeric but "red" is not a number"#),
+            "unexpected message: {}",
+            file[0].message
+        );
         Ok(())
+    }
+
+    #[test]
+    fn format_for_one_group_compares_the_other_groups_as_written() -> anyhow::Result<()> {
+        // `1.0` reads as the number 1, but `Red` and `red` differ as written.
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-format="value:numeric" same-as-pattern="(?P<name>\w+) = (?P<value>\d+)">
+Red = 1
+# </block>
+# <block name="b" same-as-pattern="(?P<name>\w+): (?P<value>[\d.]+)">
+red: 1.0
+# </block>
+"#,
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0]
+                .message
+                .ends_with(r#"[{name: "Red", value: "1"}] != [{name: "red", value: "1"}]"#),
+            "unexpected message: {}",
+            file[0].message
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn formats_for_several_groups_return_no_violations() -> anyhow::Result<()> {
+        // A space after the comma is allowed, as it is between `same-as` targets.
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-format="name:identifier, value:numeric" same-as-pattern="(?P<name>\w+) = (?P<value>\d+)">
+RedColor = 1
+# </block>
+# <block name="b" same-as-pattern="(?P<name>[\w-]+): (?P<value>[\d.]+)">
+red-color: 1.0
+# </block>
+"#,
+        );
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn format_for_the_value_group_of_a_block_without_a_pattern_returns_no_violations()
+    -> anyhow::Result<()> {
+        // Without a pattern, the whole content is the one group `value`.
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-format="value:numeric">
+1
+# </block>
+# <block name="b">
+1.0
+# </block>
+"#,
+        );
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn format_for_a_group_the_pattern_does_not_have_returns_an_error() {
+        // A typo in a group name would otherwise compare that group as written, with no sign that
+        // its format is lost.
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-format="vaule:numeric" same-as-pattern="(?P<name>\w+) = (?P<value>\d+)">
+red = 1
+# </block>
+# <block name="b" same-as-pattern="(?P<name>\w+): (?P<value>\d+)">
+red: 1
+# </block>
+"#,
+        );
+
+        let error = validator(&[]).validate(context).unwrap_err();
+
+        assert!(
+            format!("{error:#}").ends_with(
+                r#"same-as-format refers to group "vaule", which same-as-pattern doesn't have"#
+            ),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn unknown_format_for_a_group_returns_an_error() {
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-format="value:numbr">
+1
+# </block>
+# <block name="b">
+1
+# </block>
+"#,
+        );
+
+        let error = validator(&[]).validate(context).unwrap_err();
+
+        assert!(
+            format!("{error:#}").ends_with(
+                r#"invalid same-as-format "numbr" (expected numeric, identifier or flat)"#
+            ),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn one_format_mixed_with_formats_for_groups_returns_an_error() {
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-format="identifier,value:numeric" same-as-pattern="(?P<name>\w+) = (?P<value>\d+)">
+red = 1
+# </block>
+# <block name="b" same-as-pattern="(?P<name>\w+): (?P<value>\d+)">
+red: 1
+# </block>
+"#,
+        );
+
+        let error = validator(&[]).validate(context).unwrap_err();
+
+        assert!(
+            format!("{error:#}").ends_with(
+                r#"invalid same-as-format "identifier,value:numeric" (expected one format, or group:format entries such as value:numeric)"#
+            ),
+            "unexpected error: {error:#}"
+        );
     }
 
     #[test]

@@ -16,8 +16,10 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 - `same-as-pattern` can compare a key with its value. Every named group, such as `(?P<code>\d+)` and
   `(?P<message>.+)`, takes part, and each match is one record. So a message that moves to another code fails, even
-  though the messages alone still agree. Both patterns need the same groups. See
-  [Compare several groups](docs/validators/same-as.md#compare-several-groups)
+  though the messages alone still agree. Both patterns need the same groups. Each group can have its own
+  `same-as-format`, such as `name:identifier,value:numeric`. See
+  [Compare several groups](docs/validators/same-as.md#compare-several-groups) and
+  [A format for each group](docs/validators/same-as.md#a-format-for-each-group)
   ([#99](https://github.com/mennanov/blockwatch/issues/99)).
 
 ### Changed
@@ -25,6 +27,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - A `same-as-pattern` with named groups other than `value` now compares them too. Before, only `value` counted, or the
   whole match when the pattern had no `value` group. To keep comparing only `value`, change the other groups to
   `(?:…)`.
+- An error about the `same-as-mode`, `same-as-format` or `same-as-pattern` of a block with `same-as` or
+  `same-as-paths` now shows the block, such as `invalid same-as attributes on block src/config.rs:limits at line 3`.
+  Before, it showed only the bad value.
 
 ## [0.13.0] - 2026-10-15
 

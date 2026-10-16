@@ -8,13 +8,13 @@ It runs on every scan, with or without a diff.
 
 ## Syntax
 
-| Attribute         | Value                                               | Default           |
-|-------------------|-----------------------------------------------------|-------------------|
-| `same-as`         | One or more [targets](#targets), comma-separated    | —                 |
-| `same-as-paths`   | A [glob](#paths-as-targets) of paths to compare     | —                 |
-| `same-as-pattern` | A regex that picks the values to compare            | the whole content |
-| `same-as-mode`    | `set`, `sequence`, `single` or `subset`             | `set`             |
-| `same-as-format`  | `numeric`, `identifier` or `flat`                   | text              |
+| Attribute         | Value                                                                                | Default           |
+|-------------------|--------------------------------------------------------------------------------------|-------------------|
+| `same-as`         | One or more [targets](#targets), comma-separated                                     | —                 |
+| `same-as-paths`   | A [glob](#paths-as-targets) of paths to compare                                      | —                 |
+| `same-as-pattern` | A regex that picks the values to compare                                             | the whole content |
+| `same-as-mode`    | `set`, `sequence`, `single` or `subset`                                              | `set`             |
+| `same-as-format`  | `numeric`, `identifier` or `flat`, or [one for each group](#a-format-for-each-group) | text              |
 
 ## Targets
 
@@ -108,7 +108,7 @@ The run reports:
   with a pattern whose only group is `value`.
 - **A match is skipped when one of its groups is not in the match, or is empty.**
 - **A record must fit on one line,** because the pattern reads one line at a time.
-- **`same-as-format` applies to every group.**
+- **`same-as-format` applies to every group,** unless you give [each group its own](#a-format-for-each-group).
 - **To group part of a pattern without comparing it, use `(?:…)`.** It captures nothing.
 
 ### Lines are not part of the comparison
@@ -325,6 +325,34 @@ plain `s`, so `policies.yaml` gives `policie`, which doesn't equal `Policy`.
 - **Digits and accents count.** `Version2` equals `version-2`, but not `version`. `CAFÉ` equals `café`, but not `cafe`.
 - **Messages show each value as it is compared,** such as `crontab`.
 
+## A format for each group
+
+With [several groups](#compare-several-groups), each group can have its own format. Write `group:format` entries,
+separated by commas. Here the names differ in style and the numbers differ in spelling:
+
+```rust
+// <block same-as="docs/config.md:defaults" same-as-format="name:identifier,value:numeric" same-as-pattern="const (?P<name>\w+): \w+ = (?P<value>[\d.]+);">
+const MAX_RETRIES: u32 = 3;
+const TIMEOUT_SECS: f64 = 2.0;
+// </block>
+```
+
+```markdown
+<!-- <block name="defaults" same-as-pattern="^- `(?P<name>[a-z-]+)`: (?P<value>[\d.]+)$"> -->
+- `max-retries`: 3
+- `timeout-secs`: 2
+<!-- </block> -->
+```
+
+- **A group without an entry is compared as written.** With `same-as-format="value:numeric"`, `MAX_RETRIES` and
+  `max-retries` differ.
+- **A format without a group applies to every group.** With `same-as-format="numeric"`, the run reports that
+  `MAX_RETRIES` is not a number.
+- **The two forms don't mix.** `identifier,value:numeric` is an error.
+- **Each group must be a group of this block's pattern.** Otherwise the run stops, so a typo can't go unnoticed. A
+  block without a pattern, or a pattern without named groups, has the one group `value`. So `value:numeric` works
+  there too.
+
 ## Notes
 
 - **Which block's attributes count.** The referencing block's `same-as-mode` and `same-as-format` decide how to compare.
@@ -333,9 +361,9 @@ plain `s`, so `policies.yaml` gives `policie`, which doesn't equal `Policy`.
 - **Violations:** a missing block, a missing or repeated key, a value that is not a number under `numeric`, a `single`
   side without exactly one value, a pattern that matches nothing on either side, two patterns with different groups,
   and a `same-as-paths` glob that matches no path. Two empty sides do not count as equal.
-- **Errors that stop the run:** an unknown `same-as-mode` or `same-as-format`, an invalid regex or glob,
-  `same-as-paths` without `same-as-pattern`, a missing target file, and a symbol in a file with a syntax error, without
-  symbols, or with several YAML documents.
+- **Errors that stop the run:** an unknown `same-as-mode` or `same-as-format`, a `same-as-format` entry for a group
+  that the pattern doesn't have, an invalid regex or glob, `same-as-paths` without `same-as-pattern`, a missing target
+  file, and a symbol in a file with a syntax error, without symbols, or with several YAML documents.
 - **Run it on the whole tree now and then.** `same-as` needs no diff, so a plain `blockwatch` run catches drift that
   `--only-changed` misses. See [CI integration](../ci.md).
 - **A rename alone goes unnoticed in a diff.** Renaming a target file without changing it (a plain `git mv`) gives
