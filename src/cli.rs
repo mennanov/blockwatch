@@ -1,4 +1,3 @@
-use crate::blocks;
 use crate::blocks::BlockSeverity;
 use crate::config;
 use crate::diff_parser::{self, DiffChanges};
@@ -9,6 +8,7 @@ use crate::path_arguments::PathArguments;
 use crate::repo_path::RepoPath;
 use crate::report;
 use crate::sarif;
+use crate::scan;
 use crate::settings::Settings;
 use crate::validators;
 use crate::validators::Violation;
@@ -120,7 +120,7 @@ struct Prepared {
     file_system: Arc<crate::fs::FileSystemImpl>,
     settings: Settings,
     context: validators::ValidationContext,
-    scan_stats: blocks::ScanStats,
+    scan_stats: scan::ScanStats,
 }
 
 /// Finds the repository root, reads the diff and the config file, and parses every block in scope.
@@ -180,7 +180,7 @@ fn write_report(
     verbosity: flags::Verbosity,
     mode: report::RunMode,
     blocks_needing_diff: Option<usize>,
-    scan_stats: blocks::ScanStats,
+    scan_stats: scan::ScanStats,
     context: &validators::ValidationContext,
     log: &validators::ValidationLog,
 ) -> anyhow::Result<()> {
@@ -216,15 +216,15 @@ fn write_line(mut output: impl Write, text: &str) -> anyhow::Result<()> {
     }
 }
 
-/// Decides the [`ScanMode`] and extracts the [`DiffChanges`] from the diff (if any).
+/// Decides the [`scan::ScanMode`] and extracts the [`DiffChanges`] from the diff (if any).
 fn run_inputs(
     args: &flags::Args,
     file_system: &impl FileSystem,
-) -> anyhow::Result<(blocks::ScanMode, DiffChanges)> {
+) -> anyhow::Result<(scan::ScanMode, DiffChanges)> {
     let scan_mode = if args.only_changed {
-        blocks::ScanMode::OnlyChanged
+        scan::ScanMode::OnlyChanged
     } else {
-        blocks::ScanMode::All
+        scan::ScanMode::All
     };
     if !args.diff {
         return Ok((scan_mode, DiffChanges::default()));
@@ -262,11 +262,11 @@ fn build_context(
     args: &flags::Args,
     settings: &Settings,
     virtual_blocks: Vec<VirtualBlock>,
-    scan_mode: blocks::ScanMode,
+    scan_mode: scan::ScanMode,
     modified_lines_by_file: DiffChanges,
     language_parsers: language_parsers::LanguageParsers,
     file_system: &impl FileSystem,
-) -> anyhow::Result<(validators::ValidationContext, blocks::ScanStats)> {
+) -> anyhow::Result<(validators::ValidationContext, scan::ScanStats)> {
     let path_arguments = PathArguments::resolve(args.path_arguments(), file_system)?;
     let path_filter = crate::fs::PathFilter::new(
         path_arguments.allowed_globs()?,
@@ -274,7 +274,7 @@ fn build_context(
     );
     let language_parsers = language_parsers.with_extension_mappings(settings.extensions().clone());
 
-    let scan = blocks::Scan::new(
+    let scan = scan::Scan::new(
         file_system,
         &path_filter,
         &language_parsers,
@@ -283,10 +283,10 @@ fn build_context(
     let parsed = scan.parse_blocks(&modified_lines_by_file, scan_mode)?;
     let scanned_files = parsed.scanned_files.iter().cloned().map(Ok);
     match scan_mode {
-        blocks::ScanMode::All => path_arguments.ensure_each_matches(scanned_files)?,
+        scan::ScanMode::All => path_arguments.ensure_each_matches(scanned_files)?,
         // The scan read only the files in the diff. An argument that selects none of them still
         // passes when it selects a file that the diff doesn't touch.
-        blocks::ScanMode::OnlyChanged => {
+        scan::ScanMode::OnlyChanged => {
             path_arguments.ensure_each_matches(scanned_files.chain(scan.checkable_files()))?
         }
     }

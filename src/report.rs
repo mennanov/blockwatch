@@ -1,8 +1,8 @@
 //! Builds the report that `--verbosity` prints: the files a run scanned, the blocks it found, and
 //! the validators that checked them.
 
-use crate::blocks::ScanStats;
 use crate::repo_path::RepoPath;
+use crate::scan::ScanStats;
 use crate::validators::{ValidationContext, ValidationLog};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -160,12 +160,12 @@ fn counted(count: usize, one: &str, many: &str) -> String {
 mod tests {
     use super::*;
     use crate::Position;
-    use crate::blocks::{Scan, ScanMode};
     use crate::diff_parser::DiffChanges;
     use crate::fs::PathFilter;
     use crate::fs::test_utils::FakeFileSystem;
     use crate::language_parsers::{LanguageParsers, language_parsers};
     use crate::repo_path::RepoPath;
+    use crate::scan::{Scan, ScanMode};
     use crate::test_utils::{validation_context, virtual_block};
     use crate::validators::{
         ValidationLog, ValidationReport, Validator, Violation, ViolationRange,

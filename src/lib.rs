@@ -9,7 +9,7 @@ use serde::Serialize;
 use std::ffi::OsStr;
 
 mod block_parser;
-/// The `Block` type and the repository scan that turns source files into blocks to validate.
+/// The `Block` type and the other types that describe the blocks of a file.
 mod blocks;
 /// The whole run: reads the flags and the input, runs the validators or `list`, and writes the
 /// output.
@@ -34,6 +34,8 @@ mod repo_path;
 mod report;
 /// Renders the violations of a run as a SARIF log, the format code-scanning services read.
 mod sarif;
+/// The repository scan that turns source files into the blocks to validate.
+mod scan;
 /// Project settings: how they are validated, and how the flags and the config file are merged.
 mod settings;
 /// `SymbolPath`: a parsed and validated symbol path. It follows RFC 6901 and adds filters, such as
@@ -137,12 +139,13 @@ mod count_rust_blocks_tests {
 
 #[cfg(test)]
 mod test_utils {
-    use crate::blocks::{BlockSeverity, Scan, ScanMode};
+    use crate::blocks::BlockSeverity;
     use crate::diff_parser::{DiffChanges, LineChange, LineChangeKind};
     use crate::fs::PathFilter;
     use crate::fs::test_utils::FakeFileSystem;
     use crate::language_parsers;
     use crate::repo_path::RepoPath;
+    use crate::scan::{Scan, ScanMode};
     use crate::symbol_path::SymbolPath;
     use crate::validators::ValidationContext;
     use crate::virtual_blocks::{ConfigEntry, Locator, VirtualBlock};

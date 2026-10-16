@@ -8,13 +8,12 @@ mod line_pattern;
 mod same_as;
 
 use crate::Position;
-use crate::blocks::{
-    self, Block, BlockAddress, BlockKey, BlockSeverity, BlockWithContext, FileBlocks, ScanMode,
-};
+use crate::blocks::{Block, BlockAddress, BlockKey, BlockSeverity, BlockWithContext, FileBlocks};
 use crate::diff_parser::DiffChanges;
 use crate::fs::FileSystem;
 use crate::language_parsers::LanguageParsers;
 use crate::repo_path::RepoPath;
+use crate::scan::{self, ScanMode};
 use crate::settings::{BlockSelection, ValidatorSelection};
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{Symbol, resolve};
@@ -514,7 +513,7 @@ impl ValidationContext {
             .iter()
             .filter(|virtual_block| virtual_block.file == *file_path)
             .collect();
-        blocks::parse_file(
+        scan::parse_file(
             file_system,
             file_path.as_path(),
             self.line_changes.for_file(file_path),
