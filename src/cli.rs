@@ -65,7 +65,7 @@ fn run_skill() -> anyhow::Result<()> {
 /// Runs the `list` subcommand: parses every block in scope and writes a JSON report to stdout.
 fn run_list(args: &flags::Args) -> anyhow::Result<()> {
     let Prepared { context, .. } = prepare(args)?;
-    let report = context.to_serializable_report();
+    let report = context.listings();
     write_json(std::io::stdout(), &report).context("Failed to list blocks")
 }
 
@@ -188,7 +188,7 @@ fn write_report(
         // Building the report walks every block, so skip it when nothing will be printed.
         return Ok(());
     }
-    let report = report::RunReport::new(mode, blocks_needing_diff, scan_stats, context, log)?;
+    let report = report::RunReport::new(mode, blocks_needing_diff, scan_stats, context, log);
     match verbosity {
         flags::Verbosity::None => Ok(()),
         flags::Verbosity::Summary => write_line(std::io::stdout(), &report.summary_line()),

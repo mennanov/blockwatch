@@ -1,11 +1,13 @@
 use crate::Position;
 use crate::diff_parser::{self, LineChange, LineChangeKind, LineChanges};
 use crate::repo_path::RepoPath;
+use crate::validators::Validator;
 use crate::virtual_blocks::ConfigEntry;
 use anyhow::{Context, anyhow, bail};
+use serde::Serialize;
 use serde_repr::Serialize_repr;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::ops::Range;
 use std::str::FromStr;
@@ -359,32 +361,6 @@ impl FileBlocks {
     pub(super) fn is_empty(&self) -> bool {
         self.blocks_with_context.is_empty()
     }
-
-    /// Converts the file blocks to a serializable report.
-    ///
-    /// The listing is already deterministic without a sorting pass:
-    /// [`crate::scan::parse_file`] keeps the blocks in source order.
-    pub(crate) fn to_serializable_report(&self) -> Vec<serde_json::Value> {
-        self.blocks_with_context
-            .iter()
-            .map(|block| {
-                // <block affects="docs/cli.md:list-output-example">
-                let mut listing = serde_json::json!({
-                    "name": block.block.name_display(),
-                    "line": block.block.start_tag_position_range.start.line,
-                    "column": block.block.start_tag_position_range.start.character,
-                    "is_content_modified": block.is_content_modified,
-                    "attributes": block.block.attributes,
-                });
-                match &block.block.declaration {
-                    Declaration::Tags => {}
-                    Declaration::ConfigEntry(entry) => listing["config_line"] = entry.line.into(),
-                }
-                // </block>
-                listing
-            })
-            .collect()
-    }
 }
 
 /// Represents a block with its corresponding validation context.
@@ -397,6 +373,52 @@ pub(crate) struct BlockWithContext {
     /// Whether the content of the block is modified (computed from the input diff). Validators such
     /// as `affects` fire only for blocks whose content actually changed.
     pub(crate) is_content_modified: bool,
+}
+
+// <block name="block-listing" affects="docs/cli.md:list-output-example">
+/// A block, as it is written in JSON.
+///
+/// serde writes the keys in the order the fields are declared, and the output keeps its keys
+/// sorted. So declare the fields in alphabetical order.
+#[derive(Serialize, Debug)]
+pub(crate) struct BlockListing<'a> {
+    /// A map that is sorted, because the attributes of a block are not.
+    attributes: BTreeMap<&'a str, &'a str>,
+    /// The validators that checked the block. `None` leaves the key out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) checks: Option<BTreeSet<Validator>>,
+    column: usize,
+    /// The line of the `[[block]]` entry that declares a virtual block. `None` for a block with
+    /// tags.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    config_line: Option<usize>,
+    is_content_modified: bool,
+    line: usize,
+    name: &'a str,
+}
+// </block>
+
+impl<'a> From<&'a BlockWithContext> for BlockListing<'a> {
+    /// Describes the block, with no `checks`.
+    fn from(block_with_context: &'a BlockWithContext) -> Self {
+        let block = &block_with_context.block;
+        Self {
+            attributes: block
+                .attributes
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str()))
+                .collect(),
+            checks: None,
+            column: block.start_tag_position_range.start.character,
+            config_line: match &block.declaration {
+                Declaration::Tags => None,
+                Declaration::ConfigEntry(entry) => Some(entry.line),
+            },
+            is_content_modified: block_with_context.is_content_modified,
+            line: block.start_tag_position_range.start.line,
+            name: block.name_display(),
+        }
+    }
 }
 
 const RECOGNIZED_ATTRIBUTES: &[&str] = &[
@@ -550,6 +572,67 @@ mod block_address_tests {
                 "{address}: {error:#}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod block_listing_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn block_with_context(
+        attributes: &[(&str, &str)],
+        declaration: Declaration,
+    ) -> BlockWithContext {
+        BlockWithContext {
+            block: Block {
+                attributes: attributes
+                    .iter()
+                    .map(|(name, value)| (name.to_string(), value.to_string()))
+                    .collect(),
+                start_tag_position_range: Position::new(2, 4)..Position::new(2, 30),
+                content: Content::source(0..0, Position::new(3, 1)..Position::new(3, 1)),
+                declaration,
+                severity: BlockSeverity::Error,
+            },
+            is_start_tag_modified: false,
+            is_content_modified: true,
+        }
+    }
+
+    #[test]
+    fn virtual_block_with_checks_is_written_with_its_keys_sorted() -> anyhow::Result<()> {
+        let block = block_with_context(
+            &[
+                ("name", "n"),
+                ("line-count", "<=3"),
+                ("keep-sorted", "asc"),
+                ("affects", "a.md:b"),
+            ],
+            Declaration::ConfigEntry(ConfigEntry {
+                file: PathBuf::from("blockwatch.toml"),
+                line: 7,
+            }),
+        );
+        let mut listing = BlockListing::from(&block);
+        listing.checks = Some(BTreeSet::from([Validator::KeepSorted]));
+
+        assert_eq!(
+            serde_json::to_string(&listing)?,
+            r#"{"attributes":{"affects":"a.md:b","keep-sorted":"asc","line-count":"<=3","name":"n"},"checks":["keep-sorted"],"column":4,"config_line":7,"is_content_modified":true,"line":2,"name":"n"}"#
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unnamed_block_with_tags_is_written_without_checks_and_config_line() -> anyhow::Result<()> {
+        let block = block_with_context(&[("keep-sorted", "asc")], Declaration::Tags);
+
+        assert_eq!(
+            serde_json::to_string(&BlockListing::from(&block))?,
+            r#"{"attributes":{"keep-sorted":"asc"},"column":4,"is_content_modified":true,"line":2,"name":"(unnamed)"}"#
+        );
+        Ok(())
     }
 }
 

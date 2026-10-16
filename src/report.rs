@@ -1,11 +1,12 @@
 //! Builds the report that `--verbosity` prints: the files a run scanned, the blocks it found, and
 //! the validators that checked them.
 
+use crate::blocks::BlockListing;
 use crate::repo_path::RepoPath;
 use crate::scan::ScanStats;
 use crate::validators::{ValidationContext, ValidationLog};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Which of the three run modes produced a report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,22 +61,22 @@ struct ReportSummary {
 /// Each block is described the same way the `list` subcommand describes it, plus the checks that
 /// ran on it.
 #[derive(Serialize, Debug)]
-pub(crate) struct RunReport {
+pub(crate) struct RunReport<'a> {
     summary: ReportSummary,
     /// `BTreeMap` is used for its deterministic sorting order.
-    files: BTreeMap<RepoPath, Vec<serde_json::Value>>,
+    files: BTreeMap<&'a RepoPath, Vec<BlockListing<'a>>>,
 }
 
-impl RunReport {
+impl<'a> RunReport<'a> {
     /// Builds a report from the run mode, the scan counts, the blocks in scope, and the checks that
     /// ran.
     pub(crate) fn new(
         mode: RunMode,
         blocks_needing_diff: Option<usize>,
         stats: ScanStats,
-        context: &ValidationContext,
+        context: &'a ValidationContext,
         log: &ValidationLog,
-    ) -> anyhow::Result<Self> {
+    ) -> Self {
         let mut checks = 0;
         let mut validators: BTreeMap<&'static str, usize> = BTreeMap::new();
         for blocks_in_file in log.checked_blocks.values() {
@@ -92,27 +93,24 @@ impl RunReport {
         let mut blocks_unchecked = 0;
         for (file_path, file_blocks) in context.blocks() {
             let checked_in_file = log.checked_blocks.get(file_path);
-            let mut listings = file_blocks.to_serializable_report();
-            // There is one listing for each block, in the same order.
-            for (block_with_context, listing) in
-                file_blocks.blocks_with_context.iter().zip(&mut listings)
-            {
+            let mut listings = Vec::with_capacity(file_blocks.blocks_with_context.len());
+            for block_with_context in &file_blocks.blocks_with_context {
                 blocks += 1;
+                let mut listing = BlockListing::from(block_with_context);
                 let key = block_with_context.block.key();
-                match checked_in_file.and_then(|blocks| blocks.get(&key)) {
-                    Some(block_validators) => {
-                        listing["checks"] = serde_json::to_value(block_validators)?;
-                    }
+                listing.checks = Some(match checked_in_file.and_then(|blocks| blocks.get(&key)) {
+                    Some(block_validators) => block_validators.clone(),
                     None => {
                         blocks_unchecked += 1;
-                        listing["checks"] = serde_json::json!([]);
+                        BTreeSet::new()
                     }
-                }
+                });
+                listings.push(listing);
             }
-            files.insert(file_path.clone(), listings);
+            files.insert(file_path, listings);
         }
 
-        Ok(Self {
+        Self {
             summary: ReportSummary {
                 mode,
                 files_scanned: stats.files_scanned,
@@ -126,7 +124,7 @@ impl RunReport {
                 validators,
             },
             files,
-        })
+        }
     }
 
     /// Returns the run totals as a single line of text.
@@ -234,7 +232,7 @@ mod tests {
             },
             &context,
             &log,
-        )?;
+        );
 
         assert_eq!(
             report.summary_line(),
@@ -262,7 +260,7 @@ mod tests {
             },
             &context,
             &log,
-        )?;
+        );
 
         assert_eq!(
             report.summary_line(),
@@ -290,7 +288,7 @@ mod tests {
             },
             &context,
             &log,
-        )?;
+        );
 
         let summary = &serde_json::to_value(&report)?["summary"];
         assert_eq!(summary.get("blocks_needing_diff"), None);
@@ -326,7 +324,7 @@ mod tests {
             },
             &context,
             &log,
-        )?;
+        );
 
         assert_eq!(
             serde_json::to_value(&report)?,
@@ -417,7 +415,7 @@ mod tests {
             log.add_validation_report(validator, report);
         }
 
-        let report = RunReport::new(RunMode::All, None, ScanStats::default(), &context, &log)?;
+        let report = RunReport::new(RunMode::All, None, ScanStats::default(), &context, &log);
 
         let checks: Vec<serde_json::Value> = serde_json::to_value(&report)?["files"]["a.toml"]
             .as_array()

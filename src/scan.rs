@@ -1827,12 +1827,11 @@ mod parse_blocks_tests {
             &virtual_blocks,
         )?;
 
-        let listed: Vec<(serde_json::Value, Option<serde_json::Value>)> = blocks
-            [&RepoPath::from_reference("a.json")?]
-            .to_serializable_report()
-            .into_iter()
-            .map(|listing| (listing["name"].clone(), listing.get("config_line").cloned()))
-            .collect();
+        let mut listed = Vec::new();
+        for block in &blocks[&RepoPath::from_reference("a.json")?].blocks_with_context {
+            let listing = serde_json::to_value(BlockListing::from(block))?;
+            listed.push((listing["name"].clone(), listing.get("config_line").cloned()));
+        }
         assert_eq!(
             listed,
             vec![

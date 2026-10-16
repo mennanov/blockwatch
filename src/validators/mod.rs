@@ -8,7 +8,9 @@ mod line_pattern;
 mod same_as;
 
 use crate::Position;
-use crate::blocks::{Block, BlockAddress, BlockKey, BlockSeverity, BlockWithContext, FileBlocks};
+use crate::blocks::{
+    Block, BlockAddress, BlockKey, BlockListing, BlockSeverity, BlockWithContext, FileBlocks,
+};
 use crate::diff_parser::DiffChanges;
 use crate::fs::FileSystem;
 use crate::language_parsers::LanguageParsers;
@@ -528,14 +530,20 @@ impl ValidationContext {
         &self.line_changes
     }
 
-    /// Converts the validation context to a serializable report that can be displayed as JSON,
-    /// with the files sorted by path.
-    pub(crate) fn to_serializable_report(&self) -> BTreeMap<RepoPath, Vec<serde_json::Value>> {
-        let mut report = BTreeMap::new();
-        for (path, file_blocks) in &self.blocks {
-            report.insert(path.clone(), file_blocks.to_serializable_report());
-        }
-        report
+    /// Describes every block, with the files sorted by path. The blocks of a file are in source
+    /// order, as [`scan::parse_file`] keeps them.
+    pub(crate) fn listings(&self) -> BTreeMap<&RepoPath, Vec<BlockListing<'_>>> {
+        self.blocks
+            .iter()
+            .map(|(path, file_blocks)| {
+                let listings = file_blocks
+                    .blocks_with_context
+                    .iter()
+                    .map(BlockListing::from)
+                    .collect();
+                (path, listings)
+            })
+            .collect()
     }
 }
 
@@ -1413,7 +1421,7 @@ mod tests {
     }
 
     #[test]
-    fn to_serializable_report_returns_correct_listings() -> anyhow::Result<()> {
+    fn listings_returns_correct_listings() -> anyhow::Result<()> {
         let contents = r#"/* <block name="top"> */ let a = "cc"; /* </block> Block on the first line. */
 // <block name="first"> Block on the second line.
 fn a() {}
@@ -1423,15 +1431,15 @@ fn b() {}
 // </block>
 /* <block name="bottom"> */ fn c() {} /* </block> Block on the last line. */"#;
         let context = validation_context("example.rs", contents);
-        let report = context.to_serializable_report();
+        let report = context.listings();
 
         assert_eq!(report.len(), 1);
         let listings = &report[&RepoPath::from_reference("example.rs")?];
         assert_eq!(listings.len(), 4);
         assert_eq!(
-            listings,
-            &vec![
-                serde_json::json!({
+            serde_json::to_value(listings)?,
+            serde_json::json!([
+                {
                     "name": "top",
                     "line": 1,
                     "column": 4,
@@ -1439,8 +1447,8 @@ fn b() {}
                     "attributes": {
                         "name": "top"
                     }
-                }),
-                serde_json::json!({
+                },
+                {
                     "name": "first",
                     "line": 2,
                     "column": 4,
@@ -1448,8 +1456,8 @@ fn b() {}
                     "attributes": {
                         "name": "first",
                     }
-                }),
-                serde_json::json!({
+                },
+                {
                     "name": "second",
                     "line": 5,
                     "column": 8,
@@ -1457,8 +1465,8 @@ fn b() {}
                     "attributes": {
                         "name": "second"
                     }
-                }),
-                serde_json::json!({
+                },
+                {
                     "name": "bottom",
                     "line": 8,
                     "column": 4,
@@ -1466,15 +1474,15 @@ fn b() {}
                     "attributes": {
                         "name": "bottom"
                     }
-                })
-            ]
+                }
+            ])
         );
 
         Ok(())
     }
 
     #[test]
-    fn to_serializable_report_lists_files_sorted_by_path() {
+    fn listings_lists_files_sorted_by_path() {
         let names = [
             "c.rs", "a.rs", "j.rs", "e.rs", "b.rs", "h.rs", "d.rs", "g.rs", "i.rs", "f.rs",
         ];
@@ -1486,7 +1494,7 @@ fn b() {}
         );
 
         let paths: Vec<String> = context
-            .to_serializable_report()
+            .listings()
             .into_keys()
             .map(|path| path.to_string())
             .collect();
