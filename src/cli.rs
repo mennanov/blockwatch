@@ -1,7 +1,7 @@
 use crate::blocks;
 use crate::blocks::BlockSeverity;
 use crate::config;
-use crate::diff_parser;
+use crate::diff_parser::{self, DiffChanges};
 use crate::flags;
 use crate::fs::FileSystem;
 use crate::language_parsers;
@@ -16,7 +16,7 @@ use crate::violation_address::ViolationAddress;
 use crate::virtual_blocks::VirtualBlock;
 use anyhow::Context;
 use clap::Parser;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -216,21 +216,18 @@ fn write_line(mut output: impl Write, text: &str) -> anyhow::Result<()> {
     }
 }
 
-/// Decides the [`ScanMode`] and extracts the [`diff_parser::LineChange`]s from the diff (if any).
+/// Decides the [`ScanMode`] and extracts the [`DiffChanges`] from the diff (if any).
 fn run_inputs(
     args: &flags::Args,
     file_system: &impl FileSystem,
-) -> anyhow::Result<(
-    blocks::ScanMode,
-    HashMap<RepoPath, Vec<diff_parser::LineChange>>,
-)> {
+) -> anyhow::Result<(blocks::ScanMode, DiffChanges)> {
     let scan_mode = if args.only_changed {
         blocks::ScanMode::OnlyChanged
     } else {
         blocks::ScanMode::All
     };
     if !args.diff {
-        return Ok((scan_mode, HashMap::new()));
+        return Ok((scan_mode, DiffChanges::default()));
     }
     if stdin_is_terminal() {
         return Err(anyhow::anyhow!(
@@ -248,7 +245,7 @@ fn run_inputs(
 fn read_config(
     args: &flags::Args,
     file_system: &impl FileSystem,
-    line_changes: &HashMap<RepoPath, Vec<diff_parser::LineChange>>,
+    line_changes: &DiffChanges,
     language_parsers: &language_parsers::LanguageParsers,
 ) -> anyhow::Result<(Settings, Vec<VirtualBlock>)> {
     let config = config::read(args.config.as_deref(), file_system, line_changes)?;
@@ -266,7 +263,7 @@ fn build_context(
     settings: &Settings,
     virtual_blocks: Vec<VirtualBlock>,
     scan_mode: blocks::ScanMode,
-    modified_lines_by_file: HashMap<RepoPath, Vec<diff_parser::LineChange>>,
+    modified_lines_by_file: DiffChanges,
     language_parsers: language_parsers::LanguageParsers,
     file_system: &impl FileSystem,
 ) -> anyhow::Result<(validators::ValidationContext, blocks::ScanStats)> {
@@ -318,9 +315,7 @@ fn stdin_is_terminal() -> bool {
 }
 
 /// Reads a unified diff from stdin and parses it into per-file line changes.
-fn read_diff_from_stdin(
-    file_system: &impl FileSystem,
-) -> anyhow::Result<HashMap<RepoPath, Vec<diff_parser::LineChange>>> {
+fn read_diff_from_stdin(file_system: &impl FileSystem) -> anyhow::Result<DiffChanges> {
     let mut diff = Vec::new();
     std::io::stdin().read_to_end(&mut diff)?;
     // A diff of a file that is not UTF-8 carries the file's bytes as they are. Only line numbers

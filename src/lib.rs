@@ -135,7 +135,7 @@ mod count_rust_blocks_tests {
 #[cfg(test)]
 mod test_utils {
     use crate::blocks::{BlockSeverity, ScanMode, parse_blocks};
-    use crate::diff_parser::{LineChange, LineChangeKind};
+    use crate::diff_parser::{DiffChanges, LineChange, LineChangeKind};
     use crate::fs::test_utils::{FakeFileSystem, FakePathChecker};
     use crate::language_parsers;
     use crate::repo_path::RepoPath;
@@ -155,6 +155,16 @@ mod test_utils {
     pub(crate) fn substr_range(input: &str, substr: &str) -> Range<usize> {
         let pos = input.find(substr).unwrap();
         pos..(pos + substr.len())
+    }
+
+    /// The diff's changes to each of `files`.
+    pub(crate) fn diff_changes(
+        files: impl IntoIterator<Item = (RepoPath, Vec<LineChange>)>,
+    ) -> DiffChanges {
+        files
+            .into_iter()
+            .map(|(file, line_changes)| (file, line_changes.into_iter().collect()))
+            .collect()
     }
 
     /// Creates a [`ValidationContext`] for the given `file_name` with `contents` with all lines
@@ -191,7 +201,7 @@ mod test_utils {
             contents.to_string(),
         )]));
         let line_changes_by_file =
-            HashMap::from([(RepoPath::from_reference(file_name).unwrap(), line_changes)]);
+            diff_changes([(RepoPath::from_reference(file_name).unwrap(), line_changes)]);
         let parsers = language_parsers::language_parsers().unwrap();
         Arc::new(ValidationContext::new(
             parse_blocks(

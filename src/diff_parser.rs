@@ -18,6 +18,77 @@ pub(crate) struct LineChange {
     pub(crate) kind: LineChangeKind,
 }
 
+/// The changes a diff makes to one file, in ascending order of line.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct LineChanges(Vec<LineChange>);
+
+impl FromIterator<LineChange> for LineChanges {
+    /// Sorts the changes by line. Changes on the same line keep their order.
+    fn from_iter<I: IntoIterator<Item = LineChange>>(changes: I) -> Self {
+        let mut changes: Vec<LineChange> = changes.into_iter().collect();
+        changes.sort_by_key(|line_change| line_change.line);
+        Self(changes)
+    }
+}
+
+impl LineChanges {
+    /// Whether there are no changes.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Whether any change touches a character in `range`.
+    ///
+    /// Text deleted right before `range.start` does not count, since it was never part of the range.
+    pub(crate) fn touches(&self, range: &Range<Position>) -> bool {
+        self.on_lines(range.start.line, range.end.line)
+            .any(|line_change| range_intersects(range, line_change))
+    }
+
+    /// The changes that fall on lines `first_line..=last_line`, in order.
+    pub(crate) fn on_lines(
+        &self,
+        first_line: usize,
+        last_line: usize,
+    ) -> impl Iterator<Item = &LineChange> {
+        let first = self
+            .0
+            .partition_point(|line_change| line_change.line < first_line);
+        self.0[first..]
+            .iter()
+            .take_while(move |line_change| line_change.line <= last_line)
+    }
+}
+
+/// The changes a diff makes to the files of the repository.
+#[derive(Debug, Default)]
+pub(crate) struct DiffChanges(HashMap<RepoPath, LineChanges>);
+
+impl FromIterator<(RepoPath, LineChanges)> for DiffChanges {
+    fn from_iter<I: IntoIterator<Item = (RepoPath, LineChanges)>>(files: I) -> Self {
+        Self(files.into_iter().collect())
+    }
+}
+
+impl DiffChanges {
+    /// The changes to `file`. A file the diff does not list has none.
+    pub(crate) fn for_file(&self, file: &RepoPath) -> &LineChanges {
+        static NO_CHANGES: LineChanges = LineChanges(Vec::new());
+        self.0.get(file).unwrap_or(&NO_CHANGES)
+    }
+
+    /// Whether the diff lists `file`. A listed file can have no line changes, such as a renamed
+    /// file whose lines are the same.
+    pub(crate) fn mentions(&self, file: &RepoPath) -> bool {
+        self.0.contains_key(file)
+    }
+
+    /// The files the diff lists, in no particular order.
+    pub(crate) fn files(&self) -> impl Iterator<Item = &RepoPath> {
+        self.0.keys()
+    }
+}
+
 /// Checks whether the 0-based character ranges of a modified line intersect a 1-based half-open
 /// column span `[start_col, end_col)`.
 ///
@@ -48,14 +119,6 @@ pub(crate) fn intersects_columns(
             }
         })
         .is_ok()
-}
-
-/// Whether any of the **ordered** `line_changes` touches a character in `range`.
-///
-/// Text deleted right before `range.start` does not count, since it was never part of the range.
-pub(crate) fn range_intersects_any(range: &Range<Position>, line_changes: &[LineChange]) -> bool {
-    changes_on_lines(line_changes, range.start.line, range.end.line)
-        .any(|line_change| range_intersects(range, line_change))
 }
 
 /// Whether `line_change`, which has to fall on one of the lines `range` spans, touches a character
@@ -92,18 +155,6 @@ fn range_intersects(range: &Range<Position>, line_change: &LineChange) -> bool {
             intersects_columns(ranges, start_col, end_col)
         }
     }
-}
-
-/// The **ordered** `line_changes` that fall on lines `first_line..=last_line`, in order.
-pub(crate) fn changes_on_lines(
-    line_changes: &[LineChange],
-    first_line: usize,
-    last_line: usize,
-) -> impl Iterator<Item = &LineChange> {
-    let first = line_changes.partition_point(|line_change| line_change.line < first_line);
-    line_changes[first..]
-        .iter()
-        .take_while(move |line_change| line_change.line <= last_line)
 }
 
 /// The place in the target file where a deletion anchored at `line` removed its text.
@@ -156,7 +207,7 @@ pub(crate) fn validate_diff_input(diff: &str) -> anyhow::Result<()> {
 pub(crate) fn line_changes_from_diff(
     patch_diff: &str,
     file_system: &impl FileSystem,
-) -> anyhow::Result<HashMap<RepoPath, Vec<LineChange>>> {
+) -> anyhow::Result<DiffChanges> {
     let mut result = HashMap::new();
     for patched_file in PatchSet::from_str(patch_diff)? {
         if patched_file.is_removed_file() {
@@ -182,10 +233,10 @@ pub(crate) fn line_changes_from_diff(
         })?;
         result.insert(target_path, changes);
     }
-    Ok(result)
+    Ok(DiffChanges(result))
 }
 
-fn line_changes(patched_file: &PatchedFile) -> anyhow::Result<Vec<LineChange>> {
+fn line_changes(patched_file: &PatchedFile) -> anyhow::Result<LineChanges> {
     let mut line_changes = Vec::new();
     let mut removed: Vec<&Line> = Vec::new();
     let mut added: Vec<&Line> = Vec::new();
@@ -224,13 +275,13 @@ fn line_changes(patched_file: &PatchedFile) -> anyhow::Result<Vec<LineChange>> {
             &mut line_changes,
         )?;
     }
-    Ok(line_changes)
+    Ok(line_changes.into_iter().collect())
 }
 
 /// Appends `line_change` to `line_changes`, enforcing ascending order by line.
 ///
-/// The binary searches in blocks.rs rely on this order. A valid unified diff always satisfies it;
-/// a violation means the diff's hunks are out of order or overlapping.
+/// A valid unified diff always satisfies it. A violation means the diff's hunks are out of order
+/// or overlapping, so the diff is rejected instead of sorted into an order it does not have.
 fn push_line_change(
     line_changes: &mut Vec<LineChange>,
     line_change: LineChange,
@@ -652,7 +703,7 @@ mod tests {
     }
 
     /// Parses `diff` against an ordinary working tree.
-    fn changes(diff: &str) -> anyhow::Result<HashMap<RepoPath, Vec<LineChange>>> {
+    fn changes(diff: &str) -> anyhow::Result<DiffChanges> {
         line_changes_from_diff(diff, &TypicalRepo)
     }
 
@@ -678,8 +729,8 @@ mod tests {
 +banana\n";
         let files = tree(&["b/rules.py", "rules.py"]);
         let result = line_changes_from_diff(diff, &files)?;
-        assert!(result.contains_key(&key("b/rules.py")));
-        assert!(!result.contains_key(&key("rules.py")));
+        assert!(result.mentions(&key("b/rules.py")));
+        assert!(!result.mentions(&key("rules.py")));
         Ok(())
     }
 
@@ -694,9 +745,9 @@ mod tests {
         let files = tree(&["café.py"]);
         let result = line_changes_from_diff(diff, &files)?;
         assert!(
-            result.contains_key(&key("café.py")),
+            result.mentions(&key("café.py")),
             "unexpected keys: {:?}",
-            result.keys().collect::<Vec<_>>()
+            result.files().collect::<Vec<_>>()
         );
         Ok(())
     }
@@ -718,6 +769,13 @@ mod tests {
     }
 
     #[test]
+    fn unsorted_changes_collected_are_sorted_by_line() {
+        let changes: LineChanges = [added(3), deleted(1), added(2)].into_iter().collect();
+
+        assert_eq!(changes.0, vec![deleted(1), added(2), added(3)]);
+    }
+
+    #[test]
     fn single_file_diff_extracts_ranges_for_single_file() -> anyhow::Result<()> {
         let ranges = changes(
             r#"diff --git a/Cargo.toml b/Cargo.toml
@@ -734,7 +792,7 @@ index 8c34c48..23ddd69 100644
  cc="1.2.16"
 \ No newline at end of file"#,
         )?;
-        assert_eq!(ranges.keys().collect::<Vec<_>>(), vec![&key("Cargo.toml")]);
+        assert_eq!(ranges.files().collect::<Vec<_>>(), vec![&key("Cargo.toml")]);
         Ok(())
     }
 
@@ -774,7 +832,7 @@ index e69de29..215ed53 100644
         )?;
         assert_eq!(
             line_changes
-                .keys()
+                .files()
                 .map(RepoPath::as_str)
                 .collect::<HashSet<_>>(),
             HashSet::from(["Cargo.toml", "src/main.rs", "src/differ.rs"])
@@ -796,7 +854,7 @@ index f384549..b4b0c67 100644
 +three and a half
  four"#,
         )?;
-        assert_eq!(line_changes[&key("a.txt")], vec![added(4)]);
+        assert_eq!(line_changes.for_file(&key("a.txt")).0, vec![added(4)]);
         Ok(())
     }
 
@@ -813,7 +871,7 @@ index f384549..fa220f8 100644
  two
  three"#,
         )?;
-        assert_eq!(ranges[&key("a.txt")], vec![added(1)]);
+        assert_eq!(ranges.for_file(&key("a.txt")).0, vec![added(1)]);
         Ok(())
     }
 
@@ -832,7 +890,10 @@ index f384549..3a7bc2a 100644
 +almost four
  four"#,
         )?;
-        assert_eq!(line_changes[&key("a.txt")], vec![added(4), added(5),]);
+        assert_eq!(
+            line_changes.for_file(&key("a.txt")).0,
+            vec![added(4), added(5),]
+        );
         Ok(())
     }
 
@@ -851,7 +912,10 @@ index f384549..3ccae75 100644
  two
  three"#,
         )?;
-        assert_eq!(line_changes[&key("a.txt")], vec![added(1), added(2),]);
+        assert_eq!(
+            line_changes.for_file(&key("a.txt")).0,
+            vec![added(1), added(2),]
+        );
         Ok(())
     }
 
@@ -871,7 +935,10 @@ index f384549..e797e7c 100644
 +three and a half
  four"#,
         )?;
-        assert_eq!(line_changes[&key("a.txt")], vec![added(3), added(5)]);
+        assert_eq!(
+            line_changes.for_file(&key("a.txt")).0,
+            vec![added(3), added(5)]
+        );
         Ok(())
     }
 
@@ -894,7 +961,7 @@ index f384549..ab47fb2 100644
  four"#,
         )?;
         assert_eq!(
-            line_changes[&key("a.txt")],
+            line_changes.for_file(&key("a.txt")).0,
             vec![added(3), added(4), added(6), added(7),]
         );
         Ok(())
@@ -915,7 +982,7 @@ index f384549..e4c2829 100644
  four"#,
         )?;
         assert_eq!(
-            line_changes[&key("a.txt")],
+            line_changes.for_file(&key("a.txt")).0,
             vec![LineChange {
                 line: 3,
                 // "i" in "is" was modified, "o" and "a" in "thora" were modified.
@@ -945,7 +1012,7 @@ index f384549..46c7533 100644
  "#,
         )?;
         assert_eq!(
-            line_changes[&key("a.txt")],
+            line_changes.for_file(&key("a.txt")).0,
             vec![
                 LineChange {
                     line: 1,
@@ -984,7 +1051,7 @@ index f384549..676cbb7 100644
  four"#,
         )?;
         assert_eq!(
-            line_changes[&key("a.txt")],
+            line_changes.for_file(&key("a.txt")).0,
             vec![
                 LineChange {
                     line: 2,
@@ -1015,7 +1082,7 @@ index f384549..676cbb7 100644
 +modified two"#,
         )?;
         assert_eq!(
-            line_changes[&key("a.txt")],
+            line_changes.for_file(&key("a.txt")).0,
             vec![
                 LineChange {
                     line: 1,
@@ -1043,7 +1110,7 @@ index f384549..87a123c 100644
 -three
  four"#,
         )?;
-        assert_eq!(line_changes[&key("a.txt")], vec![deleted(3)]);
+        assert_eq!(line_changes.for_file(&key("a.txt")).0, vec![deleted(3)]);
         Ok(())
     }
 
@@ -1060,7 +1127,7 @@ index f384549..58ac960 100644
  three
  four"#,
         )?;
-        assert_eq!(line_changes[&key("a.txt")], vec![deleted(1)]);
+        assert_eq!(line_changes.for_file(&key("a.txt")).0, vec![deleted(1)]);
         Ok(())
     }
 
@@ -1077,7 +1144,7 @@ index f384549..4cb29ea 100644
  three
 -four"#,
         )?;
-        assert_eq!(line_changes[&key("a.txt")], vec![deleted(4)]);
+        assert_eq!(line_changes.for_file(&key("a.txt")).0, vec![deleted(4)]);
         Ok(())
     }
 
@@ -1095,7 +1162,10 @@ index f384549..8c05df4 100644
 -three
  four"#,
         )?;
-        assert_eq!(line_changes[&key("a.txt")], vec![deleted(1), deleted(2)]);
+        assert_eq!(
+            line_changes.for_file(&key("a.txt")).0,
+            vec![deleted(1), deleted(2)]
+        );
         Ok(())
     }
 
@@ -1114,7 +1184,7 @@ index f384549..a9c7698 100644
         )?;
         // Consecutive deleted lines are treated as a single one-line range because they no longer
         // exist in the target file.
-        assert_eq!(line_changes[&key("a.txt")], vec![deleted(2)]);
+        assert_eq!(line_changes.for_file(&key("a.txt")).0, vec![deleted(2)]);
         Ok(())
     }
 
@@ -1131,7 +1201,7 @@ index f384549..e69de29 100644
 -three
 -four"#,
         )?;
-        assert!(line_changes.is_empty());
+        assert!(line_changes.0.is_empty());
         Ok(())
     }
 
@@ -1153,7 +1223,7 @@ index f384549..58a279e 100644
 +added five"#,
         )?;
         assert_eq!(
-            line_changes[&key("a.txt")],
+            line_changes.for_file(&key("a.txt")).0,
             vec![
                 LineChange {
                     line: 1,
@@ -1196,7 +1266,7 @@ index abc123..def456 100644
 +# <block name="deps" affects=":deps-docs" keep-sorted="asc">
 "#,
         )?;
-        let changes = &line_changes[&key("deps.py")];
+        let changes = &line_changes.for_file(&key("deps.py")).0;
         assert_eq!(changes.len(), 3);
         // Line 1 pairs with the old comment line.
         assert_eq!(changes[0].line, 1);
@@ -1248,7 +1318,7 @@ index abc123..def456 100644
              \x20// </block>\n"
         ))?;
 
-        let changes = &line_changes[&key("a.rs")];
+        let changes = &line_changes.for_file(&key("a.rs")).0;
         assert_eq!(changes.len(), 3);
         // The middle line keeps the `affects` value, so it is the one the pairing anchors on.
         assert_eq!(changes[1].line, 2);
@@ -1309,7 +1379,7 @@ index f384549..b4b0c67 100644
              +{long_line}\n"
         );
         let line_changes = changes(&diff)?;
-        let changes = &line_changes[&key("a.txt")];
+        let changes = &line_changes.for_file(&key("a.txt")).0;
         assert_eq!(changes.len(), 2);
         // Similarity pairing would prefer the identical added line 2; the positional fallback
         // pairs the removed line with added line 1 and leaves line 2 as a pure insertion.
@@ -1345,7 +1415,7 @@ index f384549..b4b0c67 100644
 -deleted content
 "#,
         )?;
-        let changes = &line_changes[&key("a.txt")];
+        let changes = &line_changes.for_file(&key("a.txt")).0;
         // Source line 3 sits at target position 8 after the five inserted lines: the deletion gap
         // is between target lines 7 and 8.
         assert_eq!(
@@ -1368,7 +1438,7 @@ index f384549..b4b0c67 100644
 +# </block>
 \ No newline at end of file"#,
         )?;
-        let changes = &line_changes[&key("a.txt")];
+        let changes = &line_changes.for_file(&key("a.txt")).0;
         assert_eq!(changes.len(), 1, "unexpected changes: {changes:?}");
         assert_eq!(changes[0].line, 5);
         assert!(matches!(changes[0].kind, LineChangeKind::Modified(_)));
@@ -1390,7 +1460,7 @@ index 0000000..710d1d9
 "#,
         )?;
         assert_eq!(
-            line_changes[&key("example.rs")],
+            line_changes.for_file(&key("example.rs")).0,
             vec![added(1), added(2), added(3)]
         );
         Ok(())
@@ -1410,7 +1480,7 @@ index f384549..0000000
 -three
 -four"#,
         )?;
-        assert!(line_changes.is_empty());
+        assert!(line_changes.0.is_empty());
         Ok(())
     }
 
@@ -1436,8 +1506,8 @@ new file mode 120000
 
         let result = line_changes_from_diff(diff, &files)?;
 
-        assert!(result.contains_key(&key("AGENTS.md")));
-        assert!(!result.contains_key(&key("CLAUDE.md")));
+        assert!(result.mentions(&key("AGENTS.md")));
+        assert!(!result.mentions(&key("CLAUDE.md")));
         Ok(())
     }
 

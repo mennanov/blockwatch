@@ -273,7 +273,7 @@ impl<'s> Walk<'s> {
     /// `range` extended to just after the line break that ends its last line, or to the end of
     /// the source when no line break follows.
     fn extended_past_line_break(&self, range: Range<usize>) -> Range<usize> {
-        // `range_intersects_any` places a deleted line at the start of the line after it. Ending
+        // `LineChanges::touches` places a deleted line at the start of the line after it. Ending
         // after the line break puts that point inside the range, so deleting a table's last pair
         // counts as touching the table.
         #[expect(

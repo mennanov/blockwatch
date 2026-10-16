@@ -1,5 +1,4 @@
 use crate::blocks::{Block, BlockWithContext, FileBlocks};
-use crate::diff_parser::range_intersects_any;
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
@@ -138,21 +137,21 @@ impl<'a, Fs: FileSystem> TargetIndex<'a, Fs> {
     ) -> anyhow::Result<TargetResult<bool>> {
         let target_file = &self.real_path(target_file);
         // A file the diff never mentions has no line changes, so nothing in it counts as modified.
-        let line_changes = self.context.line_changes_for(target_file).unwrap_or(&[]);
+        let line_changes = self.context.line_changes().for_file(target_file);
         let (content, resolution) = self.files.resolve_symbol(target_file, path)?;
         Ok(resolution.map(|symbol| {
             symbol
                 .position_ranges(content)
                 .iter()
-                .any(|range| range_intersects_any(range, line_changes))
+                .any(|range| line_changes.touches(range))
         }))
     }
 
     /// Whether the diff mentions `target_file`.
     fn file_modified(&self, target_file: &RepoPath) -> bool {
         self.context
-            .line_changes_for(&self.real_path(target_file))
-            .is_some()
+            .line_changes()
+            .mentions(&self.real_path(target_file))
     }
 
     fn file_exists(&self, target_file: &RepoPath) -> bool {
@@ -429,7 +428,9 @@ mod validate_tests {
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::{validation_context, validation_context_with_changes, virtual_block};
+    use crate::test_utils::{
+        diff_changes, validation_context, validation_context_with_changes, virtual_block,
+    };
     use crate::validators::SyncValidator;
     use crate::validators::test_utils::{
         checked_lines, merge_validation_contexts, violation_count, with_virtual_blocks,
@@ -472,6 +473,7 @@ mod validate_tests {
         file_system: &FakeFileSystem,
         line_changes: HashMap<RepoPath, Vec<LineChange>>,
     ) -> anyhow::Result<Arc<validators::ValidationContext>> {
+        let line_changes = diff_changes(line_changes);
         let parsers = crate::language_parsers::language_parsers()?;
         let parsed = crate::blocks::parse_blocks(
             &line_changes,
@@ -1071,6 +1073,7 @@ pass
                     .collect(),
             );
         }
+        let line_changes = diff_changes(line_changes);
         let parsers = crate::language_parsers::language_parsers()?;
         let parsed = crate::blocks::parse_blocks(
             &line_changes,

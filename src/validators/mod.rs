@@ -12,7 +12,7 @@ use crate::blocks::{
     self, Block, BlockAddress, BlockKey, BlockSeverity, BlockWithContext, FileBlocks, every_block,
     parser_for_file_path,
 };
-use crate::diff_parser::LineChange;
+use crate::diff_parser::DiffChanges;
 use crate::fs::FileSystem;
 use crate::language_parsers::LanguageParsers;
 use crate::repo_path::RepoPath;
@@ -419,7 +419,7 @@ pub(crate) struct ValidationContext {
     /// Language parsers per file type, used by validators to parse referenced source files.
     parsers: LanguageParsers,
     /// Every line change from the diff (if any).
-    line_changes: HashMap<RepoPath, Vec<LineChange>>,
+    line_changes: DiffChanges,
     /// Extension remappings from the command line.
     extra_file_extensions: HashMap<OsString, OsString>,
     /// The declarations of every virtual block in the config file, in its order. Unlike `blocks`,
@@ -432,7 +432,7 @@ impl ValidationContext {
     pub(crate) fn new(
         blocks: HashMap<RepoPath, FileBlocks>,
         parsers: LanguageParsers,
-        line_changes: HashMap<RepoPath, Vec<LineChange>>,
+        line_changes: DiffChanges,
         extra_file_extensions: HashMap<OsString, OsString>,
         virtual_blocks: Vec<VirtualBlock>,
     ) -> Self {
@@ -523,7 +523,7 @@ impl ValidationContext {
         blocks::parse_file(
             file_system,
             file_path.as_path(),
-            self.line_changes_for(file_path).unwrap_or(&[]),
+            self.line_changes.for_file(file_path),
             every_block,
             &self.parsers,
             &self.extra_file_extensions,
@@ -531,9 +531,9 @@ impl ValidationContext {
         )
     }
 
-    /// The line changes the diff reported for the `file_path`.
-    fn line_changes_for(&self, file_path: &RepoPath) -> Option<&[LineChange]> {
-        self.line_changes.get(file_path).map(Vec::as_slice)
+    /// The changes the diff reported, by file.
+    fn line_changes(&self) -> &DiffChanges {
+        &self.line_changes
     }
 
     /// Converts the validation context to a serializable report that can be displayed as JSON,
@@ -2164,14 +2164,17 @@ mod test_utils {
                     .blocks_with_context
                     .extend(file_blocks.blocks_with_context.clone());
             }
-            for (file_path, line_changes) in &context.line_changes {
-                merged_line_changes.insert(file_path.clone(), line_changes.to_vec());
+            for file_path in context.line_changes.files() {
+                merged_line_changes.insert(
+                    file_path.clone(),
+                    context.line_changes.for_file(file_path).clone(),
+                );
             }
         }
         Arc::new(ValidationContext::new(
             merged_modified_blocks,
             parsers,
-            merged_line_changes,
+            merged_line_changes.into_iter().collect(),
             HashMap::new(),
             Vec::new(),
         ))

@@ -170,6 +170,7 @@ mod tests {
     use super::*;
     use crate::Position;
     use crate::blocks::{ScanMode, parse_blocks};
+    use crate::diff_parser::DiffChanges;
     use crate::fs::test_utils::{FakeFileSystem, FakePathChecker};
     use crate::language_parsers::language_parsers;
     use crate::repo_path::RepoPath;
@@ -399,7 +400,7 @@ mod tests {
         let mut inner = virtual_block("a.toml#/a/b", &[])?;
         inner.entry.line = 9;
         let parsed = parse_blocks(
-            &HashMap::new(),
+            &DiffChanges::default(),
             ScanMode::All,
             &FakeFileSystem::new(HashMap::from([(
                 "a.toml".to_string(),
@@ -413,7 +414,7 @@ mod tests {
         let context = ValidationContext::new(
             parsed.blocks,
             HashMap::new(),
-            HashMap::new(),
+            DiffChanges::default(),
             HashMap::new(),
             Vec::new(),
         );

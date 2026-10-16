@@ -1,6 +1,6 @@
 use crate::Position;
 use crate::blocks::{BlockSeverity, validate_attributes};
-use crate::diff_parser::{self, LineChange};
+use crate::diff_parser::{DiffChanges, LineChanges};
 use crate::fs::FileSystem;
 use crate::language_parsers::toml;
 use crate::paths_glob::{GLOB_CHARACTERS, PathsGlob};
@@ -103,15 +103,16 @@ enum AttributeValue {
 pub(crate) fn read(
     path: Option<&Path>,
     file_system: &impl FileSystem,
-    line_changes_by_file: &HashMap<RepoPath, Vec<LineChange>>,
+    line_changes_by_file: &DiffChanges,
 ) -> anyhow::Result<Config> {
     let (path, text, repo_path) = match read_file(path, file_system)? {
         Some(file) => file,
         None => return Ok(Config::default()),
     };
-    let line_changes = repo_path
-        .and_then(|repo_path| line_changes_by_file.get(&repo_path))
-        .map_or(&[][..], Vec::as_slice);
+    let no_changes = LineChanges::default();
+    let line_changes = repo_path.map_or(&no_changes, |repo_path| {
+        line_changes_by_file.for_file(&repo_path)
+    });
     let ConfigFile {
         ignore,
         extensions,
@@ -185,7 +186,7 @@ fn virtual_blocks(
     entries: Vec<Spanned<BlockEntry>>,
     path: &Path,
     text: &str,
-    line_changes: &[LineChange],
+    line_changes: &LineChanges,
     file_system: &impl FileSystem,
 ) -> anyhow::Result<Vec<VirtualBlock>> {
     let symbols = toml::parse_symbols(text)?;
@@ -246,7 +247,7 @@ fn is_entry_modified(
     text: &str,
     symbols: &[Symbol],
     index: usize,
-    line_changes: &[LineChange],
+    line_changes: &LineChanges,
 ) -> anyhow::Result<bool> {
     // The symbol covers every line of the entry. The span that serde gives covers only its header.
     let path = SymbolPath::parse(&format!("/block/{index}"))?;
@@ -254,7 +255,7 @@ fn is_entry_modified(
     Ok(symbol.def_byte_ranges.iter().any(|range| {
         let positions = Position::from_byte_offset(text, range.start)
             ..Position::from_byte_offset(text, range.end);
-        diff_parser::range_intersects_any(&positions, line_changes)
+        line_changes.touches(&positions)
     }))
 }
 
@@ -381,8 +382,9 @@ fn attributes_as_text(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diff_parser::LineChangeKind;
+    use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::test_utils::FakeFileSystem;
+    use crate::test_utils::diff_changes;
     use std::path::PathBuf;
 
     /// Reads `text` as the default config file, with no diff.
@@ -407,7 +409,7 @@ mod tests {
         read(
             None,
             &FakeFileSystem::new(contents),
-            &HashMap::from([(
+            &diff_changes([(
                 RepoPath::from_reference(DEFAULT_FILE)?,
                 line_changes.to_vec(),
             )]),
@@ -656,7 +658,7 @@ target = 'plugins/*/package.json#/version'
         let config = read(
             None,
             &crate::fs::FileSystemImpl::new(root.path())?,
-            &HashMap::new(),
+            &DiffChanges::default(),
         )?;
 
         let files: Vec<&str> = config
@@ -904,7 +906,11 @@ severity = 'warning'
 
     #[test]
     fn missing_default_file_reads_as_an_empty_config() -> anyhow::Result<()> {
-        let config = read(None, &FakeFileSystem::new(HashMap::new()), &HashMap::new())?;
+        let config = read(
+            None,
+            &FakeFileSystem::new(HashMap::new()),
+            &DiffChanges::default(),
+        )?;
         assert!(config.settings.ignore.is_empty());
         assert!(config.settings.extensions.is_empty());
         assert!(config.settings.enable.is_empty());
@@ -920,7 +926,7 @@ severity = 'warning'
         let error = read(
             Some(Path::new("no-such-config.toml")),
             &FakeFileSystem::new(HashMap::new()),
-            &HashMap::new(),
+            &DiffChanges::default(),
         )
         .expect_err("a config file given by name must exist");
         assert!(

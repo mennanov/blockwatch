@@ -156,8 +156,9 @@ The whole pipeline is in `src/cli.rs`. `src/main.rs` only calls `blockwatch::run
 2. Find the repository root and build a `fs::FileSystemImpl` limited to it. Every file read goes through it, so a path
    in a block attribute can't reach outside the repository.
 3. Decide what the run works on. With `--diff`, a unified diff is read from stdin, and
-   `diff_parser::line_changes_from_diff` turns it into a `HashMap<RepoPath, Vec<LineChange>>`. `--only-changed` also
-   limits the run to the files in that diff. Without `--diff`, stdin is never read and no block counts as changed.
+   `diff_parser::line_changes_from_diff` turns it into `DiffChanges`: a sorted `LineChanges` for each file.
+   `--only-changed` also limits the run to the files in that diff. Without `--diff`, stdin is never read and no block
+   counts as changed.
 4. Resolve the run's settings. `config::read` reads `blockwatch.toml` from the repository root, or the file given by
    `--config`. `Args::raw_settings` returns the settings given as flags. `settings::Settings::resolve` validates both
    with the same rules and merges them: the ignore globs, the extension mappings and the validator selection.
@@ -245,10 +246,11 @@ The main modules:
 - `src/validators/` — one file for each validator (`affects`, `check_ai`, `check_lua`, `keep_sorted`, `keep_unique`,
   `line_count`, `line_pattern`, `same_as`). Each file exports a `detect` function. `Validator::detect` in
   `validators/mod.rs` calls them from one `match`.
-- `src/diff_parser.rs` — wraps `unidiff` to produce `LineChange`s. `range_intersects_any` decides whether they touch a
-  range of the file, such as a block's start tag or a symbol's definition. A block's content has its own check in
-  `blocks.rs`, because a deletion right where the content starts removes content. The results end up in
-  `is_content_modified` and `is_start_tag_modified` on `BlockWithContext`, which decide which blocks count as changed.
+- `src/diff_parser.rs` — wraps `unidiff` to produce `LineChange`s, kept in `LineChanges` for a file and in
+  `DiffChanges` for the whole diff. `LineChanges::touches` decides whether they touch a range of the file, such as a
+  block's start tag or a symbol's definition. A block's content has its own check in `blocks.rs`, because a deletion
+  right where the content starts removes content. The results end up in `is_content_modified` and
+  `is_start_tag_modified` on `BlockWithContext`, which decide which blocks count as changed.
 
 A block counts as changed only when its content or its start tag overlaps a `LineChange`. With
 `--diff --only-changed`, only changed blocks are validated. With `--diff` alone, every block is validated, but rules

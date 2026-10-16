@@ -1,6 +1,6 @@
 use crate::Position;
 use crate::blocks::{Block, BlockSeverity, BlockWithContext, Content, Declaration};
-use crate::diff_parser::{self, LineChange};
+use crate::diff_parser::LineChanges;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{Symbol, resolve};
@@ -176,7 +176,7 @@ impl VirtualBlock {
         &self,
         symbols: &[Symbol],
         source: &str,
-        line_changes: &[LineChange],
+        line_changes: &LineChanges,
     ) -> anyhow::Result<BlockWithContext> {
         let (definition, content) = match &self.locator {
             Locator::Symbol(path) => self.symbol_definition(path, symbols, source)?,
@@ -209,7 +209,7 @@ impl VirtualBlock {
             },
             is_content_modified: match self.locator {
                 Locator::Symbol(_) | Locator::Pattern(_) => {
-                    diff_parser::range_intersects_any(&definition_positions, line_changes)
+                    line_changes.touches(&definition_positions)
                 }
                 Locator::File => !line_changes.is_empty(),
             },
@@ -309,7 +309,7 @@ fn position_range(source: &str, range: &Range<usize>) -> Range<Position> {
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use super::*;
-    use crate::diff_parser::LineChangeKind;
+    use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::language_parsers::language_parsers;
     use crate::test_utils::virtual_block;
     use std::ffi::OsString;
@@ -330,7 +330,11 @@ mod tests {
             .lock()
             .expect("no active locks")
             .parse_symbols(source)?;
-        virtual_block(&format!("{file}#{path}"), &[])?.resolve(&symbols, source, line_changes)
+        virtual_block(&format!("{file}#{path}"), &[])?.resolve(
+            &symbols,
+            source,
+            &line_changes.iter().cloned().collect(),
+        )
     }
 
     /// The block that a [`virtual_block`] in `notes.txt`, found by `locator`, declares in
@@ -342,7 +346,7 @@ mod tests {
     ) -> anyhow::Result<BlockWithContext> {
         let mut block = virtual_block("notes.txt", &[])?;
         block.locator = locator;
-        block.resolve(&[], source, line_changes)
+        block.resolve(&[], source, &line_changes.iter().cloned().collect())
     }
 
     /// What a `target-pattern` of `pattern` wraps.
@@ -490,7 +494,7 @@ CREATE TABLE b (
     #[test]
     fn severity_attribute_resolve_returns_a_block_with_that_severity() -> anyhow::Result<()> {
         let block = virtual_block("notes.txt", &[("severity", "warning")])?
-            .resolve(&[], "a\n", &[])?
+            .resolve(&[], "a\n", &LineChanges::default())?
             .block;
 
         assert_eq!(block.severity, BlockSeverity::Warning);
