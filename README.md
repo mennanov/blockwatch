@@ -214,7 +214,7 @@ exclusions, and custom extension mappings.
 
 ```yaml
 - repo: https://github.com/mennanov/blockwatch
-  rev: v0.13.0  # Use latest release
+  rev: v0.14.0  # Use latest release
   hooks:
     - id: blockwatch
 ```

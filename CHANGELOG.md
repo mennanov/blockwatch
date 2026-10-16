@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.14.0] - 2026-10-16
+
 ### Added
 
 - `same-as-pattern` can compare a key with its value. Every named group, such as `(?P<code>\d+)` and
