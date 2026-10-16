@@ -139,7 +139,8 @@ mod count_rust_blocks_tests {
 mod test_utils {
     use crate::blocks::{BlockSeverity, ScanMode, parse_blocks};
     use crate::diff_parser::{DiffChanges, LineChange, LineChangeKind};
-    use crate::fs::test_utils::{FakeFileSystem, FakePathChecker};
+    use crate::fs::PathFilter;
+    use crate::fs::test_utils::FakeFileSystem;
     use crate::language_parsers;
     use crate::repo_path::RepoPath;
     use crate::symbol_path::SymbolPath;
@@ -211,7 +212,7 @@ mod test_utils {
                 &line_changes_by_file,
                 ScanMode::OnlyChanged,
                 &file_system,
-                &FakePathChecker::allow_all(),
+                &PathFilter::allow_all(),
                 &parsers,
                 &[],
             )

@@ -193,8 +193,9 @@ prints `src/skill.md` right after step 1.
 
 The main modules:
 
-- `src/fs.rs` — the `FileSystem` and `PathChecker` traits, and their real implementations. Tests use these traits to
-  swap in fakes: `FakeFileSystem` and `FakePathChecker` in `fs::test_utils`.
+- `src/fs.rs` — the `FileSystem` trait and its real implementation, and `PathFilter`, which decides whether a run
+  reads a path: it must match an allow glob and no ignore glob. Tests swap in `FakeFileSystem` from `fs::test_utils`.
+  They build a real `PathFilter` with `PathFilter::allow_all()`, `allow_only` or `with_ignored_paths`.
 - `src/settings.rs` — `RawSettings` holds the settings read from one place: the config file or the flags. `Settings` is
   the validated and merged result. `RawSettings::parse` is the only place the rules for a setting live, so the flags
   and the config file can't drift apart. It returns the parsed values, so nothing is parsed twice. Its errors quote the

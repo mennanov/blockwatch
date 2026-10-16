@@ -479,7 +479,7 @@ mod validate_tests {
             &line_changes,
             crate::blocks::ScanMode::OnlyChanged,
             file_system,
-            &crate::fs::test_utils::FakePathChecker::allow_only("source.py"),
+            &crate::fs::PathFilter::allow_only("source.py"),
             &parsers,
             &[],
         )?;
@@ -1077,7 +1077,7 @@ pass
             &line_changes,
             crate::blocks::ScanMode::All,
             &file_system,
-            &crate::fs::test_utils::FakePathChecker::allow_all(),
+            &crate::fs::PathFilter::allow_all(),
             &parsers,
             &[],
         )?;

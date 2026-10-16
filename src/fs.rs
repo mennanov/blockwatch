@@ -2,6 +2,8 @@ use crate::repo_path::RepoPath;
 use anyhow::{Context, anyhow};
 use globset::GlobSet;
 use ignore::WalkBuilder;
+#[cfg(test)]
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 /// Directory names a version control system keeps its own state in.
@@ -62,15 +64,6 @@ pub(crate) enum Entry {
     Directory(RepoPath),
     /// Anything that is not a directory, such as a file.
     File(RepoPath),
-}
-
-/// Checks whether a path should be allowed or ignored when parsing blocks from files.
-pub(crate) trait PathChecker {
-    /// Whether the given `path` should be explicitly allowed.
-    fn should_allow(&self, path: &Path) -> bool;
-
-    /// Whether the given `path` should be explicitly ignored.
-    fn should_ignore(&self, path: &Path) -> bool;
 }
 
 /// The real filesystem, confined to one VCS repository.
@@ -215,33 +208,62 @@ impl FileSystem for FileSystemImpl {
     }
 }
 
-/// Checks whether a path should be allowed or ignored.
-pub(crate) struct PathCheckerImpl {
-    glob_set: GlobSet,
+/// Decides which paths a run reads: those that match an allow glob and no ignore glob.
+pub(crate) struct PathFilter {
+    allowed_glob_set: GlobSet,
     ignored_glob_set: GlobSet,
 }
 
-impl PathCheckerImpl {
-    /// Builds a checker from the compiled globs of the positional file filters and of `--ignore`.
+impl PathFilter {
+    /// Builds a filter from the compiled globs of the positional file filters and of `--ignore`.
     ///
-    /// An empty `glob_set` matches nothing, so callers treat "no filters given" as "every file" on
-    /// their own rather than relying on this type.
-    pub(crate) fn new(glob_set: GlobSet, ignored_glob_set: GlobSet) -> Self {
+    /// An empty `allowed_glob_set` matches nothing, so callers treat "no filters given" as "every
+    /// file" on their own rather than relying on this type.
+    pub(crate) fn new(allowed_glob_set: GlobSet, ignored_glob_set: GlobSet) -> Self {
         Self {
-            glob_set,
+            allowed_glob_set,
             ignored_glob_set,
         }
     }
-}
 
-impl PathChecker for PathCheckerImpl {
-    fn should_allow(&self, path: &Path) -> bool {
-        self.glob_set.is_match(path)
+    /// Whether `path` matches an allow glob and no ignore glob.
+    pub(crate) fn is_selected(&self, path: &Path) -> bool {
+        self.allowed_glob_set.is_match(path) && !self.is_ignored(path)
     }
 
-    fn should_ignore(&self, path: &Path) -> bool {
+    /// Whether `path` matches an ignore glob. The allow globs are not looked at.
+    pub(crate) fn is_ignored(&self, path: &Path) -> bool {
         self.ignored_glob_set.is_match(path)
     }
+}
+
+/// Constructors that let a test describe a filter without building glob sets.
+#[cfg(test)]
+impl PathFilter {
+    /// Selects every path.
+    pub(crate) fn allow_all() -> Self {
+        Self::allow_only("**")
+    }
+
+    /// Selects only the paths matching `glob`.
+    pub(crate) fn allow_only(glob: &str) -> Self {
+        Self::new(glob_set([glob]), GlobSet::empty())
+    }
+
+    /// Selects every path except those listed.
+    pub(crate) fn with_ignored_paths(ignored_paths: HashSet<String>) -> Self {
+        Self::new(glob_set(["**"]), glob_set(ignored_paths))
+    }
+}
+
+/// Compiles `globs`, for the test constructors of [`PathFilter`].
+#[cfg(test)]
+fn glob_set(globs: impl IntoIterator<Item = impl AsRef<str>>) -> GlobSet {
+    let mut builder = GlobSet::builder();
+    for glob in globs {
+        builder.add(globset::Glob::new(glob.as_ref()).expect("malformed test glob"));
+    }
+    builder.build().expect("failed to build test glob set")
 }
 
 #[cfg(test)]
@@ -579,14 +601,13 @@ mod file_system_impl_tests {
     }
 }
 
-/// In-memory stand-ins for [`FileSystem`] and [`PathChecker`], so unit tests can describe a source
-/// tree as a map of strings instead of creating temporary directories.
+/// An in-memory stand-in for [`FileSystem`], so unit tests can describe a source tree as a map of
+/// strings instead of creating temporary directories.
 #[cfg(test)]
 pub(crate) mod test_utils {
-    use crate::fs::{Entry, FileSystem, PathChecker};
+    use crate::fs::{Entry, FileSystem};
     use crate::repo_path::RepoPath;
-    use globset::GlobSet;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
     use std::path::{Component, Path};
 
     /// A source tree held in memory, keyed by path exactly as it is spelled by the caller.
@@ -691,54 +712,6 @@ pub(crate) mod test_utils {
                         .is_none_or(|prefix| path.starts_with(prefix.as_str()))
                 })
                 .map(|path| RepoPath::from_reference(path))
-        }
-    }
-
-    /// A path filter for tests: an explicit deny list, so a file can be excluded without writing
-    /// glob patterns, plus an optional allow-list of globs for the tests that are about globbing.
-    pub(crate) struct FakePathChecker {
-        /// The globs a path must match to be allowed. `None` allows every path, which is what most
-        /// tests want; `Some` mirrors the real checker, whose empty glob set matches nothing.
-        allowed_globs: Option<GlobSet>,
-        ignored_paths: HashSet<String>,
-    }
-
-    impl FakePathChecker {
-        /// Allows every path except those listed.
-        pub(crate) fn with_ignored_paths(ignored_paths: HashSet<String>) -> Self {
-            Self {
-                allowed_globs: None,
-                ignored_paths,
-            }
-        }
-
-        /// Allows every path — the default for tests that are not about filtering.
-        pub(crate) fn allow_all() -> Self {
-            Self::with_ignored_paths(HashSet::new())
-        }
-
-        /// Allows only the paths matching `glob`.
-        pub(crate) fn allow_only(glob: &str) -> Self {
-            let glob_set = GlobSet::builder()
-                .add(globset::Glob::new(glob).expect("malformed test glob"))
-                .build()
-                .expect("failed to build test glob set");
-            Self {
-                allowed_globs: Some(glob_set),
-                ignored_paths: HashSet::new(),
-            }
-        }
-    }
-
-    impl PathChecker for FakePathChecker {
-        fn should_allow(&self, path: &Path) -> bool {
-            self.allowed_globs
-                .as_ref()
-                .is_none_or(|globs| globs.is_match(path))
-        }
-
-        fn should_ignore(&self, path: &Path) -> bool {
-            self.ignored_paths.contains(&path.display().to_string())
         }
     }
 }

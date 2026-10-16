@@ -171,7 +171,8 @@ mod tests {
     use crate::Position;
     use crate::blocks::{ScanMode, parse_blocks};
     use crate::diff_parser::DiffChanges;
-    use crate::fs::test_utils::{FakeFileSystem, FakePathChecker};
+    use crate::fs::PathFilter;
+    use crate::fs::test_utils::FakeFileSystem;
     use crate::language_parsers::{LanguageParsers, language_parsers};
     use crate::repo_path::RepoPath;
     use crate::test_utils::{validation_context, virtual_block};
@@ -406,7 +407,7 @@ mod tests {
                 "a.toml".to_string(),
                 "a.b = 1\n".to_string(),
             )])),
-            &FakePathChecker::allow_all(),
+            &PathFilter::allow_all(),
             &language_parsers()?,
             &[virtual_block("a.toml#/a", &[])?, inner],
         )?;

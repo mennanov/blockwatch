@@ -268,7 +268,7 @@ fn build_context(
     file_system: &impl FileSystem,
 ) -> anyhow::Result<(validators::ValidationContext, blocks::ScanStats)> {
     let path_arguments = PathArguments::resolve(args.path_arguments(), file_system)?;
-    let path_checker = crate::fs::PathCheckerImpl::new(
+    let path_filter = crate::fs::PathFilter::new(
         path_arguments.allowed_globs()?,
         settings.ignored_globs().clone(),
     );
@@ -278,7 +278,7 @@ fn build_context(
         &modified_lines_by_file,
         scan_mode,
         file_system,
-        &path_checker,
+        &path_filter,
         &language_parsers,
         &virtual_blocks,
     )?;
@@ -290,7 +290,7 @@ fn build_context(
         blocks::ScanMode::OnlyChanged => {
             path_arguments.ensure_each_matches(scanned_files.chain(blocks::checkable_files(
                 file_system,
-                &path_checker,
+                &path_filter,
                 &language_parsers,
                 &virtual_blocks,
             )))?
