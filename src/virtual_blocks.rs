@@ -1,5 +1,5 @@
 use crate::Position;
-use crate::blocks::{Block, BlockWithContext, Content, Declaration};
+use crate::blocks::{Block, BlockSeverity, BlockWithContext, Content, Declaration};
 use crate::diff_parser::{self, LineChange};
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
@@ -26,6 +26,8 @@ pub(crate) struct VirtualBlock {
     pub(crate) entry: ConfigEntry,
     /// Whether the diff touches `entry`.
     pub(crate) is_entry_modified: bool,
+    /// The block's severity, from its `severity` attribute.
+    pub(crate) severity: BlockSeverity,
 }
 
 /// How to find a [`VirtualBlock`] in its file.
@@ -203,6 +205,7 @@ impl VirtualBlock {
                 start_tag_position_range,
                 content,
                 declaration: Declaration::ConfigEntry(self.entry.clone()),
+                severity: self.severity,
             },
             is_content_modified: match self.locator {
                 Locator::Symbol(_) | Locator::Pattern(_) => {
@@ -481,6 +484,16 @@ CREATE TABLE b (
             block.start_tag_position_range,
             Position::new(1, 1)..Position::new(1, 2)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn severity_attribute_resolve_returns_a_block_with_that_severity() -> anyhow::Result<()> {
+        let block = virtual_block("notes.txt", &[("severity", "warning")])?
+            .resolve(&[], "a\n", &[])?
+            .block;
+
+        assert_eq!(block.severity, BlockSeverity::Warning);
         Ok(())
     }
 

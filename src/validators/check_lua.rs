@@ -460,14 +460,13 @@ fn create_violation(
     let details = serde_json::to_value(CheckLuaViolation {
         script: script_path,
         lua_error: error_message,
-    })
-    .context("failed to serialize CheckLuaDetails")?;
+    })?;
     let message = format!(
         "Block {file_path}:{} defined at {} failed Lua check: {error_message}",
         block.name_display(),
         block.declared_at(),
     );
-    Violation::new(
+    Ok(Violation::new(
         block.start_tag_position_range.clone().into(),
         file_path,
         block,
@@ -476,7 +475,7 @@ fn create_violation(
         // A script passes or fails the block as a whole, so there is never a sibling to tell apart.
         None,
         Some(details),
-    )
+    ))
 }
 
 /// A target referenced by the validated block's `affects` attribute, exposed to Lua scripts.

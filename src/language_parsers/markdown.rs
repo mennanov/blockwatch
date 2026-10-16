@@ -362,7 +362,7 @@ fn link_reference_definition_comment_text(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blocks::{Block, Content, Declaration};
+    use crate::blocks::{Block, BlockSeverity, Content, Declaration};
     use crate::{Position, test_utils};
     use std::collections::HashMap;
 
@@ -646,6 +646,7 @@ Some text here 3
                         Position::new(6, 1)..Position::new(8, 1),
                     ),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: HashMap::from([("name".to_string(), "md_block_2".to_string())]),
@@ -658,6 +659,7 @@ Some text here 3
                         Position::new(11, 1)..Position::new(17, 1),
                     ),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: HashMap::from([("name".to_string(), "md_block_3".to_string())]),
@@ -667,6 +669,7 @@ Some text here 3
                         Position::new(14, 1)..Position::new(16, 1),
                     ),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 }
             ]
         );
@@ -800,6 +803,7 @@ Inline code `<!-- <block name="ignored"> -->` is not a comment.
                     Position::new(4, 47)..Position::new(6, 13),
                 ),
                 declaration: Declaration::Tags,
+                severity: BlockSeverity::Error,
             }]
         );
 
@@ -933,6 +937,7 @@ Not wrapped in HTML tags on multiple lines
                         Position::new(5, 35)..Position::new(7, 1),
                     ),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: HashMap::from([("name".to_string(), "md_block".to_string())]),
@@ -942,6 +947,7 @@ Not wrapped in HTML tags on multiple lines
                         Position::new(11, 1)..Position::new(13, 1),
                     ),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: HashMap::from([("name".to_string(), "html_block2".to_string())]),
@@ -951,6 +957,7 @@ Not wrapped in HTML tags on multiple lines
                         Position::new(15, 36)..Position::new(15, 60),
                     ),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: HashMap::from([("name".to_string(), "html_block3".to_string())]),
@@ -963,6 +970,7 @@ Not wrapped in HTML tags on multiple lines
                         Position::new(17, 36)..Position::new(19, 1),
                     ),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 },
             ]
         );

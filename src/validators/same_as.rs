@@ -835,7 +835,7 @@ fn create_violation(
         block.declared_at(),
         data.reason,
     );
-    Violation::new(
+    Ok(Violation::new(
         block.start_tag_position_range.clone().into(),
         file_path,
         block,
@@ -844,7 +844,7 @@ fn create_violation(
         // A block may be compared against several targets, so the target identifies this violation.
         Some(target),
         Some(serde_json::to_value(data)?),
-    )
+    ))
 }
 
 /// Selects [`SameAsValidator`] for blocks carrying a `same-as` or a `same-as-paths` attribute.

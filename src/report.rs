@@ -201,7 +201,6 @@ mod tests {
             Some("'apple',"),
             None,
         )
-        .expect("the block declares a valid severity")
     }
 
     /// Builds a run log in which `validator` checked the block at `block_index` of `example.py`.

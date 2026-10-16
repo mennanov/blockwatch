@@ -80,7 +80,7 @@ impl SyncValidator for KeepUniqueValidator {
                             violation_start.line,
                             violation_start.character,
                             line_character_end,
-                        )?);
+                        ));
                         break;
                     }
                 }
@@ -107,7 +107,7 @@ fn create_violation(
     violation_line_number: usize,
     violation_character_start: usize,
     violation_character_end: usize,
-) -> anyhow::Result<Violation> {
+) -> Violation {
     let message = format!(
         "Block {block_file_path}:{} defined at {} has a duplicated line {}",
         block.name_display(),

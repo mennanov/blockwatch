@@ -1,5 +1,5 @@
 use crate::Position;
-use crate::blocks::validate_attributes;
+use crate::blocks::{BlockSeverity, validate_attributes};
 use crate::diff_parser::{self, LineChange};
 use crate::fs::FileSystem;
 use crate::language_parsers::toml;
@@ -278,6 +278,7 @@ fn entry_blocks(
     let (file, locator) = parse_target(&block_entry.target, block_entry.target_pattern)?;
     let attributes = attributes_as_text(block_entry.attributes)?;
     validate_attributes(&attributes)?;
+    let severity = BlockSeverity::from_attributes(&attributes)?;
     let files = target_files(file, file_system)?;
     if files.is_empty() {
         // Without this error, a typo in the glob would turn the rules off without a word.
@@ -292,6 +293,7 @@ fn entry_blocks(
             attributes: attributes.clone(),
             entry: entry.clone(),
             is_entry_modified,
+            severity,
         })
         .collect())
 }
@@ -450,6 +452,7 @@ target = 'a.yaml#/b'
                         line: 3,
                     },
                     is_entry_modified: false,
+                    severity: BlockSeverity::Error,
                 },
                 VirtualBlock {
                     file: RepoPath::from_reference("a.yaml")?,
@@ -460,6 +463,7 @@ target = 'a.yaml#/b'
                         line: 9,
                     },
                     is_entry_modified: false,
+                    severity: BlockSeverity::Error,
                 },
             ]
         );
@@ -522,6 +526,7 @@ name = 'version'
                     line: 1,
                 },
                 is_entry_modified: false,
+                severity: BlockSeverity::Error,
             })
         };
         // Sorted by file.
@@ -873,6 +878,19 @@ severity = 'loud'
             read_error(text),
             "invalid block at line 1 of \"blockwatch.toml\": unrecognized severity value `loud`"
         );
+    }
+
+    #[test]
+    fn severity_attribute_read_returns_blocks_with_that_severity() -> anyhow::Result<()> {
+        let text = r"[[block]]
+target = 'a.json#/x'
+severity = 'warning'
+";
+
+        let config = read_text(text)?;
+
+        assert_eq!(config.blocks[0].severity, BlockSeverity::Warning);
+        Ok(())
     }
 
     #[test]

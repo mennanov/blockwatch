@@ -94,7 +94,7 @@ fn create_violation(
         operation.as_str(),
         expected
     );
-    Violation::new(
+    Ok(Violation::new(
         block.start_tag_position_range.clone().into(),
         block_file_path,
         block,
@@ -107,7 +107,7 @@ fn create_violation(
             op: operation.as_str().to_string(),
             expected,
         })?),
-    )
+    ))
 }
 
 /// Selects [`LineCountValidator`] for blocks carrying a `line-count` attribute.

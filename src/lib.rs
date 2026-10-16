@@ -134,7 +134,7 @@ mod count_rust_blocks_tests {
 
 #[cfg(test)]
 mod test_utils {
-    use crate::blocks::{ScanMode, parse_blocks};
+    use crate::blocks::{BlockSeverity, ScanMode, parse_blocks};
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::test_utils::{FakeFileSystem, FakePathChecker};
     use crate::language_parsers;
@@ -223,13 +223,15 @@ mod test_utils {
             Some((file, path)) => (file, Locator::Symbol(SymbolPath::parse(path)?)),
             None => (target, Locator::File),
         };
+        let attributes = attributes
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect();
         Ok(VirtualBlock {
             file: RepoPath::from_reference(file)?,
             locator,
-            attributes: attributes
-                .iter()
-                .map(|(name, value)| (name.to_string(), value.to_string()))
-                .collect(),
+            severity: BlockSeverity::from_attributes(&attributes)?,
+            attributes,
             entry: ConfigEntry {
                 file: PathBuf::from("blockwatch.toml"),
                 line: 7,

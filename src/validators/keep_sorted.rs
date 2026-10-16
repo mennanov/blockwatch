@@ -195,7 +195,7 @@ fn create_violation(
         block.name_display(),
         block.declared_at(),
     );
-    Violation::new(
+    Ok(Violation::new(
         ViolationRange::new(
             Position::new(violation_line_number, violation_character_start),
             Position::new(violation_line_number, violation_character_end),
@@ -207,13 +207,10 @@ fn create_violation(
         // Identify the violation by the offending line rather than its number, which shifts
         // whenever anything above it is added or removed.
         Some(violation_line),
-        Some(
-            serde_json::to_value(KeepSortedViolation {
-                order_by: keep_sorted_value,
-            })
-            .context("failed to serialize AffectsViolation block")?,
-        ),
-    )
+        Some(serde_json::to_value(KeepSortedViolation {
+            order_by: keep_sorted_value,
+        })?),
+    ))
 }
 
 #[cfg(test)]

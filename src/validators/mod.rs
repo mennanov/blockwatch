@@ -203,16 +203,16 @@ impl Violation {
         message: String,
         violation_text: Option<&str>,
         data: Option<serde_json::Value>,
-    ) -> anyhow::Result<Self> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             address: ViolationAddress::new(file, block.name(), code, violation_text),
-            severity: block.severity()?,
+            severity: block.severity,
             range,
             code,
             message,
             suppressed: false,
             data,
-        })
+        }
     }
 
     /// A unique address of this violation or `None` if its block is unnamed.
@@ -1395,7 +1395,9 @@ mod target_files_tests {
 
 #[cfg(test)]
 mod tests {
-    use crate::blocks::{Block, BlockAddress, BlockWithContext, Content, Declaration};
+    use crate::blocks::{
+        Block, BlockAddress, BlockSeverity, BlockWithContext, Content, Declaration,
+    };
     use crate::fs::FileSystem;
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
@@ -1417,6 +1419,7 @@ mod tests {
             start_tag_position_range: Position::new(0, 0)..Position::new(0, 0),
             content: Content::source(0..0, Position::new(0, 0)..Position::new(0, 0)),
             declaration: Declaration::Tags,
+            severity: BlockSeverity::Error,
         }
     }
 
@@ -1441,18 +1444,15 @@ mod tests {
                     .map(|file_name| {
                         (
                             file_name.clone(),
-                            vec![
-                                Violation::new(
-                                    empty_testing_violation_range(),
-                                    file_name,
-                                    &self.testing_block,
-                                    Validator::CheckAi,
-                                    "check-ai error message".to_string(),
-                                    None,
-                                    None,
-                                )
-                                .expect("the testing block has a valid severity"),
-                            ],
+                            vec![Violation::new(
+                                empty_testing_violation_range(),
+                                file_name,
+                                &self.testing_block,
+                                Validator::CheckAi,
+                                "check-ai error message".to_string(),
+                                None,
+                                None,
+                            )],
                         )
                     })
                     .collect(),
@@ -1474,18 +1474,15 @@ mod tests {
                     .map(|file_name| {
                         (
                             file_name.clone(),
-                            vec![
-                                Violation::new(
-                                    empty_testing_violation_range(),
-                                    file_name,
-                                    &self.testing_block,
-                                    Validator::KeepSorted,
-                                    "keep-sorted error message".to_string(),
-                                    None,
-                                    None,
-                                )
-                                .expect("the testing block has a valid severity"),
-                            ],
+                            vec![Violation::new(
+                                empty_testing_violation_range(),
+                                file_name,
+                                &self.testing_block,
+                                Validator::KeepSorted,
+                                "keep-sorted error message".to_string(),
+                                None,
+                                None,
+                            )],
                         )
                     })
                     .collect(),

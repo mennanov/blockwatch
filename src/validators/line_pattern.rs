@@ -199,7 +199,7 @@ fn create_violation(
         block.name_display(),
         block.declared_at(),
     );
-    Violation::new(
+    Ok(Violation::new(
         range,
         block_file_path,
         block,
@@ -209,7 +209,7 @@ fn create_violation(
         // whenever anything above it is added or removed.
         Some(violation_line),
         Some(serde_json::to_value(violation)?),
-    )
+    ))
 }
 
 #[cfg(test)]

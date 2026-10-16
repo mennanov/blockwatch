@@ -1,5 +1,5 @@
 use crate::Position;
-use crate::blocks::{Block, Content, Declaration};
+use crate::blocks::{Block, Content};
 use crate::language_parsers::{Comment, CommentsParser};
 use crate::tag_parser::{BlockTag, MalformedTag, WinnowBlockTagParser};
 use std::collections::{HashMap, VecDeque};
@@ -92,7 +92,10 @@ impl<'source, I: Iterator<Item = Comment>> Blocks<'source, I> {
             ));
             return;
         };
-        self.blocks.push_back(block_end.into_block(block_start));
+        match block_end.into_block(block_start) {
+            Ok(block) => self.blocks.push_back(block),
+            Err(error) => self.error = Some(error),
+        }
         if self.open_blocks.is_empty() {
             self.sort_completed_group();
         }
@@ -364,7 +367,9 @@ impl BlockEnd {
     ///
     /// The content is everything between the two comments, so a block opened and closed within one
     /// comment has no content at all.
-    fn into_block(self, block_start: BlockStart) -> Block {
+    ///
+    /// Returns an error if the start tag has an attribute that is not valid.
+    fn into_block(self, block_start: BlockStart) -> anyhow::Result<Block> {
         let content_range = if !Rc::ptr_eq(&self.comment, &block_start.comment) {
             block_start.comment.source_range.end..self.comment.source_range.start
         } else {
@@ -374,18 +379,17 @@ impl BlockEnd {
         };
         let content_start_position = block_start.comment.position_range.end;
         let content_end_position = self.comment.position_range.start;
-        Block {
-            attributes: block_start.attributes,
-            start_tag_position_range: block_start.start_tag_position_range,
-            content: Content::source(content_range, content_start_position..content_end_position),
-            declaration: Declaration::Tags,
-        }
+        Block::from_tags(
+            block_start.attributes,
+            block_start.start_tag_position_range,
+            Content::source(content_range, content_start_position..content_end_position),
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::blocks::{Block, Content, Declaration};
+    use crate::blocks::{Block, BlockSeverity, Content, Declaration};
     use crate::language_parsers::LanguageParser;
     use crate::{Position, language_parsers, test_utils};
     use std::collections::HashMap;
@@ -428,6 +432,7 @@ mod tests {
                     Position::new(1, 14)..Position::new(1, 31),
                 ),
                 declaration: Declaration::Tags,
+                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -448,6 +453,7 @@ mod tests {
                     Position::new(1, 11)..Position::new(3, 1),
                 ),
                 declaration: Declaration::Tags,
+                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -474,6 +480,7 @@ println!("hello2");
                         Position::new(1, 11)..Position::new(3, 1),
                     ),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: HashMap::new(),
@@ -483,6 +490,7 @@ println!("hello2");
                         Position::new(4, 11)..Position::new(6, 1),
                     ),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 }
             ]
         );
@@ -505,6 +513,7 @@ println!("hello2");
                         Position::new(1, 14)..Position::new(1, 33),
                     ),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: HashMap::new(),
@@ -514,6 +523,7 @@ println!("hello2");
                         Position::new(1, 54)..Position::new(1, 73),
                     ),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 }
             ]
         );
@@ -536,6 +546,7 @@ println!("hello2");
                         Position::new(1, 11)..Position::new(3, 1),
                     ),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: HashMap::new(),
@@ -545,6 +556,7 @@ println!("hello2");
                         Position::new(3, 22)..Position::new(5, 1),
                     ),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 }
             ]
         );
@@ -591,12 +603,14 @@ println!("hello2");
                     start_tag_position_range: Position::new(2, 12)..Position::new(2, 30),
                     content: Content::source(30..620, Position::new(2, 30)..Position::new(25, 9),),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: HashMap::from([("name".to_string(), "bar".to_string())]),
                     start_tag_position_range: Position::new(7, 16)..Position::new(7, 34),
                     content: Content::source(142..440, Position::new(7, 34)..Position::new(17, 13),),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: HashMap::from([("name".to_string(), "bar-bar".to_string())]),
@@ -606,6 +620,7 @@ println!("hello2");
                         Position::new(11, 42)..Position::new(15, 17),
                     ),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: HashMap::from([("name".to_string(), "buzz".to_string())]),
@@ -615,12 +630,14 @@ println!("hello2");
                         Position::new(19, 35)..Position::new(23, 13),
                     ),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: HashMap::from([("name".to_string(), "fizz".to_string())]),
                     start_tag_position_range: Position::new(26, 12)..Position::new(26, 31),
                     content: Content::source(662..671, Position::new(26, 31)..Position::new(27, 9),),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 },
             ]
         );
@@ -669,6 +686,7 @@ println!("hello2");
                     Position::new(1, 42)..Position::new(3, 9),
                 ),
                 declaration: Declaration::Tags,
+                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -700,6 +718,7 @@ println!("hello2");
                     Position::new(2, 5)..Position::new(2, 22),
                 ),
                 declaration: Declaration::Tags,
+                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -725,6 +744,7 @@ println!("hello2");
                     Position::new(3, 16)..Position::new(5, 1),
                 ),
                 declaration: Declaration::Tags,
+                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -747,6 +767,7 @@ println!("hello2");
                         Position::new(1, 20)..Position::new(3, 1),
                     ),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: HashMap::from([
@@ -759,6 +780,7 @@ println!("hello2");
                         Position::new(4, 16)..Position::new(6, 1),
                     ),
                     declaration: Declaration::Tags,
+                    severity: BlockSeverity::Error,
                 },
             ]
         );
@@ -780,6 +802,7 @@ println!("hello2");
                     Position::new(1, 11)..Position::new(4, 1),
                 ),
                 declaration: Declaration::Tags,
+                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -800,6 +823,7 @@ println!("hello2");
                     Position::new(1, 14)..Position::new(1, 31),
                 ),
                 declaration: Declaration::Tags,
+                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -820,6 +844,7 @@ println!("hello2");
                     Position::new(2, 11)..Position::new(2, 30),
                 ),
                 declaration: Declaration::Tags,
+                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -840,6 +865,7 @@ println!("hello2");
                     Position::new(1, 14)..Position::new(1, 33),
                 ),
                 declaration: Declaration::Tags,
+                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -862,6 +888,7 @@ println!("hello2");
                     Position::new(1, 16)..Position::new(3, 1),
                 ),
                 declaration: Declaration::Tags,
+                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -885,6 +912,7 @@ println!("hello2");
                     Position::new(2, 19)..Position::new(4, 1),
                 ),
                 declaration: Declaration::Tags,
+                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -1164,7 +1192,7 @@ println!("hello2");
     fn tag_with_attributes_on_a_single_line_returns_correct_attributes() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
-        // <block foo="bar" fizz="buzz">
+        // <block name="bar" check-ai="buzz">
         fn foo() {
           println!("hello world!");
         }
@@ -1175,8 +1203,8 @@ println!("hello2");
         assert_eq!(
             blocks[0].attributes,
             HashMap::from([
-                ("foo".to_string(), "bar".to_string()),
-                ("fizz".to_string(), "buzz".to_string())
+                ("name".to_string(), "bar".to_string()),
+                ("check-ai".to_string(), "buzz".to_string())
             ])
         );
         Ok(())
@@ -1187,8 +1215,8 @@ println!("hello2");
         let mut parser = create_parser();
         let contents = r#"
         /* <block
-            foo="bar"
-            fizz="buzz"> */
+            name="bar"
+            check-ai="buzz"> */
         fn foo() {
           println!("hello world!");
         }
@@ -1199,8 +1227,8 @@ println!("hello2");
         assert_eq!(
             blocks[0].attributes,
             HashMap::from([
-                ("foo".to_string(), "bar".to_string()),
-                ("fizz".to_string(), "buzz".to_string())
+                ("name".to_string(), "bar".to_string()),
+                ("check-ai".to_string(), "buzz".to_string())
             ])
         );
         Ok(())
@@ -1210,12 +1238,12 @@ println!("hello2");
     fn unquoted_attribute_values_return_correct_values() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
-        // <block color=red flavor=sweet>
+        // <block name=red check-ai=sweet>
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks[0].attributes["color"], "red");
-        assert_eq!(blocks[0].attributes["flavor"], "sweet");
+        assert_eq!(blocks[0].attributes["name"], "red");
+        assert_eq!(blocks[0].attributes["check-ai"], "sweet");
         Ok(())
     }
 
@@ -1223,11 +1251,11 @@ println!("hello2");
     fn single_quoted_attribute_value_returns_the_value_verbatim() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
-        // <block text='He said "Hello"'>
+        // <block check-ai='He said "Hello"'>
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks[0].attributes["text"], "He said \"Hello\"");
+        assert_eq!(blocks[0].attributes["check-ai"], "He said \"Hello\"");
         Ok(())
     }
 
@@ -1289,12 +1317,12 @@ println!("hello2");
     fn valueless_attributes_return_empty_strings() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
-        // <block attr1 attr2>
+        // <block keep-sorted keep-unique>
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks[0].attributes["attr1"], "");
-        assert_eq!(blocks[0].attributes["attr2"], "");
+        assert_eq!(blocks[0].attributes["keep-sorted"], "");
+        assert_eq!(blocks[0].attributes["keep-unique"], "");
         Ok(())
     }
 
@@ -1302,7 +1330,7 @@ println!("hello2");
     fn attributes_with_an_empty_quoted_value_return_empty_strings() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
-        // <block name="" foo="" bar=''>
+        // <block name="" check-ai="" keep-sorted=''>
         fn foo() {}
         // </block>
         "#;
@@ -1311,8 +1339,8 @@ println!("hello2");
             blocks[0].attributes,
             HashMap::from([
                 ("name".to_string(), "".to_string()),
-                ("foo".to_string(), "".to_string()),
-                ("bar".to_string(), "".to_string())
+                ("check-ai".to_string(), "".to_string()),
+                ("keep-sorted".to_string(), "".to_string())
             ])
         );
         Ok(())
@@ -1322,13 +1350,13 @@ println!("hello2");
     fn attributes_with_spaces_around_the_equals_sign_return_correct_values() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
-        // <block name = "foo" desc = 'bar'>
+        // <block name = "foo" check-ai = 'bar'>
         fn unicode() {}
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks[0].attributes["name"], "foo");
-        assert_eq!(blocks[0].attributes["desc"], "bar");
+        assert_eq!(blocks[0].attributes["check-ai"], "bar");
         Ok(())
     }
 
@@ -1337,15 +1365,15 @@ println!("hello2");
     {
         let mut parser = create_parser();
         let contents = r#"
-        // <block color="red" attr1 align="center" attr2>
+        // <block name="red" keep-sorted check-ai="center" keep-unique>
         fn escaped() {}
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks[0].attributes["color"], "red");
-        assert_eq!(blocks[0].attributes["attr1"], "");
-        assert_eq!(blocks[0].attributes["align"], "center");
-        assert_eq!(blocks[0].attributes["attr2"], "");
+        assert_eq!(blocks[0].attributes["name"], "red");
+        assert_eq!(blocks[0].attributes["keep-sorted"], "");
+        assert_eq!(blocks[0].attributes["check-ai"], "center");
+        assert_eq!(blocks[0].attributes["keep-unique"], "");
         Ok(())
     }
 
@@ -1353,7 +1381,7 @@ println!("hello2");
     fn duplicated_attribute_returns_the_last_value() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
-        // <block color="red" color="blue">
+        // <block name="red" name="blue">
         fn escaped() {}
         // </block>
         "#;
@@ -1361,7 +1389,7 @@ println!("hello2");
 
         // Duplicate attributes: last value wins (standard HTML/XML behavior)
         assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].attributes.get("color"), Some(&"blue".to_string()));
+        assert_eq!(blocks[0].attributes.get("name"), Some(&"blue".to_string()));
         Ok(())
     }
 
@@ -1369,12 +1397,15 @@ println!("hello2");
     fn html_escaped_quotes_in_an_attribute_value_are_not_decoded() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
-        // <block text="He said &quot;Hello&quot;">
+        // <block check-ai="He said &quot;Hello&quot;">
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
 
-        assert_eq!(blocks[0].attributes["text"], "He said &quot;Hello&quot;");
+        assert_eq!(
+            blocks[0].attributes["check-ai"],
+            "He said &quot;Hello&quot;"
+        );
         Ok(())
     }
 
@@ -1394,13 +1425,13 @@ println!("hello2");
     fn non_ascii_attribute_value_returns_the_value_verbatim() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
-        // <block name="🦀" desc="Rust">
+        // <block name="🦀" check-ai="Rust">
         fn unicode() {}
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks[0].attributes["name"], "🦀");
-        assert_eq!(blocks[0].attributes["desc"], "Rust");
+        assert_eq!(blocks[0].attributes["check-ai"], "Rust");
         Ok(())
     }
 
@@ -1408,9 +1439,9 @@ println!("hello2");
     fn nested_blocks_return_their_own_attributes() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
-        // <block name="outer" foo="bar">
+        // <block name="outer" check-ai="bar">
         fn outer() {
-            // <block name="inner" fizz="buzz">
+            // <block name="inner" keep-sorted="buzz">
             fn inner() {}
             // </block>
         }
@@ -1422,14 +1453,14 @@ println!("hello2");
             blocks[0].attributes,
             HashMap::from([
                 ("name".to_string(), "outer".to_string()),
-                ("foo".to_string(), "bar".to_string()),
+                ("check-ai".to_string(), "bar".to_string()),
             ])
         );
         assert_eq!(
             blocks[1].attributes,
             HashMap::from([
                 ("name".to_string(), "inner".to_string()),
-                ("fizz".to_string(), "buzz".to_string())
+                ("keep-sorted".to_string(), "buzz".to_string())
             ])
         );
         Ok(())

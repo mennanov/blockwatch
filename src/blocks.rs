@@ -36,6 +36,9 @@ pub(crate) struct Block {
     pub(crate) content: Content,
     /// Where the block's attributes are written.
     pub(crate) declaration: Declaration,
+    /// How serious a violation of this block is. It is the `severity` attribute, or
+    /// [`BlockSeverity::Error`] if the block has none.
+    pub(crate) severity: BlockSeverity,
 }
 
 /// The content of a [`Block`]: its text, and where the block's file writes it.
@@ -245,6 +248,38 @@ impl Content {
 }
 
 impl Block {
+    /// Builds the block that a pair of tags declares, with the start tag at
+    /// `start_tag_position_range`.
+    ///
+    /// # Errors
+    /// Returns an error that shows the block's name and line if its attributes are not valid; see
+    /// [`validate_attributes`] and [`BlockSeverity::from_attributes`].
+    pub(crate) fn from_tags(
+        attributes: HashMap<String, String>,
+        start_tag_position_range: Range<Position>,
+        content: Content,
+    ) -> anyhow::Result<Self> {
+        let severity = validate_attributes(&attributes)
+            .and_then(|()| BlockSeverity::from_attributes(&attributes))
+            .map_err(|error| {
+                // The tag parser does not know the file, so the message cannot show it.
+                let name = attributes
+                    .get("name")
+                    .map_or(UNNAMED_BLOCK_LABEL, String::as_str);
+                anyhow!(
+                    "Block {name} at line {} contains {error}",
+                    start_tag_position_range.start.line
+                )
+            })?;
+        Ok(Self {
+            attributes,
+            start_tag_position_range,
+            content,
+            declaration: Declaration::Tags,
+            severity,
+        })
+    }
+
     /// Returns the optional value of the `name` attribute for this block.
     pub(crate) fn name(&self) -> Option<&str> {
         self.attributes.get("name").map(String::as_str)
@@ -281,16 +316,6 @@ impl Block {
             },
         }
     }
-
-    /// Returns the block's severity.
-    pub(crate) fn severity(&self) -> anyhow::Result<BlockSeverity> {
-        self.attributes
-            .get("severity")
-            .map_or(Ok(BlockSeverity::Error), |s| {
-                BlockSeverity::from_str(s.as_str())
-                    .context(format!("Invalid \"severity\" attribute value \"{}\"", s))
-            })
-    }
 }
 
 /// Block's severity.
@@ -312,6 +337,22 @@ pub(crate) enum BlockSeverity {
     Hint = 4,
 }
 // </block>
+
+impl BlockSeverity {
+    /// The severity that `attributes` give a block: its `severity` attribute, or
+    /// [`BlockSeverity::Error`] if it has none.
+    ///
+    /// # Errors
+    /// Returns an error that quotes the value if it is not a severity.
+    pub(crate) fn from_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<Self> {
+        match attributes.get("severity") {
+            Some(value) => {
+                Self::from_str(value).map_err(|_| anyhow!("unrecognized severity value `{value}`"))
+            }
+            None => Ok(Self::Error),
+        }
+    }
+}
 
 /// Represents a source field with its corresponding modified blocks.
 #[derive(Debug)]
@@ -840,7 +881,6 @@ fn tag_blocks(
         .parse_blocks(source)
         .map(|block| {
             let block = block?;
-            validate_block_syntax(&block, file_path)?;
             reject_duplicate_name(&block, file_path, names_seen)?;
             Ok(BlockWithContext {
                 is_content_modified: block.content.intersects_any(line_changes),
@@ -935,11 +975,11 @@ const RECOGNIZED_ATTRIBUTES: &[&str] = &[
     // </block>
 ];
 
-/// Checks a block's attributes: each one must be recognized, and `severity` must have a valid
-/// value.
+/// Checks that each attribute of a block is recognized. It does not check the values: see
+/// [`BlockSeverity::from_attributes`] for `severity`.
 ///
 /// # Errors
-/// Returns an error that quotes an attribute or a value that is not valid, such as
+/// Returns an error that quotes the attribute that is not recognized, such as
 /// ``unrecognized attribute `keep-sortd` ``.
 pub(crate) fn validate_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<()> {
     if let Some(name) = attributes
@@ -948,27 +988,7 @@ pub(crate) fn validate_attributes(attributes: &HashMap<String, String>) -> anyho
     {
         bail!("unrecognized attribute `{name}`");
     }
-    if let Some(value) = attributes.get("severity")
-        && BlockSeverity::from_str(value).is_err()
-    {
-        bail!("unrecognized severity value `{value}`");
-    }
     Ok(())
-}
-
-/// Checks the attributes of `block`, which is in `file_path`, with [`validate_attributes`].
-///
-/// # Errors
-/// Returns an error that shows the block and what is not valid.
-fn validate_block_syntax(block: &Block, file_path: &Path) -> anyhow::Result<()> {
-    validate_attributes(&block.attributes).map_err(|error| {
-        anyhow!(
-            "Block {}:{} at {} contains {error}",
-            file_path.display(),
-            block.name_display(),
-            block.declared_at(),
-        )
-    })
 }
 
 /// Rejects a block whose `name` was already used earlier in the same file. Otherwise records in
@@ -1041,59 +1061,47 @@ fn try_parser_for_extension<'p>(
 
 #[cfg(test)]
 mod block_severity_from_str_tests {
-    use crate::Position;
-    use crate::blocks::{Block, BlockSeverity, Content, Declaration};
+    use crate::blocks::BlockSeverity;
     use std::collections::HashMap;
 
-    /// Builds a contentless block carrying only a `severity` attribute to test how that attribute
-    /// is parsed.
-    fn new_empty_block_with_severity(severity: &str) -> Block {
-        Block {
-            attributes: HashMap::from([("severity".into(), severity.into())]),
-            start_tag_position_range: Position::new(0, 0)..Position::new(0, 0),
-            content: Content::source(0..0, Position::new(0, 0)..Position::new(0, 0)),
-            declaration: Declaration::Tags,
-        }
+    /// Attributes holding only a `severity`, to test how that attribute is parsed.
+    fn attributes_with_severity(severity: &str) -> HashMap<String, String> {
+        HashMap::from([("severity".into(), severity.into())])
     }
 
     #[test]
     fn block_with_valid_severity_attribute_returns_correct_severity() {
-        let block = new_empty_block_with_severity("warning");
+        let severity = BlockSeverity::from_attributes(&attributes_with_severity("warning"));
 
-        assert_eq!(block.severity().unwrap(), BlockSeverity::Warning);
+        assert_eq!(severity.unwrap(), BlockSeverity::Warning);
     }
 
     #[test]
     fn block_with_mixed_case_severity_attribute_returns_correct_severity() {
-        let block = new_empty_block_with_severity("InFo");
+        let severity = BlockSeverity::from_attributes(&attributes_with_severity("InFo"));
 
-        assert_eq!(block.severity().unwrap(), BlockSeverity::Info);
+        assert_eq!(severity.unwrap(), BlockSeverity::Info);
     }
 
     #[test]
     fn block_without_severity_attribute_returns_error_severity() {
-        let block = Block {
-            attributes: HashMap::new(),
-            start_tag_position_range: Position::new(0, 0)..Position::new(0, 0),
-            content: Content::source(0..0, Position::new(0, 0)..Position::new(0, 0)),
-            declaration: Declaration::Tags,
-        };
+        let severity = BlockSeverity::from_attributes(&HashMap::new());
 
-        assert_eq!(block.severity().unwrap(), BlockSeverity::Error);
+        assert_eq!(severity.unwrap(), BlockSeverity::Error);
     }
 
     #[test]
     fn block_with_invalid_severity_attribute_returns_error() {
-        let block = new_empty_block_with_severity("warn");
+        let severity = BlockSeverity::from_attributes(&attributes_with_severity("warn"));
 
-        assert!(block.severity().is_err());
+        assert!(severity.is_err());
     }
 }
 
 #[cfg(test)]
 mod block_address_tests {
     use crate::Position;
-    use crate::blocks::{Block, BlockAddress, Content, Declaration};
+    use crate::blocks::{Block, BlockAddress, BlockSeverity, Content, Declaration};
     use crate::repo_path::RepoPath;
     use std::collections::HashMap;
 
@@ -1111,6 +1119,7 @@ mod block_address_tests {
             start_tag_position_range: Position::new(0, 0)..Position::new(0, 0),
             content: Content::source(0..0, Position::new(0, 0)..Position::new(0, 0)),
             declaration: Declaration::Tags,
+            severity: BlockSeverity::Error,
         }
     }
 
@@ -2278,7 +2287,7 @@ mod parse_blocks_tests {
         assert!(file_blocks.is_err());
         assert_eq!(
             file_blocks.unwrap_err().source().unwrap().to_string(),
-            "Block a.py:x at line 1 contains unrecognized attribute `unknown-attr`"
+            "Block x at line 1 contains unrecognized attribute `unknown-attr`"
         );
         Ok(())
     }
@@ -2303,7 +2312,7 @@ mod parse_blocks_tests {
         assert!(file_blocks.is_err());
         assert_eq!(
             file_blocks.unwrap_err().source().unwrap().to_string(),
-            "Block a.py:(unnamed) at line 1 contains unrecognized severity value `invalid-severity`"
+            "Block (unnamed) at line 1 contains unrecognized severity value `invalid-severity`"
         );
         Ok(())
     }

@@ -407,9 +407,8 @@ fn affects_violation(
     let details = serde_json::to_value(AffectsViolation {
         affected_block_file_path,
         affected_block_name,
-    })
-    .context("failed to serialize AffectsViolation block")?;
-    Violation::new(
+    })?;
+    Ok(Violation::new(
         block.start_tag_position_range.clone().into(),
         file_path,
         block,
@@ -421,7 +420,7 @@ fn affects_violation(
             affected_block_name,
         )),
         Some(details),
-    )
+    ))
 }
 
 #[cfg(test)]

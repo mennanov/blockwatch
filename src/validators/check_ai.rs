@@ -186,8 +186,8 @@ fn block_violation(
     error_message: String,
     details: CheckAiViolation,
 ) -> anyhow::Result<Violation> {
-    let details = serde_json::to_value(details).context("failed to serialize CheckAiDetails")?;
-    Violation::new(
+    let details = serde_json::to_value(details)?;
+    Ok(Violation::new(
         block.start_tag_position_range.clone().into(),
         file_path,
         block,
@@ -196,7 +196,7 @@ fn block_violation(
         // The model answers about the whole block, so there is never a sibling to tell apart.
         None,
         Some(details),
-    )
+    ))
 }
 
 impl<C: AiClient> CheckAiValidator<C> {
