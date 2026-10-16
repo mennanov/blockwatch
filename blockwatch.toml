@@ -40,41 +40,14 @@ same-as = '''.github/workflows/codeql.yml,
 same-as-pattern = '(?:actions/checkout@|^)(?P<value>v\d+)$'
 
 # `blockwatch skill` prints src/skill.md, and projects save that output. A tag in that file would become a block in
-# every one of those projects. So the file marks its sections with plain comments, which are not tags, and these
-# entries make each marked section a named block.
+# every one of those projects. So blocks point at its sections by their headings, and these entries hold the pattern
+# that reads a section, which the section can't hold itself.
 [[block]]
-target = 'src/skill.md'
-target-pattern = '(?s)<!-- validator-catalog -->.*<!-- /validator-catalog -->'
-name = 'validator-catalog'
-
-[[block]]
-target = 'src/skill.md'
-target-pattern = '(?s)<!-- validator-reference -->.*<!-- /validator-reference -->'
+target = 'src/skill.md#/blockwatch/Validator reference'
 name = 'validator-reference'
 same-as-pattern = '^\|\s*`(?P<value>[a-z-]+)`'
 
 [[block]]
-target = 'src/skill.md'
-target-pattern = '(?s)<!-- extensions-with-symbols -->.*<!-- /extensions-with-symbols -->'
+target = 'src/skill.md#/blockwatch/Symbols/Files with symbols'
 name = 'extensions-with-symbols'
 same-as-pattern = '`\.?(?P<value>[A-Za-z]+)`'
-
-[[block]]
-target = 'src/skill.md'
-target-pattern = '(?s)<!-- json-paths -->.*<!-- /json-paths -->'
-name = 'json-paths'
-
-[[block]]
-target = 'src/skill.md'
-target-pattern = '(?s)<!-- toml-paths -->.*<!-- /toml-paths -->'
-name = 'toml-paths'
-
-[[block]]
-target = 'src/skill.md'
-target-pattern = '(?s)<!-- yaml-paths -->.*<!-- /yaml-paths -->'
-name = 'yaml-paths'
-
-[[block]]
-target = 'src/skill.md'
-target-pattern = '(?s)<!-- markdown-paths -->.*<!-- /markdown-paths -->'
-name = 'markdown-paths'

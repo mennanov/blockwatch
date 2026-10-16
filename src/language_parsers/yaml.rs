@@ -779,7 +779,7 @@ multi: this is
 last: end
 "#;
 
-        // <block affects="docs/symbols.md:yaml-paths, src/skill.md:yaml-paths">
+        // <block affects="docs/symbols.md:yaml-paths, src/skill.md#/blockwatch/Symbols/YAML">
         assert_eq!(
             derived_symbols(source)?,
             expected_symbols(&[

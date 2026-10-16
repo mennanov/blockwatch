@@ -49,8 +49,6 @@ Then run `git diff --patch | blockwatch --diff` to confirm the new tags pass (se
 
 ### Where blocks add value (catalog)
 
-<!-- validator-catalog -->
-
 | You see...                                                                                                                                   | Add                      | Why                                                                        |
 |----------------------------------------------------------------------------------------------------------------------------------------------|--------------------------|----------------------------------------------------------------------------|
 | A hand-maintained list/enum/match that should stay ordered (dependencies, CLI flags, feature lists, route tables)                            | `keep-sorted`            | Eliminates "please sort this" review nits                                  |
@@ -62,8 +60,6 @@ Then run `git diff --patch | blockwatch --diff` to confirm the new tags pass (se
 | A block that must not grow past N lines (public API surface, a switch mapped to a fixed enum)                                                | `line-count="<=N"`       | Flags unbounded growth                                                     |
 | Prose or config with a natural-language rule ("must mention X", "no TODOs left")                                                             | `check-ai="..."`         | Rules regex can't express                                                  |
 | Domain logic too complex for regex                                                                                                           | `check-lua="script.lua"` | Custom programmable checks                                                 |
-
-<!-- /validator-catalog -->
 
 Prefer the deterministic validators (`keep-sorted`, `keep-unique`, `affects`, `same-as`, `line-pattern`, `line-count`)
 first — they are free, fast, and need no API keys. Reserve `check-ai` for rules the cheaper validators genuinely can't
@@ -121,8 +117,6 @@ pub enum Language { Rust, Python }
 
 ## Validator reference
 
-<!-- validator-reference -->
-
 | Attribute                | Syntax                                                                                                                                | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 |--------------------------|---------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `name`                   | `name="foo"`                                                                                                                          | Gives the block a name, so `affects` and `same-as` can point at it; shown by `blockwatch list`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -146,20 +140,18 @@ pub enum Language { Rust, Python }
 | `check-lua-timeout`      | `check-lua-timeout="60"`                                                                                                              | Wall-clock budget for the script, in whole seconds; default `30`. A script that runs past it fails the run with an error, not a violation. A value below `1` is a hard error.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `severity`               | `severity="error"` (default) `/ warning / info / hint`                                                                                | Only `error` fails the run (exit 1); the others are reported but exit 0.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
-<!-- /validator-reference -->
-
 ## Symbols
 
 A symbol is one value inside a file, such as the `version` key in `package.json`. `affects` and `same-as` point at one
 with `file#/path`, or with `#/path` for the block's own file. Use a symbol when only one key in a file matters, or when
 the file cannot hold a comment. To put rules on the value itself, wrap it in a `[[block]]` entry in `blockwatch.toml`.
 
-<!-- extensions-with-symbols -->
+### Files with symbols
 
 Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`.toml`, `Pipfile`), YAML (`.yaml`,
 `.yml`, `.cff`) and Markdown (`.md`, `.markdown`, `.mdx`). A path into any other file fails the run.
 
-<!-- /extensions-with-symbols -->
+### Writing a path
 
 - **Paths follow RFC 6901.** `/` separates keys. An array item is its position, counted from 0: `#/files/0`.
 - **Pick a list item by a key's value when items can be added above it:** `#/services/~[name=web]/port` is the `port`
@@ -170,19 +162,17 @@ Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`
 - **A missing key is a violation.** The message suggests similar paths.
 - **A missing or broken file fails the run.** blockwatch does not guess what a broken file meant.
 
-<!-- json-paths -->
+### JSON
 
-**JSON.** Every key and every array item is a symbol.
+Every key and every array item is a symbol.
 
 - A comment is not an array item, so it does not shift the positions after it.
 - A trailing comma breaks the file, even in `.jsonc`.
 - A key written twice is a violation, because blockwatch can't tell which copy you mean.
 
-<!-- /json-paths -->
+### TOML
 
-<!-- toml-paths -->
-
-**TOML.** Every key, every table and every array item is a symbol.
+Every key, every table and every array item is a symbol.
 
 - A path follows the keys, however the file writes them. `[tool.ruff]` with `line-length = 88` below it is
   `#/tool/ruff/line-length`, and so is `tool.ruff.line-length = 88`.
@@ -192,11 +182,9 @@ Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`
   each place, in order.
 - A key written twice breaks the file.
 
-<!-- /toml-paths -->
+### YAML
 
-<!-- yaml-paths -->
-
-**YAML.** Every key and every list item is a symbol. Block style and flow style give the same paths.
+Every key and every list item is a symbol. Block style and flow style give the same paths.
 
 - A string counts as the text YAML reads, `|` and `>` blocks included. Tags and anchors are not part of a value.
   An empty value (`key:`) is an empty string.
@@ -206,11 +194,9 @@ Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`
 - A key written twice is a violation.
 - A file with several documents fails the run. Use a named block there instead.
 
-<!-- /yaml-paths -->
+### Markdown
 
-<!-- markdown-paths -->
-
-**Markdown.** Every section is a symbol: a heading and everything up to the next heading of the same or a higher
+Every section is a symbol: a heading and everything up to the next heading of the same or a higher
 level. Its path is the text of each heading it is under, then its own, the top `#` title included:
 `README.md#/My project/Install/From source`.
 
@@ -222,8 +208,6 @@ level. Its path is the text of each heading it is under, then its own, the top `
 - The same heading twice under one parent is a violation.
 - An `.mdx` file gets the same paths. JSX text and the code in braces count as heading text. A heading inside a JSX
   element doesn't count.
-
-<!-- /markdown-paths -->
 
 ## The config file (`blockwatch.toml`)
 

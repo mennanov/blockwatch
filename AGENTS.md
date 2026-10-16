@@ -276,9 +276,10 @@ They are not instructions for working on blockwatch, and changing them changes w
 guidance for working on blockwatch.
 
 `src/skill.md` must not hold block tags. A project that saves the skill parses it too, so each tag would become a block
-in that project. To point a block at a section of the skill, put the section between two plain comments, such as
-`<!-- json-paths -->` and `<!-- /json-paths -->`. Then add a `[[block]]` entry that matches them to `blockwatch.toml`,
-next to the others for `src/skill.md`.
+in that project. To point a block at a section of the skill, use the section's headings, such as
+`src/skill.md#/blockwatch/Symbols/JSON`. To point at only a part of a section, give that part a heading of its own.
+When the section needs a rule of its own, such as a `same-as-pattern`, add a `[[block]]` entry for it to
+`blockwatch.toml`, next to the others for `src/skill.md`.
 
 Each agent's local config directory is left out of git on purpose: `.claude/`, `.cursor/`, `.gemini/`, `.windsurf/`,
 `.aider*`, and the others listed in `.gitignore`. Don't commit agent-specific settings. Anything a future contributor
