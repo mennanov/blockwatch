@@ -16,7 +16,7 @@ use crate::diff_parser::LineChange;
 use crate::fs::FileSystem;
 use crate::language_parsers::LanguageParsers;
 use crate::repo_path::RepoPath;
-use crate::settings::BlockSelection;
+use crate::settings::{BlockSelection, ValidatorSelection};
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{Symbol, resolve};
 use crate::violation_address::ViolationAddress;
@@ -26,7 +26,7 @@ use async_trait::async_trait;
 use bigdecimal::BigDecimal;
 use serde::Serialize;
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ffi::OsString;
 use std::ops::Range;
 use std::sync::Arc;
@@ -646,31 +646,14 @@ pub(crate) fn run(
 type SyncValidators = Vec<(Validator, Box<dyn SyncValidator>)>;
 type AsyncValidators = Vec<(Validator, Box<dyn AsyncValidator>)>;
 
-/// Whether a validator is enabled/disabled.
-fn is_validator_active(
-    validator: Validator,
-    disabled_validators: &HashSet<Validator>,
-    enabled_validators: &HashSet<Validator>,
-) -> bool {
-    if enabled_validators.is_empty() {
-        !disabled_validators.contains(&validator)
-    } else {
-        enabled_validators.contains(&validator)
-    }
-}
-
 /// Counts the blocks in `context` carrying a rule that cannot fire unless a diff is supplied; see
-/// [`Validator::needs_diff`].
+/// [`Validator::needs_diff`]. A validator that `selection` leaves out does not count.
 pub(crate) fn diff_gated_block_count(
     context: &ValidationContext,
-    disabled_validators: &HashSet<Validator>,
-    enabled_validators: &HashSet<Validator>,
+    selection: &ValidatorSelection,
 ) -> usize {
     let attributes: Vec<&str> = Validator::iter()
-        .filter(|validator| {
-            validator.needs_diff()
-                && is_validator_active(*validator, disabled_validators, enabled_validators)
-        })
+        .filter(|validator| validator.needs_diff() && selection.includes(*validator))
         .map(|validator| validator.as_str())
         .collect();
     context
@@ -691,22 +674,18 @@ pub(crate) fn diff_gated_block_count(
 /// soon as every candidate has been detected. Returning sync and async validators separately lets
 /// the caller skip starting a Tokio runtime when no async validator is present.
 ///
-/// `enabled_validators` takes precedence over `disabled_validators`: when it is non-empty, only the
-/// validators it names are considered. Passing both is rejected earlier, when the flags are parsed.
+/// Only the validators that `selection` includes are considered.
 ///
 /// `detect` decides whether a validator applies to a block, as [`Validator::detect`] does. It is a
 /// parameter so that a test can use validators that don't call a model or read the environment.
 pub(crate) fn detect_validators<Fs: FileSystem + 'static>(
     context: &ValidationContext,
     detect: impl Fn(Validator, &BlockWithContext, &Arc<Fs>) -> anyhow::Result<Option<ValidatorType>>,
-    disabled_validators: &HashSet<Validator>,
-    enabled_validators: &HashSet<Validator>,
+    selection: &ValidatorSelection,
     file_system: &Arc<Fs>,
 ) -> anyhow::Result<(SyncValidators, AsyncValidators)> {
     let mut undetected: Vec<Validator> = Validator::iter()
-        .filter(|validator| {
-            is_validator_active(*validator, disabled_validators, enabled_validators)
-        })
+        .filter(|validator| selection.includes(*validator))
         .collect();
     let mut sync_validators = Vec::new();
     let mut async_validators = Vec::new();
@@ -1420,7 +1399,7 @@ mod tests {
     use crate::fs::FileSystem;
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
-    use crate::settings::BlockSelection;
+    use crate::settings::{BlockSelection, ValidatorSelection};
     use crate::test_utils::{validation_context, virtual_block};
     use crate::validators::test_utils::{merge_validation_contexts, with_virtual_blocks};
     use crate::validators::{
@@ -1562,8 +1541,7 @@ mod tests {
         let (sync_validators, async_validators) = detect_validators(
             &context,
             detect_fakes,
-            &HashSet::new(),
-            &HashSet::new(),
+            &ValidatorSelection::All,
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?.violations;
@@ -1610,8 +1588,7 @@ mod tests {
         let (sync_validators, async_validators) = detect_validators(
             &context,
             detect_fakes,
-            &HashSet::new(),
-            &HashSet::new(),
+            &ValidatorSelection::All,
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?.violations;
@@ -1654,8 +1631,7 @@ mod tests {
         let (sync_validators, async_validators) = detect_validators(
             &context,
             detect_fakes,
-            &HashSet::new(),
-            &HashSet::new(),
+            &ValidatorSelection::All,
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?.violations;
@@ -1691,8 +1667,7 @@ mod tests {
         let (sync_validators, async_validators) = detect_validators(
             &context,
             detect_fakes,
-            &HashSet::from([Validator::CheckAi]),
-            &HashSet::new(),
+            &ValidatorSelection::Skip(HashSet::from([Validator::CheckAi])),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?.violations;
@@ -1721,8 +1696,7 @@ mod tests {
         let (sync_validators, async_validators) = detect_validators(
             &context,
             detect_fakes,
-            &HashSet::new(),
-            &HashSet::from([Validator::CheckAi]),
+            &ValidatorSelection::Only(HashSet::from([Validator::CheckAi])),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?.violations;
@@ -1750,8 +1724,7 @@ mod tests {
         let (sync_validators, async_validators) = detect_validators(
             &context,
             detect_fakes,
-            &HashSet::from([Validator::KeepSorted]),
-            &HashSet::new(),
+            &ValidatorSelection::Skip(HashSet::from([Validator::KeepSorted])),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?.violations;
@@ -1780,8 +1753,7 @@ mod tests {
         let (sync_validators, async_validators) = detect_validators(
             &context,
             detect_fakes,
-            &HashSet::new(),
-            &HashSet::from([Validator::KeepSorted]),
+            &ValidatorSelection::Only(HashSet::from([Validator::KeepSorted])),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?.violations;
@@ -1910,8 +1882,7 @@ x
         let (sync_validators, async_validators) = detect_validators(
             &context,
             Validator::detect,
-            &HashSet::new(),
-            &HashSet::new(),
+            &ValidatorSelection::All,
             &Arc::new(FakeFileSystem::new(HashMap::from([(
                 "example.py".to_string(),
                 contents.to_string(),
@@ -1967,11 +1938,7 @@ print("target")
     #[test]
     fn diff_gated_block_count_counts_the_blocks_carrying_the_rule() {
         assert_eq!(
-            validators::diff_gated_block_count(
-                &diff_gated_context(),
-                &HashSet::new(),
-                &HashSet::new()
-            ),
+            validators::diff_gated_block_count(&diff_gated_context(), &ValidatorSelection::All),
             1
         );
     }
@@ -1981,8 +1948,7 @@ print("target")
         assert_eq!(
             validators::diff_gated_block_count(
                 &diff_gated_context(),
-                &HashSet::from([Validator::Affects]),
-                &HashSet::new()
+                &ValidatorSelection::Skip(HashSet::from([Validator::Affects]))
             ),
             0
         );
@@ -1993,8 +1959,7 @@ print("target")
         assert_eq!(
             validators::diff_gated_block_count(
                 &diff_gated_context(),
-                &HashSet::new(),
-                &HashSet::from([Validator::KeepSorted])
+                &ValidatorSelection::Only(HashSet::from([Validator::KeepSorted]))
             ),
             0
         );

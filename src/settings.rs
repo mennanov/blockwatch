@@ -63,8 +63,7 @@ impl RawSettings {
 pub(crate) struct Settings {
     ignored_globs: GlobSet,
     extensions: HashMap<OsString, OsString>,
-    disabled_validators: HashSet<Validator>,
-    enabled_validators: HashSet<Validator>,
+    validator_selection: ValidatorSelection,
     block_selection: BlockSelection,
 }
 
@@ -97,23 +96,12 @@ impl Settings {
         // `-e keep-sorted` usually means "run only keep-sorted this time". Adding it to the config
         // file's lists would not do that. It could also mix `enable` with `disable`, which is not
         // allowed.
-        let selection = if flags.enable.is_empty() && flags.disable.is_empty() {
+        let validator_lists = if flags.enable.is_empty() && flags.disable.is_empty() {
             &config_file
         } else {
             &flags
         };
-        // The names were validated above, so these lookups can't fail. They are only here to get
-        // the `&'static str` for each name.
-        let disabled_validators = selection
-            .disable
-            .iter()
-            .map(|name| parse_validator(name))
-            .collect::<anyhow::Result<_>>()?;
-        let enabled_validators = selection
-            .enable
-            .iter()
-            .map(|name| parse_validator(name))
-            .collect::<anyhow::Result<_>>()?;
+        let validator_selection = validator_selection(validator_lists)?;
         // `--only-block` usually means "check only this block this time", even a block that the
         // config file skips.
         let block_lists = if flags.only_blocks.is_empty() && flags.skip_blocks.is_empty() {
@@ -141,8 +129,7 @@ impl Settings {
                 .build()
                 .context("Failed to build ignore glob set")?,
             extensions,
-            disabled_validators,
-            enabled_validators,
+            validator_selection,
             block_selection,
         })
     }
@@ -158,21 +145,32 @@ impl Settings {
         &self.extensions
     }
 
-    /// Validators to skip. Empty if [`Settings::enabled_validators`] is not.
-    pub(crate) fn disabled_validators(&self) -> &HashSet<Validator> {
-        &self.disabled_validators
-    }
-
-    /// If not empty, only these validators run. If empty, every validator runs except the
-    /// disabled ones.
-    pub(crate) fn enabled_validators(&self) -> &HashSet<Validator> {
-        &self.enabled_validators
+    /// Which validators the run uses.
+    pub(crate) fn validator_selection(&self) -> &ValidatorSelection {
+        &self.validator_selection
     }
 
     /// Which blocks the run checks.
     pub(crate) fn block_selection(&self) -> &BlockSelection {
         &self.block_selection
     }
+}
+
+/// The validators that `settings` selects. `settings` must be validated, so that at most one of
+/// its lists is set.
+fn validator_selection(settings: &RawSettings) -> anyhow::Result<ValidatorSelection> {
+    let parse = |names: &[String]| {
+        names
+            .iter()
+            .map(|name| parse_validator(name))
+            .collect::<anyhow::Result<_>>()
+    };
+    let selection = match (settings.enable.is_empty(), settings.disable.is_empty()) {
+        (true, true) => ValidatorSelection::All,
+        (false, _) => ValidatorSelection::Only(parse(&settings.enable)?),
+        (true, false) => ValidatorSelection::Skip(parse(&settings.disable)?),
+    };
+    Ok(selection)
 }
 
 /// The blocks that `settings` selects. `settings` must be validated, so that at most one of its
@@ -193,6 +191,28 @@ fn block_selection(settings: &RawSettings) -> anyhow::Result<BlockSelection> {
         (true, false) => BlockSelection::Skip(parse(&settings.skip_blocks)?),
     };
     Ok(selection)
+}
+
+/// Which validators a run uses.
+#[derive(Debug, PartialEq)]
+pub(crate) enum ValidatorSelection {
+    /// Every validator.
+    All,
+    /// Only these validators.
+    Only(HashSet<Validator>),
+    /// Every validator except these.
+    Skip(HashSet<Validator>),
+}
+
+impl ValidatorSelection {
+    /// Whether the run uses `validator`.
+    pub(crate) fn includes(&self, validator: Validator) -> bool {
+        match self {
+            ValidatorSelection::All => true,
+            ValidatorSelection::Only(validators) => validators.contains(&validator),
+            ValidatorSelection::Skip(validators) => !validators.contains(&validator),
+        }
+    }
 }
 
 /// Which blocks a run checks. Each address is `FILE:BLOCK_NAME`.
@@ -301,10 +321,9 @@ mod tests {
         };
         let settings = resolve(RawSettings::default(), config_file)?;
         assert_eq!(
-            settings.enabled_validators,
-            HashSet::from([Validator::KeepSorted])
+            settings.validator_selection,
+            ValidatorSelection::Only(HashSet::from([Validator::KeepSorted]))
         );
-        assert!(settings.disabled_validators.is_empty());
         Ok(())
     }
 
@@ -316,10 +335,9 @@ mod tests {
         };
         let settings = resolve(RawSettings::default(), config_file)?;
         assert_eq!(
-            settings.disabled_validators,
-            HashSet::from([Validator::CheckAi])
+            settings.validator_selection,
+            ValidatorSelection::Skip(HashSet::from([Validator::CheckAi]))
         );
-        assert!(settings.enabled_validators.is_empty());
         Ok(())
     }
 
@@ -335,10 +353,9 @@ mod tests {
         };
         let settings = resolve(flags, config_file)?;
         assert_eq!(
-            settings.disabled_validators,
-            HashSet::from([Validator::CheckAi])
+            settings.validator_selection,
+            ValidatorSelection::Skip(HashSet::from([Validator::CheckAi]))
         );
-        assert!(settings.enabled_validators.is_empty());
         Ok(())
     }
 
@@ -354,10 +371,9 @@ mod tests {
         };
         let settings = resolve(flags, config_file)?;
         assert_eq!(
-            settings.enabled_validators,
-            HashSet::from([Validator::KeepSorted])
+            settings.validator_selection,
+            ValidatorSelection::Only(HashSet::from([Validator::KeepSorted]))
         );
-        assert!(settings.disabled_validators.is_empty());
         Ok(())
     }
 

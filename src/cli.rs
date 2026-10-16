@@ -105,8 +105,7 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<ExitCode> {
     let (sync_validators, async_validators) = validators::detect_validators(
         &context,
         validators::Validator::detect,
-        settings.disabled_validators(),
-        settings.enabled_validators(),
+        settings.validator_selection(),
         &file_system,
     )?;
     let context = Arc::new(context);
@@ -118,13 +117,8 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<ExitCode> {
     // failure to write the report from discarding them.
     let has_error_severity = process_violations(&log.violations, args.output_format())?;
 
-    let blocks_needing_diff = (!args.diff).then(|| {
-        validators::diff_gated_block_count(
-            &context,
-            settings.disabled_validators(),
-            settings.enabled_validators(),
-        )
-    });
+    let blocks_needing_diff = (!args.diff)
+        .then(|| validators::diff_gated_block_count(&context, settings.validator_selection()));
     write_report(
         args.validation.verbosity,
         report::RunMode::new(args.diff, args.only_changed),
