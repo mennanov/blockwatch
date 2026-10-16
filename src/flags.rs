@@ -340,22 +340,16 @@ impl Args {
         arguments
     }
 
-    /// Validates the flags that are not settings, such as `--format` and `--suppress`.
+    /// Checks that the `list` and `skill` subcommands got none of the flags meant for validation,
+    /// such as `--format` and `--suppress`. Reads no file.
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
-        match self.command {
-            Some(Subcommand::List { .. }) => {
-                if self.validation != ValidationFlags::default() {
-                    anyhow::bail!("the `list` subcommand doesn't take flags meant for validation");
-                }
-            }
-            Some(Subcommand::Skill) => {
-                if self.validation != ValidationFlags::default() {
-                    anyhow::bail!("the `skill` subcommand doesn't take flags meant for validation");
-                }
-            }
-            None => {
-                self.suppressed_addresses()?;
-            }
+        let subcommand = match self.command {
+            Some(Subcommand::List { .. }) => "list",
+            Some(Subcommand::Skill) => "skill",
+            None => return Ok(()),
+        };
+        if self.validation != ValidationFlags::default() {
+            anyhow::bail!("the `{subcommand}` subcommand doesn't take flags meant for validation");
         }
         Ok(())
     }
@@ -634,11 +628,11 @@ mod tests {
     }
 
     #[test]
-    fn suppress_from_with_nonexistent_file_fails_validation() -> anyhow::Result<()> {
+    fn suppress_from_with_nonexistent_file_fails() -> anyhow::Result<()> {
         let args = parse(&["blockwatch", "--suppress-from", "nonexistent_file.txt"])?;
         let error = args
-            .validate()
-            .expect_err("nonexistent file must fail validation");
+            .suppressed_addresses()
+            .expect_err("nonexistent file must fail");
         assert!(
             error
                 .to_string()

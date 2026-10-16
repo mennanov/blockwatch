@@ -357,6 +357,20 @@ fn suppress_from_nonexistent_file_fails() {
 }
 
 #[test]
+fn suppress_from_nonexistent_file_with_invalid_diff_reports_the_file() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg(SORTED)
+        .args(["--diff", "--suppress-from", "nonexistent_suppressions.txt"])
+        .write_stdin("this is not a diff\n");
+    let output = cmd.output().unwrap();
+
+    output
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("failed to read suppression file"));
+}
+
+#[test]
 fn suppress_from_reads_a_file_outside_the_repository() {
     let outside_dir = tempfile::tempdir().unwrap();
     let msg_file = outside_dir.path().join("commit_msg.txt");

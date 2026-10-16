@@ -151,7 +151,8 @@ The whole pipeline is in `src/cli.rs`. `src/main.rs` only calls `blockwatch::run
 
 1. Parse the command-line flags (`flags.rs`, built with clap). The flags that `list` also takes are `global`, so they
    can go before or after `list`. The flags only validation uses are in `ValidationFlags`, so `list --help` doesn't
-   show them.
+   show them. `Args::validate` rejects them for `list` and `skill`. A validation run then reads the `--suppress-from`
+   files, once. Both happen before stdin or the config file is read, so a bad flag is reported first.
 2. Find the repository root and build a `fs::FileSystemImpl` limited to it. Every file read goes through it, so a path
    in a block attribute can't reach outside the repository.
 3. Decide what the run works on. With `--diff`, a unified diff is read from stdin, and

@@ -35,11 +35,11 @@ use std::{env, fs};
 /// For a flag that clap can't parse, clap exits the process with 2 itself.
 pub fn run() -> ExitCode {
     let args = flags::Args::parse();
-    let result = match &args.command {
+    let result = args.validate().and_then(|()| match &args.command {
         Some(flags::Subcommand::List { .. }) => run_list(&args).map(|()| ExitCode::SUCCESS),
-        Some(flags::Subcommand::Skill) => run_skill(&args).map(|()| ExitCode::SUCCESS),
+        Some(flags::Subcommand::Skill) => run_skill().map(|()| ExitCode::SUCCESS),
         None => run_validators(&args),
-    };
+    });
     result.unwrap_or_else(|error| {
         // `{error:?}` adds the causes, as Rust does for an error returned from `main`. The result
         // is ignored because there is nowhere left to report a closed stderr, and `eprintln!`
@@ -54,8 +54,7 @@ pub fn run() -> ExitCode {
 /// Runs the `skill` subcommand: writes the agent skill to stdout, as a complete `SKILL.md`.
 ///
 /// It works in any directory, even outside a repository.
-fn run_skill(args: &flags::Args) -> anyhow::Result<()> {
-    args.validate()?;
+fn run_skill() -> anyhow::Result<()> {
     // The skill is built into the binary, so the text always matches this version. The version is
     // filled in here rather than written in the file, so it can't fall behind `Cargo.toml`.
     let skill = include_str!("skill.md").replace("{{version}}", env!("CARGO_PKG_VERSION"));
@@ -65,20 +64,7 @@ fn run_skill(args: &flags::Args) -> anyhow::Result<()> {
 
 /// Runs the `list` subcommand: parses every block in scope and writes a JSON report to stdout.
 fn run_list(args: &flags::Args) -> anyhow::Result<()> {
-    let file_system = crate::fs::FileSystemImpl::new(&repository_root()?)?;
-    let (scan_mode, line_changes) = run_inputs(args, &file_system)?;
-    let language_parsers = language_parsers::language_parsers()?;
-    let (settings, virtual_blocks) =
-        read_config(args, &file_system, &line_changes, &language_parsers)?;
-    let (context, _scan_stats) = build_context(
-        args,
-        &settings,
-        virtual_blocks,
-        scan_mode,
-        line_changes,
-        language_parsers,
-        &file_system,
-    )?;
+    let Prepared { context, .. } = prepare(args)?;
     let report = context.to_serializable_report();
     write_json(std::io::stdout(), &report).context("Failed to list blocks")
 }
@@ -87,20 +73,15 @@ fn run_list(args: &flags::Args) -> anyhow::Result<()> {
 ///
 /// Returns exit code 1 when a violation of error severity is not suppressed, and 0 otherwise.
 fn run_validators(args: &flags::Args) -> anyhow::Result<ExitCode> {
-    let file_system = Arc::new(crate::fs::FileSystemImpl::new(&repository_root()?)?);
-    let (scan_mode, line_changes) = run_inputs(args, file_system.as_ref())?;
-    let language_parsers = language_parsers::language_parsers()?;
-    let (settings, virtual_blocks) =
-        read_config(args, file_system.as_ref(), &line_changes, &language_parsers)?;
-    let (mut context, scan_stats) = build_context(
-        args,
-        &settings,
-        virtual_blocks,
-        scan_mode,
-        line_changes,
-        language_parsers,
-        file_system.as_ref(),
-    )?;
+    // Read first, so that a bad suppression file is reported before the diff or the config file is
+    // read.
+    let suppressed_addresses = args.suppressed_addresses()?;
+    let Prepared {
+        file_system,
+        settings,
+        mut context,
+        scan_stats,
+    } = prepare(args)?;
     context.apply_block_selection(settings.block_selection(), file_system.as_ref())?;
     let (sync_validators, async_validators) = validators::detect_validators(
         &context,
@@ -110,7 +91,6 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<ExitCode> {
     )?;
     let context = Arc::new(context);
     let mut log = validators::run(Arc::clone(&context), sync_validators, async_validators)?;
-    let suppressed_addresses = args.suppressed_addresses()?;
     apply_suppressions(&suppressed_addresses, &mut log.violations);
 
     // Violations are what the run is for; the report only describes it. Writing them first keeps a
@@ -132,6 +112,38 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<ExitCode> {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
+    })
+}
+
+/// The result of [`prepare`].
+struct Prepared {
+    file_system: Arc<crate::fs::FileSystemImpl>,
+    settings: Settings,
+    context: validators::ValidationContext,
+    scan_stats: blocks::ScanStats,
+}
+
+/// Finds the repository root, reads the diff and the config file, and parses every block in scope.
+fn prepare(args: &flags::Args) -> anyhow::Result<Prepared> {
+    let file_system = Arc::new(crate::fs::FileSystemImpl::new(&repository_root()?)?);
+    let (scan_mode, line_changes) = run_inputs(args, file_system.as_ref())?;
+    let language_parsers = language_parsers::language_parsers()?;
+    let (settings, virtual_blocks) =
+        read_config(args, file_system.as_ref(), &line_changes, &language_parsers)?;
+    let (context, scan_stats) = build_context(
+        args,
+        &settings,
+        virtual_blocks,
+        scan_mode,
+        line_changes,
+        language_parsers,
+        file_system.as_ref(),
+    )?;
+    Ok(Prepared {
+        file_system,
+        settings,
+        context,
+        scan_stats,
     })
 }
 
@@ -258,8 +270,6 @@ fn build_context(
     language_parsers: language_parsers::LanguageParsers,
     file_system: &impl FileSystem,
 ) -> anyhow::Result<(validators::ValidationContext, blocks::ScanStats)> {
-    args.validate()?;
-
     let path_arguments = PathArguments::resolve(args.path_arguments(), file_system)?;
     let path_checker = crate::fs::PathCheckerImpl::new(
         path_arguments.allowed_globs()?,
