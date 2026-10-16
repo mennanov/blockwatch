@@ -12,6 +12,20 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- `same-as-pattern` can compare a key with its value. Every named group, such as `(?P<code>\d+)` and
+  `(?P<message>.+)`, takes part, and each match is one record. So a message that moves to another code fails, even
+  though the messages alone still agree. Both patterns need the same groups. See
+  [Compare several groups](docs/validators/same-as.md#compare-several-groups)
+  ([#99](https://github.com/mennanov/blockwatch/issues/99)).
+
+### Changed
+
+- A `same-as-pattern` with named groups other than `value` now compares them too. Before, only `value` counted, or the
+  whole match when the pattern had no `value` group. To keep comparing only `value`, change the other groups to
+  `(?:…)`.
+
 ## [0.13.0] - 2026-10-15
 
 ### Added

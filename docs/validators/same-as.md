@@ -55,10 +55,10 @@ Usually, though, the two places don't hold the same text. Then each block says *
 
 ## Pick values with `same-as-pattern`
 
-Each block has its own regex. Every match is a value: the `(?P<value>…)` group if there is one, otherwise the whole
-match. A line can hold several values. Lines without a match are skipped, and so are empty matches. So is a match of a
-branch without the `value` group: `^(?:none|(?P<value>\w+))$` skips the line `none`. This lets you compare blocks
-written in different formats:
+Each block has its own regex. Every match is a value: the `(?P<value>…)` group if the pattern has one, otherwise the
+whole match. A pattern with [other named groups](#compare-several-groups) compares those too. A line can hold several
+values. Lines without a match are skipped, and so are empty matches. So is a match of a branch without the `value`
+group: `^(?:none|(?P<value>\w+))$` skips the line `none`. This lets you compare blocks written in different formats:
 
 ```rust
 // <block same-as="README.md:supported-env-vars" same-as-pattern="BLOCKWATCH_AI_[A-Z_]+">
@@ -75,6 +75,41 @@ const API_URL: &str = "BLOCKWATCH_AI_API_URL";
 
 [//]: # (</block>)
 ```
+
+### Compare several groups
+
+A pattern can have several named groups, such as a code and its message. Then each match is one record, and the
+records are compared whole. So a message that moves to another code fails, even though the messages alone still agree:
+
+```rust
+// <block same-as="docs/errors.md:errors" same-as-pattern='(?P<code>\d+) => "(?P<message>[^"]+)"'>
+404 => "not found",
+409 => "already exists",
+// </block>
+```
+
+```markdown
+<!-- <block name="errors" same-as-pattern="^- `(?P<code>\d+)`: (?P<message>.+)$"> -->
+- `404`: already exists
+- `409`: not found
+<!-- </block> -->
+```
+
+The run reports:
+
+```text
+[{code: "404", message: "not found"}, {code: "409", message: "already exists"}] != [{code: "404", message: "already exists"}, {code: "409", message: "not found"}]
+```
+
+- **Groups match by name**, not by their place in the pattern. So one side can write the message before the code.
+- **Both patterns need the same groups.** Otherwise the run reports
+  `same-as-pattern groups differ: code, message != message`.
+- **A pattern without named groups has one group, `value`.** So does a block without a pattern. Either can be compared
+  with a pattern whose only group is `value`.
+- **A match is skipped when one of its groups is not in the match, or is empty.**
+- **A record must fit on one line,** because the pattern reads one line at a time.
+- **`same-as-format` applies to every group.**
+- **To group part of a pattern without comparing it, use `(?:…)`.** It captures nothing.
 
 ### Lines are not part of the comparison
 
@@ -296,8 +331,8 @@ plain `s`, so `policies.yaml` gives `policie`, which doesn't equal `Policy`.
   Each block's `same-as-pattern` reads only that block. A whole file, a symbol or a list of paths has no block, so the
   referencing block's pattern reads it too.
 - **Violations:** a missing block, a missing or repeated key, a value that is not a number under `numeric`, a `single`
-  side without exactly one value, a pattern that matches nothing on either side, and a `same-as-paths` glob that
-  matches no path. Two empty sides do not count as equal.
+  side without exactly one value, a pattern that matches nothing on either side, two patterns with different groups,
+  and a `same-as-paths` glob that matches no path. Two empty sides do not count as equal.
 - **Errors that stop the run:** an unknown `same-as-mode` or `same-as-format`, an invalid regex or glob,
   `same-as-paths` without `same-as-pattern`, a missing target file, and a symbol in a file with a syntax error, without
   symbols, or with several YAML documents.

@@ -6,13 +6,15 @@ use crate::symbol_path::SymbolPath;
 use crate::validators::{
     self, TargetFiles, TargetReference, TargetResult, ValidationReport, ValidatorDetector,
     ValidatorSync, ValidatorType, Violation, ViolationRange, compile_pattern, parse_number,
-    target_display, value_match,
+    target_display,
 };
 use anyhow::{Context, anyhow, bail};
 use heck::ToSnakeCase;
 use serde::Serialize;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt;
+use std::hash::Hash;
 use std::sync::Arc;
 
 /// Enforces `same-as="file:name"`: the block's content must equal that of the blocks it names.
@@ -74,7 +76,7 @@ struct Comparison {
     /// `Err` carries the reason the block's own items could not be canonicalized. It is reported
     /// against every reference the block makes rather than aborting the run, since content that does
     /// not meet the asserted shape is a violation like any other.
-    source_items: Result<Vec<String>, String>,
+    source_items: Result<Vec<Record>, String>,
     /// The block's `same-as-pattern`. It also reads a whole-file, symbol or paths target, because
     /// such a target has no block of its own to carry one.
     pattern: Option<String>,
@@ -92,13 +94,17 @@ impl Comparison {
     }
 
     /// Why the target disagrees with the block, or `None` when the two agree.
-    fn disagreement_with(&self, target_items: Vec<String>) -> Option<String> {
+    fn disagreement_with(&self, target_items: Vec<Record>) -> Option<String> {
         match &self.source_items {
             Err(reason) => Some(reason.clone()),
-            Ok(source) => match canonicalize(target_items, &self.format) {
-                Err(reason) => Some(reason),
-                Ok(target) => disagreement(source, &target, &self.mode),
-            },
+            Ok(source) => {
+                groups_disagreement(source, &target_items).or_else(|| {
+                    match canonicalize(target_items, &self.format) {
+                        Err(reason) => Some(reason),
+                        Ok(target) => disagreement(source, &target, &self.mode),
+                    }
+                })
+            }
         }
     }
 }
@@ -269,19 +275,71 @@ fn reference_violation<Fs: FileSystem>(
         .transpose()
 }
 
+/// One match of a `same-as-pattern`: the text of each of its named groups.
+///
+/// A pattern without named groups, or no pattern at all, gives the one group `value`, so it can be
+/// compared with a pattern whose only group is `value`. Every record of one pattern has the same
+/// groups, because a match without one of them is skipped.
+#[derive(PartialEq, Eq, Hash)]
+struct Record {
+    /// The text of each group, by group name. Sorted by name, so two patterns that list the same
+    /// groups in a different order give equal records.
+    values: BTreeMap<String, String>,
+}
+
+impl Record {
+    /// The record of a whole match, or of a block's whole content: the one group `value`.
+    fn whole(text: String) -> Self {
+        Self {
+            values: BTreeMap::from([("value".to_string(), text)]),
+        }
+    }
+
+    /// The names of the groups, sorted.
+    fn groups(&self) -> Vec<&str> {
+        self.values.keys().map(String::as_str).collect()
+    }
+
+    /// The value of the only group, or `None` when the record has several groups.
+    fn lone_value(&self) -> Option<&String> {
+        match self.values.len() {
+            1 => self.values.values().next(),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for Record {
+    /// Shows `"red"` for one group, and `{name: "red", value: "1"}` for several.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.lone_value() {
+            // The one group is almost always `value`, which adds nothing to the message.
+            Some(value) => write!(f, "{value:?}"),
+            None => {
+                let fields: Vec<String> = self
+                    .values
+                    .iter()
+                    .map(|(group, value)| format!("{group}: {value:?}"))
+                    .collect();
+                f.write_str(&["{", &fields.join(", "), "}"].concat())
+            }
+        }
+    }
+}
+
 /// Extracts a block's comparable items.
 ///
-/// With a `same-as-pattern` attribute, every match on every content line contributes its `value`
-/// named group (or the whole match, if there is no such group) as one item; lines that do not match
-/// are skipped. A pattern selects which parts of a block take part in the comparison.
-/// Matches that give no value, or an empty one, carry nothing to compare and are skipped.
+/// With a `same-as-pattern` attribute, every match on every content line gives one record: the
+/// text of each named group, or the whole match when the pattern has no named groups. Lines that do
+/// not match are skipped. A pattern selects which parts of a block take part in the comparison.
+/// A match where a group took no part, or captured nothing, has nothing to compare and is skipped.
 ///
 /// The regex runs against each trimmed line rather than the whole block, so `^` and `$` anchor to
 /// the entry rather than to its indentation, and the items stay in the order the two sides list
 /// them.
 ///
-/// Without a pattern, the comparable value is the block's normalized whole content as a single item.
-fn extract_items(block: &Block, file_content: &str) -> anyhow::Result<Vec<String>> {
+/// Without a pattern, the block's normalized whole content is a single record.
+fn extract_items(block: &Block, file_content: &str) -> anyhow::Result<Vec<Record>> {
     extract_items_from(
         block.content.text(file_content),
         block.attributes.get("same-as-pattern"),
@@ -291,24 +349,42 @@ fn extract_items(block: &Block, file_content: &str) -> anyhow::Result<Vec<String
 /// Extracts items from `content` for the given `pattern`.
 ///
 /// If `pattern` is `None` then the whole `content` is returned.
-fn extract_items_from(content: &str, pattern: Option<&String>) -> anyhow::Result<Vec<String>> {
+fn extract_items_from(content: &str, pattern: Option<&String>) -> anyhow::Result<Vec<Record>> {
     let Some(pattern) = pattern else {
-        return Ok(vec![normalize_content(content)]);
+        return Ok(vec![Record::whole(normalize_content(content))]);
     };
     let regex = compile_pattern(pattern)
         .map_err(|e| anyhow!("same-as-pattern is not a valid regex ({pattern}): {e}"))?;
+    let groups: Vec<&str> = regex.capture_names().flatten().collect();
     Ok(content
         .lines()
         .flat_map(|line| {
             regex
                 .captures_iter(line.trim())
-                .filter_map(|captures| {
-                    value_match(&regex, &captures).map(|matched| matched.as_str())
-                })
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
+                .filter_map(|captures| record(&groups, &captures))
         })
         .collect())
+}
+
+/// The record of one match: the text of each group in `groups`, or the whole match when `groups`
+/// is empty. Returns `None` when a group took no part in the match or captured nothing.
+fn record(groups: &[&str], captures: &regex::Captures<'_>) -> Option<Record> {
+    if groups.is_empty() {
+        return non_empty(captures.get(0)).map(Record::whole);
+    }
+    let values = groups
+        .iter()
+        .map(|group| Some((group.to_string(), non_empty(captures.name(group))?)))
+        .collect::<Option<_>>()?;
+    Some(Record { values })
+}
+
+/// The text of `matched`, or `None` when its group took no part in the match or captured nothing.
+fn non_empty(matched: Option<regex::Match<'_>>) -> Option<String> {
+    matched
+        .map(|matched| matched.as_str())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 /// Trim each line, drop blanks, rejoin — matching `line-pattern` / `keep-unique` normalization.
@@ -329,7 +405,7 @@ fn normalize_content(content: &str) -> String {
 }
 
 /// Find a named block in a file and extract its comparable items.
-fn extract_named(file_blocks: &FileBlocks, name: &str) -> anyhow::Result<Option<Vec<String>>> {
+fn extract_named(file_blocks: &FileBlocks, name: &str) -> anyhow::Result<Option<Vec<Record>>> {
     for bwc in &file_blocks.blocks_with_context {
         if bwc.block.name() == Some(name) {
             return Ok(Some(extract_items(&bwc.block, &file_blocks.file_content)?));
@@ -369,7 +445,7 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
         &mut self,
         target_file: &RepoPath,
         target_name: &str,
-    ) -> anyhow::Result<TargetResult<Vec<String>>> {
+    ) -> anyhow::Result<TargetResult<Vec<Record>>> {
         if let Some(file_blocks) = self.context.blocks.get(target_file)
             && let Some(items) = extract_named(file_blocks, target_name)?
         {
@@ -404,7 +480,7 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
         &mut self,
         target_file: &RepoPath,
         pattern: Option<&String>,
-    ) -> anyhow::Result<Vec<String>> {
+    ) -> anyhow::Result<Vec<Record>> {
         let content = self.files.content(target_file).with_context(|| {
             format!(
                 "failed to read same-as target file: {}",
@@ -424,7 +500,7 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
         target_file: &RepoPath,
         path: &SymbolPath,
         pattern: Option<&String>,
-    ) -> anyhow::Result<TargetResult<Vec<String>>> {
+    ) -> anyhow::Result<TargetResult<Vec<Record>>> {
         let (content, resolution) = self.files.resolve_symbol(target_file, path)?;
         match resolution {
             Ok(symbol) => Ok(Ok(extract_items_from(
@@ -464,40 +540,47 @@ fn parse_format(block: &Block) -> anyhow::Result<Format> {
     }
 }
 
-/// Canonicalizes extracted items ahead of comparison.
+/// Canonicalizes every value of `records` under `format` ahead of comparison (see
+/// [`canonicalize_value`]). Returns `Err` with the reason of the first value that fails.
+fn canonicalize(records: Vec<Record>, format: &Format) -> Result<Vec<Record>, String> {
+    records
+        .into_iter()
+        .map(|record| {
+            let values = record
+                .values
+                .into_iter()
+                .map(|(group, value)| Ok((group, canonicalize_value(value, format)?)))
+                .collect::<Result<_, String>>()?;
+            Ok(Record { values })
+        })
+        .collect()
+}
+
+/// Canonicalizes one extracted value ahead of comparison.
 ///
-/// Under [`Format::Numeric`] each item is parsed as a number (see [`parse_number`]) and re-formatted
-/// so that different spellings of the same value (`"10"`, `"10.0"`, `"1_0"`) compare equal; an item
+/// Under [`Format::Numeric`] the value is parsed as a number (see [`parse_number`]) and re-formatted
+/// so that different spellings of the same value (`"10"`, `"10.0"`, `"1_0"`) compare equal; a value
 /// that is not a number yields `Err` with a human-readable reason, which the caller surfaces as a
-/// violation rather than aborting the run. Under [`Format::Identifier`] each item becomes its
+/// violation rather than aborting the run. Under [`Format::Identifier`] the value becomes its
 /// snake_case form (`"HTTPServer"` becomes `"http_server"`) and never fails. Under [`Format::Flat`]
-/// each item keeps only its lower-cased letters and digits (`"Sign-In"` becomes `"signin"`) and
-/// never fails. Under [`Format::Verbatim`] the items are returned unchanged.
+/// the value keeps only its lower-cased letters and digits (`"Sign-In"` becomes `"signin"`) and
+/// never fails. Under [`Format::Verbatim`] the value is returned unchanged.
 ///
 /// Normalizing drops the trailing zeros and the exponent notation that would otherwise leave two
 /// spellings of one value differing as strings.
-fn canonicalize(items: Vec<String>, format: &Format) -> Result<Vec<String>, String> {
+fn canonicalize_value(value: String, format: &Format) -> Result<String, String> {
     match format {
-        Format::Verbatim => Ok(items),
-        Format::Numeric => items
-            .into_iter()
-            .map(|item| {
-                parse_number(&item)
-                    .map(|number| number.normalized().to_string())
-                    .ok_or_else(|| format!("same-as-format=numeric but \"{item}\" is not a number"))
-            })
-            .collect(),
+        Format::Verbatim => Ok(value),
+        Format::Numeric => parse_number(&value)
+            .map(|number| number.normalized().to_string())
+            .ok_or_else(|| format!("same-as-format=numeric but \"{value}\" is not a number")),
         // snake_case keeps the word breaks, so a violation message stays readable, and two names
         // that only split the same letters differently still differ.
-        Format::Identifier => Ok(items.iter().map(|item| item.to_snake_case()).collect()),
-        Format::Flat => Ok(items
-            .iter()
-            .map(|item| {
-                item.chars()
-                    .filter(|c| c.is_alphanumeric())
-                    .flat_map(char::to_lowercase)
-                    .collect()
-            })
+        Format::Identifier => Ok(value.to_snake_case()),
+        Format::Flat => Ok(value
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .flat_map(char::to_lowercase)
             .collect()),
     }
 }
@@ -530,48 +613,112 @@ fn parse_mode(block: &Block) -> anyhow::Result<Mode> {
 /// Returns `None` when the two sides agree under `mode`, or `Some(reason)` describing the mismatch.
 ///
 /// Set, sequence, and single are symmetric; `Mode::Subset` is directional (`source` ⊆ `target`).
-/// `Mode::Single` requires exactly one value per side; a side with a different count is itself a
-/// mismatch (the block's content does not meet the asserted shape), reported like any other.
-///
-/// Under `Mode::Set` and `Mode::Subset`, the reason lists each value once, at its first position.
-/// A repeat doesn't change the result in these modes, and in a long block it makes a long message.
-fn disagreement(source: &[String], target: &[String], mode: &Mode) -> Option<String> {
+/// A side without records is a mismatch in every mode.
+fn disagreement(source: &[Record], target: &[Record], mode: &Mode) -> Option<String> {
     if source.is_empty() || target.is_empty() {
         return Some("same-as-pattern matched no values in this block or its target".to_string());
     }
     match mode {
-        Mode::Single => {
-            if source.len() != 1 || target.len() != 1 {
-                return Some(format!(
-                    "same-as-mode=single requires exactly one value per side (got {} and {})",
-                    source.len(),
-                    target.len()
-                ));
-            }
-            (source[0] != target[0]).then(|| format!("{} != {}", source[0], target[0]))
-        }
-        Mode::Sequence => (source != target).then(|| format!("{source:?} != {target:?}")),
-        Mode::Set => {
-            let source_set: HashSet<&String> = source.iter().collect();
-            let target_set: HashSet<&String> = target.iter().collect();
-            (source_set != target_set)
-                .then(|| format!("{:?} != {:?}", unique(source), unique(target)))
-        }
-        Mode::Subset => {
-            let target_set: HashSet<&String> = target.iter().collect();
-            let missing: Vec<&String> = unique(source)
-                .into_iter()
-                .filter(|item| !target_set.contains(item))
-                .collect();
-            (!missing.is_empty()).then(|| format!("not a subset; missing from target: {missing:?}"))
-        }
+        Mode::Single => single_disagreement(source, target),
+        Mode::Sequence => sequence_disagreement(source, target),
+        Mode::Set => set_disagreement(source, target),
+        Mode::Subset => subset_disagreement(source, target),
     }
 }
 
+/// Returns `None` when the records of `source` and `target` have the same groups, or when a side
+/// has no records. Records with different groups are never equal, and a message that listed them
+/// all would hide why.
+///
+/// Every record of one side has the same groups, so the first record of each side is enough.
+fn groups_disagreement(source: &[Record], target: &[Record]) -> Option<String> {
+    match (source.first(), target.first()) {
+        (Some(source), Some(target)) => (source.groups() != target.groups()).then(|| {
+            format!(
+                "same-as-pattern groups differ: {} != {}",
+                source.groups().join(", "),
+                target.groups().join(", ")
+            )
+        }),
+        // A side without records has no groups. `disagreement` reports that side.
+        (None, _) | (_, None) => None,
+    }
+}
+
+/// Returns `None` when each side holds exactly one record and the two are equal.
+///
+/// A side with a different count is itself a mismatch: the block's content does not have the
+/// shape the mode asks for, so it is reported like any other mismatch.
+fn single_disagreement(source: &[Record], target: &[Record]) -> Option<String> {
+    match (source, target) {
+        ([source], [target]) => (source != target).then(|| {
+            match (source.lone_value(), target.lone_value()) {
+                // Quotes keep values apart in a list or a record. A lone value on each side needs
+                // none.
+                (Some(source_value), Some(target_value)) => {
+                    format!("{source_value} != {target_value}")
+                }
+                (None, _) | (_, None) => format!("{source} != {target}"),
+            }
+        }),
+        _ => Some(format!(
+            "same-as-mode=single requires exactly one value per side (got {} and {})",
+            source.len(),
+            target.len()
+        )),
+    }
+}
+
+/// Returns `None` when both sides hold the same records in the same order.
+fn sequence_disagreement(source: &[Record], target: &[Record]) -> Option<String> {
+    (source != target)
+        .then(|| format!("{} != {}", records_display(source), records_display(target)))
+}
+
+/// Returns `None` when both sides hold the same records, in any order and with any repeats.
+///
+/// The reason lists each record once, at its first position. A repeat doesn't change the result,
+/// and in a long block it makes a long message.
+fn set_disagreement(source: &[Record], target: &[Record]) -> Option<String> {
+    let source_set: HashSet<&Record> = source.iter().collect();
+    let target_set: HashSet<&Record> = target.iter().collect();
+    (source_set != target_set).then(|| {
+        format!(
+            "{} != {}",
+            records_display(unique(source)),
+            records_display(unique(target))
+        )
+    })
+}
+
+/// Returns `None` when every record of `source` is also in `target`.
+///
+/// The reason lists each missing record once, at its first position in `source`. A repeat doesn't
+/// change the result, and in a long block it makes a long message.
+fn subset_disagreement(source: &[Record], target: &[Record]) -> Option<String> {
+    let target_set: HashSet<&Record> = target.iter().collect();
+    let missing: Vec<&Record> = unique(source)
+        .into_iter()
+        .filter(|record| !target_set.contains(record))
+        .collect();
+    (!missing.is_empty()).then(|| {
+        format!(
+            "not a subset; missing from target: {}",
+            records_display(missing)
+        )
+    })
+}
+
 /// Returns `values` without repeats, each value at the position where it first appears.
-fn unique(values: &[String]) -> Vec<&String> {
+fn unique<T: Eq + Hash>(values: &[T]) -> Vec<&T> {
     let mut seen = HashSet::new();
     values.iter().filter(|value| seen.insert(*value)).collect()
+}
+
+/// How a message shows a list of records, such as `["red", "blue"]`.
+fn records_display<'r>(records: impl IntoIterator<Item = &'r Record>) -> String {
+    let records: Vec<String> = records.into_iter().map(ToString::to_string).collect();
+    format!("[{}]", records.join(", "))
 }
 
 #[derive(Serialize)]
@@ -917,6 +1064,100 @@ red
     }
 
     #[test]
+    fn pattern_with_several_groups_and_a_swapped_value_returns_a_violation() -> anyhow::Result<()> {
+        // The values alone agree: each side holds 1 and 2. Only `red` and `blue` hold them the other
+        // way round.
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-pattern="(?P<name>\w+) = (?P<value>\d+)">
+red = 1
+blue = 2
+# </block>
+# <block name="b" same-as-pattern="(?P<name>\w+): (?P<value>\d+)">
+red: 2
+blue: 1
+# </block>
+"#,
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0].message.ends_with(
+                r#"[{name: "red", value: "1"}, {name: "blue", value: "2"}] != [{name: "red", value: "2"}, {name: "blue", value: "1"}]"#
+            ),
+            "unexpected message: {}",
+            file[0].message
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_with_groups_in_a_different_order_returns_no_violations() -> anyhow::Result<()> {
+        // Groups match by name, not by their place in the pattern, so the target can write the
+        // value first.
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-pattern="(?P<name>\w+) = (?P<value>\d+)">
+red = 1
+blue = 2
+# </block>
+# <block name="b" same-as-pattern="(?P<value>\d+) is (?P<name>\w+)">
+2 is blue
+1 is red
+# </block>
+"#,
+        );
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn patterns_with_different_groups_return_a_violation() -> anyhow::Result<()> {
+        // Records with different groups are never equal, so the message says that instead of
+        // listing both sides.
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-pattern="(?P<name>\w+) = (?P<value>\d+)">
+red = 1
+# </block>
+# <block name="b" same-as-pattern="(?P<value>\d+)">
+red: 1
+# </block>
+"#,
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0]
+                .message
+                .ends_with("same-as-pattern groups differ: name, value != value"),
+            "unexpected message: {}",
+            file[0].message
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_with_another_group_not_in_the_match_skips_the_match() -> anyhow::Result<()> {
+        // The `3` line matches without the `name` group.
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-pattern="^(?:(?P<name>\w+) = )?(?P<value>\d+)$">
+red = 1
+3
+# </block>
+# <block name="b" same-as-pattern="(?P<name>\w+): (?P<value>\d+)">
+red: 1
+# </block>
+"#,
+        );
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn pattern_matching_nothing_on_both_sides_returns_a_violation() -> anyhow::Result<()> {
         // Neither block contains a digit, so the pattern extracts zero items on both sides.
         let context = merge_validation_contexts(vec![
@@ -1040,6 +1281,32 @@ ids = 1, 2
         let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
         assert_eq!(file.len(), 1);
         assert_eq!(file[0].code, "same-as");
+        Ok(())
+    }
+
+    #[test]
+    fn single_mode_with_several_groups_and_a_different_value_returns_a_violation()
+    -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-mode="single" same-as-pattern="(?P<name>\w+) = (?P<value>\d+)">
+red = 1
+# </block>
+# <block name="b" same-as-pattern="(?P<name>\w+): (?P<value>\d+)">
+red: 2
+# </block>
+"#,
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0]
+                .message
+                .ends_with(r#"{name: "red", value: "1"} != {name: "red", value: "2"}"#),
+            "unexpected message: {}",
+            file[0].message
+        );
         Ok(())
     }
 
