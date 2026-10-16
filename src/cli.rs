@@ -101,7 +101,7 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<ExitCode> {
         .then(|| validators::diff_gated_block_count(&context, settings.validator_selection()));
     write_report(
         args.validation.verbosity,
-        report::RunMode::new(args.diff, args.only_changed),
+        args.run_mode(),
         blocks_needing_diff,
         scan_stats,
         &context,

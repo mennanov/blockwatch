@@ -9,7 +9,7 @@ mod same_as;
 
 use crate::Position;
 use crate::blocks::{
-    self, Block, BlockAddress, BlockKey, BlockSeverity, BlockWithContext, FileBlocks, every_block,
+    self, Block, BlockAddress, BlockKey, BlockSeverity, BlockWithContext, FileBlocks, ScanMode,
 };
 use crate::diff_parser::DiffChanges;
 use crate::fs::FileSystem;
@@ -518,7 +518,7 @@ impl ValidationContext {
             file_system,
             file_path.as_path(),
             self.line_changes.for_file(file_path),
-            every_block,
+            ScanMode::All,
             &self.parsers,
             &virtual_blocks,
         )

@@ -1,4 +1,5 @@
 use crate::blocks::BlockAddress;
+use crate::report::RunMode;
 use crate::settings::{RawSettings, parse_validator};
 use crate::validators::Validator;
 use crate::violation_address::ViolationAddress;
@@ -309,6 +310,16 @@ impl Args {
                 .iter()
                 .map(|address| address.to_string())
                 .collect(),
+        }
+    }
+
+    /// How the run uses the diff, as `--diff` and `--only-changed` select it.
+    pub(crate) fn run_mode(&self) -> RunMode {
+        // `--only-changed` requires `--diff`, so the case with it alone never happens.
+        match (self.diff, self.only_changed) {
+            (false, _) => RunMode::All,
+            (true, false) => RunMode::AllWithDiff,
+            (true, true) => RunMode::OnlyChanged,
         }
     }
 

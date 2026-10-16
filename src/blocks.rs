@@ -424,16 +424,28 @@ pub(crate) struct ParsedBlocks {
     pub(crate) scanned_files: Vec<RepoPath>,
 }
 
-/// How a run decides which files it reads.
+/// How a run decides which files it reads, and which of their blocks it keeps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScanMode {
-    /// Read every file in the repository. If a diff is supplied then the corresponding blocks are
-    /// marked as modified.
+    /// Read every file in the repository, and keep every block. If a diff is supplied then the
+    /// corresponding blocks are marked as modified.
     All,
     /// Read only the files from the supplied diff, keeping just the blocks that the diff modified.
     /// The file of a virtual block is read too when the diff modified the block's entry in the
     /// config file.
     OnlyChanged,
+}
+
+impl ScanMode {
+    /// Whether a run in this mode keeps `block`.
+    fn keeps(self, block: &BlockWithContext) -> bool {
+        match self {
+            Self::All => true,
+            // A block with a modified start tag is considered modified because its rules
+            // (attributes) are modified.
+            Self::OnlyChanged => block.is_content_modified || block.is_start_tag_modified,
+        }
+    }
 }
 
 /// Parses source files into the blocks a run should consider, together with the counts of files
@@ -570,7 +582,7 @@ fn parse_all_files(
             file_system,
             file_path.as_path(),
             line_changes_by_file.for_file(&file_path),
-            every_block,
+            ScanMode::All,
             parsers,
             virtual_blocks_by_file
                 .get(&file_path)
@@ -635,7 +647,7 @@ fn parse_changed_files(
             file_system,
             file_path.as_path(),
             line_changes_by_file.for_file(file_path),
-            modified_blocks,
+            ScanMode::OnlyChanged,
             parsers,
             virtual_blocks_by_file
                 .get(file_path)
@@ -677,20 +689,8 @@ fn record_parsed_file(
     }
 }
 
-/// Keeps every block the file declares, whether or not a diff touched it.
-pub(crate) fn every_block(_block: &BlockWithContext) -> bool {
-    true
-}
-
-/// Keeps only the blocks a diff touched, by their content or by their start tag.
-fn modified_blocks(block: &BlockWithContext) -> bool {
-    // A block with a modified start tag is considered modified because its rules (attributes) are
-    // modified.
-    block.is_content_modified || block.is_start_tag_modified
-}
-
 /// Parses the blocks of one file, marking the ones `line_changes` touched and keeping those
-/// `block_predicate` selects. The blocks come in source order, the `virtual_blocks` of the file
+/// `scan_mode` keeps. The blocks come in source order, the `virtual_blocks` of the file
 /// among its tags. A file without a parser has no tags, only its `virtual_blocks`. Returns `None`
 /// for a file with neither a parser nor `virtual_blocks`. For a file that is not valid UTF-8 but
 /// has no blocks, returns no blocks and an empty text.
@@ -703,7 +703,7 @@ pub(crate) fn parse_file(
     file_system: &impl FileSystem,
     file_path: &Path,
     line_changes: &LineChanges,
-    block_predicate: impl Fn(&BlockWithContext) -> bool,
+    scan_mode: ScanMode,
     parsers: &LanguageParsers,
     virtual_blocks: &[&VirtualBlock],
 ) -> anyhow::Result<Option<FileBlocks>> {
@@ -735,7 +735,7 @@ pub(crate) fn parse_file(
         file_path,
         source_code,
         line_changes,
-        &block_predicate,
+        scan_mode,
         virtual_blocks,
     )
     .map(Some)
@@ -760,7 +760,7 @@ fn non_utf8_file_has_blocks(
                 file_path,
                 &text,
                 &LineChanges::default(),
-                &every_block,
+                ScanMode::All,
                 &mut HashMap::new(),
             )
             .is_ok_and(|tags| tags.is_empty())
@@ -768,8 +768,8 @@ fn non_utf8_file_has_blocks(
 }
 
 /// Parses the blocks of `source_code`, the text of `file_path`: its tags and its
-/// `virtual_blocks`. Marks the ones `line_changes` touched and keeps those `block_predicate`
-/// selects, in source order. Without a `parser`, the file has no tags.
+/// `virtual_blocks`. Marks the ones `line_changes` touched and keeps those `scan_mode` keeps, in
+/// source order. Without a `parser`, the file has no tags.
 ///
 /// # Errors
 /// Returns an error if a tag is malformed or a name is used twice, or if a virtual block's target
@@ -779,7 +779,7 @@ fn parse_source(
     file_path: &Path,
     source_code: String,
     line_changes: &LineChanges,
-    block_predicate: &impl Fn(&BlockWithContext) -> bool,
+    scan_mode: ScanMode,
     virtual_blocks: &[&VirtualBlock],
 ) -> anyhow::Result<FileBlocks> {
     // Tracks where each name in this file is first declared, to reject duplicate blocks.
@@ -790,7 +790,7 @@ fn parse_source(
             file_path,
             &source_code,
             line_changes,
-            block_predicate,
+            scan_mode,
             &mut names_seen,
         )?,
         // Tags are found in the file's comments, and only a parser knows how a comment is written.
@@ -802,7 +802,7 @@ fn parse_source(
         file_path,
         &source_code,
         line_changes,
-        block_predicate,
+        scan_mode,
         &mut names_seen,
     )?);
     // The tags come in source order. The virtual blocks join them there.
@@ -814,8 +814,8 @@ fn parse_source(
 }
 
 /// The blocks that tags declare in `source`, the text of `file_path`, with what `line_changes`
-/// touched in each. Keeps those `block_predicate` selects, in source order, and records every
-/// block's name in `names_seen`.
+/// touched in each. Keeps those `scan_mode` keeps, in source order, and records every block's name
+/// in `names_seen`.
 ///
 /// # Errors
 /// Returns an error if a tag is malformed or not closed, has an unknown attribute or severity, or
@@ -825,7 +825,7 @@ fn tag_blocks(
     file_path: &Path,
     source: &str,
     line_changes: &LineChanges,
-    block_predicate: &impl Fn(&BlockWithContext) -> bool,
+    scan_mode: ScanMode,
     names_seen: &mut HashMap<String, String>,
 ) -> anyhow::Result<Vec<BlockWithContext>> {
     // Tree-sitter takes most of the time a scan spends on a file, and most files hold no tags. A
@@ -852,7 +852,7 @@ fn tag_blocks(
             })
         })
         .filter(|result| match result {
-            Ok(block_with_context) => block_predicate(block_with_context),
+            Ok(block_with_context) => scan_mode.keeps(block_with_context),
             // An error is kept, so that collecting the blocks stops at it.
             Err(_) => true,
         })
@@ -861,7 +861,7 @@ fn tag_blocks(
 }
 
 /// The blocks that `virtual_blocks` declare in `source`, the text of `file_path`, with what
-/// `line_changes` touched in each. Keeps those `block_predicate` selects, in the order of
+/// `line_changes` touched in each. Keeps those `scan_mode` keeps, in the order of
 /// `virtual_blocks`, and records every block's name in `names_seen`.
 ///
 /// # Errors
@@ -873,7 +873,7 @@ fn virtual_blocks_in_file(
     file_path: &Path,
     source: &str,
     line_changes: &LineChanges,
-    block_predicate: &impl Fn(&BlockWithContext) -> bool,
+    scan_mode: ScanMode,
     names_seen: &mut HashMap<String, String>,
 ) -> anyhow::Result<Vec<BlockWithContext>> {
     // Only a block that wraps a symbol needs the file's symbols. A language without symbols must
@@ -902,7 +902,7 @@ fn virtual_blocks_in_file(
     for virtual_block in virtual_blocks {
         let block_with_context = virtual_block.resolve(&symbols, source, line_changes)?;
         reject_duplicate_name(&block_with_context.block, file_path, names_seen)?;
-        if block_predicate(&block_with_context) {
+        if scan_mode.keeps(&block_with_context) {
             blocks_with_context.push(block_with_context);
         }
     }
@@ -2156,7 +2156,7 @@ mod parse_blocks_tests {
             &file_system,
             Path::new("a.py"),
             &LineChanges::default(),
-            every_block,
+            ScanMode::All,
             &parsers,
             &[],
         )?
@@ -2176,7 +2176,7 @@ mod parse_blocks_tests {
             &file_system,
             Path::new("a.py"),
             &LineChanges::default(),
-            every_block,
+            ScanMode::All,
             &parsers,
             &[],
         );
@@ -2200,7 +2200,7 @@ mod parse_blocks_tests {
             &file_system,
             Path::new("a.py"),
             &LineChanges::default(),
-            every_block,
+            ScanMode::All,
             &parsers,
             &[],
         );
@@ -2224,7 +2224,7 @@ mod parse_blocks_tests {
             &file_system,
             Path::new("a.py"),
             &LineChanges::default(),
-            every_block,
+            ScanMode::All,
             &parsers,
             &[],
         );
@@ -2249,7 +2249,7 @@ mod parse_blocks_tests {
             &file_system,
             Path::new("a.py"),
             &LineChanges::default(),
-            every_block,
+            ScanMode::All,
             &parsers,
             &[],
         );
@@ -2274,7 +2274,7 @@ mod parse_blocks_tests {
             &file_system,
             Path::new("a.py"),
             &LineChanges::default(),
-            every_block,
+            ScanMode::All,
             &parsers,
             &[],
         );

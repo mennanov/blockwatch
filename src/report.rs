@@ -19,15 +19,6 @@ pub(crate) enum RunMode {
 }
 
 impl RunMode {
-    /// Derives the mode from the two flags that select it.
-    pub(crate) fn new(with_diff: bool, only_changed: bool) -> Self {
-        match (with_diff, only_changed) {
-            (false, _) => Self::All,
-            (true, false) => Self::AllWithDiff,
-            (true, true) => Self::OnlyChanged,
-        }
-    }
-
     /// The name the mode goes by in the report, on both the summary line and in the JSON.
     fn as_str(&self) -> &'static str {
         match self {
