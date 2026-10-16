@@ -5,8 +5,7 @@ use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
 use crate::validators::{
     self, TargetFiles, TargetReference, TargetResult, ValidationReport, ValidatorDetector,
-    ValidatorSync, ValidatorType, Violation, ViolationRange, compile_pattern, parse_number,
-    target_display,
+    ValidatorSync, ValidatorType, Violation, compile_pattern, parse_number, target_display,
 };
 use anyhow::{Context, anyhow, bail};
 use heck::ToSnakeCase;
@@ -841,10 +840,7 @@ fn create_violation(
         data.reason,
     );
     Violation::new(
-        ViolationRange::new(
-            block.start_tag_position_range.start.clone(),
-            block.start_tag_position_range.end.clone(),
-        ),
+        block.start_tag_position_range.clone().into(),
         file_path,
         block,
         "same-as".to_string(),

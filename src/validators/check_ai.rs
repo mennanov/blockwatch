@@ -3,7 +3,7 @@ use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
     PatternContent, ValidationContext, ValidationReport, ValidatorAsync, ValidatorDetector,
-    ValidatorType, Violation, ViolationRange, block_content_for_pattern,
+    ValidatorType, Violation, block_content_for_pattern,
 };
 use anyhow::{Context, anyhow};
 use async_openai::Client;
@@ -206,10 +206,7 @@ fn block_violation(
 ) -> anyhow::Result<Violation> {
     let details = serde_json::to_value(details).context("failed to serialize CheckAiDetails")?;
     Violation::new(
-        ViolationRange::new(
-            block.start_tag_position_range.start.clone(),
-            block.start_tag_position_range.end.clone(),
-        ),
+        block.start_tag_position_range.clone().into(),
         file_path,
         block,
         "check-ai".to_string(),

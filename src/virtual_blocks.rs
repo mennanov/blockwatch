@@ -196,7 +196,7 @@ impl VirtualBlock {
             .find('\n')
             .map_or(definition.end, |offset| definition.start + offset);
         let start_tag_position_range =
-            definition_positions.start.clone()..Position::from_byte_offset(source, first_line_end);
+            definition_positions.start..Position::from_byte_offset(source, first_line_end);
         Ok(BlockWithContext {
             block: Block {
                 attributes: self.attributes.clone(),

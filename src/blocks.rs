@@ -196,7 +196,7 @@ impl Content {
             // Quotes, escapes and joined lines make a decoded value differ from the source text,
             // so a position inside it has no exact place in the source. The start of the value is
             // the closest one.
-            ContentText::Decoded(_) => self.positions.start.clone(),
+            ContentText::Decoded(_) => self.positions.start,
         }
     }
 
@@ -274,7 +274,7 @@ impl Block {
     /// What tells the block apart from the other blocks of its file.
     pub(crate) fn key(&self) -> BlockKey {
         BlockKey {
-            start: self.start_tag_position_range.start.clone(),
+            start: self.start_tag_position_range.start,
             config_line: match &self.declaration {
                 Declaration::Tags => None,
                 Declaration::ConfigEntry(entry) => Some(entry.line),
@@ -296,7 +296,7 @@ impl Block {
 /// Block's severity.
 ///
 /// Mirrors [LSP DiagnosticSeverity](https://github.com/microsoft/vscode-languageserver-node/blob/3412a17149850f445bf35b4ad71148cfe5f8411e/types/src/main.ts#L614)
-#[derive(Clone, Copy, Serialize_repr, EnumString, Debug, PartialEq)]
+#[derive(Clone, Copy, Serialize_repr, EnumString, Debug, PartialEq, Eq)]
 #[strum(ascii_case_insensitive)]
 #[repr(u8)]
 /* <block name="block-severity" same-as="docs/validators/README.md:severity-levels"

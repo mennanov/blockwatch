@@ -6,7 +6,7 @@ use crate::symbol_path::SymbolPath;
 use crate::validators;
 use crate::validators::{
     TargetFiles, TargetReference, TargetResult, ValidationReport, ValidatorType, Violation,
-    ViolationRange, target_display,
+    target_display,
 };
 use anyhow::{Context, anyhow};
 use serde::Serialize;
@@ -433,10 +433,7 @@ fn affects_violation(
     })
     .context("failed to serialize AffectsViolation block")?;
     Violation::new(
-        ViolationRange::new(
-            block.start_tag_position_range.start.clone(),
-            block.start_tag_position_range.end.clone(),
-        ),
+        block.start_tag_position_range.clone().into(),
         file_path,
         block,
         "affects".to_string(),

@@ -66,7 +66,7 @@ pub fn count_rust_blocks(source: &str) -> anyhow::Result<usize> {
 }
 
 /// A place in a source file.
-#[derive(Serialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct Position {
     /// 1-based line number.
     pub(crate) line: usize,

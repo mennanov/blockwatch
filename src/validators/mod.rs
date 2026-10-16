@@ -231,7 +231,7 @@ impl ValidationLog {
 
 /// The span an editor should highlight for a violation. 1-based and half-open: the start is
 /// inclusive, the end is exclusive.
-#[derive(Serialize, Debug, PartialEq)]
+#[derive(Serialize, Debug, PartialEq, Eq)]
 pub(crate) struct ViolationRange {
     start: Position,
     end: Position,
@@ -251,6 +251,12 @@ impl ViolationRange {
     /// The position just past the last one of the range: the end is exclusive.
     pub(crate) fn end(&self) -> &Position {
         &self.end
+    }
+}
+
+impl From<Range<Position>> for ViolationRange {
+    fn from(range: Range<Position>) -> Self {
+        Self::new(range.start, range.end)
     }
 }
 

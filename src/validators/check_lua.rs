@@ -4,8 +4,7 @@ use crate::repo_path::RepoPath;
 use crate::validators::parse_target_references;
 use crate::validators::{
     PatternContent, TargetFiles, TargetReference, ValidationContext, ValidationReport,
-    ValidatorAsync, ValidatorDetector, ValidatorType, Violation, ViolationRange,
-    block_content_for_pattern,
+    ValidatorAsync, ValidatorDetector, ValidatorType, Violation, block_content_for_pattern,
 };
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -472,10 +471,7 @@ fn create_violation(
         block.declared_at(),
     );
     Violation::new(
-        ViolationRange::new(
-            block.start_tag_position_range.start.clone(),
-            block.start_tag_position_range.end.clone(),
-        ),
+        block.start_tag_position_range.clone().into(),
         file_path,
         block,
         "check-lua".to_string(),

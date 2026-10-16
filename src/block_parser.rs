@@ -372,8 +372,8 @@ impl BlockEnd {
             // content.
             0..0
         };
-        let content_start_position = block_start.comment.position_range.end.clone();
-        let content_end_position = self.comment.position_range.start.clone();
+        let content_start_position = block_start.comment.position_range.end;
+        let content_end_position = self.comment.position_range.start;
         Block {
             attributes: block_start.attributes,
             start_tag_position_range: block_start.start_tag_position_range,

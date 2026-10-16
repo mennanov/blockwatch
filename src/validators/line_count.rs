@@ -3,7 +3,7 @@ use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{
-    ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
+    ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation,
 };
 use anyhow::anyhow;
 use serde::Serialize;
@@ -107,10 +107,7 @@ fn create_violation(
         expected
     );
     Violation::new(
-        ViolationRange::new(
-            block.start_tag_position_range.start.clone(),
-            block.start_tag_position_range.end.clone(),
-        ),
+        block.start_tag_position_range.clone().into(),
         block_file_path,
         block,
         "line-count".to_string(),
