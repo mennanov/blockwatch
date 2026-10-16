@@ -1,6 +1,7 @@
 use crate::Position;
 use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, node_text, python_style_comments_parser,
+    tree_sitter_parser,
 };
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{ScalarValue, Symbol, SymbolsParser, ensure_no_syntax_error};
@@ -15,7 +16,7 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let yaml_language = tree_sitter_yaml::LANGUAGE.into();
-    let parser = python_style_comments_parser(&yaml_language, "comment");
+    let parser = python_style_comments_parser(&yaml_language, "comment")?;
     Ok(parser)
 }
 
@@ -31,10 +32,7 @@ impl YamlSymbolsParser {
     /// # Errors
     /// Returns an error if the YAML grammar cannot be loaded.
     fn new() -> anyhow::Result<Self> {
-        let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&tree_sitter_yaml::LANGUAGE.into())
-            .context("failed to set tree-sitter language")?;
+        let parser = tree_sitter_parser(&tree_sitter_yaml::LANGUAGE.into())?;
         Ok(Self { parser })
     }
 }

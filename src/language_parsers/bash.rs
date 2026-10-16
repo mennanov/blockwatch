@@ -24,7 +24,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
                 Some(comment.replacen("#", " ", 1))
             }
         }),
-    );
+    )?;
     Ok(parser)
 }
 

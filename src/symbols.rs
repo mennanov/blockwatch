@@ -415,10 +415,7 @@ impl QuerySymbolsParser {
         query_source: &str,
         node_decoder: NodeDecoder,
     ) -> anyhow::Result<Self> {
-        let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(language)
-            .context("failed to set tree-sitter language")?;
+        let parser = crate::language_parsers::tree_sitter_parser(language)?;
         let query = tree_sitter::Query::new(language, query_source)
             .context("failed to compile tree-sitter symbol query")?;
         let capture_roles = query

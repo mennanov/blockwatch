@@ -12,7 +12,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
         &groovy_language,
         "line_comment",
         "block_comment",
-    );
+    )?;
     Ok(parser)
 }
 

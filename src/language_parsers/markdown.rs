@@ -1,9 +1,11 @@
+use crate::language_parsers;
 use crate::language_parsers::{
     Comment, CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
     blank_preserving_line_breaks, node_text, xml_style_comments_parser,
 };
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{ScalarValue, Symbol, SymbolsParser};
+use anyhow::Context;
 use markdown::mdast::Node;
 use markdown::{Constructs, ParseOptions};
 use std::ops::Range;
@@ -11,7 +13,7 @@ use tree_sitter::StreamingIterator;
 
 /// Returns a [`LanguageParser`] for Markdown. Its symbols are the sections of a file.
 pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(MdCommentsParser::new()).with_symbols(SectionsParser))
+    Ok(LanguageParserImpl::new(MdCommentsParser::new()?).with_symbols(SectionsParser))
 }
 
 /// A [`SymbolsParser`] whose symbols are the sections of a Markdown file, in the order of their
@@ -205,12 +207,9 @@ struct MdCommentsParser {
 }
 
 impl MdCommentsParser {
-    fn new() -> Self {
+    fn new() -> anyhow::Result<Self> {
         let markdown_lang: tree_sitter::Language = tree_sitter_md::LANGUAGE.into();
-        let mut md_tree_sitter_parser = tree_sitter::Parser::new();
-        md_tree_sitter_parser
-            .set_language(&markdown_lang)
-            .expect("Error setting Tree-sitter language");
+        let md_tree_sitter_parser = language_parsers::tree_sitter_parser(&markdown_lang)?;
         let md_regions_query = tree_sitter::Query::new(
             &markdown_lang,
             "(html_block) @html_block \
@@ -218,25 +217,22 @@ impl MdCommentsParser {
              (pipe_table_cell) @pipe_table_cell \
              (link_reference_definition) @link_reference_definition",
         )
-        .unwrap();
+        .context("failed to compile tree-sitter markdown regions query")?;
 
         let inline_lang: tree_sitter::Language = tree_sitter_md::INLINE_LANGUAGE.into();
-        let mut inline_tree_sitter_parser = tree_sitter::Parser::new();
-        inline_tree_sitter_parser
-            .set_language(&inline_lang)
-            .expect("Error setting Tree-sitter language");
-        let code_span_query =
-            tree_sitter::Query::new(&inline_lang, "(code_span) @code_span").unwrap();
+        let inline_tree_sitter_parser = language_parsers::tree_sitter_parser(&inline_lang)?;
+        let code_span_query = tree_sitter::Query::new(&inline_lang, "(code_span) @code_span")
+            .context("failed to compile tree-sitter code span query")?;
 
         let html_lang = tree_sitter_html::LANGUAGE.into();
-        let html_comments_parser = xml_style_comments_parser(&html_lang, "comment");
-        Self {
+        let html_comments_parser = xml_style_comments_parser(&html_lang, "comment")?;
+        Ok(Self {
             md_tree_sitter_parser,
             md_regions_query,
             inline_tree_sitter_parser,
             code_span_query,
             html_comments_parser,
-        }
+        })
     }
 
     /// Extracts the `[//]:` comments and the HTML comments (from `html_block` and `inline`

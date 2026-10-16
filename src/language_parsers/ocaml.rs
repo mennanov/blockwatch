@@ -18,7 +18,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
             }
             Some(comment_text(node_text(node, source_code)))
         }),
-    );
+    )?;
     Ok(parser)
 }
 

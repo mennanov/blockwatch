@@ -22,7 +22,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
                 None
             }
         }),
-    );
+    )?;
     Ok(parser)
 }
 

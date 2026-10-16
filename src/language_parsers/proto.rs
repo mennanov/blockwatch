@@ -8,7 +8,7 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let proto_language = tree_sitter_proto::LANGUAGE.into();
-    let parser = language_parsers::c_style_comments_parser(&proto_language, "comment");
+    let parser = language_parsers::c_style_comments_parser(&proto_language, "comment")?;
     Ok(parser)
 }
 

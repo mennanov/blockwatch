@@ -23,7 +23,7 @@ pub(crate) fn parse_symbols(source: &str) -> anyhow::Result<Vec<Symbol>> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let toml_language = tree_sitter_toml_ng::LANGUAGE.into();
-    let parser = python_style_comments_parser(&toml_language, "comment");
+    let parser = python_style_comments_parser(&toml_language, "comment")?;
     Ok(parser)
 }
 

@@ -28,7 +28,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
                 None => Visit::Continue,
             }
         }),
-    );
+    )?;
     Ok(parser)
 }
 

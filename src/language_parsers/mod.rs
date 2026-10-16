@@ -44,6 +44,7 @@ use crate::block_parser::BlocksFromCommentsParser;
 use crate::blocks::Block;
 use crate::symbols::{Symbol, SymbolsParser};
 use crate::{Position, character_column_at};
+use anyhow::Context;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::ops::Range;
@@ -323,6 +324,18 @@ enum Visit {
 /// Maps a node to a [`Visit`]: the one place a grammar's node kinds are interpreted, one per language.
 type NodeVisitor = Box<dyn Fn(&Node, &str) -> Visit + Send + Sync>;
 
+/// Creates a Tree-sitter [`Parser`] configured for `language`.
+///
+/// # Errors
+/// Returns an error if the language cannot be set on the parser.
+pub(crate) fn tree_sitter_parser(language: &Language) -> anyhow::Result<Parser> {
+    let mut parser = Parser::new();
+    parser
+        .set_language(language)
+        .context("failed to set tree-sitter language")?;
+    Ok(parser)
+}
+
 struct TreeSitterCommentsParser {
     parser: Parser,
     node_visitor: NodeVisitor,
@@ -330,16 +343,13 @@ struct TreeSitterCommentsParser {
 }
 
 impl TreeSitterCommentsParser {
-    fn new(language: &Language, node_visitor: NodeVisitor) -> Self {
-        let mut parser = Parser::new();
-        parser
-            .set_language(language)
-            .expect("Error setting Tree-sitter language");
-        Self {
+    fn new(language: &Language, node_visitor: NodeVisitor) -> anyhow::Result<Self> {
+        let parser = tree_sitter_parser(language)?;
+        Ok(Self {
             parser,
             node_visitor,
             tree: None,
-        }
+        })
     }
 
     /// Stops the walk at nodes of `kinds` without reading a comment out of them.
@@ -571,7 +581,7 @@ fn blank_preserving_line_breaks(bytes: &mut [u8]) {
 fn c_style_comments_parser(
     language: &Language,
     comment_node_kind: &'static str,
-) -> TreeSitterCommentsParser {
+) -> anyhow::Result<TreeSitterCommentsParser> {
     TreeSitterCommentsParser::new(
         language,
         comment_visitor(move |node, source_code| {
@@ -593,7 +603,7 @@ fn c_style_line_and_block_comments_parser(
     language: &Language,
     line_comment_node_kind: &'static str,
     block_comment_node_kind: &'static str,
-) -> TreeSitterCommentsParser {
+) -> anyhow::Result<TreeSitterCommentsParser> {
     TreeSitterCommentsParser::new(
         language,
         comment_visitor(move |node, source_code| {
@@ -617,7 +627,7 @@ fn c_style_line_and_block_comments_parser(
 fn c_style_and_doc_comments_parser(
     language: &Language,
     comment_node_kind: &'static str,
-) -> TreeSitterCommentsParser {
+) -> anyhow::Result<TreeSitterCommentsParser> {
     TreeSitterCommentsParser::new(
         language,
         comment_visitor(move |node, source_code| {
@@ -669,7 +679,7 @@ fn c_style_and_doc_line_and_block_comments_parser(
     language: &Language,
     line_comment_node_kind: &'static str,
     block_comment_node_kind: &'static str,
-) -> TreeSitterCommentsParser {
+) -> anyhow::Result<TreeSitterCommentsParser> {
     TreeSitterCommentsParser::new(
         language,
         comment_visitor(move |node, source_code| {
@@ -685,7 +695,7 @@ fn c_style_and_doc_line_and_block_comments_parser(
 
 /// Comments parser shared by the ECMAScript-family grammars (JavaScript, TypeScript, TSX). All
 /// three use the same node kinds for comments, so they differ only in which grammar is loaded.
-fn ecmascript_comments_parser(language: &Language) -> TreeSitterCommentsParser {
+fn ecmascript_comments_parser(language: &Language) -> anyhow::Result<TreeSitterCommentsParser> {
     TreeSitterCommentsParser::new(language, comment_visitor(ecmascript_comment_text))
 }
 
@@ -756,7 +766,7 @@ fn hash_and_c_style_comment_text(comment: &str) -> String {
 fn hash_and_c_style_comments_parser(
     language: &Language,
     comment_node_kind: &'static str,
-) -> TreeSitterCommentsParser {
+) -> anyhow::Result<TreeSitterCommentsParser> {
     TreeSitterCommentsParser::new(
         language,
         comment_visitor(move |node, source_code| {
@@ -772,7 +782,7 @@ fn hash_and_c_style_comments_parser(
 fn python_style_comments_parser(
     language: &Language,
     comment_node_kind: &'static str,
-) -> TreeSitterCommentsParser {
+) -> anyhow::Result<TreeSitterCommentsParser> {
     TreeSitterCommentsParser::new(
         language,
         comment_visitor(move |node, source_code| {
@@ -795,7 +805,7 @@ fn python_style_comments_parser(
 fn xml_style_comments_parser(
     language: &Language,
     comment_node_kind: &'static str,
-) -> TreeSitterCommentsParser {
+) -> anyhow::Result<TreeSitterCommentsParser> {
     TreeSitterCommentsParser::new(
         language,
         comment_visitor(move |node, source_code| {

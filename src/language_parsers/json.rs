@@ -7,7 +7,7 @@ use anyhow::Context;
 /// Returns a [`LanguageParser`] for JSON.
 pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
     let language = tree_sitter_json::LANGUAGE.into();
-    let comments_parser = c_style_comments_parser(&language, "comment");
+    let comments_parser = c_style_comments_parser(&language, "comment")?;
     let symbols_parser = QuerySymbolsParser::new(&language, include_str!("json.scm"), decode_node)?;
     Ok(LanguageParserImpl::new(comments_parser).with_symbols(symbols_parser))
 }

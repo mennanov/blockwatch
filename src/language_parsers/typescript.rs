@@ -7,9 +7,9 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 }
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
-    Ok(language_parsers::ecmascript_comments_parser(
+    language_parsers::ecmascript_comments_parser(
         &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-    ))
+    )
 }
 
 #[cfg(test)]

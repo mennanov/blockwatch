@@ -3,6 +3,7 @@ use crate::language_parsers::{
     Comment, CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
     node_text,
 };
+use anyhow::Context;
 use tree_sitter::StreamingIterator;
 
 /// Returns a [`LanguageParser`] for PHP.
@@ -11,7 +12,7 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 }
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
-    Ok(PhpCommentsParser::new())
+    PhpCommentsParser::new()
 }
 
 /// Parses PHP comments and the HTML comments found in the template sections of a PHP file.
@@ -26,23 +27,21 @@ struct PhpCommentsParser {
 }
 
 impl PhpCommentsParser {
-    fn new() -> Self {
+    fn new() -> anyhow::Result<Self> {
         let php_language: tree_sitter::Language = tree_sitter_php::LANGUAGE_PHP.into();
-        let mut php_tree_sitter_parser = tree_sitter::Parser::new();
-        php_tree_sitter_parser
-            .set_language(&php_language)
-            .expect("Error setting Tree-sitter language");
+        let php_tree_sitter_parser = language_parsers::tree_sitter_parser(&php_language)?;
         let regions_query =
-            tree_sitter::Query::new(&php_language, "(comment) @comment (text) @text").unwrap();
+            tree_sitter::Query::new(&php_language, "(comment) @comment (text) @text")
+                .context("failed to compile tree-sitter php regions query")?;
         let html_comments_parser = language_parsers::xml_style_comments_parser(
             &tree_sitter_html::LANGUAGE.into(),
             "comment",
-        );
-        Self {
+        )?;
+        Ok(Self {
             php_tree_sitter_parser,
             regions_query,
             html_comments_parser,
-        }
+        })
     }
 }
 

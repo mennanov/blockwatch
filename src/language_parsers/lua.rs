@@ -19,7 +19,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
             }
             Some(lua_comment_text(node, node_text(node, source_code)))
         }),
-    );
+    )?;
     Ok(parser)
 }
 

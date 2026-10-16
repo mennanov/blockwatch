@@ -9,7 +9,7 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let html_language = tree_sitter_html::LANGUAGE.into();
-    let parser = xml_style_comments_parser(&html_language, "comment")
+    let parser = xml_style_comments_parser(&html_language, "comment")?
         .with_break_at_node_kinds(&["quoted_attribute_value"]);
     Ok(parser)
 }

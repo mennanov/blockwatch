@@ -8,7 +8,7 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let dart_language = tree_sitter_dart::LANGUAGE.into();
-    let parser = language_parsers::c_style_and_doc_comments_parser(&dart_language, "comment");
+    let parser = language_parsers::c_style_and_doc_comments_parser(&dart_language, "comment")?;
     Ok(parser)
 }
 

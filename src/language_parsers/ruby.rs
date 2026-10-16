@@ -23,7 +23,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
                 multiline_comment_processor(comment)
             })
         }),
-    );
+    )?;
     Ok(parser)
 }
 

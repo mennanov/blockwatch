@@ -12,7 +12,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
         &scala_language,
         "comment",
         "block_comment",
-    );
+    )?;
     Ok(parser)
 }
 

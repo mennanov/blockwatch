@@ -8,7 +8,7 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let hcl_language = tree_sitter_hcl::LANGUAGE.into();
-    let parser = language_parsers::hash_and_c_style_comments_parser(&hcl_language, "comment");
+    let parser = language_parsers::hash_and_c_style_comments_parser(&hcl_language, "comment")?;
     Ok(parser)
 }
 

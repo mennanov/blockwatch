@@ -10,7 +10,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let nix_language = tree_sitter_nix::LANGUAGE.into();
     // Nix has `#` line comments and `/* */` block comments; the `//` branch of the shared
     // parser is unreachable because `//` is the attrset-merge operator in Nix.
-    let parser = language_parsers::hash_and_c_style_comments_parser(&nix_language, "comment");
+    let parser = language_parsers::hash_and_c_style_comments_parser(&nix_language, "comment")?;
     Ok(parser)
 }
 

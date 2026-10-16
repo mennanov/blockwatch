@@ -14,7 +14,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
         &swift_language,
         "comment",
         "multiline_comment",
-    );
+    )?;
     Ok(parser)
 }
 

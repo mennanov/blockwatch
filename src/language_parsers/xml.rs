@@ -9,7 +9,7 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let xml_language = tree_sitter_xml::LANGUAGE_XML.into();
-    let parser = xml_style_comments_parser(&xml_language, "Comment");
+    let parser = xml_style_comments_parser(&xml_language, "Comment")?;
     Ok(parser)
 }
 

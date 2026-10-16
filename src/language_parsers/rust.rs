@@ -31,7 +31,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
             ))),
             _ => None,
         }),
-    );
+    )?;
     Ok(parser)
 }
 

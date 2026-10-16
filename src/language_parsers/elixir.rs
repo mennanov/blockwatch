@@ -9,7 +9,7 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let elixir_language = tree_sitter_elixir::LANGUAGE.into();
-    let parser = python_style_comments_parser(&elixir_language, "comment");
+    let parser = python_style_comments_parser(&elixir_language, "comment")?;
     Ok(parser)
 }
 

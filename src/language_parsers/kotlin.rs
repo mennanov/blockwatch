@@ -10,7 +10,7 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let kotlin_language = tree_sitter_kotlin_ng::LANGUAGE.into();
     let parser =
-        c_style_line_and_block_comments_parser(&kotlin_language, "line_comment", "block_comment");
+        c_style_line_and_block_comments_parser(&kotlin_language, "line_comment", "block_comment")?;
     Ok(parser)
 }
 

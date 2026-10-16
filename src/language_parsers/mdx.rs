@@ -21,7 +21,7 @@ use std::ops::Range;
 
 /// Returns a [`LanguageParser`] for MDX. Its symbols are the sections of a file, as in Markdown.
 pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(MdxParser::new())
+    MdxParser::new()
 }
 
 /// Finds the comments in MDX source.
@@ -36,14 +36,14 @@ struct MdxParser {
 }
 
 impl MdxParser {
-    fn new() -> Self {
-        Self {
+    fn new() -> anyhow::Result<Self> {
+        Ok(Self {
             // MDX compiles to an ES module, where `<!--` doesn't start a comment.
             js_comments_parser: c_style_comments_parser(
                 &tree_sitter_javascript::LANGUAGE.into(),
                 "comment",
-            ),
-        }
+            )?,
+        })
     }
 
     /// Returns the comments in `source`, in source order.
@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let comments = MdxParser::new().comments(
+        let comments = MdxParser::new()?.comments(
             r#"import {Chart} from './chart.js' // after an import
 export const meta = {
   /* in an export */
@@ -348,7 +348,7 @@ Text é {/* in text */} and `{/* code span */}`.
 
     #[test]
     fn comment_in_jsx_attribute_is_found() -> anyhow::Result<()> {
-        let comments = MdxParser::new().comments(
+        let comments = MdxParser::new()?.comments(
             r#"<Items
   values={[
     // a
@@ -389,7 +389,7 @@ Text <Badge value={/* c */ 1} />
 
     #[test]
     fn comment_in_list_item_spans_its_indented_lines() -> anyhow::Result<()> {
-        let comments = MdxParser::new().comments(
+        let comments = MdxParser::new()?.comments(
             "- {/* a
   b */}
 ",
@@ -410,7 +410,7 @@ Text <Badge value={/* c */ 1} />
     #[test]
     fn frontmatter_is_skipped() -> anyhow::Result<()> {
         // Frontmatter is YAML, where `<3` is plain text. Read as MDX, it would open a JSX tag.
-        let comments = MdxParser::new().comments(
+        let comments = MdxParser::new()?.comments(
             "---
 title: <3 # not a comment
 ---

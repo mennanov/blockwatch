@@ -9,7 +9,7 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let starlark_language = tree_sitter_starlark::LANGUAGE.into();
-    let parser = python_style_comments_parser(&starlark_language, "comment");
+    let parser = python_style_comments_parser(&starlark_language, "comment")?;
     Ok(parser)
 }
 
