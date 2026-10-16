@@ -290,7 +290,7 @@ struct Properties<'a> {
     /// Whatever the validator recorded about the violation, such as an expected and an actual line
     /// count.
     #[serde(skip_serializing_if = "Option::is_none")]
-    data: &'a Option<serde_json::Value>,
+    data: Option<&'a serde_json::Value>,
 }
 
 impl<'a> Properties<'a> {

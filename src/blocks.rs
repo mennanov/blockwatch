@@ -9,7 +9,7 @@ use serde_repr::Serialize_repr;
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::ops::Range;
 use std::path::Path;
@@ -1015,23 +1015,24 @@ pub(crate) fn parser_for_file_path<'p>(
     for (i, _) in file_name.match_indices('.').rev() {
         #[expect(clippy::string_slice, reason = "`i` is the index of a `.`")]
         let extension = &file_name[i + 1..];
-        let ext_os = OsString::from(extension);
 
-        if let Some(parser) = try_parser_for_extension(&ext_os, parsers, extra_file_extensions) {
+        if let Some(parser) =
+            try_parser_for_extension(OsStr::new(extension), parsers, extra_file_extensions)
+        {
             return Some(parser);
         }
     }
 
-    try_parser_for_extension(&OsString::from(file_name), parsers, extra_file_extensions)
+    try_parser_for_extension(OsStr::new(file_name), parsers, extra_file_extensions)
 }
 
 fn try_parser_for_extension<'p>(
-    extension: &OsString,
+    extension: &OsStr,
     parsers: &'p LanguageParsers,
     extra_file_extensions: &HashMap<OsString, OsString>,
 ) -> Option<&'p SharedLanguageParser> {
     let ext = if let Some(ext) = extra_file_extensions.get(extension) {
-        ext
+        ext.as_os_str()
     } else {
         extension
     };

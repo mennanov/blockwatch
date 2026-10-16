@@ -141,7 +141,7 @@ impl Violation {
             severity: self.severity,
             address: self.address.as_ref(),
             suppressed: self.suppressed,
-            data: &self.data,
+            data: self.data.as_ref(),
         }
     }
 }
@@ -275,7 +275,7 @@ pub(crate) struct SimpleDiagnostic<'a> {
     #[serde(skip_serializing_if = "is_false")]
     suppressed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    data: &'a Option<serde_json::Value>,
+    data: Option<&'a serde_json::Value>,
 }
 
 /// Keeps a `false` `suppressed` field out of the serialized diagnostic.
@@ -315,7 +315,7 @@ impl<'a> SimpleDiagnostic<'a> {
     }
 
     /// Validator-specific details for tools.
-    pub(crate) fn data(&self) -> &'a Option<serde_json::Value> {
+    pub(crate) fn data(&self) -> Option<&'a serde_json::Value> {
         self.data
     }
 }

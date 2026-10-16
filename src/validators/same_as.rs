@@ -100,7 +100,7 @@ impl Comparison {
                 groups_disagreement(source, &target_items).or_else(|| {
                     match canonicalize(target_items, &self.formats) {
                         Err(reason) => Some(reason),
-                        Ok(target) => disagreement(source, &target, &self.mode),
+                        Ok(target) => disagreement(source, &target, self.mode),
                     }
                 })
             }
@@ -247,13 +247,13 @@ fn reference_violation<Fs: FileSystem>(
             (target_file, Some(name), resolution)
         }
         TargetReference::File(target_file) => {
-            let items = targets.whole_file_items(&target_file, comparison.pattern.as_ref())?;
+            let items = targets.whole_file_items(&target_file, comparison.pattern.as_deref())?;
             (target_file, None, Ok(items))
         }
         TargetReference::Symbol { file, path } => {
             let target_file = file.unwrap_or_else(|| file_path.clone());
             let resolution =
-                targets.symbol_items(&target_file, &path, comparison.pattern.as_ref())?;
+                targets.symbol_items(&target_file, &path, comparison.pattern.as_deref())?;
             (target_file, Some(format!("#{path}")), resolution)
         }
     };
@@ -350,14 +350,14 @@ impl fmt::Display for Record {
 fn extract_items(block: &Block, file_content: &str) -> anyhow::Result<Vec<Record>> {
     extract_items_from(
         block.content.text(file_content),
-        block.attributes.get("same-as-pattern"),
+        block.attributes.get("same-as-pattern").map(String::as_str),
     )
 }
 
 /// Extracts items from `content` for the given `pattern`.
 ///
 /// If `pattern` is `None` then the whole `content` is returned.
-fn extract_items_from(content: &str, pattern: Option<&String>) -> anyhow::Result<Vec<Record>> {
+fn extract_items_from(content: &str, pattern: Option<&str>) -> anyhow::Result<Vec<Record>> {
     let Some(pattern) = pattern else {
         return Ok(vec![Record::whole(normalize_content(content))]);
     };
@@ -381,7 +381,7 @@ fn same_as_regex(pattern: &str) -> anyhow::Result<regex::Regex> {
 
 /// The groups of every record that `pattern` gives: its named groups, or [`WHOLE_GROUP`] when it
 /// has none or when there is no pattern.
-fn pattern_groups(pattern: Option<&String>) -> anyhow::Result<Vec<String>> {
+fn pattern_groups(pattern: Option<&str>) -> anyhow::Result<Vec<String>> {
     let groups: Vec<String> = match pattern {
         Some(pattern) => same_as_regex(pattern)?
             .capture_names()
@@ -507,7 +507,7 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
     fn whole_file_items(
         &mut self,
         target_file: &RepoPath,
-        pattern: Option<&String>,
+        pattern: Option<&str>,
     ) -> anyhow::Result<Vec<Record>> {
         let content = self
             .files
@@ -525,7 +525,7 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
         &mut self,
         target_file: &RepoPath,
         path: &SymbolPath,
-        pattern: Option<&String>,
+        pattern: Option<&str>,
     ) -> anyhow::Result<TargetResult<Vec<Record>>> {
         let (content, resolution) = self.files.resolve_symbol(target_file, path)?;
         match resolution {
@@ -539,6 +539,7 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
 }
 
 /// How extracted items are canonicalized before comparison.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Format {
     /// Compare items as extracted (the default).
     Verbatim,
@@ -576,10 +577,10 @@ enum Formats {
 
 impl Formats {
     /// The format of `group`.
-    fn of(&self, group: &str) -> &Format {
+    fn of(&self, group: &str) -> Format {
         match self {
-            Formats::All(format) => format,
-            Formats::ByGroup(formats) => formats.get(group).unwrap_or(&Format::Verbatim),
+            Formats::All(format) => *format,
+            Formats::ByGroup(formats) => formats.get(group).copied().unwrap_or(Format::Verbatim),
         }
     }
 }
@@ -598,7 +599,7 @@ fn parse_formats(block: &Block) -> anyhow::Result<Formats> {
     if !attribute.contains(':') {
         return Ok(Formats::All(parse_format(attribute)?));
     }
-    let groups = pattern_groups(block.attributes.get("same-as-pattern"))?;
+    let groups = pattern_groups(block.attributes.get("same-as-pattern").map(String::as_str))?;
     attribute
         .split(',')
         .map(|entry| {
@@ -652,7 +653,7 @@ fn canonicalize(records: Vec<Record>, formats: &Formats) -> Result<Vec<Record>, 
 ///
 /// Normalizing drops the trailing zeros and the exponent notation that would otherwise leave two
 /// spellings of one value differing as strings.
-fn canonicalize_value(value: String, format: &Format) -> Result<String, String> {
+fn canonicalize_value(value: String, format: Format) -> Result<String, String> {
     match format {
         Format::Verbatim => Ok(value),
         Format::Numeric => parse_number(&value)
@@ -670,6 +671,7 @@ fn canonicalize_value(value: String, format: &Format) -> Result<String, String> 
 }
 
 /// How two item lists are compared.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
     /// Order- and duplicate-insensitive set equality (the default).
     Set,
@@ -698,7 +700,7 @@ fn parse_mode(block: &Block) -> anyhow::Result<Mode> {
 ///
 /// Set, sequence, and single are symmetric; `Mode::Subset` is directional (`source` ⊆ `target`).
 /// A side without records is a mismatch in every mode.
-fn disagreement(source: &[Record], target: &[Record], mode: &Mode) -> Option<String> {
+fn disagreement(source: &[Record], target: &[Record], mode: Mode) -> Option<String> {
     if source.is_empty() || target.is_empty() {
         return Some("same-as-pattern matched no values in this block or its target".to_string());
     }

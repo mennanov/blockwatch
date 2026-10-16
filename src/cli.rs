@@ -18,7 +18,7 @@ use anyhow::Context;
 use clap::Parser;
 use std::collections::{BTreeMap, HashMap};
 use std::io::{IsTerminal, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::{env, fs};
@@ -374,7 +374,7 @@ fn write_sarif_violations(violations: &BTreeMap<RepoPath, Vec<Violation>>) -> an
 ///
 /// The search stops at the first marker it meets, so a run started inside a nested repository (a
 /// submodule) stays within that repository instead of escaping into the parent one.
-fn repository_root_path(current_path: PathBuf) -> anyhow::Result<PathBuf> {
+fn repository_root_path(current_path: &Path) -> anyhow::Result<PathBuf> {
     current_path
         .ancestors()
         /* <block same-as="src/fs.rs:vcs-metadata-directories" same-as-mode="subset"
@@ -387,5 +387,5 @@ fn repository_root_path(current_path: PathBuf) -> anyhow::Result<PathBuf> {
 
 /// Resolves the repository root from the current working directory.
 fn repository_root() -> anyhow::Result<PathBuf> {
-    repository_root_path(fs::canonicalize(env::current_dir()?)?)
+    repository_root_path(&fs::canonicalize(env::current_dir()?)?)
 }
