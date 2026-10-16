@@ -91,7 +91,7 @@ impl RunReport {
             for validators_of_block in blocks_in_file.values() {
                 checks += validators_of_block.len();
                 for validator in validators_of_block {
-                    *validators.entry(validator).or_default() += 1;
+                    *validators.entry(validator.as_str()).or_default() += 1;
                 }
             }
         }
@@ -174,7 +174,9 @@ mod tests {
     use crate::language_parsers::language_parsers;
     use crate::repo_path::RepoPath;
     use crate::test_utils::{validation_context, virtual_block};
-    use crate::validators::{ValidationLog, ValidationReport, Violation, ViolationRange};
+    use crate::validators::{
+        ValidationLog, ValidationReport, Validator, Violation, ViolationRange,
+    };
     use std::collections::HashMap;
 
     const CONTENTS: &str = r#"# <block name="both" keep-sorted="asc" line-count="<=2">
@@ -194,7 +196,7 @@ mod tests {
             ViolationRange::new(Position::new(2, 1), Position::new(2, 8)),
             &file_path,
             block,
-            "keep-sorted".to_string(),
+            Validator::KeepSorted,
             "out of order".to_string(),
             Some("'apple',"),
             None,
@@ -206,7 +208,7 @@ mod tests {
     fn log_with_check(
         context: &ValidationContext,
         block_index: usize,
-        validator: &'static str,
+        validator: Validator,
         violations: Vec<Violation>,
     ) -> anyhow::Result<ValidationLog> {
         let file_path = RepoPath::from_reference("example.py")?;
@@ -224,7 +226,12 @@ mod tests {
     #[test]
     fn summary_line_reports_every_count() -> anyhow::Result<()> {
         let context = validation_context("example.py", CONTENTS);
-        let log = log_with_check(&context, 0, "keep-sorted", vec![violation(&context)])?;
+        let log = log_with_check(
+            &context,
+            0,
+            Validator::KeepSorted,
+            vec![violation(&context)],
+        )?;
 
         let report = RunReport::new(
             RunMode::All,
@@ -247,7 +254,12 @@ mod tests {
     #[test]
     fn summary_line_under_a_diff_leaves_out_the_needs_diff_clause() -> anyhow::Result<()> {
         let context = validation_context("example.py", CONTENTS);
-        let log = log_with_check(&context, 0, "keep-sorted", vec![violation(&context)])?;
+        let log = log_with_check(
+            &context,
+            0,
+            Validator::KeepSorted,
+            vec![violation(&context)],
+        )?;
 
         let report = RunReport::new(
             RunMode::AllWithDiff,
@@ -270,7 +282,12 @@ mod tests {
     #[test]
     fn json_under_a_diff_omits_the_needs_diff_key() -> anyhow::Result<()> {
         let context = validation_context("example.py", CONTENTS);
-        let log = log_with_check(&context, 0, "keep-sorted", vec![violation(&context)])?;
+        let log = log_with_check(
+            &context,
+            0,
+            Validator::KeepSorted,
+            vec![violation(&context)],
+        )?;
 
         let report = RunReport::new(
             RunMode::OnlyChanged,
@@ -302,11 +319,11 @@ mod tests {
         let mut sorted = ValidationReport::default();
         sorted.add_all(&file_path, &blocks[0].block, vec![violation(&context)]);
         sorted.add_all(&file_path, &blocks[1].block, Vec::new());
-        log.add_validation_report("keep-sorted", sorted);
+        log.add_validation_report(Validator::KeepSorted, sorted);
 
         let mut counted = ValidationReport::default();
         counted.add_all(&file_path, &blocks[0].block, Vec::new());
-        log.add_validation_report("line-count", counted);
+        log.add_validation_report(Validator::LineCount, counted);
 
         let report = RunReport::new(
             RunMode::OnlyChanged,
@@ -403,7 +420,9 @@ mod tests {
         );
         let mut log = ValidationLog::default();
         let blocks = &context.blocks()[&file_path].blocks_with_context;
-        for (block_with_context, validator) in blocks.iter().zip(["line-count", "same-as"]) {
+        for (block_with_context, validator) in
+            blocks.iter().zip([Validator::LineCount, Validator::SameAs])
+        {
             let mut report = ValidationReport::default();
             report.add_all(&file_path, &block_with_context.block, Vec::new());
             log.add_validation_report(validator, report);

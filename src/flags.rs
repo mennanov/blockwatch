@@ -1,5 +1,6 @@
 use crate::blocks::BlockAddress;
 use crate::settings::{RawSettings, parse_validator};
+use crate::validators::Validator;
 use crate::violation_address::ViolationAddress;
 use anyhow::Context;
 use clap::{Parser, builder::ValueParser, crate_version};
@@ -182,7 +183,7 @@ pub(crate) struct ValidationFlags {
         action = clap::ArgAction::Append,
         value_parser = ValueParser::new(parse_validator),
     )]
-    disabled_validators: Vec<&'static str>,
+    disabled_validators: Vec<Validator>,
 
     /// Run only this validator. Repeat to run more, e.g. -e keep-sorted -e line-count
     #[arg(
@@ -192,7 +193,7 @@ pub(crate) struct ValidationFlags {
         action = clap::ArgAction::Append,
         value_parser = ValueParser::new(parse_validator),
     )]
-    enabled_validators: Vec<&'static str>,
+    enabled_validators: Vec<Validator>,
 
     /// Check only this block. Repeat to check more, e.g. --only-block docs/cli.md:cli-docs
     ///

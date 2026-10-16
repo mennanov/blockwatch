@@ -2,8 +2,8 @@ use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    SyncValidator, ValidationReport, ValidatorDetector, ValidatorType, Violation, ViolationRange,
-    compile_pattern, regex_value, trimmed_line_value,
+    SyncValidator, ValidationReport, Validator, ValidatorDetector, ValidatorType, Violation,
+    ViolationRange, compile_pattern, regex_value, trimmed_line_value,
 };
 use crate::{Position, validators};
 use std::collections::HashSet;
@@ -150,7 +150,7 @@ fn create_violation(
         ),
         block_file_path,
         block,
-        "keep-unique".to_string(),
+        Validator::KeepUnique,
         message,
         // Identify the violation by the offending line rather than its number, which shifts
         // whenever anything above it is added or removed.
@@ -193,7 +193,7 @@ BB
             file_violations[0].message,
             "Block example.py:(unnamed) defined at line 1 has a duplicated line 5"
         );
-        assert_eq!(file_violations[0].code, "keep-unique");
+        assert_eq!(file_violations[0].code, Validator::KeepUnique);
         // Entire line is in the range.
         assert_eq!(
             file_violations[0].range,

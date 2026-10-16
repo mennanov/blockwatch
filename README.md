@@ -94,6 +94,7 @@ you'd otherwise have to nitpick in code review.
 
 <!-- <block name="available-validators"
      same-as="src/validators/mod.rs:validator-registry, docs/validators/README.md:validators-index"
+     same-as-format="identifier"
      same-as-pattern='^\|\s*\[`(?P<value>[a-z-]+)`\]'> -->
 
 | Validator                                         | Description                                                                                  | Attributes                                                                      |

@@ -1,5 +1,5 @@
 use crate::blocks::BlockAddress;
-use crate::validators;
+use crate::validators::Validator;
 use anyhow::{Context, bail};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::collections::{HashMap, HashSet};
@@ -63,8 +63,8 @@ impl RawSettings {
 pub(crate) struct Settings {
     ignored_globs: GlobSet,
     extensions: HashMap<OsString, OsString>,
-    disabled_validators: HashSet<&'static str>,
-    enabled_validators: HashSet<&'static str>,
+    disabled_validators: HashSet<Validator>,
+    enabled_validators: HashSet<Validator>,
     block_selection: BlockSelection,
 }
 
@@ -159,13 +159,13 @@ impl Settings {
     }
 
     /// Validators to skip. Empty if [`Settings::enabled_validators`] is not.
-    pub(crate) fn disabled_validators(&self) -> &HashSet<&'static str> {
+    pub(crate) fn disabled_validators(&self) -> &HashSet<Validator> {
         &self.disabled_validators
     }
 
     /// If not empty, only these validators run. If empty, every validator runs except the
     /// disabled ones.
-    pub(crate) fn enabled_validators(&self) -> &HashSet<&'static str> {
+    pub(crate) fn enabled_validators(&self) -> &HashSet<Validator> {
         &self.enabled_validators
     }
 
@@ -206,20 +206,9 @@ pub(crate) enum BlockSelection {
     Skip(Vec<BlockAddress>),
 }
 
-/// Looks up the validator called `value` and returns its name. Returns an error if there is no
-/// validator with that name.
-pub(crate) fn parse_validator(value: &str) -> anyhow::Result<&'static str> {
-    let validators = validators::validator_names();
-    validators
-        .iter()
-        .find(|name| **name == value)
-        .copied()
-        .with_context(|| {
-            format!(
-                "Unknown validator: {value}. Available validators: {}",
-                validators.join(", ")
-            )
-        })
+/// Looks up the validator called `value`. Returns an error if there is no validator with that name.
+pub(crate) fn parse_validator(value: &str) -> anyhow::Result<Validator> {
+    Validator::parse(value)
 }
 
 #[cfg(test)]
@@ -311,7 +300,10 @@ mod tests {
             ..RawSettings::default()
         };
         let settings = resolve(RawSettings::default(), config_file)?;
-        assert_eq!(settings.enabled_validators, HashSet::from(["keep-sorted"]));
+        assert_eq!(
+            settings.enabled_validators,
+            HashSet::from([Validator::KeepSorted])
+        );
         assert!(settings.disabled_validators.is_empty());
         Ok(())
     }
@@ -323,7 +315,10 @@ mod tests {
             ..RawSettings::default()
         };
         let settings = resolve(RawSettings::default(), config_file)?;
-        assert_eq!(settings.disabled_validators, HashSet::from(["check-ai"]));
+        assert_eq!(
+            settings.disabled_validators,
+            HashSet::from([Validator::CheckAi])
+        );
         assert!(settings.enabled_validators.is_empty());
         Ok(())
     }
@@ -339,7 +334,10 @@ mod tests {
             ..RawSettings::default()
         };
         let settings = resolve(flags, config_file)?;
-        assert_eq!(settings.disabled_validators, HashSet::from(["check-ai"]));
+        assert_eq!(
+            settings.disabled_validators,
+            HashSet::from([Validator::CheckAi])
+        );
         assert!(settings.enabled_validators.is_empty());
         Ok(())
     }
@@ -355,7 +353,10 @@ mod tests {
             ..RawSettings::default()
         };
         let settings = resolve(flags, config_file)?;
-        assert_eq!(settings.enabled_validators, HashSet::from(["keep-sorted"]));
+        assert_eq!(
+            settings.enabled_validators,
+            HashSet::from([Validator::KeepSorted])
+        );
         assert!(settings.disabled_validators.is_empty());
         Ok(())
     }

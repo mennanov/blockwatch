@@ -2,8 +2,8 @@ use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    SyncValidator, ValidationReport, ValidatorDetector, ValidatorType, Violation, ViolationRange,
-    compile_pattern,
+    SyncValidator, ValidationReport, Validator, ValidatorDetector, ValidatorType, Violation,
+    ViolationRange, compile_pattern,
 };
 use crate::{Position, validators};
 use anyhow::anyhow;
@@ -233,7 +233,7 @@ fn create_violation(
         range,
         block_file_path,
         block,
-        "line-pattern".to_string(),
+        Validator::LinePattern,
         message,
         // Identify the violation by the offending line rather than its number, which shifts
         // whenever anything above it is added or removed.
@@ -274,7 +274,7 @@ mod validate_tests {
             file_violations[0].message,
             "Block example.py:(unnamed) defined at line 1 has a non-matching line 3 (pattern: /^[A-Z]+$/)"
         );
-        assert_eq!(file_violations[0].code, "line-pattern");
+        assert_eq!(file_violations[0].code, Validator::LinePattern);
         assert_eq!(
             file_violations[0].range,
             ViolationRange::new(Position::new(3, 9), Position::new(3, 13))
@@ -347,7 +347,7 @@ green = "red"
             file_violations[0].message,
             r#"Block example.py:(unnamed) defined at line 1 has the forbidden text "red" on line 3 (pattern: /red/)"#
         );
-        assert_eq!(file_violations[0].code, "line-pattern");
+        assert_eq!(file_violations[0].code, Validator::LinePattern);
         // `red` starts at character 9, but at byte 10, because `é` takes two bytes.
         assert_eq!(
             file_violations[0].range,

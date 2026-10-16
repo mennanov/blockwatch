@@ -5,8 +5,8 @@ use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
 use crate::validators;
 use crate::validators::{
-    TargetFiles, TargetReference, TargetResult, ValidationReport, ValidatorType, Violation,
-    target_display,
+    TargetFiles, TargetReference, TargetResult, ValidationReport, Validator, ValidatorType,
+    Violation, target_display,
 };
 use anyhow::{Context, anyhow};
 use serde::Serialize;
@@ -427,7 +427,7 @@ fn affects_violation(
         block.start_tag_position_range.clone().into(),
         file_path,
         block,
-        "affects".to_string(),
+        Validator::Affects,
         message,
         // A block may reference several targets, so the target identifies this violation.
         Some(&target_display(

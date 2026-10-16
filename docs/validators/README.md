@@ -26,6 +26,7 @@ between two references is fine.
 <!-- <block name="validators-index"
      affects="src/skill.md#/blockwatch/Annotating a new project/Where blocks add value (catalog)"
      same-as="src/validators/mod.rs:validator-registry, README.md:available-validators"
+     same-as-format="identifier"
      same-as-pattern='\[`(?P<value>[a-z-]+)`\]\('> -->
 
 | I want to...                                                  | Use                               |

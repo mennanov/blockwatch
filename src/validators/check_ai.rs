@@ -2,8 +2,8 @@ use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    AsyncValidator, PatternContent, ValidationContext, ValidationReport, ValidatorDetector,
-    ValidatorType, Violation, block_content_for_pattern,
+    AsyncValidator, PatternContent, ValidationContext, ValidationReport, Validator,
+    ValidatorDetector, ValidatorType, Violation, block_content_for_pattern,
 };
 use anyhow::{Context, anyhow};
 use async_openai::Client;
@@ -206,7 +206,7 @@ fn block_violation(
         block.start_tag_position_range.clone().into(),
         file_path,
         block,
-        "check-ai".to_string(),
+        Validator::CheckAi,
         error_message,
         // The model answers about the whole block, so there is never a sibling to tell apart.
         None,
@@ -414,7 +414,7 @@ I like apples
             1
         );
         let violation = &violations[&RepoPath::from_reference("example.py")?][0];
-        assert_eq!(violation.code, "check-ai");
+        assert_eq!(violation.code, Validator::CheckAi);
         assert_eq!(
             violation.message,
             "Block example.py:(unnamed) defined at line 1 failed AI check: The block does not mention 'banana'. Add it."
@@ -579,7 +579,7 @@ I like apples
 
         let file_violations = &report.violations[&RepoPath::from_reference("example.py")?];
         assert_eq!(file_violations.len(), 1);
-        assert_eq!(file_violations[0].code, "check-ai");
+        assert_eq!(file_violations[0].code, Validator::CheckAi);
         assert_eq!(
             file_violations[0].message,
             "Block example.py:(unnamed) defined at line 1 was not checked: check-ai-pattern \"zzz_no_match\" matched nothing in the block"

@@ -38,6 +38,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
 use std::ops::Range;
 use std::sync::Arc;
+use strum::IntoEnumIterator;
+use strum_macros::{Display, EnumIter, EnumString, IntoStaticStr};
 
 /// Validates the given `Context` and returns a list of the violations grouped by filename.
 #[async_trait]
@@ -69,6 +71,89 @@ pub(crate) enum ValidatorType {
     Async(Box<dyn AsyncValidator>),
 }
 
+/// The registered validators that check blocks.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Display,
+    EnumString,
+    IntoStaticStr,
+    EnumIter,
+)]
+#[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
+pub(crate) enum Validator {
+    /* <block name="validator-registry"
+    same-as="README.md:available-validators, docs/validators/README.md:validators-index"
+    same-as-format="identifier"
+    same-as-pattern='^\s*(?P<value>[A-Za-z]+),'> */
+    Affects,
+    CheckAi,
+    CheckLua,
+    KeepSorted,
+    KeepUnique,
+    LineCount,
+    LinePattern,
+    SameAs,
+    // </block>
+}
+
+impl Validator {
+    /// A one-line description of the validator.
+    pub(crate) fn description(self) -> &'static str {
+        match self {
+            Validator::Affects => "Requires co-dependent blocks to be updated together.",
+            Validator::CheckAi => "Checks a block with AI.",
+            Validator::CheckLua => "Checks a block with a custom Lua script.",
+            Validator::KeepSorted => "Requires the lines of a block to stay in order.",
+            Validator::KeepUnique => "Requires the lines of a block to stay free of duplicates.",
+            Validator::LineCount => "Constrains how many lines a block has.",
+            Validator::LinePattern => {
+                "Checks every line of a block against a required or a forbidden pattern."
+            }
+            Validator::SameAs => "Requires two places to keep holding the same value.",
+        }
+    }
+
+    /// Whether this validator only ever fires when a diff is supplied.
+    pub(crate) fn needs_diff(self) -> bool {
+        match self {
+            Validator::Affects => true,
+            Validator::CheckAi
+            | Validator::CheckLua
+            | Validator::KeepSorted
+            | Validator::KeepUnique
+            | Validator::LineCount
+            | Validator::LinePattern
+            | Validator::SameAs => false,
+        }
+    }
+
+    /// The name of this validator as a static string.
+    pub(crate) fn as_str(self) -> &'static str {
+        self.into()
+    }
+
+    /// Looks up the validator called `value`. Returns an error if there is no validator with that
+    /// name.
+    pub(crate) fn parse(value: &str) -> anyhow::Result<Self> {
+        value.parse::<Validator>().with_context(|| {
+            let validators: Vec<&str> = Validator::iter().map(|v| v.as_str()).collect();
+            format!(
+                "Unknown validator: {value}. Available validators: {}",
+                validators.join(", ")
+            )
+        })
+    }
+}
+
 /// One rule breach found in one block: what is wrong, where, and how severe it is.
 ///
 /// Fields are private because the public shape of a violation is [`SimpleDiagnostic`], the form
@@ -77,8 +162,8 @@ pub(crate) enum ValidatorType {
 pub(crate) struct Violation {
     /// Where to underline in the file — normally the block's start tag, or the offending line.
     range: ViolationRange,
-    /// The name of the validator that reported it, e.g. `"keep-sorted"`.
-    code: String,
+    /// The validator that reported it, e.g. [`Validator::KeepSorted`].
+    code: Validator,
     /// Human-readable explanation, printed to the developer.
     message: String,
     /// Decides whether this breach fails the run; see [`BlockSeverity`].
@@ -93,8 +178,8 @@ pub(crate) struct Violation {
 }
 
 impl Violation {
-    /// Constructs a new violation record with a name, error message, and optional machine-readable
-    /// details.
+    /// Constructs a new violation record with a validator, error message, and optional
+    /// machine-readable details.
     ///
     /// Severity and address are derived here from the block and the `code` rather than being passed
     /// in, so a validator cannot report a violation whose address disagrees with the rule that
@@ -107,13 +192,13 @@ impl Violation {
         range: ViolationRange,
         file: &RepoPath,
         block: &Block,
-        code: String,
+        code: Validator,
         message: String,
         violation_text: Option<&str>,
         data: Option<serde_json::Value>,
     ) -> anyhow::Result<Self> {
         Ok(Self {
-            address: ViolationAddress::new(file, block.name(), &code, violation_text),
+            address: ViolationAddress::new(file, block.name(), code, violation_text),
             severity: block.severity()?,
             range,
             code,
@@ -136,7 +221,7 @@ impl Violation {
     pub(crate) fn as_simple_diagnostic(&self) -> SimpleDiagnostic<'_> {
         SimpleDiagnostic {
             range: &self.range,
-            code: self.code.as_str(),
+            code: self.code,
             message: self.message.as_str(),
             severity: self.severity,
             address: self.address.as_ref(),
@@ -192,16 +277,12 @@ pub(crate) struct ValidationLog {
     pub(crate) violations: BTreeMap<RepoPath, Vec<Violation>>,
     /// Every block that was examined, and by which validators. BTreeMap is used so the
     /// `--verbosity` report comes out in a stable order regardless of the validators order.
-    pub(crate) checked_blocks: BTreeMap<RepoPath, BTreeMap<BlockKey, BTreeSet<&'static str>>>,
+    pub(crate) checked_blocks: BTreeMap<RepoPath, BTreeMap<BlockKey, BTreeSet<Validator>>>,
 }
 
 impl ValidationLog {
-    /// Adds one validator's `report` for the corresponding `validator` name.
-    pub(crate) fn add_validation_report(
-        &mut self,
-        validator: &'static str,
-        report: ValidationReport,
-    ) {
+    /// Adds one validator's `report` for the corresponding `validator`.
+    pub(crate) fn add_validation_report(&mut self, validator: Validator, report: ValidationReport) {
         for (file, key) in report.checked_blocks {
             self.checked_blocks
                 .entry(file)
@@ -267,7 +348,7 @@ impl From<Range<Position>> for ViolationRange {
 #[derive(Serialize, Debug)]
 pub(crate) struct SimpleDiagnostic<'a> {
     range: &'a ViolationRange,
-    code: &'a str,
+    code: Validator,
     message: &'a str,
     severity: BlockSeverity,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -299,8 +380,8 @@ impl<'a> SimpleDiagnostic<'a> {
         self.range
     }
 
-    /// The name of the validator that reported it, e.g. `"keep-sorted"`.
-    pub(crate) fn code(&self) -> &'a str {
+    /// The validator that reported it, e.g. [`Validator::KeepSorted`].
+    pub(crate) fn code(&self) -> Validator {
         self.code
     }
 
@@ -554,9 +635,9 @@ pub(crate) fn run(
     Ok(log)
 }
 
-/// Detected validators, each paired with the name it is known by.
-type SyncValidators = Vec<(&'static str, Box<dyn SyncValidator>)>;
-type AsyncValidators = Vec<(&'static str, Box<dyn AsyncValidator>)>;
+/// Detected validators, each paired with the validator it represents.
+type SyncValidators = Vec<(Validator, Box<dyn SyncValidator>)>;
+type AsyncValidators = Vec<(Validator, Box<dyn AsyncValidator>)>;
 
 type DetectorFactory<Fs> = fn() -> Box<dyn ValidatorDetector<Fs>>;
 
@@ -565,71 +646,62 @@ type DetectorFactory<Fs> = fn() -> Box<dyn ValidatorDetector<Fs>>;
 /// This is a generic function rather than a `const` because each [`DetectorFactory`] is now
 /// parameterized by the filesystem type its detectors receive, so the registry has to be
 /// instantiated per `Fs` (the production `FileSystemImpl`, a `FakeFileSystem` in tests).
-pub(crate) fn detector_factories<Fs: FileSystem + 'static>()
--> Vec<(&'static str, DetectorFactory<Fs>)> {
+pub(crate) fn detector_factories<Fs: FileSystem + 'static>() -> Vec<(Validator, DetectorFactory<Fs>)>
+{
     vec![
-        /* <block name="validator-registry"
-        keep-unique='\("(?P<value>[^"]+)"'
-           same-as="README.md:available-validators, docs/validators/README.md:validators-index"
-           same-as-pattern='^\("(?P<value>[a-z-]+)"'> */
-        ("affects", || Box::new(AffectsValidatorDetector::new())),
-        ("keep-sorted", || {
+        (Validator::Affects, || {
+            Box::new(AffectsValidatorDetector::new())
+        }),
+        (Validator::KeepSorted, || {
             Box::new(KeepSortedValidatorDetector::new())
         }),
-        ("keep-unique", || {
+        (Validator::KeepUnique, || {
             Box::new(KeepUniqueValidatorDetector::new())
         }),
-        ("line-pattern", || {
+        (Validator::LinePattern, || {
             Box::new(LinePatternValidatorDetector::new())
         }),
-        ("line-count", || Box::new(LineCountValidatorDetector::new())),
-        ("check-ai", || Box::new(CheckAiValidatorDetector::new())),
-        ("check-lua", || Box::new(CheckLuaValidatorDetector::new())),
-        ("same-as", || Box::new(SameAsValidatorDetector::new())),
-        // </block>
+        (Validator::LineCount, || {
+            Box::new(LineCountValidatorDetector::new())
+        }),
+        (Validator::CheckAi, || {
+            Box::new(CheckAiValidatorDetector::new())
+        }),
+        (Validator::CheckLua, || {
+            Box::new(CheckLuaValidatorDetector::new())
+        }),
+        (Validator::SameAs, || {
+            Box::new(SameAsValidatorDetector::new())
+        }),
     ]
 }
 
-/// The names of every registered validator, in registry order.
-pub(crate) fn validator_names() -> Vec<&'static str> {
-    // The concrete filesystem is irrelevant here (only the names are read), so the `FileSystemImpl`
-    // is used to avoid making every caller pass a type parameter.
-    detector_factories::<crate::fs::FileSystemImpl>()
-        .iter()
-        .map(|(validator_name, _)| *validator_name)
-        .collect()
-}
-
-/// Validators that only ever fire when a diff touches the corresponding blocks, each paired with
-/// the block attribute that selects it.
-const DIFF_GATED_VALIDATORS: &[(&str, &str)] = &[("affects", "affects")];
-
 /// Whether a validator is enabled/disabled.
 fn is_validator_active(
-    validator_name: &str,
-    disabled_validators: &HashSet<&str>,
-    enabled_validators: &HashSet<&str>,
+    validator: Validator,
+    disabled_validators: &HashSet<Validator>,
+    enabled_validators: &HashSet<Validator>,
 ) -> bool {
     if enabled_validators.is_empty() {
-        !disabled_validators.contains(validator_name)
+        !disabled_validators.contains(&validator)
     } else {
-        enabled_validators.contains(validator_name)
+        enabled_validators.contains(&validator)
     }
 }
 
 /// Counts the blocks in `context` carrying a rule that cannot fire unless a diff is supplied; see
-/// [`DIFF_GATED_VALIDATORS`].
+/// [`Validator::needs_diff`].
 pub(crate) fn diff_gated_block_count(
     context: &ValidationContext,
-    disabled_validators: &HashSet<&str>,
-    enabled_validators: &HashSet<&str>,
+    disabled_validators: &HashSet<Validator>,
+    enabled_validators: &HashSet<Validator>,
 ) -> usize {
-    let attributes: Vec<&str> = DIFF_GATED_VALIDATORS
-        .iter()
-        .filter(|(validator_name, _)| {
-            is_validator_active(validator_name, disabled_validators, enabled_validators)
+    let attributes: Vec<&str> = Validator::iter()
+        .filter(|validator| {
+            validator.needs_diff()
+                && is_validator_active(*validator, disabled_validators, enabled_validators)
         })
-        .map(|(_, attribute)| *attribute)
+        .map(|validator| validator.as_str())
         .collect();
     context
         .blocks
@@ -653,17 +725,17 @@ pub(crate) fn diff_gated_block_count(
 /// validators it names are considered. Passing both is rejected earlier, when the flags are parsed.
 pub(crate) fn detect_validators<Fs: FileSystem + 'static>(
     context: &ValidationContext,
-    detectors: &[(&'static str, DetectorFactory<Fs>)],
-    disabled_validators: &HashSet<&str>,
-    enabled_validators: &HashSet<&str>,
+    detectors: &[(Validator, DetectorFactory<Fs>)],
+    disabled_validators: &HashSet<Validator>,
+    enabled_validators: &HashSet<Validator>,
     file_system: &Arc<Fs>,
 ) -> anyhow::Result<(SyncValidators, AsyncValidators)> {
-    let mut validator_detectors: Vec<(&'static str, Box<dyn ValidatorDetector<Fs>>)> = detectors
+    let mut validator_detectors: Vec<(Validator, Box<dyn ValidatorDetector<Fs>>)> = detectors
         .iter()
-        .filter(|(validator_name, _)| {
-            is_validator_active(validator_name, disabled_validators, enabled_validators)
+        .filter(|(validator, _)| {
+            is_validator_active(*validator, disabled_validators, enabled_validators)
         })
-        .map(|(name, factory)| (*name, factory()))
+        .map(|(validator, factory)| (*validator, factory()))
         .collect();
     let mut sync_validators = Vec::new();
     let mut async_validators = Vec::new();
@@ -1384,7 +1456,7 @@ mod tests {
     use crate::validators::test_utils::{merge_validation_contexts, with_virtual_blocks};
     use crate::validators::{
         AsyncValidator, DetectorFactory, SyncValidator, ValidationContext, ValidationReport,
-        ValidatorDetector, ValidatorType, Violation, ViolationRange, detect_validators,
+        Validator, ValidatorDetector, ValidatorType, Violation, ViolationRange, detect_validators,
     };
     use crate::{Position, validators};
     use async_trait::async_trait;
@@ -1426,7 +1498,7 @@ mod tests {
                                     empty_testing_violation_range(),
                                     file_name,
                                     &self.testing_block,
-                                    "check-ai".to_string(),
+                                    Validator::CheckAi,
                                     "check-ai error message".to_string(),
                                     None,
                                     None,
@@ -1459,7 +1531,7 @@ mod tests {
                                     empty_testing_violation_range(),
                                     file_name,
                                     &self.testing_block,
-                                    "keep-sorted".to_string(),
+                                    Validator::KeepSorted,
                                     "keep-sorted error message".to_string(),
                                     None,
                                     None,
@@ -1513,10 +1585,14 @@ mod tests {
         }
     }
 
-    fn detector_factories<Fs: FileSystem + 'static>() -> Vec<(&'static str, DetectorFactory<Fs>)> {
+    fn detector_factories<Fs: FileSystem + 'static>() -> Vec<(Validator, DetectorFactory<Fs>)> {
         vec![
-            ("keep-sorted", || Box::new(FakeSyncValidatorDetector {})),
-            ("check-ai", || Box::new(FakeAsyncValidatorDetector {})),
+            (Validator::KeepSorted, || {
+                Box::new(FakeSyncValidatorDetector {}) as Box<dyn ValidatorDetector<Fs>>
+            }),
+            (Validator::CheckAi, || {
+                Box::new(FakeAsyncValidatorDetector {}) as Box<dyn ValidatorDetector<Fs>>
+            }),
         ]
     }
 
@@ -1600,7 +1676,7 @@ mod tests {
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example1.py")?][0].code,
-            "keep-sorted"
+            Validator::KeepSorted
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example2.py")?].len(),
@@ -1608,7 +1684,7 @@ mod tests {
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example2.py")?][0].code,
-            "keep-sorted"
+            Validator::KeepSorted
         );
         Ok(())
     }
@@ -1644,7 +1720,7 @@ mod tests {
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example1.py")?][0].code,
-            "check-ai"
+            Validator::CheckAi
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example2.py")?].len(),
@@ -1652,7 +1728,7 @@ mod tests {
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example2.py")?][0].code,
-            "check-ai"
+            Validator::CheckAi
         );
         Ok(())
     }
@@ -1668,7 +1744,7 @@ mod tests {
         let (sync_validators, async_validators) = detect_validators(
             &context,
             &detector_factories(),
-            &HashSet::from(["check-ai"]),
+            &HashSet::from([Validator::CheckAi]),
             &HashSet::new(),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
@@ -1681,7 +1757,7 @@ mod tests {
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example1.py")?][0].code,
-            "keep-sorted"
+            Validator::KeepSorted
         );
         Ok(())
     }
@@ -1699,7 +1775,7 @@ mod tests {
             &context,
             &detector_factories(),
             &HashSet::new(),
-            &HashSet::from(["check-ai"]),
+            &HashSet::from([Validator::CheckAi]),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?.violations;
@@ -1711,7 +1787,7 @@ mod tests {
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example1.py")?][0].code,
-            "check-ai"
+            Validator::CheckAi
         );
         Ok(())
     }
@@ -1727,7 +1803,7 @@ mod tests {
         let (sync_validators, async_validators) = detect_validators(
             &context,
             &detector_factories(),
-            &HashSet::from(["keep-sorted"]),
+            &HashSet::from([Validator::KeepSorted]),
             &HashSet::new(),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
@@ -1740,7 +1816,7 @@ mod tests {
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example1.py")?][0].code,
-            "check-ai"
+            Validator::CheckAi
         );
         Ok(())
     }
@@ -1758,7 +1834,7 @@ mod tests {
             &context,
             &detector_factories(),
             &HashSet::new(),
-            &HashSet::from(["keep-sorted"]),
+            &HashSet::from([Validator::KeepSorted]),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?.violations;
@@ -1770,7 +1846,7 @@ mod tests {
         );
         assert_eq!(
             violations[&RepoPath::from_reference("example1.py")?][0].code,
-            "keep-sorted"
+            Validator::KeepSorted
         );
         Ok(())
     }
@@ -1958,7 +2034,7 @@ print("target")
         assert_eq!(
             validators::diff_gated_block_count(
                 &diff_gated_context(),
-                &HashSet::from(["affects"]),
+                &HashSet::from([Validator::Affects]),
                 &HashSet::new()
             ),
             0
@@ -1971,7 +2047,7 @@ print("target")
             validators::diff_gated_block_count(
                 &diff_gated_context(),
                 &HashSet::new(),
-                &HashSet::from(["keep-sorted"])
+                &HashSet::from([Validator::KeepSorted])
             ),
             0
         );

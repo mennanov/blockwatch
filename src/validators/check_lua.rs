@@ -4,7 +4,8 @@ use crate::repo_path::RepoPath;
 use crate::validators::parse_target_references;
 use crate::validators::{
     AsyncValidator, PatternContent, TargetFiles, TargetReference, ValidationContext,
-    ValidationReport, ValidatorDetector, ValidatorType, Violation, block_content_for_pattern,
+    ValidationReport, Validator, ValidatorDetector, ValidatorType, Violation,
+    block_content_for_pattern,
 };
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -471,7 +472,7 @@ fn create_violation(
         block.start_tag_position_range.clone().into(),
         file_path,
         block,
-        "check-lua".to_string(),
+        Validator::CheckLua,
         message,
         // A script passes or fails the block as a whole, so there is never a sibling to tell apart.
         None,
@@ -660,7 +661,7 @@ end
             1
         );
         let violation = &violations[&RepoPath::from_reference("example.py")?][0];
-        assert_eq!(violation.code, "check-lua");
+        assert_eq!(violation.code, Validator::CheckLua);
         assert_eq!(
             violation.message,
             "Block example.py:(unnamed) defined at line 1 failed Lua check: block content is invalid"

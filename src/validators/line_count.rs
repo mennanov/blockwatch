@@ -3,7 +3,7 @@ use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{
-    SyncValidator, ValidationReport, ValidatorDetector, ValidatorType, Violation,
+    SyncValidator, ValidationReport, Validator, ValidatorDetector, ValidatorType, Violation,
 };
 use anyhow::anyhow;
 use serde::Serialize;
@@ -108,7 +108,7 @@ fn create_violation(
         block.start_tag_position_range.clone().into(),
         block_file_path,
         block,
-        "line-count".to_string(),
+        Validator::LineCount,
         message,
         // A line count is one fact about the whole block, so there is never a sibling to tell apart.
         None,
@@ -245,7 +245,7 @@ mod tests {
             .get(&RepoPath::from_reference("example.py")?)
             .unwrap();
         assert_eq!(file2_violations.len(), 6);
-        assert_eq!(file2_violations[0].code, "line-count");
+        assert_eq!(file2_violations[0].code, Validator::LineCount);
         assert_eq!(
             file2_violations[0].message,
             "Block example.py:(unnamed) defined at line 1 has 3 lines, which does not satisfy <3"
@@ -259,7 +259,7 @@ mod tests {
             }))
         );
 
-        assert_eq!(file2_violations[1].code, "line-count");
+        assert_eq!(file2_violations[1].code, Validator::LineCount);
         assert_eq!(
             file2_violations[1].message,
             "Block example.py:(unnamed) defined at line 6 has 4 lines, which does not satisfy <=3"
@@ -273,7 +273,7 @@ mod tests {
             }))
         );
 
-        assert_eq!(file2_violations[2].code, "line-count");
+        assert_eq!(file2_violations[2].code, Validator::LineCount);
         assert_eq!(
             file2_violations[2].message,
             "Block example.py:(unnamed) defined at line 12 has 4 lines, which does not satisfy ==3"
@@ -287,7 +287,7 @@ mod tests {
             }))
         );
 
-        assert_eq!(file2_violations[3].code, "line-count");
+        assert_eq!(file2_violations[3].code, Validator::LineCount);
         assert_eq!(
             file2_violations[3].message,
             "Block example.py:(unnamed) defined at line 18 has 2 lines, which does not satisfy ==3"
@@ -301,7 +301,7 @@ mod tests {
             }))
         );
 
-        assert_eq!(file2_violations[4].code, "line-count");
+        assert_eq!(file2_violations[4].code, Validator::LineCount);
         assert_eq!(
             file2_violations[4].message,
             "Block example.py:(unnamed) defined at line 22 has 2 lines, which does not satisfy >=3"
@@ -315,7 +315,7 @@ mod tests {
             }))
         );
 
-        assert_eq!(file2_violations[5].code, "line-count");
+        assert_eq!(file2_violations[5].code, Validator::LineCount);
         assert_eq!(
             file2_violations[5].message,
             "Block example.py:(unnamed) defined at line 26 has 3 lines, which does not satisfy >3"

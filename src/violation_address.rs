@@ -1,5 +1,5 @@
 use crate::repo_path::RepoPath;
-use crate::validators;
+use crate::validators::Validator;
 use anyhow::{Context, bail};
 use serde::{Serialize, Serializer};
 use std::fmt;
@@ -16,7 +16,7 @@ const TEXT_HASH_HEX_LEN: usize = 8;
 pub(crate) struct ViolationAddress {
     file: RepoPath,
     block_name: Option<String>,
-    validator: Option<String>,
+    validator: Option<Validator>,
     text_hash: Option<String>,
 }
 
@@ -25,13 +25,13 @@ impl ViolationAddress {
     pub(crate) fn new(
         file: &RepoPath,
         block_name: Option<&str>,
-        validator: &str,
+        validator: Validator,
         violation_text: Option<&str>,
     ) -> Option<Self> {
         Some(Self {
             file: file.clone(),
             block_name: Some(block_name?.to_string()),
-            validator: Some(validator.to_string()),
+            validator: Some(validator),
             text_hash: violation_text.map(text_hash),
         })
     }
@@ -49,7 +49,7 @@ impl ViolationAddress {
             .with_context(|| format!("invalid file in the violation address \"{address}\""))?;
         let validator = match segments.get(2) {
             Some(name) => Some(
-                known_validator(name)
+                Validator::parse(name)
                     .with_context(|| format!("invalid violation address \"{address}\""))?,
             ),
             None => None,
@@ -73,7 +73,7 @@ impl ViolationAddress {
     /// and so on down to the single violation a four-segment address mentions.
     pub(crate) fn matches(&self, violation_address: &Self) -> bool {
         /// An absent segment matches any value; a present one has to be equal.
-        fn covers(suppressed: &Option<String>, reported: &Option<String>) -> bool {
+        fn covers<T: PartialEq>(suppressed: &Option<T>, reported: &Option<T>) -> bool {
             suppressed.is_none() || suppressed == reported
         }
 
@@ -93,11 +93,14 @@ impl ViolationAddress {
 impl fmt::Display for ViolationAddress {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}", self.file)?;
-        for segment in [&self.block_name, &self.validator, &self.text_hash]
-            .into_iter()
-            .flatten()
-        {
-            write!(formatter, ":{segment}")?;
+        if let Some(block_name) = &self.block_name {
+            write!(formatter, ":{block_name}")?;
+        }
+        if let Some(validator) = &self.validator {
+            write!(formatter, ":{validator}")?;
+        }
+        if let Some(text_hash) = &self.text_hash {
+            write!(formatter, ":{text_hash}")?;
         }
         Ok(())
     }
@@ -120,18 +123,6 @@ fn text_hash(text: &str) -> String {
         hasher.finish() as u32,
         width = TEXT_HASH_HEX_LEN
     )
-}
-
-/// The registered validator `name`, or an error listing the ones that exist.
-fn known_validator(name: &str) -> anyhow::Result<String> {
-    let validators = validators::validator_names();
-    if !validators.contains(&name) {
-        bail!(
-            "unknown validator: {name}. Available validators: {}",
-            validators.join(", ")
-        );
-    }
-    Ok(name.to_string())
 }
 
 /// The hash segment of `address`, rejected unless it is shaped like one this program emits.
@@ -161,7 +152,7 @@ mod tests {
         RepoPath::from_reference(path).expect("a valid repository path")
     }
 
-    fn violation_address(block_name: &str, validator: &str, text: &str) -> ViolationAddress {
+    fn violation_address(block_name: &str, validator: Validator, text: &str) -> ViolationAddress {
         ViolationAddress::new(&repo_path("a.md"), Some(block_name), validator, Some(text))
             .expect("a named block has an address")
     }
@@ -169,7 +160,10 @@ mod tests {
     #[test]
     fn one_segment_address_matches_every_violation_in_the_file() -> anyhow::Result<()> {
         let suppressed_address = ViolationAddress::parse("a.md")?;
-        for (block_name, validator) in [("n", "keep-unique"), ("other", "keep-sorted")] {
+        for (block_name, validator) in [
+            ("n", Validator::KeepUnique),
+            ("other", Validator::KeepSorted),
+        ] {
             assert!(
                 suppressed_address.matches(&violation_address(block_name, validator, "apple")),
                 "{block_name}:{validator} must match"
@@ -181,20 +175,28 @@ mod tests {
     #[test]
     fn one_segment_address_does_not_match_another_file() -> anyhow::Result<()> {
         let suppressed_address = ViolationAddress::parse("b.md")?;
-        assert!(!suppressed_address.matches(&violation_address("n", "keep-unique", "apple")));
+        assert!(!suppressed_address.matches(&violation_address(
+            "n",
+            Validator::KeepUnique,
+            "apple"
+        )));
         Ok(())
     }
 
     #[test]
     fn two_segment_address_matches_every_validator_of_that_block() -> anyhow::Result<()> {
         let suppressed_address = ViolationAddress::parse("a.md:n")?;
-        for validator in ["keep-unique", "keep-sorted"] {
+        for validator in [Validator::KeepUnique, Validator::KeepSorted] {
             assert!(
                 suppressed_address.matches(&violation_address("n", validator, "apple")),
                 "{validator} must match"
             );
         }
-        assert!(!suppressed_address.matches(&violation_address("other", "keep-unique", "apple")));
+        assert!(!suppressed_address.matches(&violation_address(
+            "other",
+            Validator::KeepUnique,
+            "apple"
+        )));
         Ok(())
     }
 
@@ -220,7 +222,7 @@ mod tests {
         let suppressed_address = ViolationAddress::parse("a.md:n:keep-unique")?;
         for text in ["apple", "banana"] {
             assert!(
-                suppressed_address.matches(&violation_address("n", "keep-unique", text)),
+                suppressed_address.matches(&violation_address("n", Validator::KeepUnique, text)),
                 "{text} must match"
             );
         }
@@ -229,8 +231,8 @@ mod tests {
 
     #[test]
     fn four_segment_address_matches_only_its_own_violation() -> anyhow::Result<()> {
-        let apple = violation_address("n", "keep-unique", "apple");
-        let banana = violation_address("n", "keep-unique", "banana");
+        let apple = violation_address("n", Validator::KeepUnique, "apple");
+        let banana = violation_address("n", Validator::KeepUnique, "banana");
         let suppressed_address = ViolationAddress::parse(&apple.to_string())?;
         assert!(suppressed_address.matches(&apple));
         assert!(!suppressed_address.matches(&banana));
@@ -240,7 +242,11 @@ mod tests {
     #[test]
     fn violation_of_another_validator_on_the_same_block_does_not_match() -> anyhow::Result<()> {
         let suppressed_address = ViolationAddress::parse("a.md:n:keep-unique")?;
-        assert!(!suppressed_address.matches(&violation_address("n", "keep-sorted", "apple")));
+        assert!(!suppressed_address.matches(&violation_address(
+            "n",
+            Validator::KeepSorted,
+            "apple"
+        )));
         Ok(())
     }
 
@@ -249,7 +255,7 @@ mod tests {
         let address = ViolationAddress::new(
             &repo_path("src/lib.rs"),
             Some("languages"),
-            "keep-sorted",
+            Validator::KeepSorted,
             Some("a"),
         )
         .expect("a named block has an address");
@@ -262,15 +268,20 @@ mod tests {
     #[test]
     fn identical_violation_text_yields_the_same_address() {
         assert_eq!(
-            violation_address("n", "keep-unique", "apple"),
-            violation_address("n", "keep-unique", "apple")
+            violation_address("n", Validator::KeepUnique, "apple"),
+            violation_address("n", Validator::KeepUnique, "apple")
         );
     }
 
     #[test]
     fn violation_on_an_unnamed_block_has_no_address() {
         assert_eq!(
-            ViolationAddress::new(&repo_path("src/lib.rs"), None, "keep-sorted", Some("apple")),
+            ViolationAddress::new(
+                &repo_path("src/lib.rs"),
+                None,
+                Validator::KeepSorted,
+                Some("apple")
+            ),
             None
         );
     }

@@ -4,7 +4,7 @@ use crate::paths_glob::PathsGlob;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
 use crate::validators::{
-    self, SyncValidator, TargetFiles, TargetReference, TargetResult, ValidationReport,
+    self, SyncValidator, TargetFiles, TargetReference, TargetResult, ValidationReport, Validator,
     ValidatorDetector, ValidatorType, Violation, compile_pattern, parse_number, target_display,
 };
 use anyhow::{Context, anyhow, bail};
@@ -839,7 +839,7 @@ fn create_violation(
         block.start_tag_position_range.clone().into(),
         file_path,
         block,
-        "same-as".to_string(),
+        Validator::SameAs,
         message,
         // A block may be compared against several targets, so the target identifies this violation.
         Some(target),
@@ -908,7 +908,7 @@ mod validate_tests {
             .get(&RepoPath::from_reference("config.py")?)
             .unwrap();
         assert_eq!(file.len(), 1);
-        assert_eq!(file[0].code, "same-as");
+        assert_eq!(file[0].code, Validator::SameAs);
         Ok(())
     }
 
@@ -1362,7 +1362,7 @@ ids = 1, 2
         let violations = validator(&[]).validate(context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
         assert_eq!(file.len(), 1);
-        assert_eq!(file[0].code, "same-as");
+        assert_eq!(file[0].code, Validator::SameAs);
         Ok(())
     }
 
@@ -1425,7 +1425,7 @@ red: 2
             .get(&RepoPath::from_reference("test.rs")?)
             .unwrap();
         assert_eq!(file.len(), 1);
-        assert_eq!(file[0].code, "same-as");
+        assert_eq!(file[0].code, Validator::SameAs);
         Ok(())
     }
 
@@ -1495,7 +1495,7 @@ red: 2
         let violations = validator(&[]).validate(context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
         assert_eq!(file.len(), 1);
-        assert_eq!(file[0].code, "same-as");
+        assert_eq!(file[0].code, Validator::SameAs);
         Ok(())
     }
 
@@ -1511,7 +1511,7 @@ red: 2
         let violations = validator(&[]).validate(context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
         assert_eq!(file.len(), 1);
-        assert_eq!(file[0].code, "same-as");
+        assert_eq!(file[0].code, Validator::SameAs);
         assert!(
             file[0]
                 .message
@@ -1533,7 +1533,7 @@ red: 2
         let violations = validator(&[]).validate(context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
         assert_eq!(file.len(), 1);
-        assert_eq!(file[0].code, "same-as");
+        assert_eq!(file[0].code, Validator::SameAs);
         Ok(())
     }
 

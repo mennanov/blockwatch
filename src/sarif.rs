@@ -1,6 +1,6 @@
 use crate::blocks::BlockSeverity;
 use crate::repo_path::RepoPath;
-use crate::validators::{SimpleDiagnostic, Violation};
+use crate::validators::{SimpleDiagnostic, Validator, Violation};
 use crate::violation_address::ViolationAddress;
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 use serde::Serialize;
@@ -52,35 +52,6 @@ const PATH_UNSAFE: &AsciiSet = &CONTROLS
     .add(b'{')
     .add(b'|')
     .add(b'}');
-
-/// A one-line description of every validator, by validator name.
-///
-/// Each registered validator needs an entry here. A test enforces that.
-const VALIDATOR_DESCRIPTIONS: &[(&str, &str)] = &[
-    (
-        "affects",
-        "Requires co-dependent blocks to be updated together.",
-    ),
-    ("check-ai", "Checks a block with AI."),
-    ("check-lua", "Checks a block with a custom Lua script."),
-    (
-        "keep-sorted",
-        "Requires the lines of a block to stay in order.",
-    ),
-    (
-        "keep-unique",
-        "Requires the lines of a block to stay free of duplicates.",
-    ),
-    ("line-count", "Constrains how many lines a block has."),
-    (
-        "line-pattern",
-        "Checks every line of a block against a required or a forbidden pattern.",
-    ),
-    (
-        "same-as",
-        "Requires two places to keep holding the same value.",
-    ),
-];
 
 /// A blockwatch run, in the shape a SARIF log is serialized in.
 #[derive(Serialize, Debug)]
@@ -163,7 +134,7 @@ fn sarif_results<'a>(
         .map(|(file, diagnostic)| {
             let rule_index = rules
                 .iter()
-                .position(|rule| rule.id == diagnostic.code())
+                .position(|rule| rule.id == diagnostic.code().as_str())
                 .expect("every rule that reported a diagnostic is described");
             SarifResult::new(file, diagnostic, rule_index)
         })
@@ -225,12 +196,12 @@ struct ReportingDescriptor {
 }
 
 impl ReportingDescriptor {
-    /// Describes the validator called `validator`, whether or not it has a description on file.
-    fn new(validator: &str) -> Self {
+    /// Describes the validator.
+    fn new(validator: Validator) -> Self {
         Self {
-            id: validator.to_string(),
-            name: validator.to_string(),
-            short_description: validator_description(validator).map(Message::new),
+            id: validator.as_str().to_string(),
+            name: validator.as_str().to_string(),
+            short_description: Some(Message::new(validator.description())),
             help_uri: help_uri(validator),
         }
     }
@@ -262,7 +233,7 @@ impl<'a> SarifResult<'a> {
     /// Reports `diagnostic`, found in `file`, against the rule at `rule_index`.
     fn new(file: &RepoPath, diagnostic: &SimpleDiagnostic<'a>, rule_index: usize) -> Self {
         Self {
-            rule_id: diagnostic.code(),
+            rule_id: diagnostic.code().as_str(),
             rule_index,
             level: sarif_level(diagnostic.severity()),
             message: Message::new(diagnostic.message()),
@@ -384,16 +355,8 @@ fn sarif_level(severity: BlockSeverity) -> &'static str {
     }
 }
 
-/// Returns the one-line description of `validator`, or `None` if it has no entry.
-fn validator_description(validator: &str) -> Option<&'static str> {
-    VALIDATOR_DESCRIPTIONS
-        .iter()
-        .find(|(name, _)| *name == validator)
-        .map(|(_, description)| *description)
-}
-
 /// Returns the link to the documentation page of `validator`, pinned to the running version.
-fn help_uri(validator: &str) -> String {
+fn help_uri(validator: Validator) -> String {
     // Linking to the release tag rather than to the default branch keeps the page describing the
     // rule as this binary enforces it, however far the branch moves on.
     format!(
@@ -413,6 +376,7 @@ mod tests {
     use serde_json::{Value, json};
     use std::collections::HashMap;
     use std::path::Path;
+    use strum::IntoEnumIterator;
 
     fn repo_path(path: &str) -> RepoPath {
         RepoPath::from_reference(path).expect("a repository-relative path")
@@ -437,14 +401,14 @@ mod tests {
         file: &RepoPath,
         name: Option<&str>,
         severity: &str,
-        code: &str,
+        code: Validator,
         violation_text: Option<&str>,
     ) -> Violation {
         Violation::new(
             ViolationRange::new(Position::new(3, 1), Position::new(3, 4)),
             file,
             &block(name, severity),
-            code.to_string(),
+            code,
             format!("{code} is unhappy"),
             violation_text,
             None,
@@ -480,7 +444,7 @@ mod tests {
                 &file,
                 Some("languages"),
                 "error",
-                "keep-sorted",
+                Validator::KeepSorted,
                 Some("rust"),
             )],
         )]);
@@ -582,8 +546,20 @@ mod tests {
         let violations = violations(vec![(
             file.clone(),
             vec![
-                violation(&file, Some("languages"), "warning", "line-count", None),
-                violation(&file, Some("languages"), "error", "keep-sorted", Some("a")),
+                violation(
+                    &file,
+                    Some("languages"),
+                    "warning",
+                    Validator::LineCount,
+                    None,
+                ),
+                violation(
+                    &file,
+                    Some("languages"),
+                    "error",
+                    Validator::KeepSorted,
+                    Some("a"),
+                ),
             ],
         )]);
 
@@ -618,7 +594,13 @@ mod tests {
     #[test]
     fn suppressed_violation_is_reported_with_an_external_suppression() {
         let file = repo_path("src/lib.rs");
-        let mut suppressed = violation(&file, Some("languages"), "error", "line-count", None);
+        let mut suppressed = violation(
+            &file,
+            Some("languages"),
+            "error",
+            Validator::LineCount,
+            None,
+        );
         suppressed.suppress();
         let violations = violations(vec![(file, vec![suppressed])]);
 
@@ -637,7 +619,13 @@ mod tests {
         let file = repo_path("src/lib.rs");
         let violations = violations(vec![(
             file.clone(),
-            vec![violation(&file, None, "error", "keep-sorted", Some("rust"))],
+            vec![violation(
+                &file,
+                None,
+                "error",
+                Validator::KeepSorted,
+                Some("rust"),
+            )],
         )]);
 
         let result = log_value(&violations)["runs"][0]["results"][0].clone();
@@ -663,7 +651,7 @@ mod tests {
                 &file,
                 Some("a"),
                 "error",
-                "keep-sorted",
+                Validator::KeepSorted,
                 Some("x"),
             )],
         )]);
@@ -692,7 +680,7 @@ mod tests {
                     &first,
                     Some("a"),
                     "error",
-                    "keep-sorted",
+                    Validator::KeepSorted,
                     Some("x"),
                 )],
             ),
@@ -702,7 +690,7 @@ mod tests {
                     &second,
                     Some("b"),
                     "error",
-                    "keep-sorted",
+                    Validator::KeepSorted,
                     Some("y"),
                 )],
             ),
@@ -721,25 +709,8 @@ mod tests {
     }
 
     #[test]
-    fn every_registered_validator_is_described() {
-        let described: Vec<&str> = VALIDATOR_DESCRIPTIONS
-            .iter()
-            .map(|(name, _)| *name)
-            .collect();
-        let mut registered = crate::validators::validator_names();
-        registered.sort_unstable();
-        let mut described_sorted = described.clone();
-        described_sorted.sort_unstable();
-
-        assert_eq!(
-            described_sorted, registered,
-            "every validator needs a description, and no description may outlive its validator"
-        );
-    }
-
-    #[test]
     fn every_described_validator_has_the_documentation_page_its_help_uri_points_at() {
-        for (validator, _) in VALIDATOR_DESCRIPTIONS {
+        for validator in Validator::iter() {
             let page = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("docs/validators")
                 .join(format!("{validator}.md"));

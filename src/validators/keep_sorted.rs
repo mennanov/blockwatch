@@ -2,8 +2,8 @@ use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    SyncValidator, ValidationReport, ValidatorDetector, ValidatorType, Violation, ViolationRange,
-    compile_pattern, parse_number, regex_value, trimmed_line_value,
+    SyncValidator, ValidationReport, Validator, ValidatorDetector, ValidatorType, Violation,
+    ViolationRange, compile_pattern, parse_number, regex_value, trimmed_line_value,
 };
 use crate::{Position, validators};
 use anyhow::{Context, anyhow};
@@ -231,7 +231,7 @@ fn create_violation(
         ),
         block_file_path,
         block,
-        "keep-sorted".to_string(),
+        Validator::KeepSorted,
         message,
         // Identify the violation by the offending line rather than its number, which shifts
         // whenever anything above it is added or removed.
@@ -376,7 +376,7 @@ mod validate_tests {
             file_violations[0].message,
             "Block example.py:(unnamed) defined at line 1 has an out-of-order line 5 (asc)"
         );
-        assert_eq!(file_violations[0].code, "keep-sorted");
+        assert_eq!(file_violations[0].code, Validator::KeepSorted);
         assert_eq!(
             file_violations[0].range,
             ViolationRange::new(Position::new(5, 9), Position::new(5, 11))
@@ -414,7 +414,7 @@ mod validate_tests {
             file_violations[0].message,
             "Block example.py:(unnamed) defined at line 1 has an out-of-order line 4 (desc)"
         );
-        assert_eq!(file_violations[0].code, "keep-sorted");
+        assert_eq!(file_violations[0].code, Validator::KeepSorted);
         assert_eq!(
             file_violations[0].range,
             ViolationRange::new(Position::new(4, 9), Position::new(4, 10))
@@ -618,7 +618,7 @@ mod validate_tests {
             .get(&RepoPath::from_reference("example.py")?)
             .unwrap();
         assert_eq!(file_violations.len(), 1);
-        assert_eq!(file_violations[0].code, "keep-sorted");
+        assert_eq!(file_violations[0].code, Validator::KeepSorted);
         assert_eq!(
             file_violations[0].range,
             ViolationRange::new(Position::new(4, 23), Position::new(4, 24))
@@ -712,7 +712,7 @@ mod validate_tests {
             file_violations[0].message,
             "Block example.py:(unnamed) defined at line 1 has an out-of-order line 4 (asc)"
         );
-        assert_eq!(file_violations[0].code, "keep-sorted");
+        assert_eq!(file_violations[0].code, Validator::KeepSorted);
         assert_eq!(
             file_violations[0].data,
             Some(json!({
