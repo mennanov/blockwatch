@@ -2011,6 +2011,85 @@ mod parse_blocks_tests {
     }
 
     #[test]
+    fn diff_with_several_missing_files_reports_the_lowest_path() -> anyhow::Result<()> {
+        // The same diff must still give the same error on every run.
+        let line_changes = diff_changes([
+            (RepoPath::from_reference("c.py")?, vec![added(1)]),
+            (RepoPath::from_reference("a.py")?, vec![added(1)]),
+            (RepoPath::from_reference("b.py")?, vec![added(1)]),
+        ]);
+        let error = Scan::new(
+            &FakeFileSystem::new(HashMap::new()),
+            &PathFilter::allow_all(),
+            &language_parsers()?,
+            &[],
+        )
+        .parse_blocks(&line_changes, ScanMode::All)
+        .unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "diff target \"a.py\" does not exist in the repository root."
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn only_changed_diff_with_a_missing_file_beside_a_present_one_reports_the_likely_cause()
+    -> anyhow::Result<()> {
+        // The present file makes the diff look valid, so the missing one is found only when the
+        // scan reads it.
+        let line_changes = diff_changes([
+            (RepoPath::from_reference("present.py")?, vec![added(1)]),
+            (RepoPath::from_reference("gone.py")?, vec![added(1)]),
+        ]);
+        let error = Scan::new(
+            &FakeFileSystem::new(HashMap::from([("present.py".to_string(), String::new())])),
+            &PathFilter::allow_all(),
+            &language_parsers()?,
+            &[],
+        )
+        .parse_blocks(&line_changes, ScanMode::OnlyChanged)
+        .unwrap_err();
+
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("diff target \"gone.py\" does not exist in the repository root."),
+            "unexpected error: {message}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn only_changed_diff_with_a_present_file_that_fails_to_parse_does_not_say_it_is_missing()
+    -> anyhow::Result<()> {
+        // The path is right, so blaming it would send the user to the wrong place.
+        let line_changes = diff_changes([(RepoPath::from_reference("broken.py")?, vec![added(1)])]);
+        let error = Scan::new(
+            &FakeFileSystem::new(HashMap::from([(
+                "broken.py".to_string(),
+                "# <block name=\"open\">\nx = 1\n".to_string(),
+            )])),
+            &PathFilter::allow_all(),
+            &language_parsers()?,
+            &[],
+        )
+        .parse_blocks(&line_changes, ScanMode::OnlyChanged)
+        .unwrap_err();
+
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("Failed to parse file"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            !message.contains("does not exist in the repository root"),
+            "unexpected error: {message}"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn diff_with_only_files_outside_the_globs_is_not_a_broken_diff() -> anyhow::Result<()> {
         // Globs narrow a run, so a diff with no path inside them is what the caller asked for.
         let line_changes =
