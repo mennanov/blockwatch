@@ -2,7 +2,7 @@ use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
+    SyncValidator, ValidationReport, ValidatorDetector, ValidatorType, Violation, ViolationRange,
     compile_pattern,
 };
 use crate::{Position, validators};
@@ -41,7 +41,7 @@ enum LinePatternViolation<'a> {
     },
 }
 
-impl ValidatorSync for LinePatternValidator {
+impl SyncValidator for LinePatternValidator {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,

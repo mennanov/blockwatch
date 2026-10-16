@@ -389,7 +389,7 @@ impl CommentsParser for TreeSitterCommentsParser {
         let tree = self.parser.parse(source_code, None).unwrap();
         self.tree = Some(tree);
         // It is safe to unwrap here because we just set self.tree
-        CommentsIterator::new(self.tree.as_ref().unwrap(), &self.node_visitor, source_code)
+        Comments::new(self.tree.as_ref().unwrap(), &self.node_visitor, source_code)
     }
 }
 
@@ -421,7 +421,7 @@ fn node_text<'source>(node: &Node, source: &'source str) -> &'source str {
     &source[node.byte_range()]
 }
 
-struct CommentsIterator<'source> {
+struct Comments<'source> {
     cursor: TreeCursor<'source>,
     node_visitor: &'source NodeVisitor,
     source_code: &'source str,
@@ -435,7 +435,7 @@ struct CommentsIterator<'source> {
     done: bool,
 }
 
-impl<'source> CommentsIterator<'source> {
+impl<'source> Comments<'source> {
     fn new(
         tree: &'source Tree,
         node_visitor: &'source NodeVisitor,
@@ -469,7 +469,7 @@ impl<'source> CommentsIterator<'source> {
     }
 }
 
-impl<'source> Iterator for CommentsIterator<'source> {
+impl<'source> Iterator for Comments<'source> {
     type Item = Comment;
 
     /// Yields comments in pre-order, and keeps yielding `None` once the tree is exhausted.

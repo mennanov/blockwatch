@@ -44,14 +44,14 @@ impl SymbolsParser for TomlSymbolsParser {
         // What a key means depends on the headers above it, not on how the syntax tree nests:
         // `[fruits.physical]` belongs to the last `[[fruits]]` before it. So the symbols come from
         // the document `toml_edit` builds, not from a tree-sitter query.
-        let document = toml_edit::Document::parse(source)
-            .map_err(|error| toml_error_as_error(source, &error))?;
+        let document =
+            toml_edit::Document::parse(source).map_err(|error| toml_error(source, &error))?;
         Walk::symbols_in(source, document.as_table())
     }
 }
 
 /// The error for a `source` that `toml_edit` rejected with `error`.
-fn toml_error_as_error(source: &str, error: &toml_edit::TomlError) -> anyhow::Error {
+fn toml_error(source: &str, error: &toml_edit::TomlError) -> anyhow::Error {
     match error.span() {
         Some(span) => {
             let position = Position::from_byte_offset(source, span.start);

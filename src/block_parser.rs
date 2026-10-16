@@ -27,13 +27,13 @@ impl<C: CommentsParser> BlocksFromCommentsParser<C> {
         &'a mut self,
         contents: &'a str,
     ) -> impl Iterator<Item = anyhow::Result<Block>> + 'a {
-        BlocksIterator::new(self.comments_parser.parse(contents), contents)
+        Blocks::new(self.comments_parser.parse(contents), contents)
     }
 }
 
 /// Assembles [`Block`]s out of a comment stream.
-pub(crate) struct BlocksIterator<'source, I: Iterator<Item = Comment>> {
-    partial_blocks: PartialBlocksIterator<'source, I>,
+pub(crate) struct Blocks<'source, I: Iterator<Item = Comment>> {
+    partial_blocks: Tags<'source, I>,
     /// Start tags still waiting for their end tag, outermost first.
     open_blocks: Vec<BlockStart>,
     /// The current group of blocks, in start order.
@@ -44,11 +44,11 @@ pub(crate) struct BlocksIterator<'source, I: Iterator<Item = Comment>> {
     done: bool,
 }
 
-impl<'source, I: Iterator<Item = Comment>> BlocksIterator<'source, I> {
+impl<'source, I: Iterator<Item = Comment>> Blocks<'source, I> {
     /// Starts the block stream over the comments of `contents`, which must be in source order.
     pub(crate) fn new(comments: I, contents: &'source str) -> Self {
         Self {
-            partial_blocks: PartialBlocksIterator::new(comments, contents),
+            partial_blocks: Tags::new(comments, contents),
             open_blocks: Vec::new(),
             blocks: VecDeque::new(),
             error: None,
@@ -121,7 +121,7 @@ impl<'source, I: Iterator<Item = Comment>> BlocksIterator<'source, I> {
     }
 }
 
-impl<I: Iterator<Item = Comment>> Iterator for BlocksIterator<'_, I> {
+impl<I: Iterator<Item = Comment>> Iterator for Blocks<'_, I> {
     type Item = anyhow::Result<Block>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -141,7 +141,7 @@ impl<I: Iterator<Item = Comment>> Iterator for BlocksIterator<'_, I> {
 ///
 /// One comment may hold several tags (or a whole block, opened and closed in the same comment), so
 /// the iterator parses all the tags of a comment at once and returns them one by one.
-struct PartialBlocksIterator<'source, I: Iterator<Item = Comment>> {
+struct Tags<'source, I: Iterator<Item = Comment>> {
     contents: &'source str,
     comments: Peekable<I>,
     /// The tags of the last comment read that are not returned yet, in source order. A tag that
@@ -149,7 +149,7 @@ struct PartialBlocksIterator<'source, I: Iterator<Item = Comment>> {
     pending: VecDeque<anyhow::Result<PartialBlock>>,
 }
 
-impl<'source, I: Iterator<Item = Comment>> PartialBlocksIterator<'source, I> {
+impl<'source, I: Iterator<Item = Comment>> Tags<'source, I> {
     /// Starts the tag stream over the comments of `contents`, which must be in source order.
     fn new(comments: I, contents: &'source str) -> Self {
         Self {
@@ -267,7 +267,7 @@ fn to_partial_block(
 /// fails the run with these errors too, and backticks are the fix for it.
 const NOT_A_TAG_HINT: &str = "If this is not meant as a tag, put it in backticks.";
 
-impl<I: Iterator<Item = Comment>> Iterator for PartialBlocksIterator<'_, I> {
+impl<I: Iterator<Item = Comment>> Iterator for Tags<'_, I> {
     type Item = anyhow::Result<PartialBlock>;
 
     fn next(&mut self) -> Option<Self::Item> {

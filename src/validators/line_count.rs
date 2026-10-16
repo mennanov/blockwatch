@@ -3,7 +3,7 @@ use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{
-    ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation,
+    SyncValidator, ValidationReport, ValidatorDetector, ValidatorType, Violation,
 };
 use anyhow::anyhow;
 use serde::Serialize;
@@ -30,7 +30,7 @@ struct LineCountViolation {
     expected: usize,
 }
 
-impl ValidatorSync for LineCountValidator {
+impl SyncValidator for LineCountValidator {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,

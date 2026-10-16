@@ -4,7 +4,7 @@
 //! crates.io, so the `markdown` crate finds those spans, and tree-sitter-javascript finds the
 //! comments in each one.
 
-use crate::block_parser::BlocksIterator;
+use crate::block_parser::Blocks;
 use crate::blocks::Block;
 use crate::language_parsers::markdown::section_symbols;
 use crate::language_parsers::{
@@ -79,7 +79,7 @@ impl LanguageParser for MdxParser {
         contents: &'a str,
     ) -> Box<dyn Iterator<Item = anyhow::Result<Block>> + 'a> {
         match self.comments(contents) {
-            Ok(comments) => Box::new(BlocksIterator::new(comments.into_iter(), contents)),
+            Ok(comments) => Box::new(Blocks::new(comments.into_iter(), contents)),
             Err(error) => Box::new(std::iter::once(Err(error))),
         }
     }

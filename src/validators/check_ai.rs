@@ -2,7 +2,7 @@ use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    PatternContent, ValidationContext, ValidationReport, ValidatorAsync, ValidatorDetector,
+    AsyncValidator, PatternContent, ValidationContext, ValidationReport, ValidatorDetector,
     ValidatorType, Violation, block_content_for_pattern,
 };
 use anyhow::{Context, anyhow};
@@ -47,7 +47,7 @@ struct CheckAiValidator<C: AiClient> {
 }
 
 #[async_trait]
-impl<C: AiClient + 'static> ValidatorAsync for CheckAiValidator<C> {
+impl<C: AiClient + 'static> AsyncValidator for CheckAiValidator<C> {
     async fn validate(&self, context: Arc<ValidationContext>) -> anyhow::Result<ValidationReport> {
         let mut report = ValidationReport::default();
         let mut tasks = JoinSet::new();
@@ -131,7 +131,7 @@ impl<Fs: FileSystem> ValidatorDetector<Fs> for CheckAiValidatorDetector {
     ) -> anyhow::Result<Option<ValidatorType>> {
         if block_with_context.block.attributes.contains_key("check-ai") {
             Ok(Some(ValidatorType::Async(Box::new(
-                CheckAiValidator::with_client(OpenAiClient::new_from_env()),
+                CheckAiValidator::with_client(OpenAiClient::from_env()),
             ))))
         } else {
             Ok(None)
@@ -277,7 +277,7 @@ struct OpenAiClient {
 impl OpenAiClient {
     /// Creates a new OpenAI client from environment variables (BLOCKWATCH_AI_*),
     /// falling back to `async-openai` crate defaults when not provided.
-    fn new_from_env() -> Self {
+    fn from_env() -> Self {
         let model = std::env::var(API_MODEL_ENV_VAR_NAME).unwrap_or(DEFAULT_MODEL_NAME.into());
         let api_base = std::env::var(API_URL_ENV_VAR_NAME).unwrap_or(OPENAI_API_BASE.into());
         let api_key = std::env::var(API_KEY_ENV_VAR_NAME).unwrap_or("".into());

@@ -41,14 +41,14 @@ use std::sync::Arc;
 
 /// Validates the given `Context` and returns a list of the violations grouped by filename.
 #[async_trait]
-pub(crate) trait ValidatorAsync: Send + Sync {
+pub(crate) trait AsyncValidator: Send + Sync {
     async fn validate(&self, context: Arc<ValidationContext>) -> anyhow::Result<ValidationReport>;
 }
 
-/// The same contract as [`ValidatorAsync`] for validators that need no I/O beyond the filesystem,
+/// The same contract as [`AsyncValidator`] for validators that need no I/O beyond the filesystem,
 /// so the common case runs on plain threads and no Tokio runtime has to be started if no async
 /// validators are involved.
-pub(crate) trait ValidatorSync: Send + Sync {
+pub(crate) trait SyncValidator: Send + Sync {
     fn validate(&self, context: Arc<ValidationContext>) -> anyhow::Result<ValidationReport>;
 }
 
@@ -65,8 +65,8 @@ pub(crate) trait ValidatorDetector<Fs: FileSystem> {
 
 /// Validator type (sync or async).
 pub(crate) enum ValidatorType {
-    Sync(Box<dyn ValidatorSync>),
-    Async(Box<dyn ValidatorAsync>),
+    Sync(Box<dyn SyncValidator>),
+    Async(Box<dyn AsyncValidator>),
 }
 
 /// One rule breach found in one block: what is wrong, where, and how severe it is.
@@ -555,8 +555,8 @@ pub(crate) fn run(
 }
 
 /// Detected validators, each paired with the name it is known by.
-type SyncValidators = Vec<(&'static str, Box<dyn ValidatorSync>)>;
-type AsyncValidators = Vec<(&'static str, Box<dyn ValidatorAsync>)>;
+type SyncValidators = Vec<(&'static str, Box<dyn SyncValidator>)>;
+type AsyncValidators = Vec<(&'static str, Box<dyn AsyncValidator>)>;
 
 type DetectorFactory<Fs> = fn() -> Box<dyn ValidatorDetector<Fs>>;
 
@@ -1383,8 +1383,8 @@ mod tests {
     use crate::test_utils::{validation_context, virtual_block};
     use crate::validators::test_utils::{merge_validation_contexts, with_virtual_blocks};
     use crate::validators::{
-        DetectorFactory, ValidationContext, ValidationReport, ValidatorAsync, ValidatorDetector,
-        ValidatorSync, ValidatorType, Violation, ViolationRange, detect_validators,
+        AsyncValidator, DetectorFactory, SyncValidator, ValidationContext, ValidationReport,
+        ValidatorDetector, ValidatorType, Violation, ViolationRange, detect_validators,
     };
     use crate::{Position, validators};
     use async_trait::async_trait;
@@ -1409,7 +1409,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl ValidatorAsync for FakeAsyncValidator {
+    impl AsyncValidator for FakeAsyncValidator {
         async fn validate(
             &self,
             context: Arc<ValidationContext>,
@@ -1445,7 +1445,7 @@ mod tests {
         testing_block: Arc<Block>,
     }
 
-    impl ValidatorSync for FakeSyncValidator {
+    impl SyncValidator for FakeSyncValidator {
         fn validate(&self, context: Arc<ValidationContext>) -> anyhow::Result<ValidationReport> {
             Ok(ValidationReport {
                 violations: context

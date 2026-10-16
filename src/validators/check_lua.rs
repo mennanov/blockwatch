@@ -3,8 +3,8 @@ use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::parse_target_references;
 use crate::validators::{
-    PatternContent, TargetFiles, TargetReference, ValidationContext, ValidationReport,
-    ValidatorAsync, ValidatorDetector, ValidatorType, Violation, block_content_for_pattern,
+    AsyncValidator, PatternContent, TargetFiles, TargetReference, ValidationContext,
+    ValidationReport, ValidatorDetector, ValidatorType, Violation, block_content_for_pattern,
 };
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -101,7 +101,7 @@ impl<Fs: FileSystem + 'static> CheckLuaValidator<Fs> {
 }
 
 #[async_trait]
-impl<Fs: FileSystem + 'static> ValidatorAsync for CheckLuaValidator<Fs> {
+impl<Fs: FileSystem + 'static> AsyncValidator for CheckLuaValidator<Fs> {
     async fn validate(&self, context: Arc<ValidationContext>) -> anyhow::Result<ValidationReport> {
         let mut report = ValidationReport::default();
         let mut tasks = JoinSet::new();

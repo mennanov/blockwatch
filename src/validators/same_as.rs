@@ -4,8 +4,8 @@ use crate::paths_glob::PathsGlob;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
 use crate::validators::{
-    self, TargetFiles, TargetReference, TargetResult, ValidationReport, ValidatorDetector,
-    ValidatorSync, ValidatorType, Violation, compile_pattern, parse_number, target_display,
+    self, SyncValidator, TargetFiles, TargetReference, TargetResult, ValidationReport,
+    ValidatorDetector, ValidatorType, Violation, compile_pattern, parse_number, target_display,
 };
 use anyhow::{Context, anyhow, bail};
 use heck::ToSnakeCase;
@@ -40,7 +40,7 @@ impl<Fs: FileSystem + 'static> SameAsValidator<Fs> {
     }
 }
 
-impl<Fs: FileSystem + 'static> ValidatorSync for SameAsValidator<Fs> {
+impl<Fs: FileSystem + 'static> SyncValidator for SameAsValidator<Fs> {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,

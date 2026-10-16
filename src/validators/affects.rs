@@ -39,7 +39,7 @@ struct AffectsViolation<'a> {
     affected_block_name: Option<&'a str>,
 }
 
-impl<Fs: FileSystem + 'static> validators::ValidatorSync for AffectsValidator<Fs> {
+impl<Fs: FileSystem + 'static> validators::SyncValidator for AffectsValidator<Fs> {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,
@@ -445,7 +445,7 @@ mod validate_tests {
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
     use crate::test_utils::{validation_context, validation_context_with_changes, virtual_block};
-    use crate::validators::ValidatorSync;
+    use crate::validators::SyncValidator;
     use crate::validators::test_utils::{
         checked_lines, merge_validation_contexts, violation_count, with_virtual_blocks,
     };

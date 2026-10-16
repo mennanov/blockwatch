@@ -2,7 +2,7 @@ use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
+    SyncValidator, ValidationReport, ValidatorDetector, ValidatorType, Violation, ViolationRange,
     compile_pattern, parse_number, regex_value, trimmed_line_value,
 };
 use crate::{Position, validators};
@@ -55,7 +55,7 @@ struct KeepSortedViolation<'a> {
     order_by: &'a str,
 }
 
-impl ValidatorSync for KeepSortedValidator {
+impl SyncValidator for KeepSortedValidator {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,

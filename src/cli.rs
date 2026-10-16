@@ -36,8 +36,8 @@ use std::{env, fs};
 pub fn run() -> ExitCode {
     let args = flags::Args::parse();
     let result = match &args.command {
-        Some(flags::SubCommand::List { .. }) => run_list(&args).map(|()| ExitCode::SUCCESS),
-        Some(flags::SubCommand::Skill) => run_skill(&args).map(|()| ExitCode::SUCCESS),
+        Some(flags::Subcommand::List { .. }) => run_list(&args).map(|()| ExitCode::SUCCESS),
+        Some(flags::Subcommand::Skill) => run_skill(&args).map(|()| ExitCode::SUCCESS),
         None => run_validators(&args),
     };
     result.unwrap_or_else(|error| {

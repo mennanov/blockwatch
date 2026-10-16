@@ -2,7 +2,7 @@ use crate::blocks::{Block, BlockWithContext};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    ValidationReport, ValidatorDetector, ValidatorSync, ValidatorType, Violation, ViolationRange,
+    SyncValidator, ValidationReport, ValidatorDetector, ValidatorType, Violation, ViolationRange,
     compile_pattern, regex_value, trimmed_line_value,
 };
 use crate::{Position, validators};
@@ -22,7 +22,7 @@ impl KeepUniqueValidator {
     }
 }
 
-impl ValidatorSync for KeepUniqueValidator {
+impl SyncValidator for KeepUniqueValidator {
     fn validate(
         &self,
         context: Arc<validators::ValidationContext>,

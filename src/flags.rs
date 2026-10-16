@@ -165,7 +165,7 @@ pub(crate) struct Args {
 
     /// The subcommand to run, if any. `None` means the default action: validate.
     #[command(subcommand)]
-    pub(crate) command: Option<SubCommand>,
+    pub(crate) command: Option<Subcommand>,
 }
 
 /// The flags that only the default command takes. They choose the validators or the blocks,
@@ -264,7 +264,7 @@ pub(crate) struct ValidationFlags {
 
 /// A command that does something other than validate the blocks.
 #[derive(clap::Subcommand, Debug, Clone)]
-pub(crate) enum SubCommand {
+pub(crate) enum Subcommand {
     /// List all blocks found in the scanned files.
     List {
         /// Files, directories or glob patterns to list the blocks of, starting from the repository
@@ -333,8 +333,8 @@ impl Args {
     pub(crate) fn path_arguments(&self) -> Vec<String> {
         let mut arguments = self.paths.clone();
         match &self.command {
-            Some(SubCommand::List { paths }) => arguments.extend(paths.iter().cloned()),
-            Some(SubCommand::Skill) | None => {}
+            Some(Subcommand::List { paths }) => arguments.extend(paths.iter().cloned()),
+            Some(Subcommand::Skill) | None => {}
         }
         arguments
     }
@@ -342,12 +342,12 @@ impl Args {
     /// Validates the flags that are not settings, such as `--format` and `--suppress`.
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
         match self.command {
-            Some(SubCommand::List { .. }) => {
+            Some(Subcommand::List { .. }) => {
                 if self.validation != ValidationFlags::default() {
                     anyhow::bail!("the `list` subcommand doesn't take flags meant for validation");
                 }
             }
-            Some(SubCommand::Skill) => {
+            Some(Subcommand::Skill) => {
                 if self.validation != ValidationFlags::default() {
                     anyhow::bail!("the `skill` subcommand doesn't take flags meant for validation");
                 }
@@ -447,7 +447,7 @@ mod tests {
         let args = parse(&["blockwatch", "list", "--diff", "--only-changed"])?;
         assert!(args.diff);
         assert!(args.only_changed);
-        assert!(matches!(args.command, Some(SubCommand::List { .. })));
+        assert!(matches!(args.command, Some(Subcommand::List { .. })));
         Ok(())
     }
 
@@ -456,7 +456,7 @@ mod tests {
         let args = parse(&["blockwatch", "--diff", "--only-changed", "list"])?;
         assert!(args.diff);
         assert!(args.only_changed);
-        assert!(matches!(args.command, Some(SubCommand::List { .. })));
+        assert!(matches!(args.command, Some(Subcommand::List { .. })));
         Ok(())
     }
 
