@@ -1,7 +1,7 @@
 use crate::Position;
 use crate::blocks::{Block, Content, Declaration};
 use crate::language_parsers::{Comment, CommentsParser};
-use crate::tag_parser::{BlockTag, BlockTagParseError, BlockTagParser, WinnowBlockTagParser};
+use crate::tag_parser::{BlockTag, MalformedTag, WinnowBlockTagParser};
 use std::collections::{HashMap, VecDeque};
 use std::iter::Peekable;
 use std::ops::Range;
@@ -170,21 +170,21 @@ impl<'source, I: Iterator<Item = Comment>> Tags<'source, I> {
     fn parse_tags(
         &mut self,
         mut comment: Comment,
-    ) -> (Comment, Vec<Result<BlockTag, BlockTagParseError>>) {
+    ) -> (Comment, Vec<Result<BlockTag, MalformedTag>>) {
         let mut tags = Vec::new();
         let mut tags_parser_cursor = 0;
         loop {
             let mut tags_parser =
                 WinnowBlockTagParser::new(&comment.comment_text, tags_parser_cursor);
             match tags_parser.next() {
-                Ok(Some(tag)) => {
+                Some(Ok(tag)) => {
                     tags.push(Ok(tag));
                     tags_parser_cursor = tags_parser.cursor();
                 }
-                Ok(None) => return (comment, tags),
+                None => return (comment, tags),
                 // Most grammars make each line comment a node of its own, and a formatter such as
                 // rustfmt wraps a long tag in a line comment over several of them.
-                Err(BlockTagParseError::Malformed(malformed)) => {
+                Some(Err(malformed)) => {
                     match self.take_adjacent_comment(&comment) {
                         Some(next) => {
                             comment = join_comments(comment, next, self.contents);
@@ -193,7 +193,7 @@ impl<'source, I: Iterator<Item = Comment>> Tags<'source, I> {
                             tags_parser_cursor = malformed.position;
                         }
                         None => {
-                            tags.push(Err(BlockTagParseError::Malformed(malformed)));
+                            tags.push(Err(malformed));
                             return (comment, tags);
                         }
                     }
@@ -236,7 +236,7 @@ fn join_comments(comment: Comment, next: Comment, contents: &str) -> Comment {
 /// Turns a tag parsed from `comment` into a partial block. A tag that does not parse becomes an
 /// error that shows its line and column.
 fn to_partial_block(
-    tag: Result<BlockTag, BlockTagParseError>,
+    tag: Result<BlockTag, MalformedTag>,
     comment: &Rc<Comment>,
 ) -> anyhow::Result<PartialBlock> {
     match tag {
@@ -252,7 +252,7 @@ fn to_partial_block(
             Rc::clone(comment),
             start_position,
         ))),
-        Err(BlockTagParseError::Malformed(malformed)) => {
+        Err(malformed) => {
             let position = BlockStart::source_position_at(malformed.position, comment);
             Err(anyhow::anyhow!(
                 "Malformed block tag at line {}, column {}. {NOT_A_TAG_HINT}",

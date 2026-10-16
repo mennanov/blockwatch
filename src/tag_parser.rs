@@ -6,40 +6,27 @@ use winnow::combinator::{alt, delimited, opt, preceded, repeat};
 use winnow::prelude::*;
 use winnow::token::{any, literal, take_till, take_while};
 
-/// Parses block tags from the concatenated comment string.
-///
-/// The input string is implicitly bound to the implementing type when it's created.
-pub(crate) trait BlockTagParser {
-    fn next(&mut self) -> Result<Option<BlockTag>, BlockTagParseError>;
-}
-
 /// Represents a parsed block tag.
 #[derive(Debug)]
 pub(crate) enum BlockTag {
-    /// A start tag like.
+    /// A start tag.
     Start {
         /// Position of the start tag in a comment.
         tag_range: Range<usize>,
         /// Attribute name-value pairs (duplicate keys use last value).
         attributes: HashMap<String, String>,
     },
-    /// An end tag like.
+    /// An end tag.
     End {
         /// Byte position where the tag starts in the source
         start_position: usize,
     },
 }
 
-/// Why [`BlockTagParser::next`] could not return the next tag.
-#[derive(Debug)]
-pub(crate) enum BlockTagParseError {
-    Malformed(MalformedBlockTagError),
-}
-
 /// A start or end tag that was recognized as an attempt (see [`looks_like_tag_attempt`]) but
 /// failed to parse as a complete tag, for example, a missing closing `>`.
 #[derive(Debug)]
-pub(crate) struct MalformedBlockTagError {
+pub(crate) struct MalformedTag {
     /// Byte offset of the offending `<` within the comment text passed to the parser.
     pub(crate) position: usize,
 }
@@ -52,7 +39,7 @@ pub(crate) struct WinnowBlockTagParser<'source> {
 
 impl<'source> WinnowBlockTagParser<'source> {
     /// Parses `source` starting at byte offset `cursor`, which must be a character boundary in
-    /// `source`. Otherwise [`BlockTagParser::next`] panics.
+    /// `source`. Otherwise [`Iterator::next`] panics.
     ///
     /// Callers resume scanning a comment they have already partly consumed by passing back the
     /// [`Self::cursor`] of the previous parser.
@@ -70,7 +57,7 @@ impl<'source> WinnowBlockTagParser<'source> {
     ///
     /// Returns `None` if the text there is not a tag, and an error if it looks like one but does
     /// not parse (see [`looks_like_tag_attempt`]). The cursor moves only when a tag is returned.
-    fn parse_tag_at(&mut self, start: usize) -> Result<Option<BlockTag>, BlockTagParseError> {
+    fn parse_tag_at(&mut self, start: usize) -> Result<Option<BlockTag>, MalformedTag> {
         #[expect(clippy::string_slice, reason = "`start` is the index of a `<`")]
         let input = &self.source[start..];
         if let Ok((remaining, attributes)) = parse_start_tag.parse_peek(input) {
@@ -87,16 +74,16 @@ impl<'source> WinnowBlockTagParser<'source> {
             }));
         }
         if looks_like_tag_attempt(input) {
-            return Err(BlockTagParseError::Malformed(MalformedBlockTagError {
-                position: start,
-            }));
+            return Err(MalformedTag { position: start });
         }
         Ok(None)
     }
 }
 
-impl<'source> BlockTagParser for WinnowBlockTagParser<'source> {
-    fn next(&mut self) -> Result<Option<BlockTag>, BlockTagParseError> {
+impl<'source> Iterator for WinnowBlockTagParser<'source> {
+    type Item = Result<BlockTag, MalformedTag>;
+
+    fn next(&mut self) -> Option<Self::Item> {
         let mut position = self.cursor;
         loop {
             #[expect(
@@ -109,14 +96,17 @@ impl<'source> BlockTagParser for WinnowBlockTagParser<'source> {
                 None => break,
             };
             let start = position + offset;
-            if let Some(tag) = self.parse_tag_at(start)? {
-                return Ok(Some(tag));
+            match self.parse_tag_at(start) {
+                Ok(Some(tag)) => return Some(Ok(tag)),
+                Ok(None) => {
+                    // Not a tag, such as `<blockquote>`, so the search goes on past its `<`.
+                    position = start + 1;
+                }
+                Err(malformed) => return Some(Err(malformed)),
             }
-            // Not a tag, such as `<blockquote>`, so the search goes on past its `<`.
-            position = start + 1;
         }
         self.cursor = self.source.len();
-        Ok(None)
+        None
     }
 }
 
