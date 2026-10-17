@@ -1,3 +1,5 @@
+//! One tree-sitter-backed comment parser per supported language, keyed by file extension.
+
 mod bash;
 mod c;
 mod c_sharp;

@@ -1,3 +1,6 @@
+//! `SymbolPath`: a parsed and validated symbol path. It follows RFC 6901 and adds filters, such as
+//! `~[name=blue]`.
+
 use anyhow::{Context, bail};
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 use std::fmt;

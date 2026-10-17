@@ -1,3 +1,5 @@
+//! Reads the settings from the config file, `blockwatch.toml`.
+
 use crate::LineIndex;
 use crate::blocks::{BlockSeverity, validate_attributes};
 use crate::diff_parser::{DiffChanges, LineChanges};

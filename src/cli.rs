@@ -1,3 +1,6 @@
+//! The whole run: reads the flags and the input, runs the validators or `list`, and writes the
+//! output.
+
 use crate::blocks::BlockSeverity;
 use crate::config;
 use crate::diff_parser::{self, DiffChanges};

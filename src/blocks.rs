@@ -1,3 +1,5 @@
+//! The `Block` type and the other types that describe the blocks of a file.
+
 use crate::Position;
 use crate::diff_parser::{self, LineChange, LineChangeKind, LineChanges};
 use crate::repo_path::RepoPath;

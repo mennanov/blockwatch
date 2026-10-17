@@ -1,3 +1,11 @@
+//! blockwatch is a linter that works with any language. Rules are written as block tags in code
+//! comments, and blockwatch checks them. It can check the whole repository, or only the lines
+//! that a unified diff changes.
+//!
+//! This crate is a program, not a library. The library exists so that the `blockwatch` binary and
+//! the fuzz target in `fuzz/` can share the code. Only [`run`] and [`count_rust_blocks`] are
+//! `pub`.
+
 // blockwatch is a program, not a library. The library exists only for the binary and the fuzz
 // targets, so nothing but `run` and `count_rust_blocks` may be `pub`. This lint catches any other.
 #![warn(unreachable_pub)]
@@ -10,49 +18,26 @@ use std::ffi::OsStr;
 use std::ops::Range;
 
 mod block_parser;
-/// The `Block` type and the other types that describe the blocks of a file.
 mod blocks;
-/// The whole run: reads the flags and the input, runs the validators or `list`, and writes the
-/// output.
 mod cli;
-/// Reads the settings from the config file, `blockwatch.toml`.
 mod config;
-/// Reads a unified diff into the per-file line changes that decide which blocks are checked.
 mod diff_parser;
-/// Command-line arguments and the accessors that turn them into globs, filters, and extension maps.
 mod flags;
-/// File access and path filtering behind traits, so tests can substitute fakes for the real disk.
 mod fs;
-/// One tree-sitter-backed comment parser per supported language, keyed by file extension.
 mod language_parsers;
-/// The paths and globs given on the command line, and the check that each selects a file.
 mod path_arguments;
-/// `PathsGlob`: a glob that lists the repository paths it matches.
 mod paths_glob;
-/// `RepoPath`: the single spelling of a repository-relative file path used as a map key.
 mod repo_path;
-/// Renders the end-of-run report describing what was scanned and checked.
 mod report;
-/// Renders the violations of a run as a SARIF log, the format code-scanning services read.
 mod sarif;
-/// The repository scan that turns source files into the blocks to validate.
 mod scan;
-/// Project settings: how they are validated, and how the flags and the config file are merged.
 mod settings;
-/// `SymbolPath`: a parsed and validated symbol path. It follows RFC 6901 and adds filters, such as
-/// `~[name=blue]`.
 mod symbol_path;
-/// Derives the symbols of a file: the elements a symbol reference can address.
 mod symbols;
 mod tag_parser;
-/// The reference to a block, a symbol or a file that `affects`, `check-lua` and `same-as` write in
-/// an attribute, and the target it points at.
 mod target_reference;
-/// The rules enforced on blocks (`affects`, `keep-sorted`, …) and the machinery that runs them.
 mod validators;
-/// Unique violation address.
 mod violation_address;
-/// Blocks that the config file declares around a symbol, instead of tags in a comment.
 mod virtual_blocks;
 
 pub use cli::run;
@@ -62,6 +47,14 @@ pub use cli::run;
 ///
 /// It is `pub` because a fuzz target is a separate crate, and a separate crate can only call `pub`
 /// functions.
+///
+/// # Examples
+///
+/// ```
+/// let count = blockwatch::count_rust_blocks("fn main() {}\n")?;
+/// assert_eq!(count, 0);
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 pub fn count_rust_blocks(source: &str) -> anyhow::Result<usize> {
     let parsers = language_parsers::language_parsers()?;
     let rust_parser = parsers

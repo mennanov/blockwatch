@@ -1,3 +1,5 @@
+//! `PathsGlob`: a glob that lists the repository paths it matches.
+
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use globset::{GlobBuilder, GlobMatcher};

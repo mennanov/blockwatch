@@ -1,3 +1,5 @@
+//! File access and path filtering behind traits, so tests can substitute fakes for the real disk.
+
 use crate::repo_path::RepoPath;
 use anyhow::{Context, anyhow};
 use globset::GlobSet;

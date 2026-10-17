@@ -1,3 +1,5 @@
+//! Renders the violations of a run as a SARIF log, the format code-scanning services read.
+
 use crate::blocks::BlockSeverity;
 use crate::repo_path::RepoPath;
 use crate::validators::{SimpleDiagnostic, Validator, Violation};

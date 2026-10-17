@@ -1,3 +1,5 @@
+//! Project settings: how they are validated, and how the flags and the config file are merged.
+
 use crate::blocks::BlockAddress;
 use crate::validators::Validator;
 use anyhow::{Context, bail};

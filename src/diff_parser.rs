@@ -1,3 +1,5 @@
+//! Reads a unified diff into the per-file line changes that decide which blocks are checked.
+
 use crate::Position;
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;

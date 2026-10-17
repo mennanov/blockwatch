@@ -1,3 +1,5 @@
+//! `RepoPath`: the single spelling of a repository-relative file path used as a map key.
+
 use crate::fs::FileSystem;
 use anyhow::{Context, anyhow, bail};
 use serde::{Serialize, Serializer};

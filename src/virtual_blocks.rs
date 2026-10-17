@@ -1,3 +1,5 @@
+//! Blocks that the config file declares around a symbol, instead of tags in a comment.
+
 use crate::LineIndex;
 use crate::blocks::{Block, BlockSeverity, BlockWithContext, Content, Declaration};
 use crate::diff_parser::LineChanges;

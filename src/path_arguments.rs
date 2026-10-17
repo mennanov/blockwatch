@@ -1,3 +1,5 @@
+//! The paths and globs given on the command line, and the check that each selects a file.
+
 use crate::fs::{Entry, FileSystem};
 use crate::repo_path::RepoPath;
 use anyhow::{Context, bail};

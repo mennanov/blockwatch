@@ -1,3 +1,5 @@
+//! Unique violation address.
+
 use crate::repo_path::RepoPath;
 use crate::validators::Validator;
 use anyhow::{Context, bail};

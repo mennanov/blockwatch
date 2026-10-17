@@ -1,3 +1,6 @@
+//! The reference to a block, a symbol or a file that `affects`, `check-lua` and `same-as` write in
+//! an attribute, and the target it points at.
+
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
 use anyhow::bail;

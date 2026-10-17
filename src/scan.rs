@@ -1,3 +1,5 @@
+//! The repository scan that turns source files into the blocks to validate.
+
 use crate::blocks::{Block, BlockWithContext, FileBlocks};
 use crate::diff_parser::{DiffChanges, LineChanges};
 use crate::fs::{FileSystem, PathFilter};

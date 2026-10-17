@@ -1,3 +1,5 @@
+//! The rules enforced on blocks (`affects`, `keep-sorted`, …) and the machinery that runs them.
+
 mod affects;
 mod check_ai;
 mod check_lua;

@@ -1,3 +1,5 @@
+//! Derives the symbols of a file: the elements a symbol reference can address.
+
 use crate::symbol_path::{Segment, SymbolPath};
 use crate::{LineIndex, Position};
 use anyhow::{Context, bail};

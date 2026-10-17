@@ -1,3 +1,5 @@
+//! Command-line arguments and the accessors that turn them into globs, filters, and extension maps.
+
 use crate::blocks::BlockAddress;
 use crate::report::RunMode;
 use crate::settings::{RawSettings, parse_validator};
