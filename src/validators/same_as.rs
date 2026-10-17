@@ -120,8 +120,8 @@ fn block_violations<Fs: FileSystem>(
 ) -> anyhow::Result<Vec<Violation>> {
     let comparison = Comparison::new(block, file_content).with_context(|| {
         format!(
-            "invalid same-as attributes on {}",
-            block_display(file_path, block)
+            "invalid same-as attributes on block {}",
+            block.label(file_path)
         )
     })?;
     let mut violations = Vec::new();
@@ -160,15 +160,15 @@ fn paths_violation(
     // list as one string, and every mode would act the same.
     let Some(pattern) = &comparison.pattern else {
         bail!(
-            "same-as-paths needs same-as-pattern on {}. To compare whole lines, use \
+            "same-as-paths needs same-as-pattern on block {}. To compare whole lines, use \
              same-as-pattern=\".+\"",
-            block_display(file_path, block)
+            block.label(file_path)
         );
     };
     let invalid_glob = || {
         format!(
-            "invalid same-as-paths glob on {}",
-            block_display(file_path, block)
+            "invalid same-as-paths glob on block {}",
+            block.label(file_path)
         )
     };
     // The glob is written the way the block writes its paths, so a directory ends with `/`.
@@ -205,16 +205,6 @@ fn paths_violation(
         .transpose()
 }
 
-/// How an error message shows `block` in `file_path`, such as `block README.md:services at line 3`.
-fn block_display(file_path: &RepoPath, block: &Block) -> String {
-    format!(
-        "block {}:{} at {}",
-        file_path,
-        block.name_display(),
-        block.declared_at()
-    )
-}
-
 /// Parses the attribute's raw value, naming the block that wrote it so an author can find the
 /// offending reference without searching for it.
 fn parse_references(
@@ -224,8 +214,8 @@ fn parse_references(
 ) -> anyhow::Result<Vec<TargetReference>> {
     TargetReference::parse_list(same_as).with_context(|| {
         format!(
-            "invalid same-as reference on {}",
-            block_display(file_path, block)
+            "invalid same-as reference on block {}",
+            block.label(file_path)
         )
     })
 }
@@ -810,9 +800,8 @@ fn create_violation(
     data: SameAsViolation<'_>,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {file_path}:{} at {} disagrees with {target}: {}",
-        block.name_display(),
-        block.declared_at(),
+        "Block {} disagrees with {target}: {}",
+        block.label(file_path),
         data.reason,
     );
     Ok(Violation::new(

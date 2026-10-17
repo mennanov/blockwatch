@@ -140,7 +140,7 @@ index 1111111..2222222 100644
                     }
                   },
                   "code": "check-ai",
-                  "message": "Block tests/testdata/check_ai/two_blocks.py:(unnamed) defined at line 7 failed AI check: The block does not mention 'banana'. Add it.",
+                  "message": "Block tests/testdata/check_ai/two_blocks.py:(unnamed) at line 7 failed AI check: The block does not mention 'banana'. Add it.",
                   "severity": 1,
                   "data": {
                     "condition": "must mention banana",
@@ -169,7 +169,7 @@ async fn without_a_diff_every_block_in_the_file_is_checked() {
         .assert()
         .failure()
         .stderr(predicates::prelude::predicate::str::contains(
-            "Block tests/testdata/check_ai/two_blocks.py:(unnamed) defined at line 7 failed AI check",
+            "Block tests/testdata/check_ai/two_blocks.py:(unnamed) at line 7 failed AI check",
         ));
 }
 

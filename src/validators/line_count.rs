@@ -32,10 +32,9 @@ impl SyncValidator for LineCountValidator {
                     continue;
                 };
                 let (op, expected) = parse_constraint(expr).map_err(|e| anyhow!(
-                    "line-count expected a comparator like <N, <=N, ==N, >=N, >N; got \"{}\" in {file_path}:{} at {} (error: {})",
+                    "line-count expected a comparator like <N, <=N, ==N, >=N, >N; got \"{}\" in {} (error: {})",
                     expr,
-                    block_with_context.block.name_display(),
-                    block_with_context.block.declared_at(),
+                    block_with_context.block.label(file_path),
                     e
                 ))?;
                 let actual = if block_with_context
@@ -87,9 +86,8 @@ fn create_violation(
     actual: usize,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {block_file_path}:{} defined at {} has {} lines, which does not satisfy {}{}",
-        block.name_display(),
-        block.declared_at(),
+        "Block {} has {} lines, which does not satisfy {}{}",
+        block.label(block_file_path),
         actual,
         operation.as_str(),
         expected
@@ -217,7 +215,7 @@ mod tests {
         assert_eq!(file2_violations[0].code, Validator::LineCount);
         assert_eq!(
             file2_violations[0].message,
-            "Block example.py:(unnamed) defined at line 1 has 3 lines, which does not satisfy <3"
+            "Block example.py:(unnamed) at line 1 has 3 lines, which does not satisfy <3"
         );
         assert_eq!(
             file2_violations[0].data,
@@ -231,7 +229,7 @@ mod tests {
         assert_eq!(file2_violations[1].code, Validator::LineCount);
         assert_eq!(
             file2_violations[1].message,
-            "Block example.py:(unnamed) defined at line 6 has 4 lines, which does not satisfy <=3"
+            "Block example.py:(unnamed) at line 6 has 4 lines, which does not satisfy <=3"
         );
         assert_eq!(
             file2_violations[1].data,
@@ -245,7 +243,7 @@ mod tests {
         assert_eq!(file2_violations[2].code, Validator::LineCount);
         assert_eq!(
             file2_violations[2].message,
-            "Block example.py:(unnamed) defined at line 12 has 4 lines, which does not satisfy ==3"
+            "Block example.py:(unnamed) at line 12 has 4 lines, which does not satisfy ==3"
         );
         assert_eq!(
             file2_violations[2].data,
@@ -259,7 +257,7 @@ mod tests {
         assert_eq!(file2_violations[3].code, Validator::LineCount);
         assert_eq!(
             file2_violations[3].message,
-            "Block example.py:(unnamed) defined at line 18 has 2 lines, which does not satisfy ==3"
+            "Block example.py:(unnamed) at line 18 has 2 lines, which does not satisfy ==3"
         );
         assert_eq!(
             file2_violations[3].data,
@@ -273,7 +271,7 @@ mod tests {
         assert_eq!(file2_violations[4].code, Validator::LineCount);
         assert_eq!(
             file2_violations[4].message,
-            "Block example.py:(unnamed) defined at line 22 has 2 lines, which does not satisfy >=3"
+            "Block example.py:(unnamed) at line 22 has 2 lines, which does not satisfy >=3"
         );
         assert_eq!(
             file2_violations[4].data,
@@ -287,7 +285,7 @@ mod tests {
         assert_eq!(file2_violations[5].code, Validator::LineCount);
         assert_eq!(
             file2_violations[5].message,
-            "Block example.py:(unnamed) defined at line 26 has 3 lines, which does not satisfy >3"
+            "Block example.py:(unnamed) at line 26 has 3 lines, which does not satisfy >3"
         );
         assert_eq!(
             file2_violations[5].data,

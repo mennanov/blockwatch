@@ -574,7 +574,7 @@ Nothing else about the run changes: the same violations are found, and the exit 
           "ruleId": "keep-sorted",
           "ruleIndex": 0,
           "level": "error",
-          "message": { "text": "Block fruits.py:fruits defined at line 2 has an out-of-order line 4 (asc)" },
+          "message": { "text": "Block fruits.py:fruits at line 2 has an out-of-order line 4 (asc)" },
           "locations": [
             {
               "physicalLocation": {

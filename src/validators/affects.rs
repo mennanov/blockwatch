@@ -210,10 +210,8 @@ fn parse_references(
 ) -> anyhow::Result<Vec<TargetReference>> {
     TargetReference::parse_list(affects).with_context(|| {
         format!(
-            "invalid affects reference on block {}:{} at {}",
-            file_path,
-            block.name_display(),
-            block.declared_at(),
+            "invalid affects reference on block {}",
+            block.label(file_path),
         )
     })
 }
@@ -258,9 +256,8 @@ fn symbol_reference_violation<Fs: FileSystem>(
         Ok(target_modified) => target_modified,
         Err(reason) => {
             let message = format!(
-                "Block {file_path}:{} at {} references {target}: {reason}",
-                block.name_display(),
-                block.declared_at(),
+                "Block {} references {target}: {reason}",
+                block.label(file_path),
             );
             return Ok(Some(affects_violation(file_path, block, target, message)?));
         }
@@ -332,9 +329,8 @@ fn create_violation(
     target: &ResolvedTarget,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {modified_block_file_path}:{} at {} is modified, but {target} is not",
-        modified_block.name_display(),
-        modified_block.declared_at(),
+        "Block {} is modified, but {target} is not",
+        modified_block.label(modified_block_file_path),
     );
     affects_violation(modified_block_file_path, modified_block, target, message)
 }
@@ -348,9 +344,8 @@ fn dangling_reference_violation(
     target: &ResolvedTarget,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {referencing_block_file_path}:{} at {} references {target}, which does not exist",
-        referencing_block.name_display(),
-        referencing_block.declared_at(),
+        "Block {} references {target}, which does not exist",
+        referencing_block.label(referencing_block_file_path),
     );
     affects_violation(
         referencing_block_file_path,

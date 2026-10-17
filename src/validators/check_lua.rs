@@ -111,9 +111,8 @@ impl<Fs: FileSystem + 'static> AsyncValidator for CheckLuaValidator<Fs> {
                 if let Some(script_path) = block_with_context.block.attributes.get("check-lua") {
                     if script_path.trim().is_empty() {
                         return Err(anyhow!(
-                            "check-lua requires a non-empty script path in {file_path}:{} at {}",
-                            block_with_context.block.name_display(),
-                            block_with_context.block.declared_at()
+                            "check-lua requires a non-empty script path in {}",
+                            block_with_context.block.label(file_path)
                         ));
                     };
                 } else {
@@ -161,9 +160,8 @@ impl<Fs: FileSystem + 'static> AsyncValidator for CheckLuaValidator<Fs> {
                     .await;
 
                     let block_violations = match result.context(format!(
-                        "check-lua script error in {file_path}:{} at {}",
-                        block_with_context.block.name_display(),
-                        block_with_context.block.declared_at()
+                        "check-lua script error in {}",
+                        block_with_context.block.label(&file_path)
                     ))? {
                         None => Vec::new(),
                         Some(msg) => vec![create_violation(
@@ -461,9 +459,8 @@ fn create_violation(
         lua_error: error_message,
     })?;
     let message = format!(
-        "Block {file_path}:{} defined at {} failed Lua check: {error_message}",
-        block.name_display(),
-        block.declared_at(),
+        "Block {} failed Lua check: {error_message}",
+        block.label(file_path),
     );
     Ok(Violation::new(
         block.start_tag_position_range.clone().into(),
@@ -507,10 +504,8 @@ fn resolve_affected_targets<Fs: FileSystem>(
     };
     let references = TargetReference::parse_list(affects).with_context(|| {
         format!(
-            "invalid affects reference on block {}:{} at {}",
-            current_file_path,
-            block.name_display(),
-            block.declared_at(),
+            "invalid affects reference on block {}",
+            block.label(current_file_path),
         )
     })?;
     let mut files = TargetFiles::new(context, file_system);
@@ -646,7 +641,7 @@ end
         assert_eq!(violation.code, Validator::CheckLua);
         assert_eq!(
             violation.message,
-            "Block example.py:(unnamed) defined at line 1 failed Lua check: block content is invalid"
+            "Block example.py:(unnamed) at line 1 failed Lua check: block content is invalid"
         );
         assert_eq!(
             violation.data,

@@ -91,7 +91,7 @@ index ca94c7e..8a99694 100644
                     }
                   },
                   "code": "line-pattern",
-                  "message": "Block tests/testdata/line_pattern/hex_and_word_patterns.py:(unnamed) defined at line 11 has a non-matching line 13 (pattern: /'[A-Z]+'/)",
+                  "message": "Block tests/testdata/line_pattern/hex_and_word_patterns.py:(unnamed) at line 11 has a non-matching line 13 (pattern: /'[A-Z]+'/)",
                   "severity": 1,
                   "data": {
                     "pattern": "'[A-Z]+'"

@@ -87,7 +87,7 @@ line-pattern = '^\d+\.\d+\.\d+$'
     // The rule is written in the config file, so the message shows the line there.
     assert_eq!(
         violation["message"],
-        "Block package.json:(unnamed) defined at line 1 of \"blockwatch.toml\" has a \
+        "Block package.json:(unnamed) at line 1 of \"blockwatch.toml\" has a \
          non-matching line 2 (pattern: /^\\d+\\.\\d+\\.\\d+$/)"
     );
     Ok(())

@@ -57,9 +57,8 @@ impl<C: AiClient + 'static> AsyncValidator for CheckAiValidator<C> {
                 if let Some(condition) = block_with_context.block.attributes.get("check-ai") {
                     if condition.trim().is_empty() {
                         return Err(anyhow!(
-                            "check-ai requires a non-empty condition in {file_path}:{} at {}",
-                            block_with_context.block.name_display(),
-                            block_with_context.block.declared_at()
+                            "check-ai requires a non-empty condition in {}",
+                            block_with_context.block.label(file_path)
                         ));
                     };
                 } else {
@@ -130,9 +129,8 @@ fn create_violation(
     ai_message: &str,
 ) -> anyhow::Result<Violation> {
     let error_message = format!(
-        "Block {file_path}:{} defined at {} failed AI check: {ai_message}",
-        block.name_display(),
-        block.declared_at(),
+        "Block {} failed AI check: {ai_message}",
+        block.label(file_path),
     );
     block_violation(
         file_path,
@@ -153,9 +151,8 @@ fn create_pattern_no_match_violation(
     pattern: &str,
 ) -> anyhow::Result<Violation> {
     let error_message = format!(
-        "Block {file_path}:{} defined at {} was not checked: check-ai-pattern \"{pattern}\" matched nothing in the block",
-        block.name_display(),
-        block.declared_at(),
+        "Block {} was not checked: check-ai-pattern \"{pattern}\" matched nothing in the block",
+        block.label(file_path),
     );
     block_violation(
         file_path,
@@ -216,9 +213,8 @@ fn process_ai_response(
     result: anyhow::Result<Option<String>>,
 ) -> anyhow::Result<Option<Violation>> {
     match result.context(format!(
-        "check-ai API error in {file_path}:{} at {}",
-        block_with_context.block.name_display(),
-        block_with_context.block.declared_at()
+        "check-ai API error in {}",
+        block_with_context.block.label(file_path)
     ))? {
         None => Ok(None),
         Some(msg) => Ok(Some(create_violation(
@@ -402,7 +398,7 @@ I like apples
         assert_eq!(violation.code, Validator::CheckAi);
         assert_eq!(
             violation.message,
-            "Block example.py:(unnamed) defined at line 1 failed AI check: The block does not mention 'banana'. Add it."
+            "Block example.py:(unnamed) at line 1 failed AI check: The block does not mention 'banana'. Add it."
         );
         assert_eq!(
             violation.data,
@@ -567,7 +563,7 @@ I like apples
         assert_eq!(file_violations[0].code, Validator::CheckAi);
         assert_eq!(
             file_violations[0].message,
-            "Block example.py:(unnamed) defined at line 1 was not checked: check-ai-pattern \"zzz_no_match\" matched nothing in the block"
+            "Block example.py:(unnamed) at line 1 was not checked: check-ai-pattern \"zzz_no_match\" matched nothing in the block"
         );
         assert_eq!(
             file_violations[0].data,

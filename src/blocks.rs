@@ -70,6 +70,24 @@ pub(crate) enum Declaration {
     ConfigEntry(ConfigEntry),
 }
 
+/// A block and its file, written the way messages refer to the block. [`Block::label`] makes it.
+pub(crate) struct BlockLabel<'a> {
+    file: &'a RepoPath,
+    block: &'a Block,
+}
+
+impl fmt::Display for BlockLabel<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}:{} at {}",
+            self.file,
+            self.block.name_display(),
+            self.block.declared_at()
+        )
+    }
+}
+
 /// What tells a block apart from the other blocks of its file.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct BlockKey {
@@ -298,6 +316,12 @@ impl Block {
             Declaration::Tags => format!("line {}", self.start_tag_position_range.start.line),
             Declaration::ConfigEntry(entry) => entry.to_string(),
         }
+    }
+
+    /// How a message refers to this block, which is in `file`: `FILE:NAME at WHERE`, such as
+    /// `src/a.rs:limits at line 3`.
+    pub(crate) fn label<'a>(&'a self, file: &'a RepoPath) -> BlockLabel<'a> {
+        BlockLabel { file, block: self }
     }
 
     /// What tells the block apart from the other blocks of its file.

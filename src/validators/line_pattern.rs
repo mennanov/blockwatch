@@ -76,9 +76,8 @@ fn compile_attribute<'b>(
     };
     let re = compile_pattern(pattern).map_err(|e| {
         anyhow!(
-            "{attribute} expected a valid regular expression, got \"{pattern}\" in {file_path}:{} at {} (error: {e})",
-            block.name_display(),
-            block.declared_at(),
+            "{attribute} expected a valid regular expression, got \"{pattern}\" in {} (error: {e})",
+            block.label(file_path),
         )
     })?;
     Ok(Some((pattern.as_str(), re)))
@@ -194,11 +193,7 @@ fn create_violation(
             "the forbidden text \"{text}\" on line {line_number} (pattern: /{forbidden_pattern}/)"
         ),
     };
-    let message = format!(
-        "Block {block_file_path}:{} defined at {} has {failure}",
-        block.name_display(),
-        block.declared_at(),
-    );
+    let message = format!("Block {} has {failure}", block.label(block_file_path));
     Ok(Violation::new(
         range,
         block_file_path,
@@ -242,7 +237,7 @@ mod validate_tests {
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,
-            "Block example.py:(unnamed) defined at line 1 has a non-matching line 3 (pattern: /^[A-Z]+$/)"
+            "Block example.py:(unnamed) at line 1 has a non-matching line 3 (pattern: /^[A-Z]+$/)"
         );
         assert_eq!(file_violations[0].code, Validator::LinePattern);
         assert_eq!(
@@ -315,7 +310,7 @@ green = "red"
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,
-            r#"Block example.py:(unnamed) defined at line 1 has the forbidden text "red" on line 3 (pattern: /red/)"#
+            r#"Block example.py:(unnamed) at line 1 has the forbidden text "red" on line 3 (pattern: /red/)"#
         );
         assert_eq!(file_violations[0].code, Validator::LinePattern);
         // `red` starts at character 9, but at byte 10, because `é` takes two bytes.
@@ -370,8 +365,8 @@ red
         assert_eq!(
             messages,
             vec![
-                "Block example.py:non-matching defined at line 1 has a non-matching line 2 (pattern: /^[a-z]+$/)",
-                r#"Block example.py:forbidden defined at line 4 has the forbidden text "red" on line 5 (pattern: /red/)"#,
+                "Block example.py:non-matching at line 1 has a non-matching line 2 (pattern: /^[a-z]+$/)",
+                r#"Block example.py:forbidden at line 4 has the forbidden text "red" on line 5 (pattern: /red/)"#,
             ]
         );
         Ok(())

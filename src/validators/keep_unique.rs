@@ -55,9 +55,8 @@ impl SyncValidator for KeepUniqueValidator {
                         Some(Err(e)) => {
                             // Invalid regex: return an error for the validator
                             return Err(anyhow::anyhow!(
-                                "Invalid keep-unique regex pattern for block {file_path}:{} defined at {}: {}",
-                                block_with_context.block.name_display(),
-                                block_with_context.block.declared_at(),
+                                "Invalid keep-unique regex pattern for block {}: {}",
+                                block_with_context.block.label(file_path),
                                 e
                             ));
                         }
@@ -109,9 +108,8 @@ fn create_violation(
     violation_character_end: usize,
 ) -> Violation {
     let message = format!(
-        "Block {block_file_path}:{} defined at {} has a duplicated line {}",
-        block.name_display(),
-        block.declared_at(),
+        "Block {} has a duplicated line {}",
+        block.label(block_file_path),
         violation_line_number,
     );
     Violation::new(
@@ -164,7 +162,7 @@ BB
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,
-            "Block example.py:(unnamed) defined at line 1 has a duplicated line 5"
+            "Block example.py:(unnamed) at line 1 has a duplicated line 5"
         );
         assert_eq!(file_violations[0].code, Validator::KeepUnique);
         // Entire line is in the range.

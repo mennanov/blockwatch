@@ -67,7 +67,7 @@ index 366590e..82c1f16 100644
                     }
                   },
                   "code": "keep-sorted",
-                  "message": "Block tests/testdata/keep_sorted/orderings.py:(unnamed) defined at line 10 has an out-of-order line 13 (desc)",
+                  "message": "Block tests/testdata/keep_sorted/orderings.py:(unnamed) at line 10 has an out-of-order line 13 (desc)",
                   "severity": 1,
                   "data": {
                     "order_by": "desc",
@@ -139,7 +139,7 @@ index 1111111..2222222 100644
                     }
                   },
                   "code": "keep-sorted",
-                  "message": "Block tests/testdata/keep_sorted/orderings.py:(unnamed) defined at line 26 has an out-of-order line 29 (asc)",
+                  "message": "Block tests/testdata/keep_sorted/orderings.py:(unnamed) at line 26 has an out-of-order line 29 (asc)",
                   "severity": 1,
                   "data": {
                     "order_by": "asc",
@@ -213,7 +213,7 @@ index 1111111..2222222 100644
                     }
                   },
                   "code": "keep-sorted",
-                  "message": "Block tests/testdata/keep_sorted/orderings.py:(unnamed) defined at line 50 has an out-of-order line 53 (asc)",
+                  "message": "Block tests/testdata/keep_sorted/orderings.py:(unnamed) at line 50 has an out-of-order line 53 (asc)",
                   "severity": 1,
                   "data": {
                     "order_by": "asc",
@@ -263,7 +263,7 @@ index 1111111..2222222 100644
                     }
                   },
                   "code": "keep-sorted",
-                  "message": "Block tests/testdata/keep_sorted/orderings.py:(unnamed) defined at line 34 has an out-of-order line 36 (asc)",
+                  "message": "Block tests/testdata/keep_sorted/orderings.py:(unnamed) at line 34 has an out-of-order line 36 (asc)",
                   "severity": 1,
                   "data": {
                     "order_by": "asc",

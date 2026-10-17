@@ -65,11 +65,7 @@ impl SyncValidator for KeepSortedValidator {
             for block_with_context in &file_blocks.blocks_with_context {
                 if let Some(keep_sorted) = block_with_context.block.attributes.get("keep-sorted") {
                     let located = |error: anyhow::Error| {
-                        anyhow!(
-                            "{error} in {file_path}:{} at {}",
-                            block_with_context.block.name_display(),
-                            block_with_context.block.declared_at()
-                        )
+                        anyhow!("{error} in {}", block_with_context.block.label(file_path))
                     };
                     let order = if keep_sorted.trim().is_empty() {
                         SortOrder::default()
@@ -122,9 +118,8 @@ impl SyncValidator for KeepSortedValidator {
                             Some(Ok(regex)) => regex_value(line, regex),
                             Some(Err(e)) => {
                                 return Err(anyhow!(
-                                    "Invalid keep-sorted-pattern expression in block {file_path}:{} defined at {}: {}",
-                                    block_with_context.block.name_display(),
-                                    block_with_context.block.declared_at(),
+                                    "Invalid keep-sorted-pattern expression in block {}: {}",
+                                    block_with_context.block.label(file_path),
                                     e
                                 ));
                             }
@@ -135,9 +130,8 @@ impl SyncValidator for KeepSortedValidator {
                                 let cmp =
                                     sort_format.cmp(prev_val, curr_val).with_context(|| {
                                         format!(
-                                            "in block {file_path}:{} defined at {}",
-                                            block_with_context.block.name_display(),
-                                            block_with_context.block.declared_at(),
+                                            "in block {}",
+                                            block_with_context.block.label(file_path),
                                         )
                                     })?;
                                 if cmp == violating_ord {
@@ -190,9 +184,8 @@ fn create_violation(
     violation_character_end: usize,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {block_file_path}:{} defined at {} has an out-of-order line {violation_line_number} ({keep_sorted_value})",
-        block.name_display(),
-        block.declared_at(),
+        "Block {} has an out-of-order line {violation_line_number} ({keep_sorted_value})",
+        block.label(block_file_path),
     );
     Ok(Violation::new(
         ViolationRange::new(
@@ -341,7 +334,7 @@ mod validate_tests {
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,
-            "Block example.py:(unnamed) defined at line 1 has an out-of-order line 5 (asc)"
+            "Block example.py:(unnamed) at line 1 has an out-of-order line 5 (asc)"
         );
         assert_eq!(file_violations[0].code, Validator::KeepSorted);
         assert_eq!(
@@ -379,7 +372,7 @@ mod validate_tests {
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,
-            "Block example.py:(unnamed) defined at line 1 has an out-of-order line 4 (desc)"
+            "Block example.py:(unnamed) at line 1 has an out-of-order line 4 (desc)"
         );
         assert_eq!(file_violations[0].code, Validator::KeepSorted);
         assert_eq!(
@@ -469,7 +462,7 @@ mod validate_tests {
             .unwrap();
         assert_eq!(
             file_violations[0].message,
-            "Block example.py:(unnamed) defined at line 1 has an out-of-order line 3 (asc)"
+            "Block example.py:(unnamed) at line 1 has an out-of-order line 3 (asc)"
         );
         Ok(())
     }
@@ -693,7 +686,7 @@ mod validate_tests {
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,
-            "Block example.py:(unnamed) defined at line 1 has an out-of-order line 4 (asc)"
+            "Block example.py:(unnamed) at line 1 has an out-of-order line 4 (asc)"
         );
         assert_eq!(file_violations[0].code, Validator::KeepSorted);
         assert_eq!(
@@ -724,7 +717,7 @@ mod validate_tests {
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,
-            "Block example.py:(unnamed) defined at line 1 has an out-of-order line 4 (desc)"
+            "Block example.py:(unnamed) at line 1 has an out-of-order line 4 (desc)"
         );
         Ok(())
     }
@@ -780,7 +773,7 @@ mod validate_tests {
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,
-            "Block example.py:(unnamed) defined at line 1 has an out-of-order line 4 (asc)"
+            "Block example.py:(unnamed) at line 1 has an out-of-order line 4 (asc)"
         );
         Ok(())
     }
@@ -890,7 +883,7 @@ mod validate_tests {
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,
-            "Block example.py:(unnamed) defined at line 1 has an out-of-order line 3 (asc)"
+            "Block example.py:(unnamed) at line 1 has an out-of-order line 3 (asc)"
         );
         Ok(())
     }
@@ -915,7 +908,7 @@ mod validate_tests {
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,
-            "Block example.py:(unnamed) defined at line 1 has an out-of-order line 3 (asc)"
+            "Block example.py:(unnamed) at line 1 has an out-of-order line 3 (asc)"
         );
         Ok(())
     }
@@ -970,7 +963,7 @@ mod validate_tests {
         assert_eq!(file_violations.len(), 1);
         assert_eq!(
             file_violations[0].message,
-            "Block example.py:(unnamed) defined at line 1 has an out-of-order line 3 (asc)"
+            "Block example.py:(unnamed) at line 1 has an out-of-order line 3 (asc)"
         );
         Ok(())
     }

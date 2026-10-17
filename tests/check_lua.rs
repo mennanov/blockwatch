@@ -77,7 +77,7 @@ index 1111111..2222222 100644
                     }
                   },
                   "code": "check-lua",
-                  "message": "Block tests/testdata/check_lua/success_and_failure.py:(unnamed) defined at line 10 failed Lua check: block content is invalid",
+                  "message": "Block tests/testdata/check_lua/success_and_failure.py:(unnamed) at line 10 failed Lua check: block content is invalid",
                   "severity": 1,
                   "data": {
                     "script": "tests/testdata/check_lua/fail.lua",

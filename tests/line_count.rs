@@ -78,7 +78,7 @@ index 6781fec..4ce6a3b 100644
                     }
                   },
                   "code": "line-count",
-                  "message": "Block tests/testdata/line_count/equality_and_greater_than.py:(unnamed) defined at line 12 has 3 lines, which does not satisfy >3",
+                  "message": "Block tests/testdata/line_count/equality_and_greater_than.py:(unnamed) at line 12 has 3 lines, which does not satisfy >3",
                   "severity": 1,
                   "data": {
                     "actual": 3,

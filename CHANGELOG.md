@@ -19,6 +19,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   `keep-sorted-format` did not list them before.
 - `same-as-mode`, `same-as-format` and `BLOCKWATCH_LUA_MODE` ignore upper and lower case, so `Numeric` and `Safe` work
   like `numeric` and `safe`. `keep-sorted` and `keep-sorted-format` already did.
+- A message about a block of `keep-sorted`, `keep-unique`, `line-count`, `line-pattern`, `check-ai` or `check-lua` now
+  says `at line 3` where it said `defined at line 3`, as the messages of `affects` and `same-as` always did. For
+  example: `Block src/a.rs:limits at line 3 has an out-of-order line 5 (asc)`.
 
 ## [0.14.0] - 2026-10-16
 

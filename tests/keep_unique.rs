@@ -78,7 +78,7 @@ index d69398d..9b29f11 100644
                     }
                   },
                   "code": "keep-unique",
-                  "message": "Block tests/testdata/keep_unique/basic_and_pattern.py:(unnamed) defined at line 10 has a duplicated line 13",
+                  "message": "Block tests/testdata/keep_unique/basic_and_pattern.py:(unnamed) at line 10 has a duplicated line 13",
                   "severity": 1,
                 }
               ]
