@@ -46,7 +46,7 @@ struct ReportSummary {
     blocks: usize,
     blocks_unchecked: usize,
     /// Blocks carrying a rule that cannot fire unless a diff is supplied; see
-    /// [`crate::validators::DIFF_GATED_VALIDATORS`].
+    /// [`crate::validators::Validator::needs_diff`].
     #[serde(skip_serializing_if = "Option::is_none")]
     blocks_needing_diff: Option<usize>,
     checks: usize,

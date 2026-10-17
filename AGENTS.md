@@ -15,6 +15,8 @@ only the lines changed in a unified diff piped into it.
 cargo run -- list '<path or glob>'         # print the blocks parsed from matching files, as JSON
 cargo llvm-cov                             # run the tests and report coverage
 cargo clippy --all-targets -- -D warnings  # lint
+cargo test --doc                           # run the examples in the doc comments (cargo llvm-cov skips them)
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items  # check the doc comments
 markdownlint-cli2                          # lint Markdown (config: .markdownlint-cli2.yaml)
 pre-commit run --all-files                 # run every hook the repository installs
 ```

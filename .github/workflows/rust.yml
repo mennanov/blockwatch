@@ -33,6 +33,14 @@ jobs:
         run: cargo fmt --check
       - name: Run Clippy lint
         run: cargo clippy --all-targets -- -D warnings
+      - name: Check the doc comments
+        # Nearly every item is private, so without the flag rustdoc would skip their docs.
+        run: cargo doc --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: -D warnings
+      # `cargo llvm-cov` below does not run doctests.
+      - name: Run doctests
+        run: cargo test --doc
       - name: Run tests
         run: cargo llvm-cov --lcov --output-path coverage.lcov
       - name: Upload coverage report to Codecov

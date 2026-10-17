@@ -9,6 +9,8 @@
 // blockwatch is a program, not a library. The library exists only for the binary and the fuzz
 // targets, so nothing but `run` and `count_rust_blocks` may be `pub`. This lint catches any other.
 #![warn(unreachable_pub)]
+// A `pub` item is all the binary and the fuzz target see of this crate, so each one needs a doc.
+#![warn(missing_docs)]
 // Slicing a `str` panics when an index falls inside a multi-byte character, such as `é`. So each
 // slice outside tests needs an `expect` that says why its indexes are on character boundaries.
 #![cfg_attr(not(test), warn(clippy::string_slice))]

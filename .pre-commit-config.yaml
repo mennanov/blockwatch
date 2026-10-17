@@ -34,6 +34,15 @@ repos:
         types: [ rust ]
         stages: [ pre-commit ]
         pass_filenames: false
+      - id: cargo-doc
+        name: cargo doc
+        description: Check the doc comments with rustdoc, private items included.
+        # Nearly every item is private, so without the flag rustdoc would skip their docs.
+        entry: bash -c 'RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items'
+        language: system
+        types: [ rust ]
+        stages: [ pre-commit ]
+        pass_filenames: false
 
   # Rules and the set of files linted live in `.markdownlint-cli2.yaml`, which the tool picks up
   # from the repository root. The hook passes only the staged Markdown files, so a commit is judged

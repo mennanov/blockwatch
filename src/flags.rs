@@ -244,6 +244,8 @@ pub(crate) struct ValidationFlags {
     /// The address is FILE[:BLOCK_NAME[:VALIDATOR[:HASH]]]: the shorter it is, the more it covers,
     /// from a single violation down to every violation in a file. The violations are still
     /// reported. Repeat the flag to suppress more.
+    // clap prints this doc comment as the `--help` text, so the brackets can't be escaped.
+    #[allow(rustdoc::broken_intra_doc_links)]
     #[arg(
         long = "suppress",
         value_name = "ADDRESS",
