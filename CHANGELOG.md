@@ -22,6 +22,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - A message about a block of `keep-sorted`, `keep-unique`, `line-count`, `line-pattern`, `check-ai` or `check-lua` now
   says `at line 3` where it said `defined at line 3`, as the messages of `affects` and `same-as` always did. For
   example: `Block src/a.rs:limits at line 3 has an out-of-order line 5 (asc)`.
+- Every error now starts with a lowercase letter and has no period at the end. Before, about 30 started with a capital
+  letter or ended with a period. For example: `failed to read file "a.py"`, `could not find the repository root
+  directory` and `malformed block tag at line 1, column 4. If this is not meant as a tag, put it in backticks`. An
+  error that gives advice in a second sentence keeps that sentence. An error that starts with a name, such as `API` or
+  `Lua`, keeps its capital letter.
 
 ## [0.14.0] - 2026-10-16
 

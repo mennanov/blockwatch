@@ -408,7 +408,7 @@ fn parse_suppressions(content: &str, path: &Path) -> anyhow::Result<Vec<Violatio
 fn parse_extensions(s: &str) -> anyhow::Result<(String, String)> {
     s.split_once('=')
         .map(|(key, value)| (key.trim().to_string(), value.trim().to_string()))
-        .with_context(|| format!("Invalid KEY=VALUE format: {s}"))
+        .with_context(|| format!("invalid KEY=VALUE format: {s}"))
 }
 
 #[cfg(test)]

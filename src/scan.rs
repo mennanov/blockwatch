@@ -218,7 +218,7 @@ impl<'a, F: FileSystem> Scan<'a, F> {
         let mut parsed = ParsedBlocks::default();
         for repo_path_result in self.file_system.walk(None) {
             let file_path =
-                repo_path_result.map_err(|err| anyhow!("Failed to walk directory: {err}"))?;
+                repo_path_result.map_err(|err| anyhow!("failed to walk directory: {err}"))?;
             if !self.path_filter.is_selected(file_path.as_path()) {
                 continue;
             }
@@ -290,7 +290,7 @@ impl<'a, F: FileSystem> Scan<'a, F> {
 }
 
 fn invalid_diff_target_message(file_path: &RepoPath) -> String {
-    format!("diff target \"{file_path}\" does not exist in the repository root.")
+    format!("diff target \"{file_path}\" does not exist in the repository root")
 }
 
 /// Parses the blocks of one file, marking the ones `line_changes` touched and keeping those
@@ -322,8 +322,9 @@ pub(crate) fn parse_file(
             if non_utf8_file_has_blocks(parser, file_path, error.as_bytes(), virtual_blocks) =>
         {
             bail!(
-                "file {file_path:?} is not valid UTF-8, so its blocks can't be read. Save it as \
-                 UTF-8, or skip it with `ignore` in the config file or with `--ignore`."
+                "file \"{}\" is not valid UTF-8, so its blocks can't be read. Save it as \
+                 UTF-8, or skip it with `ignore` in the config file or with `--ignore`",
+                file_path.display()
             );
         }
         // No block refers into a file without blocks, so its text is not kept.
@@ -461,7 +462,7 @@ fn tag_blocks(
             Err(_) => true,
         })
         .collect::<anyhow::Result<Vec<_>>>()
-        .with_context(|| format!("Failed to parse file {file_path:?}"))
+        .with_context(|| format!("failed to parse file \"{}\"", file_path.display()))
 }
 
 /// The blocks that `virtual_blocks` declare in `source`, the text of `file_path`, with what
@@ -530,7 +531,7 @@ fn reject_duplicate_name(
     match names_seen.entry(name.to_string()) {
         Entry::Occupied(entry) => {
             bail!(
-                "Block {}:{} at {} duplicates the name of the block at {}",
+                "block {}:{} at {} duplicates the name of the block at {}",
                 file_path.display(),
                 name,
                 block.declared_at(),
@@ -1484,7 +1485,7 @@ mod parse_blocks_tests {
 
         assert_eq!(
             format!("{error:#}"),
-            "diff target \"a.py\" does not exist in the repository root."
+            "diff target \"a.py\" does not exist in the repository root"
         );
         Ok(())
     }
@@ -1509,7 +1510,7 @@ mod parse_blocks_tests {
 
         let message = format!("{error:#}");
         assert!(
-            message.contains("diff target \"gone.py\" does not exist in the repository root."),
+            message.contains("diff target \"gone.py\" does not exist in the repository root"),
             "unexpected error: {message}"
         );
         Ok(())
@@ -1534,7 +1535,7 @@ mod parse_blocks_tests {
 
         let message = format!("{error:#}");
         assert!(
-            message.contains("Failed to parse file"),
+            message.contains("failed to parse file"),
             "unexpected error: {message}"
         );
         assert!(
@@ -1666,7 +1667,7 @@ mod parse_blocks_tests {
         assert!(file_blocks.is_err());
         assert_eq!(
             file_blocks.unwrap_err().source().unwrap().to_string(),
-            "Block x at line 1 contains unrecognized attribute `unknown-attr`"
+            "block x at line 1 contains unrecognized attribute `unknown-attr`"
         );
         Ok(())
     }
@@ -1690,7 +1691,7 @@ mod parse_blocks_tests {
         assert!(file_blocks.is_err());
         assert_eq!(
             file_blocks.unwrap_err().source().unwrap().to_string(),
-            "Block (unnamed) at line 1 contains unrecognized severity value `invalid-severity`"
+            "block (unnamed) at line 1 contains unrecognized severity value `invalid-severity`"
         );
         Ok(())
     }
@@ -1714,7 +1715,7 @@ mod parse_blocks_tests {
         assert!(file_blocks.is_err());
         assert_eq!(
             file_blocks.unwrap_err().source().unwrap().to_string(),
-            "Block a.py:x at line 4 duplicates the name of the block at line 1"
+            "block a.py:x at line 4 duplicates the name of the block at line 1"
         );
         Ok(())
     }
@@ -1739,7 +1740,7 @@ mod parse_blocks_tests {
         assert!(file_blocks.is_err());
         assert_eq!(
             file_blocks.unwrap_err().source().unwrap().to_string(),
-            "Unexpected closed block at line 2, column 3. If this is not meant as a tag, put it in backticks."
+            "unexpected closed block at line 2, column 3. If this is not meant as a tag, put it in backticks"
         );
         Ok(())
     }
@@ -1764,7 +1765,7 @@ mod parse_blocks_tests {
         assert!(file_blocks.is_err());
         assert_eq!(
             file_blocks.unwrap_err().source().unwrap().to_string(),
-            "Block at line 1, column 3 is not closed. If this is not meant as a tag, put it in backticks."
+            "block at line 1, column 3 is not closed. If this is not meant as a tag, put it in backticks"
         );
         Ok(())
     }
@@ -2120,7 +2121,7 @@ mod parse_blocks_tests {
 
         assert_eq!(
             format!("{error:#}"),
-            "Block a.json:n at line 7 of \"blockwatch.toml\" duplicates the name of the block at \
+            "block a.json:n at line 7 of \"blockwatch.toml\" duplicates the name of the block at \
              line 3"
         );
         Ok(())

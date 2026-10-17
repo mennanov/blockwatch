@@ -34,7 +34,7 @@ impl RawSettings {
             .ignore
             .iter()
             .map(|glob| {
-                Glob::new(glob).with_context(|| format!("Invalid ignore glob pattern: {glob}"))
+                Glob::new(glob).with_context(|| format!("invalid ignore glob pattern: {glob}"))
             })
             .collect::<anyhow::Result<_>>()?;
         let extensions = self
@@ -43,7 +43,7 @@ impl RawSettings {
             .map(|(key, value)| {
                 let language = OsString::from(value);
                 if !supported_extensions.contains(&language) {
-                    bail!("Unsupported extension mapping: {key}={value}");
+                    bail!("unsupported extension mapping: {key}={value}");
                 }
                 Ok((OsString::from(key), language))
             })
@@ -134,7 +134,7 @@ impl Settings {
         Ok(Settings {
             ignored_globs: ignored_globs
                 .build()
-                .context("Failed to build ignore glob set")?,
+                .context("failed to build ignore glob set")?,
             extensions,
             validator_selection,
             block_selection,
@@ -509,7 +509,7 @@ mod tests {
             disable: to_string_vec(&["keep-sorted", "keep-tidy"]),
             ..RawSettings::default()
         });
-        assert!(error.contains("Unknown validator: keep-tidy"), "{error}");
+        assert!(error.contains("unknown validator: keep-tidy"), "{error}");
     }
 
     #[test]

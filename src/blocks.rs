@@ -279,7 +279,7 @@ impl Block {
                     .get("name")
                     .map_or(UNNAMED_BLOCK_LABEL, String::as_str);
                 anyhow!(
-                    "Block {name} at line {} contains {error}",
+                    "block {name} at line {} contains {error}",
                     start_tag_position_range.start.line
                 )
             })?;

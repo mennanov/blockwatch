@@ -118,7 +118,7 @@ impl SyncValidator for KeepSortedValidator {
                             Some(Ok(regex)) => regex_value(line, regex),
                             Some(Err(e)) => {
                                 return Err(anyhow!(
-                                    "Invalid keep-sorted-pattern expression in block {}: {}",
+                                    "invalid keep-sorted-pattern expression in block {}: {}",
                                     block_with_context.block.label(file_path),
                                     e
                                 ));
@@ -646,7 +646,7 @@ mod validate_tests {
             result
                 .unwrap_err()
                 .to_string()
-                .contains("Invalid keep-sorted-pattern expression")
+                .contains("invalid keep-sorted-pattern expression")
         );
 
         Ok(())

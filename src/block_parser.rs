@@ -85,7 +85,7 @@ impl<'source, I: Iterator<Item = Comment>> Blocks<'source, I> {
         let Some(block_start) = self.open_blocks.pop() else {
             let position = block_end.comment.position_at(block_end.start_position);
             self.error = Some(anyhow::anyhow!(
-                "Unexpected closed block at line {}, column {}. {NOT_A_TAG_HINT}",
+                "unexpected closed block at line {}, column {}. {NOT_A_TAG_HINT}",
                 position.line,
                 position.character
             ));
@@ -110,7 +110,7 @@ impl<'source, I: Iterator<Item = Comment>> Blocks<'source, I> {
         if let Some(unclosed_block) = self.open_blocks.pop() {
             let position = &unclosed_block.start_tag_position_range.start;
             self.error = Some(anyhow::anyhow!(
-                "Block at line {}, column {} is not closed. {NOT_A_TAG_HINT}",
+                "block at line {}, column {} is not closed. {NOT_A_TAG_HINT}",
                 position.line,
                 position.character
             ));
@@ -257,7 +257,7 @@ fn to_partial_block(
         Err(malformed) => {
             let position = comment.position_at(malformed.position);
             Err(anyhow::anyhow!(
-                "Malformed block tag at line {}, column {}. {NOT_A_TAG_HINT}",
+                "malformed block tag at line {}, column {}. {NOT_A_TAG_HINT}",
                 position.line,
                 position.character
             ))
@@ -267,7 +267,7 @@ fn to_partial_block(
 
 /// The end of the message of every error about a tag. A comment that only mentions a tag in prose
 /// fails the run with these errors too, and backticks are the fix for it.
-const NOT_A_TAG_HINT: &str = "If this is not meant as a tag, put it in backticks.";
+const NOT_A_TAG_HINT: &str = "If this is not meant as a tag, put it in backticks";
 
 impl<I: Iterator<Item = Comment>> Iterator for Tags<'_, I> {
     type Item = anyhow::Result<PartialBlock>;
@@ -903,7 +903,7 @@ println!("hello2");
         let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
         assert_eq!(
             error_message,
-            "Block at line 2, column 12 is not closed. If this is not meant as a tag, put it in backticks."
+            "block at line 2, column 12 is not closed. If this is not meant as a tag, put it in backticks"
         );
         Ok(())
     }
@@ -915,7 +915,7 @@ println!("hello2");
         let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
         assert_eq!(
             error_message,
-            "Block at line 2, column 15 is not closed. If this is not meant as a tag, put it in backticks."
+            "block at line 2, column 15 is not closed. If this is not meant as a tag, put it in backticks"
         );
         Ok(())
     }
@@ -937,7 +937,7 @@ println!("hello2");
         let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
         assert_eq!(
             error_message,
-            "Block at line 2, column 12 is not closed. If this is not meant as a tag, put it in backticks."
+            "block at line 2, column 12 is not closed. If this is not meant as a tag, put it in backticks"
         );
         Ok(())
     }
@@ -954,7 +954,7 @@ println!("hello2");
         let result = parse_all(&mut parser, contents);
         assert_eq!(
             result.unwrap_err().to_string(),
-            "Unexpected closed block at line 5, column 12. If this is not meant as a tag, put it in backticks."
+            "unexpected closed block at line 5, column 12. If this is not meant as a tag, put it in backticks"
         );
         Ok(())
     }
@@ -980,7 +980,7 @@ println!("hello2");
         let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
         assert_eq!(
             error_message,
-            "Malformed block tag at line 1, column 4. If this is not meant as a tag, put it in backticks."
+            "malformed block tag at line 1, column 4. If this is not meant as a tag, put it in backticks"
         );
         Ok(())
     }
@@ -992,7 +992,7 @@ println!("hello2");
         let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
         assert_eq!(
             error_message,
-            "Malformed block tag at line 1, column 4. If this is not meant as a tag, put it in backticks."
+            "malformed block tag at line 1, column 4. If this is not meant as a tag, put it in backticks"
         );
         Ok(())
     }
@@ -1004,7 +1004,7 @@ println!("hello2");
         let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
         assert_eq!(
             error_message,
-            "Malformed block tag at line 2, column 8. If this is not meant as a tag, put it in backticks."
+            "malformed block tag at line 2, column 8. If this is not meant as a tag, put it in backticks"
         );
         Ok(())
     }
@@ -1018,7 +1018,7 @@ println!("hello2");
         let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
         assert_eq!(
             error_message,
-            "Malformed block tag at line 2, column 8. If this is not meant as a tag, put it in backticks."
+            "malformed block tag at line 2, column 8. If this is not meant as a tag, put it in backticks"
         );
         Ok(())
     }
@@ -1065,7 +1065,7 @@ println!("hello2");
         let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
         assert_eq!(
             error_message,
-            "Malformed block tag at line 1, column 4. If this is not meant as a tag, put it in backticks."
+            "malformed block tag at line 1, column 4. If this is not meant as a tag, put it in backticks"
         );
         Ok(())
     }
@@ -1124,7 +1124,7 @@ println!("hello2");
                 .expect("an error")
                 .expect_err("the unclosed block")
                 .to_string(),
-            "Block at line 3, column 4 is not closed. If this is not meant as a tag, put it in backticks."
+            "block at line 3, column 4 is not closed. If this is not meant as a tag, put it in backticks"
         );
         assert!(blocks.next().is_none());
     }
@@ -1144,7 +1144,7 @@ println!("hello2");
                 .expect("an error")
                 .expect_err("the unclosed block")
                 .to_string(),
-            "Block at line 2, column 4 is not closed. If this is not meant as a tag, put it in backticks."
+            "block at line 2, column 4 is not closed. If this is not meant as a tag, put it in backticks"
         );
         assert!(blocks.next().is_none());
     }
@@ -1281,7 +1281,7 @@ println!("hello2");
         let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
         assert_eq!(
             error_message,
-            "Malformed block tag at line 1, column 4. If this is not meant as a tag, put it in backticks."
+            "malformed block tag at line 1, column 4. If this is not meant as a tag, put it in backticks"
         );
         Ok(())
     }

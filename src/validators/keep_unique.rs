@@ -55,7 +55,7 @@ impl SyncValidator for KeepUniqueValidator {
                         Some(Err(e)) => {
                             // Invalid regex: return an error for the validator
                             return Err(anyhow::anyhow!(
-                                "Invalid keep-unique regex pattern for block {}: {}",
+                                "invalid keep-unique regex pattern for block {}: {}",
                                 block_with_context.block.label(file_path),
                                 e
                             ));

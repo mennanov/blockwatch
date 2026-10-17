@@ -104,7 +104,7 @@ impl RepoPath {
         };
         let Some(without_prefix) = stripped else {
             bail!(
-                "diff target \"{decoded_target}\" has no recognized path prefix ({}).",
+                "diff target \"{decoded_target}\" has no recognized path prefix ({})",
                 DIFF_PATH_PREFIXES.join(", ")
             );
         };
@@ -121,7 +121,7 @@ impl RepoPath {
                 Some(unprefixed) if file_system.exists(path.as_path()) => bail!(
                     "cannot tell whether diff target \"{decoded_target}\" carries a path prefix: it \
                      reads as both \"{path}\" and \"{unprefixed}\", and both exist. A newly added \
-                     file's header records no prefix."
+                     file's header records no prefix"
                 ),
                 Some(unprefixed) => unprefixed,
                 None => path,

@@ -122,7 +122,7 @@ impl FileSystem for FileSystemImpl {
     fn read(&self, path: &Path) -> anyhow::Result<Vec<u8>> {
         let resolved = self.resolve_within_root(path)?;
         std::fs::read(&resolved)
-            .with_context(|| format!("Failed to read file \"{}\"", path.display()))
+            .with_context(|| format!("failed to read file \"{}\"", path.display()))
     }
 
     fn exists(&self, path: &Path) -> bool {
@@ -654,7 +654,7 @@ pub(crate) mod test_utils {
             self.files
                 .get(&self.file_key(path))
                 .map(|content| content.clone().into_bytes())
-                .ok_or_else(|| anyhow::anyhow!("File {} not found", path.display()))
+                .ok_or_else(|| anyhow::anyhow!("file {} not found", path.display()))
         }
 
         fn exists(&self, path: &Path) -> bool {

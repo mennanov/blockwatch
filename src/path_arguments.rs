@@ -40,12 +40,12 @@ impl PathArguments {
                 None => argument.trim_start_matches("./").to_string(),
             };
             builder.add(
-                Glob::new(&glob).with_context(|| format!("Invalid glob pattern: {argument}"))?,
+                Glob::new(&glob).with_context(|| format!("invalid glob pattern: {argument}"))?,
             );
         }
         Ok(Self {
             written: arguments,
-            globs: builder.build().context("Failed to build glob set")?,
+            globs: builder.build().context("failed to build glob set")?,
         })
     }
 
@@ -87,7 +87,7 @@ impl PathArguments {
                          root, not from the current directory. A file is not checked if \
                          .gitignore, --ignore or the `ignore` key in the config file leaves it \
                          out, or if its extension is not supported and the config file has no \
-                         `[[block]]` entry for it.",
+                         `[[block]]` entry for it",
                         quoted.join(" or ")
                     );
                 }

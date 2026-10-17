@@ -44,19 +44,19 @@ impl TargetReference {
     pub(crate) fn parse(raw: &str) -> anyhow::Result<Self> {
         let reference = raw.trim();
         if reference.is_empty() {
-            bail!("Invalid target reference: \"{reference}\"");
+            bail!("invalid target reference: \"{reference}\"");
         }
         // A formatter that wraps long comments can break a tag inside a reference. The file or
         // block would then not be found, and that error would not say why.
         if reference.contains('\n') {
             bail!(
-                "Invalid target reference: \"{reference}\" has a line break. Put the reference on \
+                "invalid target reference: \"{reference}\" has a line break. Put the reference on \
                  one line"
             );
         }
         if reference.contains('#') && reference.contains(':') {
             bail!(
-                "Invalid target reference: \"{reference}\" combines '#' and ':'; \
+                "invalid target reference: \"{reference}\" combines '#' and ':'; \
              these forms are mutually exclusive"
             );
         }
@@ -102,10 +102,10 @@ fn parse_symbol_reference(
     let file_part = file_part.trim();
     if fragment == "#" {
         if file_part.is_empty() {
-            bail!("Invalid target reference: \"{reference}\"");
+            bail!("invalid target reference: \"{reference}\"");
         }
         bail!(
-            "Invalid target reference: \"{reference}\" has no symbol path after '#'; \
+            "invalid target reference: \"{reference}\" has no symbol path after '#'; \
              drop the '#' to reference the whole file"
         );
     }
@@ -124,7 +124,7 @@ fn parse_block_reference(
     let name_part = name_part.trim();
     if name_part.is_empty() {
         bail!(
-            "Invalid target reference: \"{reference}\" has no block name after ':'; \
+            "invalid target reference: \"{reference}\" has no block name after ':'; \
              drop the ':' to reference the whole file"
         );
     }
@@ -318,7 +318,7 @@ mod parse_target_references_tests {
         let err = TargetReference::parse_list("config.json:").unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Invalid target reference: \"config.json:\" has no block name after ':'; \
+            "invalid target reference: \"config.json:\" has no block name after ':'; \
              drop the ':' to reference the whole file"
         );
     }
@@ -397,7 +397,7 @@ mod parse_target_references_tests {
         let err = TargetReference::parse_list("package.json#").unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Invalid target reference: \"package.json#\" has no symbol path after '#'; \
+            "invalid target reference: \"package.json#\" has no symbol path after '#'; \
              drop the '#' to reference the whole file"
         );
         assert!(TargetReference::parse_list("#").is_err());

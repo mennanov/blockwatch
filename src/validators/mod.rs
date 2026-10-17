@@ -154,7 +154,7 @@ impl Validator {
         value.parse::<Validator>().with_context(|| {
             let validators: Vec<&str> = Validator::iter().map(|v| v.as_str()).collect();
             format!(
-                "Unknown validator: {value}. Available validators: {}",
+                "unknown validator: {value}. Available validators: {}",
                 validators.join(", ")
             )
         })
@@ -567,7 +567,7 @@ fn run_sync_validators(
         match handle.join() {
             Ok((name, Ok(report))) => log.add_validation_report(name, report),
             Ok((_, Err(e))) => return Err(e),
-            Err(e) => return Err(anyhow::anyhow!("Failed to run validation: {e:?}")),
+            Err(e) => return Err(anyhow::anyhow!("failed to run validation: {e:?}")),
         }
     }
 
@@ -593,7 +593,7 @@ fn run_async_validators(
             match result {
                 Ok((name, Ok(report))) => log.add_validation_report(name, report),
                 Ok((_, Err(e))) => return Err(e),
-                Err(e) => return Err(anyhow::anyhow!("Failed to run validation: {e}")),
+                Err(e) => return Err(anyhow::anyhow!("failed to run validation: {e}")),
             }
         }
 
@@ -625,12 +625,12 @@ pub(crate) fn run(
             std::thread::spawn(move || run_async_validators(context, async_validators));
         let sync_result = sync_violations_handle
             .join()
-            .map_err(|e| anyhow::anyhow!("Failed to join sync violations thread: {e:?}"))?;
+            .map_err(|e| anyhow::anyhow!("failed to join sync violations thread: {e:?}"))?;
         let mut log = sync_result?;
 
         let async_result = async_violations_handle
             .join()
-            .map_err(|e| anyhow::anyhow!("Failed to join async violations thread: {e:?}"))?;
+            .map_err(|e| anyhow::anyhow!("failed to join async violations thread: {e:?}"))?;
         log.merge(async_result?);
         log
     };

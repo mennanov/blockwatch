@@ -66,7 +66,7 @@ fn run_skill() -> anyhow::Result<()> {
 fn run_list(args: &flags::Args) -> anyhow::Result<()> {
     let Prepared { context, .. } = prepare(args)?;
     let report = context.listings();
-    write_json(std::io::stdout(), &report).context("Failed to list blocks")
+    write_json(std::io::stdout(), &report).context("failed to list blocks")
 }
 
 /// Runs the default command: validates every block in scope and reports any violations.
@@ -232,7 +232,7 @@ fn run_inputs(
     if stdin_is_terminal() {
         return Err(anyhow::anyhow!(
             "--diff was given but stdin is a terminal, so there is no diff to read. \
-             Pipe a unified diff in, or drop --diff to check every block."
+             Pipe a unified diff in, or drop --diff to check every block"
         ));
     }
     Ok((scan_mode, read_diff_from_stdin(file_system)?))
@@ -373,7 +373,7 @@ fn repository_root_path(current_path: &Path) -> anyhow::Result<PathBuf> {
         .find(|path| path.join(".git").exists() || path.join(".hg").exists())
         // </block>
         .map(|path| path.to_path_buf())
-        .ok_or_else(|| anyhow::anyhow!("Could not find the repository root directory"))
+        .ok_or_else(|| anyhow::anyhow!("could not find the repository root directory"))
 }
 
 /// Resolves the repository root from the current working directory.

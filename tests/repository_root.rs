@@ -140,7 +140,7 @@ fn a_directory_outside_any_repository_fails() -> anyhow::Result<()> {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "Could not find the repository root",
+            "could not find the repository root",
         ));
     Ok(())
 }

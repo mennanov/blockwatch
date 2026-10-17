@@ -172,7 +172,7 @@ describe the input rather than the command that produced it, since a diff need n
 
 ```console
 $ git diff --no-prefix | blockwatch --diff
-Error: diff target "rules.py" has no recognized path prefix (a/, b/, i/, w/, c/, o/).
+Error: diff target "rules.py" has no recognized path prefix (a/, b/, i/, w/, c/, o/)
 ```
 
 With Git, that means `--no-prefix`, `diff.noprefix`, or a custom `diff.srcPrefix` / `diff.dstPrefix`. To produce

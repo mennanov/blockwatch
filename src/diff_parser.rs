@@ -189,13 +189,13 @@ pub(crate) fn validate_diff_input(diff: &str) -> anyhow::Result<()> {
         return Ok(());
     }
     if diff.lines().any(|line| line.starts_with('\u{1b}')) {
-        anyhow::bail!("stdin carries ANSI color escapes, which cannot be parsed as a diff.");
+        anyhow::bail!("stdin carries ANSI color escapes, which cannot be parsed as a diff");
     }
     if !diff
         .lines()
         .any(|line| line.starts_with("diff --git ") || line.starts_with("--- "))
     {
-        anyhow::bail!("stdin is not a unified diff: no line starts with `diff --git ` or `--- `.");
+        anyhow::bail!("stdin is not a unified diff: no line starts with `diff --git ` or `--- `");
     }
     Ok(())
 }
