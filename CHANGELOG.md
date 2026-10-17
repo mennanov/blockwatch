@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.14.1] - 2026-10-17
+
 ### Changed
 
 - The error for a wrong `keep-sorted`, `keep-sorted-format`, `same-as-mode`, `same-as-format` or `BLOCKWATCH_LUA_MODE`
