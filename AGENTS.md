@@ -107,6 +107,8 @@ The goal is a test suite that fails when behavior changes. Running every line is
 - *Always* mutation-test a new test before you call the work done. For example, flip each comparison or boundary the
   change touched, run the tests, check that one fails, then undo the flip. If the tests pass either way, they are too
   weak.
+- *Always* delete a scratch copy you made for mutation testing, with its own `target/` directory, as soon as the
+  mutation run ends. A `target/` directory takes gigabytes.
 - *Always* run the tests with coverage as the last check before you call the work done.
 - *Prefer* to read a coverage report (`cargo llvm-cov`) as a list of questions, not as a number to raise. An uncovered
   branch asks why nobody needed it. The answer is either a case worth testing or code worth deleting. *Never* add a
