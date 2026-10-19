@@ -27,7 +27,7 @@ publish-jobs = ["homebrew"]
 global = "ubuntu-latest"
 
 [dist.github-custom-runners.aarch64-apple-darwin]
-runner = "macos-14"
+runner = "macos-15"
 
 [dist.github-custom-runners.x86_64-unknown-linux-gnu]
 runner = "ubuntu-latest"
