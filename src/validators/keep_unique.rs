@@ -1,10 +1,11 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    SyncValidator, ValidationReport, Validator, ValidatorType, Violation, ViolationRange,
-    compile_pattern, regex_value, trimmed_line_value,
+    SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
+    ViolationRange, compile_pattern, regex_value, trimmed_line_value,
 };
 use crate::{Position, validators};
+use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -40,6 +41,9 @@ impl SyncValidator for KeepUniqueValidator {
                 } else {
                     Some(compile_pattern(&pattern))
                 };
+                let mut trace = context
+                    .traces_requested
+                    .then(|| KeepUniqueTrace { lines: Vec::new() });
                 let mut block_violations = Vec::new();
                 let mut seen: HashSet<&str> = HashSet::new();
                 for (line_number, line) in block_with_context
@@ -61,6 +65,19 @@ impl SyncValidator for KeepUniqueValidator {
                             ));
                         }
                     };
+                    if let Some(trace) = &mut trace
+                        && !line.trim().is_empty()
+                    {
+                        trace.push(
+                            block_with_context
+                                .block
+                                .content
+                                .position(line_number, 0)
+                                .line,
+                            line.trim(),
+                            line_match.as_ref().map(|(value, _)| *value),
+                        );
+                    }
                     if let Some((matched_line, line_range)) = line_match
                         && !seen.insert(matched_line)
                     {
@@ -84,10 +101,63 @@ impl SyncValidator for KeepUniqueValidator {
                     }
                 }
                 report.add_all(file_path, &block_with_context.block, block_violations);
+                if let Some(trace) = trace {
+                    report.add_trace(
+                        file_path,
+                        &block_with_context.block,
+                        ValidatorTrace::KeepUnique(trace),
+                    );
+                }
             }
         }
         Ok(report)
     }
+}
+
+/// What `keep-unique` saw in one block.
+#[derive(Serialize, Debug)]
+pub(crate) struct KeepUniqueTrace {
+    /// The lines that aren't blank, up to the first repeat, where the validator stops.
+    lines: Vec<KeepUniqueLine>,
+}
+
+impl KeepUniqueTrace {
+    /// Adds the trimmed `text` of `line`, whose compared value is `value`, or `None` when the
+    /// pattern skips the line.
+    fn push(&mut self, line: usize, text: &str, value: Option<&str>) {
+        // The validator stops at the first repeat, so an earlier line with the same value is the
+        // one the repeat is a duplicate of.
+        let duplicate_of = value.and_then(|value| {
+            self.lines
+                .iter()
+                .find(|earlier| earlier.value.as_deref() == Some(value))
+                .map(|earlier| earlier.line)
+        });
+        self.lines.push(KeepUniqueLine {
+            duplicate_of,
+            line,
+            text: text.to_string(),
+            value: value.map(str::to_string),
+        });
+    }
+}
+
+/// One line that `keep-unique` read.
+///
+/// serde writes the keys in the order the fields are declared, and the output keeps its keys
+/// sorted. So declare the fields in alphabetical order.
+#[derive(Serialize, Debug)]
+struct KeepUniqueLine {
+    /// The line where the value first appeared. `None` for a value seen for the first time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duplicate_of: Option<usize>,
+    /// The line in the block's file.
+    line: usize,
+    /// The line, trimmed.
+    text: String,
+    /// What is compared: the `value` group of the pattern, the whole match, or the trimmed line.
+    /// `None` when the pattern skips the line.
+    value: Option<String>,
 }
 
 /// Selects [`KeepUniqueValidator`] for blocks carrying a `keep-unique` attribute.
@@ -496,6 +566,75 @@ C
         // The block without a keep-unique attribute is not checked, so it records nothing.
         assert_eq!(checked_lines(&report), vec![1, 5]);
         assert_eq!(violation_count(&report), 1);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod trace_tests {
+    use super::*;
+    use crate::test_utils::validation_context;
+    use crate::validators::test_utils::{trace_json, with_traces};
+    use serde_json::json;
+
+    #[test]
+    fn block_with_a_repeat_records_the_lines_up_to_it_and_where_its_value_first_appeared()
+    -> anyhow::Result<()> {
+        // The validator stops at the first repeat, so it never reads the last line.
+        let context = with_traces(validation_context(
+            "a.py",
+            "# <block keep-unique>\nred\nblue\n\nred\n red\n# </block>\n",
+        ));
+
+        let report = KeepUniqueValidator.validate(context)?;
+
+        assert_eq!(
+            trace_json(&report),
+            json!({
+                "lines": [
+                    { "line": 2, "text": "red", "value": "red" },
+                    { "line": 3, "text": "blue", "value": "blue" },
+                    { "duplicate_of": 2, "line": 5, "text": "red", "value": "red" }
+                ]
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_records_no_value_for_a_line_it_skips() -> anyhow::Result<()> {
+        let context = with_traces(validation_context(
+            "a.py",
+            r#"# <block keep-unique="ID:(?P<value>\d+)">
+ID:7 red
+none
+ID:7 blue
+# </block>
+"#,
+        ));
+
+        let report = KeepUniqueValidator.validate(context)?;
+
+        assert_eq!(
+            trace_json(&report),
+            json!({
+                "lines": [
+                    { "line": 2, "text": "ID:7 red", "value": "7" },
+                    { "line": 3, "text": "none", "value": null },
+                    { "duplicate_of": 2, "line": 4, "text": "ID:7 blue", "value": "7" }
+                ]
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_without_traces_requested_records_no_trace() -> anyhow::Result<()> {
+        let context = validation_context("a.py", "# <block keep-unique>\na\na\n# </block>\n");
+
+        let report = KeepUniqueValidator.validate(context)?;
+
+        assert!(report.traces.is_empty());
         Ok(())
     }
 }

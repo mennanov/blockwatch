@@ -46,7 +46,16 @@ fn named_block_writes_its_explanation_to_stdout() -> anyhow::Result<()> {
                 "line": 1,
                 "name": "fruits"
             },
-            "checks": {},
+            "checks": {
+                "keep-sorted": {
+                    "format": "lexicographic",
+                    "lines": [
+                        { "line": 2, "text": "apple", "value": "apple" },
+                        { "line": 3, "text": "banana", "value": "banana" }
+                    ],
+                    "order": "asc"
+                }
+            },
             "content": {
                 "start": { "line": 1, "character": 42 },
                 "end": { "line": 4, "character": 1 },

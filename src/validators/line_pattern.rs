@@ -1,8 +1,8 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    SyncValidator, ValidationReport, Validator, ValidatorType, Violation, ViolationRange,
-    compile_pattern,
+    SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
+    ViolationRange, compile_pattern,
 };
 use crate::{Position, validators};
 use anyhow::anyhow;
@@ -47,14 +47,20 @@ impl SyncValidator for LinePatternValidator {
                 if required.is_none() && forbidden.is_none() {
                     continue;
                 }
+                let mut lines = context.traces_requested.then(Vec::new);
                 let violation = first_violation(
                     file_path,
                     block,
                     &file_blocks.file_content,
                     required.as_ref(),
                     forbidden.as_ref(),
+                    lines.as_mut(),
                 )?;
                 report.add_all(file_path, block, violation.into_iter().collect());
+                if let Some(lines) = lines {
+                    let trace = ValidatorTrace::LinePattern(LinePatternTrace { lines });
+                    report.add_trace(file_path, block, trace);
+                }
             }
         }
         Ok(report)
@@ -84,7 +90,8 @@ fn compile_attribute<'b>(
 }
 
 /// Returns the violation for the first non-empty line of `block` that fails a check, or `None`
-/// when every line passes. Each line is trimmed before it is checked.
+/// when every line passes. Each line is trimmed before it is checked. Adds each line it checks to
+/// `trace`, when given.
 ///
 /// `required` and `forbidden` are the compiled `line-pattern` and `line-pattern-forbidden`.
 fn first_violation(
@@ -93,13 +100,36 @@ fn first_violation(
     file_content: &str,
     required: Option<&(&str, Regex)>,
     forbidden: Option<&(&str, Regex)>,
+    mut trace: Option<&mut Vec<LinePatternLine>>,
 ) -> anyhow::Result<Option<Violation>> {
     for (line_idx, line) in block.content.text(file_content).lines().enumerate() {
         let trimmed_line = line.trim();
         if trimmed_line.is_empty() {
             continue;
         }
-        if let Some((failing_bytes, violation)) = check_line(trimmed_line, required, forbidden) {
+        let failure = check_line(trimmed_line, required, forbidden);
+        if let Some(lines) = trace.as_deref_mut() {
+            let (fails, forbidden_match) = match &failure {
+                None => (None, None),
+                Some((_, LinePatternViolation::NonMatching { .. })) => (Some("line-pattern"), None),
+                Some((_, LinePatternViolation::Forbidden { text, .. })) => {
+                    (Some("line-pattern-forbidden"), Some(text.to_string()))
+                }
+            };
+            // The check only asks whether the line matches. The text it matched shows a pattern
+            // that is looser than its author meant, such as one without `^` and `$`.
+            let matched = required
+                .and_then(|(_, re)| re.find(trimmed_line))
+                .map(|found| found.as_str().to_string());
+            lines.push(LinePatternLine {
+                fails,
+                forbidden_match,
+                line: block.content.position(line_idx, 0).line,
+                matched,
+                text: trimmed_line.to_string(),
+            });
+        }
+        if let Some((failing_bytes, violation)) = failure {
             let range = source_range(block, line_idx, line, trimmed_line, failing_bytes);
             return create_violation(file_path, block, violation, trimmed_line, range).map(Some);
         }
@@ -162,6 +192,35 @@ fn source_range(
         start.character + trimmed_line[bytes].chars().count(),
     );
     ViolationRange::new(start, end)
+}
+
+/// What `line-pattern` saw in one block.
+#[derive(Serialize, Debug)]
+pub(crate) struct LinePatternTrace {
+    /// The lines that aren't blank, up to the first one that fails, where the validator stops.
+    lines: Vec<LinePatternLine>,
+}
+
+/// One line that `line-pattern` checked.
+///
+/// serde writes the keys in the order the fields are declared, and the output keeps its keys
+/// sorted. So declare the fields in alphabetical order.
+#[derive(Serialize, Debug)]
+struct LinePatternLine {
+    /// The attribute whose check the line fails. `None` when the line passes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fails: Option<&'static str>,
+    /// The text that `line-pattern-forbidden` found. `None` for any other line.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    forbidden_match: Option<String>,
+    /// The line in the block's file.
+    line: usize,
+    /// The text that `line-pattern` matched. `None` when the line doesn't match it, or the block
+    /// has no `line-pattern`.
+    #[serde(rename = "match", skip_serializing_if = "Option::is_none")]
+    matched: Option<String>,
+    /// The line, trimmed.
+    text: String,
 }
 
 /// Selects [`LinePatternValidator`] for blocks carrying a `line-pattern` or a
@@ -525,6 +584,72 @@ anything
         // The block without a line-pattern attribute is not checked, so it records nothing.
         assert_eq!(checked_lines(&report), vec![1, 4]);
         assert_eq!(violation_count(&report), 1);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod trace_tests {
+    use super::*;
+    use crate::test_utils::validation_context;
+    use crate::validators::test_utils::{trace_json, with_traces};
+    use serde_json::json;
+
+    #[test]
+    fn block_records_the_lines_up_to_the_first_that_fails() -> anyhow::Result<()> {
+        // The validator stops at `blue`, so it never reads `- green`. It skips the blank line.
+        let context = with_traces(validation_context(
+            "a.py",
+            "# <block line-pattern=\"^- \">\n- red\n\nblue\n- green\n# </block>\n",
+        ));
+
+        let report = LinePatternValidator.validate(context)?;
+
+        assert_eq!(
+            trace_json(&report),
+            json!({
+                "lines": [
+                    { "line": 2, "match": "- ", "text": "- red" },
+                    { "fails": "line-pattern", "line": 4, "text": "blue" }
+                ]
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn line_with_forbidden_text_records_the_text_of_both_patterns() -> anyhow::Result<()> {
+        let context = with_traces(validation_context(
+            "a.py",
+            "# <block line-pattern=\"^- \" line-pattern-forbidden=\"TODO\">\n- TODO red\n# </block>\n",
+        ));
+
+        let report = LinePatternValidator.validate(context)?;
+
+        assert_eq!(
+            trace_json(&report),
+            json!({
+                "lines": [
+                    {
+                        "fails": "line-pattern-forbidden",
+                        "forbidden_match": "TODO",
+                        "line": 2,
+                        "match": "- ",
+                        "text": "- TODO red"
+                    }
+                ]
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_without_traces_requested_records_no_trace() -> anyhow::Result<()> {
+        let context = validation_context("a.py", "# <block line-pattern=\"^a$\">\nb\n# </block>\n");
+
+        let report = LinePatternValidator.validate(context)?;
+
+        assert!(report.traces.is_empty());
         Ok(())
     }
 }

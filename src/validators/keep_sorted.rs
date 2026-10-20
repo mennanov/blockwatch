@@ -1,8 +1,8 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    SyncValidator, ValidationReport, Validator, ValidatorType, Violation, ViolationRange,
-    compile_pattern, parse_keyword, parse_number, regex_value, trimmed_line_value,
+    SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
+    ViolationRange, compile_pattern, parse_keyword, parse_number, regex_value, trimmed_line_value,
 };
 use crate::{Position, validators};
 use anyhow::{Context, anyhow};
@@ -13,16 +13,18 @@ use std::sync::Arc;
 use strum_macros::{Display, EnumIter, EnumString};
 
 /// The direction of a `keep-sorted` block.
-#[derive(Default, Clone, Copy, EnumString, EnumIter, Display)]
+#[derive(Default, Clone, Copy, Debug, EnumString, EnumIter, Display, Serialize)]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 enum SortOrder {
     #[default]
     Asc,
     Desc,
 }
 
-#[derive(Default, EnumString, EnumIter, Display)]
+#[derive(Default, Clone, Copy, Debug, EnumString, EnumIter, Display, Serialize)]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 enum SortFormat {
     #[default]
     Lexicographic,
@@ -102,6 +104,11 @@ impl SyncValidator for KeepSortedValidator {
                         SortOrder::Asc => Ordering::Greater,
                         SortOrder::Desc => Ordering::Less,
                     };
+                    let mut trace = context.traces_requested.then(|| KeepSortedTrace {
+                        format: sort_format,
+                        lines: Vec::new(),
+                        order,
+                    });
                     let mut block_violations = Vec::new();
                     // Keep previous value and its range for violation location purposes
                     let mut prev_value: Option<(&str, Range<usize>)> = None;
@@ -124,6 +131,19 @@ impl SyncValidator for KeepSortedValidator {
                                 ));
                             }
                         };
+                        if let Some(trace) = &mut trace
+                            && !line.trim().is_empty()
+                        {
+                            trace.lines.push(KeepSortedLine {
+                                line: block_with_context
+                                    .block
+                                    .content
+                                    .position(line_number, 0)
+                                    .line,
+                                text: line.trim().to_string(),
+                                value: value.as_ref().map(|(value, _)| value.to_string()),
+                            });
+                        }
 
                         if let Some((curr_val, curr_range)) = value {
                             if let Some((prev_val, _prev_range)) = &prev_value {
@@ -157,12 +177,43 @@ impl SyncValidator for KeepSortedValidator {
                         }
                     }
                     report.add_all(file_path, &block_with_context.block, block_violations);
+                    if let Some(trace) = trace {
+                        report.add_trace(
+                            file_path,
+                            &block_with_context.block,
+                            ValidatorTrace::KeepSorted(trace),
+                        );
+                    }
                 }
             }
         }
 
         Ok(report)
     }
+}
+
+/// What `keep-sorted` saw in one block.
+///
+/// serde writes the keys in the order the fields are declared, and the output keeps its keys
+/// sorted. So declare the fields in alphabetical order.
+#[derive(Serialize, Debug)]
+pub(crate) struct KeepSortedTrace {
+    format: SortFormat,
+    /// The lines that aren't blank, up to the first one out of order, where the validator stops.
+    lines: Vec<KeepSortedLine>,
+    order: SortOrder,
+}
+
+/// One line that `keep-sorted` read.
+#[derive(Serialize, Debug)]
+struct KeepSortedLine {
+    /// The line in the block's file.
+    line: usize,
+    /// The line, trimmed.
+    text: String,
+    /// What is compared: the `value` group of `keep-sorted-pattern`, the whole match, or the
+    /// trimmed line. `None` when the pattern skips the line.
+    value: Option<String>,
 }
 
 /// Selects [`KeepSortedValidator`] for blocks carrying a `keep-sorted` attribute.
@@ -1073,6 +1124,82 @@ mod validate_tests {
         // The block without a keep-sorted attribute is not checked, so it records nothing.
         assert_eq!(checked_lines(&report), vec![1, 5]);
         assert_eq!(violation_count(&report), 1);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod trace_tests {
+    use super::*;
+    use crate::test_utils::validation_context;
+    use crate::validators::test_utils::{trace_json, with_traces};
+    use serde_json::json;
+
+    #[test]
+    fn block_with_a_pattern_records_the_value_of_each_line_up_to_the_first_out_of_order()
+    -> anyhow::Result<()> {
+        // `id: 1` is out of order, so the validator stops there and never reads `id: 3`. The blank
+        // line is left out.
+        let context = with_traces(validation_context(
+            "a.py",
+            r#"# <block keep-sorted="asc" keep-sorted-pattern="id: (?P<value>\d+)">
+id: 2 red
+
+skip me
+id: 1 blue
+id: 3 green
+# </block>
+"#,
+        ));
+
+        let report = KeepSortedValidator.validate(context)?;
+
+        assert_eq!(
+            trace_json(&report),
+            json!({
+                "format": "lexicographic",
+                "lines": [
+                    { "line": 2, "text": "id: 2 red", "value": "2" },
+                    { "line": 4, "text": "skip me", "value": null },
+                    { "line": 5, "text": "id: 1 blue", "value": "1" }
+                ],
+                "order": "asc"
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn block_without_a_pattern_records_each_trimmed_line_as_its_value() -> anyhow::Result<()> {
+        let context = with_traces(validation_context(
+            "a.py",
+            "# <block keep-sorted=\"desc\" keep-sorted-format=\"numeric\">\n10\n  9\n1\n# </block>\n",
+        ));
+
+        let report = KeepSortedValidator.validate(context)?;
+
+        assert_eq!(
+            trace_json(&report),
+            json!({
+                "format": "numeric",
+                "lines": [
+                    { "line": 2, "text": "10", "value": "10" },
+                    { "line": 3, "text": "9", "value": "9" },
+                    { "line": 4, "text": "1", "value": "1" }
+                ],
+                "order": "desc"
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_without_traces_requested_records_no_trace() -> anyhow::Result<()> {
+        let context = validation_context("a.py", "# <block keep-sorted>\nb\na\n# </block>\n");
+
+        let report = KeepSortedValidator.validate(context)?;
+
+        assert!(report.traces.is_empty());
         Ok(())
     }
 }
