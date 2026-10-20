@@ -48,7 +48,7 @@ impl<Fs: FileSystem + 'static> SyncValidator for SameAsValidator<Fs> {
         &self,
         context: Arc<validators::ValidationContext>,
     ) -> anyhow::Result<ValidationReport> {
-        let mut targets = TargetItems::new(&context, self.file_system.as_ref());
+        let mut targets = TargetRecords::new(&context, self.file_system.as_ref());
         let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
@@ -78,15 +78,15 @@ impl<Fs: FileSystem + 'static> SyncValidator for SameAsValidator<Fs> {
     }
 }
 
-/// One block's side of a `same-as` comparison: the items it contributes and the rules the two sides
-/// are held to. Built once per block and reused for each of its references.
+/// One block's side of a `same-as` comparison: the records it contributes and the rules the two
+/// sides are held to. Built once per block and reused for each of its references.
 struct Comparison {
     mode: Mode,
     formats: Formats,
-    /// `Err` carries the reason the block's own items could not be canonicalized. It is reported
+    /// `Err` carries the reason the block's own records could not be canonicalized. It is reported
     /// against every reference the block makes rather than aborting the run, since content that does
     /// not meet the asserted shape is a violation like any other.
-    source_items: Result<Vec<Record>, String>,
+    source_records: Result<Vec<Record>, String>,
     /// The block's `same-as-pattern`. It also reads a whole-file, symbol or paths target, because
     /// such a target has no block of its own to carry one.
     pattern: Option<String>,
@@ -97,19 +97,19 @@ impl Comparison {
         let formats = parse_formats(block)?;
         Ok(Self {
             mode: parse_mode(block)?,
-            source_items: canonicalize(extract_items(block, file_content)?, &formats),
+            source_records: canonicalize(extract_records(block, file_content)?, &formats),
             pattern: block.attributes.get("same-as-pattern").cloned(),
             formats,
         })
     }
 
     /// Why the target disagrees with the block, or `None` when the two agree.
-    fn disagreement_with(&self, target_items: Vec<Record>) -> Option<String> {
-        match &self.source_items {
+    fn disagreement_with(&self, target_records: Vec<Record>) -> Option<String> {
+        match &self.source_records {
             Err(reason) => Some(reason.clone()),
             Ok(source) => {
-                groups_disagreement(source, &target_items).or_else(|| {
-                    match canonicalize(target_items, &self.formats) {
+                groups_disagreement(source, &target_records).or_else(|| {
+                    match canonicalize(target_records, &self.formats) {
                         Err(reason) => Some(reason),
                         Ok(target) => disagreement(source, &target, self.mode),
                     }
@@ -128,7 +128,7 @@ impl Comparison {
 /// `same-as`, then at most one for `same-as-paths`. With `traced`, also returns what the validator
 /// saw in the block.
 fn block_violations<Fs: FileSystem>(
-    targets: &mut TargetItems<'_, Fs>,
+    targets: &mut TargetRecords<'_, Fs>,
     file_path: &RepoPath,
     file_content: &str,
     block: &Block,
@@ -143,7 +143,7 @@ fn block_violations<Fs: FileSystem>(
     let mut trace = traced.then(|| SameAsTrace {
         mode: comparison.mode,
         paths: None,
-        records: comparison.source_items.as_ref().ok().cloned(),
+        records: comparison.source_records.as_ref().ok().cloned(),
         targets: Vec::new(),
     });
     let mut violations = Vec::new();
@@ -214,22 +214,22 @@ fn paths_violation(
             .map(ToString::to_string)
             .collect(),
     };
-    let items = extract_items_from(&paths.join("\n"), Some(pattern), |_| None)?;
-    let records = trace
+    let records = extract_records_from(&paths.join("\n"), Some(pattern), |_| None)?;
+    let formatted = trace
         .is_some()
-        .then(|| comparison.formatted(&items))
+        .then(|| comparison.formatted(&records))
         .flatten();
     let reason = if paths.is_empty() {
         Some("no paths match".to_string())
     } else {
-        comparison.disagreement_with(items)
+        comparison.disagreement_with(records)
     };
     if let Some(trace) = trace {
         *trace = Some(PathsTrace {
             glob: glob.to_string(),
             matched: paths,
             reason: reason.clone(),
-            records,
+            records: formatted,
         });
     }
     reason
@@ -268,9 +268,9 @@ fn parse_references(
 /// the comparison saw to `trace`, when given.
 ///
 /// A target that cannot be found is reported rather than aborting the run; a target *file* that
-/// cannot be read is an `Err`, which is [`TargetItems`]'s call to make.
+/// cannot be read is an `Err`, which is [`TargetRecords`]'s call to make.
 fn reference_violation<Fs: FileSystem>(
-    targets: &mut TargetItems<'_, Fs>,
+    targets: &mut TargetRecords<'_, Fs>,
     comparison: &Comparison,
     file_path: &RepoPath,
     block: &Block,
@@ -279,31 +279,31 @@ fn reference_violation<Fs: FileSystem>(
 ) -> anyhow::Result<Option<Violation>> {
     let target = reference.resolve(file_path);
     let resolution = match &target.kind {
-        TargetKind::Block(name) => targets.named_block_items(&target.file, name)?,
+        TargetKind::Block(name) => targets.named_block_records(&target.file, name)?,
         TargetKind::WholeFile => {
-            Ok(targets.whole_file_items(&target.file, comparison.pattern.as_deref())?)
+            Ok(targets.whole_file_records(&target.file, comparison.pattern.as_deref())?)
         }
         TargetKind::Symbol(path) => {
-            targets.symbol_items(&target.file, path, comparison.pattern.as_deref())?
+            targets.symbol_records(&target.file, path, comparison.pattern.as_deref())?
         }
     };
-    let records = trace
+    let formatted = trace
         .is_some()
         .then(|| {
             resolution
                 .as_ref()
                 .ok()
-                .and_then(|items| comparison.formatted(items))
+                .and_then(|records| comparison.formatted(records))
         })
         .flatten();
     let reason = match resolution {
-        Ok(target_items) => comparison.disagreement_with(target_items),
+        Ok(target_records) => comparison.disagreement_with(target_records),
         Err(reason) => Some(reason),
     };
     if let Some(trace) = trace {
         trace.push(TargetTrace {
             reason: reason.clone(),
-            records,
+            records: formatted,
             target: target.to_string(),
         });
     }
@@ -405,7 +405,7 @@ impl fmt::Display for Record {
     }
 }
 
-/// Extracts a block's comparable items.
+/// Extracts a block's records.
 ///
 /// With a `same-as-pattern` attribute, every match on every content line gives one record: the
 /// text of each named group, or the whole match when the pattern has no named groups. Lines that do
@@ -413,23 +413,23 @@ impl fmt::Display for Record {
 /// A match where a group took no part, or captured nothing, has nothing to compare and is skipped.
 ///
 /// The regex runs against each trimmed line rather than the whole block, so `^` and `$` anchor to
-/// the entry rather than to its indentation, and the items stay in the order the two sides list
+/// the entry rather than to its indentation, and the records stay in the order the two sides list
 /// them.
 ///
 /// Without a pattern, the block's normalized whole content is a single record.
-fn extract_items(block: &Block, file_content: &str) -> anyhow::Result<Vec<Record>> {
-    extract_items_from(
+fn extract_records(block: &Block, file_content: &str) -> anyhow::Result<Vec<Record>> {
+    extract_records_from(
         block.content.text(file_content),
         block.attributes.get("same-as-pattern").map(String::as_str),
         |index| Some(block.content.position(index, 0).line),
     )
 }
 
-/// Extracts items from `content` for the given `pattern`. `line_of` maps the 0-based index of a
+/// Extracts records from `content` for the given `pattern`. `line_of` maps the 0-based index of a
 /// line of `content` to the line of the file that each record of it gets.
 ///
 /// If `pattern` is `None` then the whole `content` is returned.
-fn extract_items_from(
+fn extract_records_from(
     content: &str,
     pattern: Option<&str>,
     line_of: impl Fn(usize) -> Option<usize>,
@@ -526,18 +526,21 @@ fn normalize_content(content: &str) -> String {
         })
 }
 
-/// Find a named block in a file and extract its comparable items.
+/// Find a named block in a file and extract its records.
 fn extract_named(file_blocks: &FileBlocks, name: &str) -> anyhow::Result<Option<Vec<Record>>> {
     for bwc in &file_blocks.blocks_with_context {
         if bwc.block.name() == Some(name) {
-            return Ok(Some(extract_items(&bwc.block, &file_blocks.file_content)?));
+            return Ok(Some(extract_records(
+                &bwc.block,
+                &file_blocks.file_content,
+            )?));
         }
     }
     Ok(None)
 }
 
-/// Resolves the targets a `same-as` reference names to their comparable items.
-struct TargetItems<'a, Fs: FileSystem> {
+/// Resolves the targets a `same-as` reference names to their records.
+struct TargetRecords<'a, Fs: FileSystem> {
     context: &'a validators::ValidationContext,
     /// Reads target files that are not already parsed into the validation context.
     file_system: &'a Fs,
@@ -547,7 +550,7 @@ struct TargetItems<'a, Fs: FileSystem> {
     files: TargetFiles<'a, Fs>,
 }
 
-impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
+impl<'a, Fs: FileSystem> TargetRecords<'a, Fs> {
     fn new(context: &'a validators::ValidationContext, file_system: &'a Fs) -> Self {
         Self {
             context,
@@ -557,21 +560,21 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
         }
     }
 
-    /// Resolves a named target block's comparable items via a three-step lookup:
+    /// Resolves a named target block's records via a three-step lookup:
     /// 1. blocks already parsed into the validation context (no I/O),
     /// 2. the files read earlier during this run,
     /// 3. reading and parsing the file, keeping the result.
     ///
     /// Resolves to a reason instead when the file has no block with that name.
-    fn named_block_items(
+    fn named_block_records(
         &mut self,
         target_file: &RepoPath,
         target_name: &str,
     ) -> anyhow::Result<TargetResult<Vec<Record>>> {
         if let Some(file_blocks) = self.context.blocks.get(target_file)
-            && let Some(items) = extract_named(file_blocks, target_name)?
+            && let Some(records) = extract_named(file_blocks, target_name)?
         {
-            return Ok(Ok(items));
+            return Ok(Ok(records));
         }
         let file_blocks = match self.parsed.entry(target_file.clone()) {
             Entry::Occupied(entry) => entry.into_mut(),
@@ -589,13 +592,13 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
             .ok_or_else(|| "target block not found".to_string()))
     }
 
-    /// Resolves a whole-file target's comparable items from the file's entire text.
+    /// Resolves a whole-file target's records from the file's entire text.
     ///
     /// No grammar is involved, which is what lets a `same-as` target be a file blockwatch cannot
     /// parse. A file already in the validation context is read from there; otherwise it is read
     /// through the filesystem and kept. A missing or unreadable file is an `Err`, as it is for a
     /// named target.
-    fn whole_file_items(
+    fn whole_file_records(
         &mut self,
         target_file: &RepoPath,
         pattern: Option<&str>,
@@ -604,15 +607,15 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
             .files
             .content(target_file)
             .with_context(|| format!("failed to read same-as target file: {target_file}"))?;
-        extract_items_from(content, pattern, |index| Some(index + 1))
+        extract_records_from(content, pattern, |index| Some(index + 1))
     }
 
-    /// Resolves a symbol target's comparable items from the symbol's value, or from the text of
+    /// Resolves a symbol target's records from the symbol's value, or from the text of
     /// its definition when it has no value.
     ///
     /// Resolves to a reason instead when no symbol, or more than one, has `path`. A file that
     /// cannot be read, has no grammar or no symbols, or does not parse, is an `Err`.
-    fn symbol_items(
+    fn symbol_records(
         &mut self,
         target_file: &RepoPath,
         path: &SymbolPath,
@@ -622,7 +625,7 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
         match resolution {
             Ok(symbol) => {
                 let symbol_content = symbol.content(content, &LineIndex::new(content));
-                Ok(Ok(extract_items_from(
+                Ok(Ok(extract_records_from(
                     symbol_content.text(content),
                     pattern,
                     |index| Some(symbol_content.position(index, 0).line),
@@ -633,20 +636,20 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
     }
 }
 
-/// How extracted items are canonicalized before comparison.
+/// How the values of records are canonicalized before comparison.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumString, EnumIter, Display)]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 enum Format {
-    /// Compare items as extracted (the default). The attribute has no keyword for it: leaving the
+    /// Compare values as extracted (the default). The attribute has no keyword for it: leaving the
     /// attribute out, or a group out of it, does this.
     #[strum(disabled)]
     Verbatim,
-    /// Parse each item as a number so different spellings (`"10"`, `"10.0"`) compare equal.
+    /// Parse each value as a number so different spellings (`"10"`, `"10.0"`) compare equal.
     Numeric,
-    /// Split each item into words so naming styles (`"PreExistingFailure"`,
+    /// Split each value into words so naming styles (`"PreExistingFailure"`,
     /// `"pre-existing-failure"`) compare equal.
     Identifier,
-    /// Keep only the lower-cased letters and digits of each item, so names whose words break in
+    /// Keep only the lower-cased letters and digits of each value, so names whose words break in
     /// different places (`"DarkRed"`, `"darkred"`) compare equal.
     Flat,
 }
@@ -755,7 +758,7 @@ fn canonicalize_value(value: String, format: Format) -> Result<String, String> {
     }
 }
 
-/// How two item lists are compared.
+/// How the records of the two sides are compared.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumString, EnumIter, Display, Serialize)]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
@@ -1346,7 +1349,7 @@ red: 1
 
     #[test]
     fn pattern_matching_nothing_on_both_sides_returns_a_violation() -> anyhow::Result<()> {
-        // Neither block contains a digit, so the pattern extracts zero items on both sides.
+        // Neither block contains a digit, so the pattern extracts no records on either side.
         let context = merge_validation_contexts(vec![
             validation_context(
                 "a.rs",
