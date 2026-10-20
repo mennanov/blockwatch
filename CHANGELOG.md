@@ -27,7 +27,7 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   - `check-ai`: the model, the prompt it was sent and its answer.
 
   `"with_diff"` says whether `--diff` was given. Without it, no block counts as changed. Violations go to stderr, and
-  the exit code is the same as for a normal run.
+  the exit code is the same as for a normal run. See [The `explain` Command](docs/cli.md#the-explain-command).
 
 ### Changed
 

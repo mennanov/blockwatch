@@ -14,6 +14,7 @@ use strum::IntoEnumIterator;
 /// The fields are declared in alphabetical order, so the keys come out sorted.
 #[derive(Serialize, Debug)]
 pub(crate) struct Explanation<'a> {
+    // <block name="explanation" affects="docs/cli.md:explain-output-example">
     /// The block, as `list` writes it.
     block: BlockListing<'a>,
     /// What each validator saw in the block, by validator.
@@ -24,6 +25,7 @@ pub(crate) struct Explanation<'a> {
     file: &'a RepoPath,
     /// Whether the run was given a diff. Without one, no block counts as changed.
     with_diff: bool,
+    // </block>
 }
 
 impl<'a> Explanation<'a> {

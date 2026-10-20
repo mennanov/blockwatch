@@ -173,6 +173,9 @@ git diff --patch HEAD | blockwatch --diff --only-changed
 
 # Dump all discovered blocks as JSON
 blockwatch list
+
+# Show what each validator of one named block read
+blockwatch explain src/lib.rs:languages
 ```
 
 Rules live in comments, next to the code they describe. Settings that apply to the whole project, such as ignored

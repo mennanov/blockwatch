@@ -337,6 +337,7 @@ git diff --patch | blockwatch --diff                         # every block, with
 git diff --patch HEAD | blockwatch --diff                    # the same, for staged and unstaged changes
 git diff --patch | blockwatch --diff --only-changed          # only the blocks your changes touched
 blockwatch list                                              # JSON dump of every block found (audit / debug)
+blockwatch explain src/lib.rs:languages                      # what each validator of this named block read
 blockwatch src/main.rs "**/*.md"                             # restrict to paths or globs (quote globs)
 blockwatch --ignore "**/generated/**"                        # exclude paths for this run
 blockwatch --only-block src/lib.rs:languages                 # check only this block
@@ -353,6 +354,11 @@ sorting/duplication/pattern/sync issue, and re-run until it passes. A violation 
 fix only if your change caused it, for example when you changed one side of a `same-as` or renamed a block that another
 one points at. Otherwise leave it, and tell the user about it. Use `blockwatch list` to confirm a tag you
 just added is parsed and seen.
+
+After you write a rule with a pattern, a glob or a target, run `blockwatch explain FILE:BLOCK_NAME`. A rule can pass and
+still be wrong, such as a `same-as-pattern` that takes the same wrong part of each line on both sides. `explain` prints,
+as JSON, what each validator read: the values a pattern extracted, the targets it found, the paths a glob matched. Check
+that they are what you meant. The block needs a `name`.
 
 Exit code `1` means at least one `error` violation. Exit code `2` means blockwatch could not check the code, for example
 because of a malformed tag, a bad `blockwatch.toml` or a missing API key. Fix what the error says, then re-run.

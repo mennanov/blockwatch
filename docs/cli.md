@@ -14,6 +14,8 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
   every block in the repository.
 - **List Blocks**: `blockwatch list` outputs a JSON report of all discovered blocks. It takes `--diff`,
   `--only-changed`, `--config`, `-E` and `--ignore`.
+- **Explain a Block**: `blockwatch explain FILE:BLOCK_NAME` checks one named block and prints what each of its
+  validators read, as JSON. See [The `explain` Command](#the-explain-command).
 - **Print the Agent Skill**: `blockwatch skill` prints the [skill for AI agents](#the-skill-command), as a `SKILL.md`
 - **Config File**: `blockwatch --config FILE` reads the project's settings from FILE instead of `blockwatch.toml`
 - **Custom Extensions**: Map custom file extensions: `blockwatch -E ino=cpp` (config key: `extensions`)
@@ -617,7 +619,7 @@ What to expect from the log:
 - **Lines and columns are 1-based, with an exclusive end column.** A column counts characters, which the run declares as
   `"columnKind": "unicodeCodePoints"` so that a consumer does not count UTF-16 code units instead.
 
-`--format` cannot be combined with the `list` subcommand, which reports blocks rather than violations. To upload a log
+`--format` cannot be combined with the `list` and `explain` subcommands, which write JSON of their own. To upload a log
 to GitHub code scanning, see [CI Integration](ci.md#github-code-scanning).
 
 ## The `list` Command
@@ -700,6 +702,104 @@ A block with no `name` attribute is reported as `(unnamed)`. Within a file, bloc
 block's attributes are sorted by name; the files themselves are not ordered, and two runs over an unchanged tree may
 emit them differently. Sort by key downstream if you need to diff one run against another — or use
 [`--verbosity full`](#full-reports), which does order its files.
+
+## The `explain` Command
+
+`blockwatch explain FILE:BLOCK_NAME` checks one named block and prints what each of its validators read, as JSON. Run it
+after you write a rule, to see that the rule matches what you meant. A rule can be wrong and still pass. For example, a
+`same-as-pattern` can take the same wrong part of each line on both sides.
+
+```shell
+blockwatch explain src/colors.py:colors
+blockwatch explain package.json:version                              # a block from blockwatch.toml
+git diff --patch | blockwatch explain --diff src/colors.py:colors   # affects needs the diff
+```
+
+- It takes one address, as `--only-block` does. A block without a `name` can't be explained, so give it one first.
+- It takes `--diff`, `--config`, `-E` and `--ignore`, and rejects the other flags.
+- `only-blocks` and `skip-blocks` in `blockwatch.toml` play no part, because the address already picks the block.
+  `enable` and `disable` still apply.
+- The explanation goes to stdout. Violations go to stderr, and the [exit code](#exit-codes) is the one a normal run
+  gives. `check-ai` calls the API, as in a normal run.
+
+### Explain Output Example
+
+For this block:
+
+```python
+COLORS = [
+    # <block name="colors" keep-sorted="asc" keep-sorted-pattern='"(?P<value>\w+)"'>
+    "blue",
+    "red",
+    # </block>
+]
+```
+
+`blockwatch explain src/colors.py:colors` prints:
+
+[//]: # (<block name="explain-output-example">)
+
+```json
+{
+  "block": {
+    "attributes": {
+      "keep-sorted": "asc",
+      "keep-sorted-pattern": "\"(?P<value>\\w+)\"",
+      "name": "colors"
+    },
+    "column": 7,
+    "is_content_modified": false,
+    "line": 2,
+    "name": "colors"
+  },
+  "checks": {
+    "keep-sorted": {
+      "format": "lexicographic",
+      "lines": [
+        { "line": 3, "text": "\"blue\",", "value": "blue" },
+        { "line": 4, "text": "\"red\",", "value": "red" }
+      ],
+      "order": "asc"
+    }
+  },
+  "content": {
+    "start": { "line": 2, "character": 85 },
+    "end": { "line": 5, "character": 5 },
+    "text": "\n    \"blue\",\n    \"red\",\n    "
+  },
+  "disabled": [],
+  "file": "src/colors.py",
+  "with_diff": false
+}
+```
+
+[//]: # (</block>)
+
+| Key         | What it holds                                                                                                                                                                                                                                                                          |
+|-------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `block`     | The block, as [`list`](#the-list-command) writes it.                                                                                                                                                                                                                                   |
+| `checks`    | What each validator read, by validator. See [What Each Validator Shows](#what-each-validator-shows).                                                                                                                                                                                   |
+| `content`   | The text the validators read. `start` is its first character, and `end` is the first character after it. The column is `character`, as in the `range` of a violation. For a [virtual block](#blocks-in-the-config-file) around a quoted or escaped value, `text` is the decoded value. |
+| `disabled`  | The validators that the block asks for, but the settings turn off. They have no entry in `checks`.                                                                                                                                                                                     |
+| `file`      | The block's file.                                                                                                                                                                                                                                                                      |
+| `with_diff` | Whether `--diff` was given. Without it, no block counts as changed, so `affects` can't fire.                                                                                                                                                                                           |
+
+### What Each Validator Shows
+
+A trace stops where its validator stops, such as at the first line out of order. A `line` is a line of the block's
+file, and `text` is that line trimmed, as the validator compares it. A key that holds what a violation reports has the
+name the violation's `data` gives it, such as `reason`.
+
+| Validator      | What it shows                                                                                                                                                                                                                                                                                                                                                                          |
+|----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `same-as`      | `records`: each match of `same-as-pattern` in the block, with its `line`, the text the regex matched (`match`), and each named group after `same-as-format` (`groups`). `targets`: the `records` of each target, and the `reason` of its violation, or `null` when the two agree. `paths`: with `same-as-paths`, the `glob`, the paths it `matched`, their `records` and the `reason`. |
+| `keep-sorted`  | `lines`: each line read, with the `value` it compares, or `null` when `keep-sorted-pattern` skips the line. `format` and `order`.                                                                                                                                                                                                                                                      |
+| `keep-unique`  | `lines`, as for `keep-sorted`. A repeated value has `duplicate_of`: the line where it first appeared.                                                                                                                                                                                                                                                                                  |
+| `line-pattern` | `lines`: each line read, with the text `line-pattern` matched (`match`). A line that fails has `fails`: the check it fails. `forbidden_match` is the text `line-pattern-forbidden` found.                                                                                                                                                                                              |
+| `line-count`   | The number of lines that aren't blank (`actual`), and the rule (`op` and `expected`).                                                                                                                                                                                                                                                                                                  |
+| `affects`      | Whether the diff changed the block (`block_changed`). For each target: whether the diff `changed` it, or the `reason` it doesn't resolve.                                                                                                                                                                                                                                              |
+| `check-lua`    | The `content` and the `affects` the script got, and the message it returned (`lua_error`), or `null` when it passed. `affects` is `ctx.affects` without the content of each target.                                                                                                                                                                                                    |
+| `check-ai`     | The `model`, the `prompt` sent and the `response`. Both are `null` when `check-ai-pattern` matched nothing, so no request was sent.                                                                                                                                                                                                                                                    |
 
 ## Run Reports
 
