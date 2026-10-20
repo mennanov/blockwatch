@@ -344,6 +344,8 @@ impl ValidationLog {
 #[serde(untagged)]
 pub(crate) enum ValidatorTrace {
     Affects(affects::AffectsTrace),
+    CheckAi(check_ai::CheckAiTrace),
+    CheckLua(check_lua::CheckLuaTrace),
     KeepSorted(keep_sorted::KeepSortedTrace),
     KeepUnique(keep_unique::KeepUniqueTrace),
     LineCount(line_count::LineCountTrace),

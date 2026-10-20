@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 mod common;
 
 /// `colors` in this file fails `keep-sorted`, and `fruits` passes. `colors-copy` has the same
-/// content as `colors`, which `same-as` checks.
+/// content as `colors`, which `same-as` checks. `checked-fruits` passes `keep-sorted` and a
+/// `check-lua` script.
 const FIXTURE: &str = "tests/testdata/explain/a.py";
 
 /// The text of [`FIXTURE`], for a repository that a test creates.
@@ -90,6 +91,24 @@ fn block_with_same_as_writes_its_trace_under_checks() -> anyhow::Result<()> {
             }
         })
     );
+    Ok(())
+}
+
+#[test]
+fn block_with_sync_and_async_validators_writes_both_traces() -> anyhow::Result<()> {
+    let output = cargo_bin_cmd!()
+        .args(["explain", &format!("{FIXTURE}:checked-fruits")])
+        .output()?;
+
+    output.clone().assert().success().stderr("");
+    let checks = json_from(&output.stdout)?["checks"].clone();
+    let validators: Vec<&String> = checks
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(key, _)| key)
+        .collect();
+    assert_eq!(validators, ["check-lua", "keep-sorted"]);
     Ok(())
 }
 

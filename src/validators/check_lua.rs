@@ -5,7 +5,7 @@ use crate::symbol_path::SymbolPath;
 use crate::target_reference::{TargetKind, TargetReference};
 use crate::validators::{
     AsyncValidator, PatternContent, TargetFiles, ValidationContext, ValidationReport, Validator,
-    ValidatorType, Violation, block_content_for_pattern, parse_keyword,
+    ValidatorTrace, ValidatorType, Violation, block_content_for_pattern, parse_keyword,
 };
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -109,15 +109,14 @@ impl<Fs: FileSystem + 'static> AsyncValidator for CheckLuaValidator<Fs> {
             for (block_idx, block_with_context) in
                 file_blocks.blocks_with_context.iter().enumerate()
             {
-                if let Some(script_path) = block_with_context.block.attributes.get("check-lua") {
-                    if script_path.trim().is_empty() {
-                        return Err(anyhow!(
-                            "check-lua requires a non-empty script path in {}",
-                            block_with_context.block.label(file_path)
-                        ));
-                    };
-                } else {
+                let Some(script_path) = block_with_context.block.attributes.get("check-lua") else {
                     continue;
+                };
+                if script_path.trim().is_empty() {
+                    return Err(anyhow!(
+                        "check-lua requires a non-empty script path in {}",
+                        block_with_context.block.label(file_path)
+                    ));
                 }
 
                 // The block is checked from here on, whatever the script returns, so add it
@@ -129,59 +128,80 @@ impl<Fs: FileSystem + 'static> AsyncValidator for CheckLuaValidator<Fs> {
                 let file_system = Arc::clone(&self.file_system);
                 let mode = self.mode;
                 tasks.spawn(async move {
-                    let file_blocks = &context.blocks[&file_path];
-                    let block_with_context = &file_blocks.blocks_with_context[block_idx];
-                    let script_path = &block_with_context.block.attributes["check-lua"];
-                    let content = match block_content_for_pattern(
-                        block_with_context,
-                        &file_blocks.file_content,
-                        "check-lua-pattern",
-                    )? {
-                        PatternContent::Whole(content) => LuaContent::Text(content.to_string()),
-                        PatternContent::Matches(matches) => {
-                            LuaContent::Matches(matches.into_iter().map(str::to_string).collect())
-                        }
-                    };
-                    let affected_targets = resolve_affected_targets(
-                        &context,
-                        file_system.as_ref(),
-                        &file_path,
-                        &block_with_context.block,
-                    )?;
-
-                    let result = run_lua_script(
-                        script_path,
-                        file_system.as_ref(),
-                        &file_path,
-                        block_with_context,
-                        content,
-                        &affected_targets,
-                        mode,
-                    )
-                    .await;
-
-                    let block_violations = match result.context(format!(
-                        "check-lua script error in {}",
-                        block_with_context.block.label(&file_path)
-                    ))? {
-                        None => Vec::new(),
-                        Some(msg) => vec![create_violation(
-                            &file_path,
-                            &block_with_context.block,
-                            script_path,
-                            &msg,
-                        )?],
-                    };
-                    anyhow::Ok((file_path, block_violations))
+                    let (violations, trace) =
+                        check_block(file_system.as_ref(), mode, &context, &file_path, block_idx)
+                            .await?;
+                    anyhow::Ok((file_path, block_idx, violations, trace))
                 });
             }
         }
         while let Some(task_result) = tasks.join_next().await {
-            let (file_path, violations) = task_result.context("check-lua task failed")??;
+            let (file_path, block_idx, violations, trace) =
+                task_result.context("check-lua task failed")??;
+            if let Some(trace) = trace {
+                let block = &context.blocks[&file_path].blocks_with_context[block_idx].block;
+                report.add_trace(&file_path, block, trace);
+            }
             report.add_violations(&file_path, violations);
         }
         Ok(report)
     }
+}
+
+/// Runs the `check-lua` script of block `block_idx` of `file_path`, with the libraries of `mode`.
+/// Returns the block's violations, and its trace when `context` asks for traces.
+///
+/// # Errors
+/// Returns an error if `check-lua-pattern` is not a valid regex, an `affects` target can't be
+/// read, or the script fails to run.
+async fn check_block<Fs: FileSystem>(
+    file_system: &Fs,
+    mode: LuaMode,
+    context: &ValidationContext,
+    file_path: &RepoPath,
+    block_idx: usize,
+) -> anyhow::Result<(Vec<Violation>, Option<ValidatorTrace>)> {
+    let file_blocks = &context.blocks[file_path];
+    let block_with_context = &file_blocks.blocks_with_context[block_idx];
+    let block = &block_with_context.block;
+    let script_path = &block.attributes["check-lua"];
+    let content = match block_content_for_pattern(
+        block_with_context,
+        &file_blocks.file_content,
+        "check-lua-pattern",
+    )? {
+        PatternContent::Whole(content) => LuaContent::Text(content.to_string()),
+        PatternContent::Matches(matches) => {
+            LuaContent::Matches(matches.into_iter().map(str::to_string).collect())
+        }
+    };
+    let affected_targets = resolve_affected_targets(context, file_system, file_path, block)?;
+    let traced_content = context.traces_requested.then(|| content.clone());
+
+    let lua_error = run_lua_script(
+        script_path,
+        file_system,
+        file_path,
+        block_with_context,
+        content,
+        affected_targets.as_deref(),
+        mode,
+    )
+    .await
+    .with_context(|| format!("check-lua script error in {}", block.label(file_path)))?;
+
+    let violation = lua_error
+        .as_deref()
+        .map(|message| create_violation(file_path, block, script_path, message))
+        .transpose()?;
+    let trace = traced_content.map(|content| {
+        ValidatorTrace::CheckLua(CheckLuaTrace {
+            affects: affected_targets,
+            content,
+            lua_error,
+        })
+    });
+    Ok((Vec::from_iter(violation), trace))
 }
 
 async fn run_lua_script<Fs: FileSystem>(
@@ -190,7 +210,7 @@ async fn run_lua_script<Fs: FileSystem>(
     file_path: &RepoPath,
     block_with_context: &BlockWithContext,
     content: LuaContent,
-    affected_targets: &[AffectedTarget],
+    affected_targets: Option<&[AffectedTarget]>,
     mode: LuaMode,
 ) -> anyhow::Result<Option<String>> {
     let timeout = parse_check_lua_timeout(&block_with_context.block)?;
@@ -234,6 +254,8 @@ struct LuaScriptInputs {
 }
 
 /// The `content` argument handed to the `validate()` function in the Lua script.
+#[derive(Clone, Debug, Serialize)]
+#[serde(untagged)]
 enum LuaContent {
     /// The block's whole trimmed content, passed to the script as a string.
     Text(String),
@@ -260,10 +282,10 @@ impl LuaScriptInputs {
         file_path: &RepoPath,
         block_with_context: &BlockWithContext,
         content: LuaContent,
-        affected_targets: &[AffectedTarget],
+        affected_targets: Option<&[AffectedTarget]>,
     ) -> Self {
         let block = &block_with_context.block;
-        let affects = block.attributes.contains_key("affects").then(|| {
+        let affects = affected_targets.map(|affected_targets| {
             affected_targets
                 .iter()
                 .map(|affected| LuaAffected {
@@ -476,11 +498,31 @@ fn create_violation(
 }
 
 /// A target referenced by the validated block's `affects` attribute, exposed to Lua scripts.
+///
+/// Its JSON leaves out the content, which can be a whole file.
+#[derive(Debug, Serialize)]
 struct AffectedTarget {
     file: RepoPath,
     /// A block name, or a symbol path with its leading `#`. `None` for a whole-file reference.
+    #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
+    #[serde(skip)]
     content: String,
+}
+
+/// What `check-lua` gave its script, and what the script returned.
+///
+/// serde writes the keys in the order the fields are declared, and the output keeps its keys
+/// sorted. So declare the fields in alphabetical order.
+#[derive(Debug, Serialize)]
+pub(crate) struct CheckLuaTrace {
+    /// The targets in `ctx.affects`. `None` when the block has no `affects` attribute.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    affects: Option<Vec<AffectedTarget>>,
+    /// The `content` argument of `validate()`.
+    content: LuaContent,
+    /// What `validate()` returned. `None` when it returned `nil`.
+    lua_error: Option<String>,
 }
 
 /// Resolves the targets referenced by the `affects` attribute of `block` to their `(file, name,
@@ -488,6 +530,7 @@ struct AffectedTarget {
 ///
 /// References that don't resolve are skipped (the `affects` validator is responsible for reporting
 /// those). The content is trimmed to mirror how the validated block's own content is presented.
+/// Returns `None` when `block` has no `affects` attribute.
 ///
 /// # Errors
 /// Returns an error if a symbol reference points into a file that cannot be read, has no symbols,
@@ -498,10 +541,9 @@ fn resolve_affected_targets<Fs: FileSystem>(
     file_system: &Fs,
     current_file_path: &RepoPath,
     block: &Block,
-) -> anyhow::Result<Vec<AffectedTarget>> {
-    let mut result = Vec::new();
+) -> anyhow::Result<Option<Vec<AffectedTarget>>> {
     let Some(affects) = block.attributes.get("affects") else {
-        return Ok(result);
+        return Ok(None);
     };
     let references = TargetReference::parse_list(affects).with_context(|| {
         format!(
@@ -509,6 +551,7 @@ fn resolve_affected_targets<Fs: FileSystem>(
             block.label(current_file_path),
         )
     })?;
+    let mut result = Vec::new();
     let mut files = TargetFiles::new(context, file_system);
     for reference in references {
         let target = reference.resolve(current_file_path);
@@ -525,7 +568,7 @@ fn resolve_affected_targets<Fs: FileSystem>(
             });
         }
     }
-    Ok(result)
+    Ok(Some(result))
 }
 
 /// The content of the block `name` in `file`. Returns `None` when `file` holds no block with that
@@ -618,7 +661,7 @@ mod tests {
     use serde_json::json;
 
     /// Builds a `CheckLuaValidator` backed by a fake filesystem seeded with `scripts`.
-    fn validator(scripts: &[(&str, &str)]) -> CheckLuaValidator<FakeFileSystem> {
+    pub(super) fn validator(scripts: &[(&str, &str)]) -> CheckLuaValidator<FakeFileSystem> {
         let files = scripts
             .iter()
             .map(|(path, contents)| (path.to_string(), contents.to_string()))
@@ -1588,6 +1631,85 @@ text
             err.to_string()
                 .contains("check-lua requires a non-empty script path")
         );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod trace_tests {
+    use super::tests::validator;
+    use crate::test_utils::validation_context;
+    use crate::validators::AsyncValidator;
+    use crate::validators::test_utils::{trace_json, with_traces};
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn block_records_what_its_script_got_and_returned() -> anyhow::Result<()> {
+        let script = r#"
+function validate(ctx, content)
+    return "got " .. #content .. " values"
+end
+"#;
+        let source = r#"# <block check-lua="check.lua" check-lua-pattern="\w+" affects=":colors, colors.txt">
+red blue
+# </block>
+# <block name="colors">
+red
+# </block>
+"#;
+        let context = with_traces(validation_context("a.py", source));
+
+        let report = validator(&[
+            ("check.lua", script),
+            ("a.py", source),
+            ("colors.txt", "red\n"),
+        ])
+        .validate(context)
+        .await?;
+
+        assert_eq!(
+            trace_json(&report),
+            json!({
+                "affects": [{ "file": "a.py", "name": "colors" }, { "file": "colors.txt" }],
+                "content": ["red", "blue"],
+                "lua_error": "got 2 values"
+            })
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn block_whose_script_passes_records_its_content_and_no_error() -> anyhow::Result<()> {
+        let script = "function validate(ctx, content) return nil end";
+        let context = with_traces(validation_context(
+            "a.py",
+            "# <block check-lua=\"check.lua\">\nred\n# </block>\n",
+        ));
+
+        let report = validator(&[("check.lua", script)])
+            .validate(context)
+            .await?;
+
+        assert_eq!(
+            trace_json(&report),
+            json!({ "content": "red", "lua_error": null })
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn context_without_traces_requested_records_no_trace() -> anyhow::Result<()> {
+        let script = "function validate(ctx, content) return nil end";
+        let context = validation_context(
+            "a.py",
+            "# <block check-lua=\"check.lua\">\nred\n# </block>\n",
+        );
+
+        let report = validator(&[("check.lua", script)])
+            .validate(context)
+            .await?;
+
+        assert!(report.traces.is_empty());
         Ok(())
     }
 }

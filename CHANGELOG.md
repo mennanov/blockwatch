@@ -23,6 +23,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   - `line-pattern`: what each pattern matched on each line, up to the first line that fails.
   - `affects`: whether the block changed, and for each target, whether it changed or why it doesn't resolve.
   - `line-count`: how many lines the block has, and the rule they were checked against.
+  - `check-lua`: the `content` and `ctx.affects` the script got, and the message it returned.
+  - `check-ai`: the model, the prompt it was sent and its answer.
 
   `"with_diff"` says whether `--diff` was given. Without it, no block counts as changed. Violations go to stderr, and
   the exit code is the same as for a normal run.

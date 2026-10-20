@@ -1,8 +1,8 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    AsyncValidator, PatternContent, ValidationContext, ValidationReport, Validator, ValidatorType,
-    Violation, block_content_for_pattern,
+    AsyncValidator, PatternContent, ValidationContext, ValidationReport, Validator, ValidatorTrace,
+    ValidatorType, Violation, block_content_for_pattern,
 };
 use anyhow::{Context, anyhow};
 use async_openai::Client;
@@ -54,15 +54,14 @@ impl<C: AiClient + 'static> AsyncValidator for CheckAiValidator<C> {
             for (block_idx, block_with_context) in
                 file_blocks.blocks_with_context.iter().enumerate()
             {
-                if let Some(condition) = block_with_context.block.attributes.get("check-ai") {
-                    if condition.trim().is_empty() {
-                        return Err(anyhow!(
-                            "check-ai requires a non-empty condition in {}",
-                            block_with_context.block.label(file_path)
-                        ));
-                    };
-                } else {
+                let Some(condition) = block_with_context.block.attributes.get("check-ai") else {
                     continue;
+                };
+                if condition.trim().is_empty() {
+                    return Err(anyhow!(
+                        "check-ai requires a non-empty condition in {}",
+                        block_with_context.block.label(file_path)
+                    ));
                 }
 
                 // The block is checked from here on, whatever the API answers, so add it
@@ -73,40 +72,79 @@ impl<C: AiClient + 'static> AsyncValidator for CheckAiValidator<C> {
                 let context = Arc::clone(&context);
                 let file_path = file_path.clone();
                 tasks.spawn(async move {
-                    let file_blocks = &context.blocks[&file_path];
-                    let block_with_context = &file_blocks.blocks_with_context[block_idx];
-                    let condition = &block_with_context.block.attributes["check-ai"];
-                    // A prompt can only carry text, so the extracted values are flattened into one
-                    // newline-separated blob for the model to read.
-                    let content = match block_content_for_pattern(
-                        block_with_context,
-                        &file_blocks.file_content,
-                        "check-ai-pattern",
-                    )? {
-                        PatternContent::Whole(content) => Cow::Borrowed(content),
-                        PatternContent::Matches(matches) if matches.is_empty() => {
-                            let violation = create_pattern_no_match_violation(
-                                &file_path,
-                                &block_with_context.block,
-                                &block_with_context.block.attributes["check-ai-pattern"],
-                            )?;
-                            return anyhow::Ok((file_path, vec![violation]));
-                        }
-                        PatternContent::Matches(matches) => Cow::Owned(matches.join("\n")),
-                    };
-
-                    let result = client.check_block(condition, &content).await;
-                    let violation = process_ai_response(&file_path, block_with_context, result)?;
-                    anyhow::Ok((file_path, Vec::from_iter(violation)))
+                    let (violations, trace) =
+                        check_block(client.as_ref(), &context, &file_path, block_idx).await?;
+                    anyhow::Ok((file_path, block_idx, violations, trace))
                 });
             }
         }
         while let Some(task_result) = tasks.join_next().await {
-            let (file_path, violations) = task_result.context("check-ai task failed")??;
+            let (file_path, block_idx, violations, trace) =
+                task_result.context("check-ai task failed")??;
+            if let Some(trace) = trace {
+                let block = &context.blocks[&file_path].blocks_with_context[block_idx].block;
+                report.add_trace(&file_path, block, trace);
+            }
             report.add_violations(&file_path, violations);
         }
         Ok(report)
     }
+}
+
+/// Asks the model whether block `block_idx` of `file_path` meets its `check-ai` condition.
+/// Returns the block's violations, and its trace when `context` asks for traces.
+///
+/// # Errors
+/// Returns an error if `check-ai-pattern` is not a valid regex, or the request to the model fails.
+async fn check_block<C: AiClient>(
+    client: &C,
+    context: &ValidationContext,
+    file_path: &RepoPath,
+    block_idx: usize,
+) -> anyhow::Result<(Vec<Violation>, Option<ValidatorTrace>)> {
+    let file_blocks = &context.blocks[file_path];
+    let block_with_context = &file_blocks.blocks_with_context[block_idx];
+    let block = &block_with_context.block;
+    let trace = |prompt, response| {
+        context.traces_requested.then(|| {
+            ValidatorTrace::CheckAi(CheckAiTrace {
+                model: client.model().to_string(),
+                prompt,
+                response,
+            })
+        })
+    };
+    // A prompt can only carry text, so the extracted values are flattened into one
+    // newline-separated blob for the model to read.
+    let content = match block_content_for_pattern(
+        block_with_context,
+        &file_blocks.file_content,
+        "check-ai-pattern",
+    )? {
+        PatternContent::Whole(content) => Cow::Borrowed(content),
+        PatternContent::Matches(matches) if matches.is_empty() => {
+            let violation = create_pattern_no_match_violation(
+                file_path,
+                block,
+                &block.attributes["check-ai-pattern"],
+            )?;
+            return Ok((vec![violation], trace(None, None)));
+        }
+        PatternContent::Matches(matches) => Cow::Owned(matches.join("\n")),
+    };
+
+    let prompt = user_prompt(&block.attributes["check-ai"], &content);
+    let response = client
+        .ask(&prompt)
+        .await
+        .with_context(|| format!("check-ai API error in {}", block.label(file_path)))?;
+    let violation = (!is_pass(&response))
+        .then(|| create_violation(file_path, block, &response))
+        .transpose()?;
+    Ok((
+        Vec::from_iter(violation),
+        trace(Some(prompt), Some(response)),
+    ))
 }
 
 /// Selects [`CheckAiValidator`] for blocks carrying a `check-ai` attribute, building a client from
@@ -206,23 +244,29 @@ impl<C: AiClient> CheckAiValidator<C> {
     }
 }
 
-/// Turns one AI answer into a violation, or into nothing when the block satisfied the check.
-fn process_ai_response(
-    file_path: &RepoPath,
-    block_with_context: &BlockWithContext,
-    result: anyhow::Result<Option<String>>,
-) -> anyhow::Result<Option<Violation>> {
-    match result.context(format!(
-        "check-ai API error in {}",
-        block_with_context.block.label(file_path)
-    ))? {
-        None => Ok(None),
-        Some(msg) => Ok(Some(create_violation(
-            file_path,
-            &block_with_context.block,
-            &msg,
-        )?)),
-    }
+/// The user message that asks the model whether `content` meets `condition`.
+fn user_prompt(condition: &str, content: &str) -> String {
+    format!("CONDITION:\n{condition}\n\nBLOCK (formatting preserved):\n{content}")
+}
+
+/// Whether the model's `response` says that the block meets its condition. The system prompt asks
+/// for exactly `OK`, but models often add a period or change the case.
+fn is_pass(response: &str) -> bool {
+    response.eq_ignore_ascii_case("OK") || response.eq_ignore_ascii_case("OK.")
+}
+
+/// What `check-ai` sent to the model, and what it answered.
+///
+/// serde writes the keys in the order the fields are declared, and the output keeps its keys
+/// sorted. So declare the fields in alphabetical order.
+#[derive(Debug, Serialize)]
+pub(crate) struct CheckAiTrace {
+    model: String,
+    /// The user message. The system prompt is the same for every block, so it is left out. `None`
+    /// when `check-ai-pattern` matches nothing, so no request is sent.
+    prompt: Option<String>,
+    /// The model's answer as it is. `None` when no request is sent.
+    response: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -237,16 +281,15 @@ struct CheckAiViolation<'a> {
 
 /// The single call [`CheckAiValidator`] makes against a model provider.
 ///
-/// Narrow on purpose: it hides prompt construction and response parsing behind one method, so the
-/// validator's own logic can be tested against a canned client.
+/// Narrow on purpose, so the validator's own logic, which builds the prompt and reads the answer,
+/// can be tested against a canned client.
 #[async_trait]
 trait AiClient: Send + Sync {
-    /// Returns Ok(None) if the block satisfies the condition, Ok(Some(error_message)) otherwise.
-    async fn check_block(
-        &self,
-        condition: &str,
-        block_content: &str,
-    ) -> anyhow::Result<Option<String>>;
+    /// The model that answers.
+    fn model(&self) -> &str;
+
+    /// Sends `prompt` as the user message, and returns the model's answer as it is.
+    async fn ask(&self, prompt: &str) -> anyhow::Result<String>;
 }
 
 /// Default OpenAI-based implementation. Uses async-openai crate.
@@ -272,20 +315,18 @@ impl OpenAiClient {
 
 #[async_trait]
 impl AiClient for OpenAiClient {
-    async fn check_block(
-        &self,
-        condition: &str,
-        block_content: &str,
-    ) -> anyhow::Result<Option<String>> {
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    async fn ask(&self, prompt: &str) -> anyhow::Result<String> {
         if self.client.config().api_key().expose_secret().is_empty() {
             return Err(anyhow::anyhow!(
                 "API key is empty. Is {API_KEY_ENV_VAR_NAME} env variable set?"
             ));
         }
-        let user =
-            format!("CONDITION:\n{condition}\n\nBLOCK (formatting preserved):\n{block_content}");
         let user_msg = ChatCompletionRequestUserMessageArgs::default()
-            .content(user)
+            .content(prompt)
             .build()
             .context("failed to build user message")?;
 
@@ -310,16 +351,11 @@ impl AiClient for OpenAiClient {
             .await
             .context("OpenAI API request failed")?;
 
-        if let Some(chat_choice) = resp.choices.into_iter().next()
-            && let Some(message) = chat_choice.message.content
-        {
-            return if message.eq_ignore_ascii_case("OK") || message.eq_ignore_ascii_case("OK.") {
-                Ok(None)
-            } else {
-                Ok(Some(message))
-            };
-        }
-        Err(anyhow!("empty response from AI"))
+        resp.choices
+            .into_iter()
+            .next()
+            .and_then(|chat_choice| chat_choice.message.content)
+            .ok_or_else(|| anyhow!("empty response from AI"))
     }
 }
 
@@ -333,7 +369,7 @@ mod tests {
     use std::collections::HashMap;
 
     #[derive(Clone)]
-    enum FakeAiResponse {
+    pub(super) enum FakeAiResponse {
         // No violations.
         None,
         // Violation.
@@ -343,34 +379,39 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct FakeClient {
-        // A map from the block's condition to a response: None = OK, Some(msg) = violation.
-        responses: HashMap<(String, String), FakeAiResponse>,
+    pub(super) struct FakeClient {
+        // A map from the prompt to a response: None = OK, Some(msg) = violation.
+        responses: HashMap<String, FakeAiResponse>,
     }
 
     impl FakeClient {
-        fn new(responses: HashMap<(String, String), FakeAiResponse>) -> Self {
+        /// A client that answers the prompt of each `(condition, content)` with its response.
+        pub(super) fn new(responses: HashMap<(String, String), FakeAiResponse>) -> Self {
+            let responses = responses
+                .into_iter()
+                .map(|((condition, content), response)| {
+                    (user_prompt(&condition, &content), response)
+                })
+                .collect();
             Self { responses }
         }
     }
 
     #[async_trait]
     impl AiClient for FakeClient {
-        async fn check_block(
-            &self,
-            condition: &str,
-            block_content: &str,
-        ) -> anyhow::Result<Option<String>> {
+        fn model(&self) -> &str {
+            "fake-model"
+        }
+
+        async fn ask(&self, prompt: &str) -> anyhow::Result<String> {
             let response = self
                 .responses
-                .get(&(condition.to_string(), block_content.to_string()))
+                .get(prompt)
                 .cloned()
-                .unwrap_or_else(|| {
-                    panic!("Unexpected AiClient call: {condition:?}, {block_content:?}")
-                });
+                .unwrap_or_else(|| panic!("Unexpected AiClient call: {prompt:?}"));
             match response {
-                FakeAiResponse::None => Ok(None),
-                FakeAiResponse::Some(validation_error) => Ok(Some(validation_error)),
+                FakeAiResponse::None => Ok("OK".to_string()),
+                FakeAiResponse::Some(validation_error) => Ok(validation_error),
                 FakeAiResponse::Err(error_message) => Err(anyhow!(error_message)),
             }
         }
@@ -415,6 +456,23 @@ I like apples
         let validator = CheckAiValidator::with_client(FakeClient::new(HashMap::from([(
             ("must mention banana".into(), "I like banana".into()),
             FakeAiResponse::None,
+        )])));
+        let context = validation_context(
+            "example.py",
+            r#"# <block check-ai="must mention banana">
+I like banana
+# </block>"#,
+        );
+        let violations = validator.validate(context).await?.violations;
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ai_answer_ok_in_lowercase_with_a_period_returns_no_violations() -> anyhow::Result<()> {
+        let validator = CheckAiValidator::with_client(FakeClient::new(HashMap::from([(
+            ("must mention banana".into(), "I like banana".into()),
+            FakeAiResponse::Some("ok.".into()),
         )])));
         let context = validation_context(
             "example.py",
@@ -624,6 +682,75 @@ I like banana
         // check-ai attribute is not checked, so it records nothing.
         assert_eq!(checked_lines(&report), vec![1, 4]);
         assert_eq!(violation_count(&report), 1);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod trace_tests {
+    use super::tests::{FakeAiResponse, FakeClient};
+    use super::*;
+    use crate::test_utils::validation_context;
+    use crate::validators::test_utils::{trace_json, with_traces};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn block_records_the_prompt_and_the_response() -> anyhow::Result<()> {
+        let validator = CheckAiValidator::with_client(FakeClient::new(HashMap::from([(
+            ("must mention banana".into(), "I like apples".into()),
+            FakeAiResponse::Some("Mention banana.".into()),
+        )])));
+        let context = with_traces(validation_context(
+            "a.py",
+            "# <block check-ai=\"must mention banana\">\nI like apples\n# </block>\n",
+        ));
+
+        let report = validator.validate(context).await?;
+
+        assert_eq!(
+            trace_json(&report),
+            json!({
+                "model": "fake-model",
+                "prompt": "CONDITION:\nmust mention banana\n\nBLOCK (formatting preserved):\nI like apples",
+                "response": "Mention banana."
+            })
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn block_whose_pattern_matches_nothing_records_that_no_prompt_was_sent()
+    -> anyhow::Result<()> {
+        let validator = CheckAiValidator::with_client(FakeClient::default());
+        let context = with_traces(validation_context(
+            "a.py",
+            "# <block check-ai=\"must mention banana\" check-ai-pattern=\"zzz\">\nI like apples\n# </block>\n",
+        ));
+
+        let report = validator.validate(context).await?;
+
+        assert_eq!(
+            trace_json(&report),
+            json!({ "model": "fake-model", "prompt": null, "response": null })
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn context_without_traces_requested_records_no_trace() -> anyhow::Result<()> {
+        let validator = CheckAiValidator::with_client(FakeClient::new(HashMap::from([(
+            ("must mention banana".into(), "I like apples".into()),
+            FakeAiResponse::None,
+        )])));
+        let context = validation_context(
+            "a.py",
+            "# <block check-ai=\"must mention banana\">\nI like apples\n# </block>\n",
+        );
+
+        let report = validator.validate(context).await?;
+
+        assert!(report.traces.is_empty());
         Ok(())
     }
 }

@@ -10,3 +10,7 @@ blue
 red
 blue
 # </block>
+# <block name="checked-fruits" keep-sorted="asc" check-lua="tests/testdata/explain/check.lua">
+apple
+banana
+# </block>
