@@ -104,7 +104,7 @@ you'd otherwise have to nitpick in code review.
 | [`keep-sorted`](docs/validators/keep-sorted.md)   | Enforces alphabetical or numerical ordering on list items                                    | `keep-sorted`, `keep-sorted-pattern`, `keep-sorted-format`                      |
 | [`keep-unique`](docs/validators/keep-unique.md)   | Prevents duplicate lines within a block                                                      | `keep-unique`                                                                   |
 | [`line-pattern`](docs/validators/line-pattern.md) | Enforces that every line matches a regex, or that no line matches a forbidden one            | `line-pattern`, `line-pattern-forbidden`                                        |
-| [`line-count`](docs/validators/line-count.md)     | Enforces lower or upper bounds on the number of lines in a block                             | `line-count`                                                                    |
+| [`line-count`](docs/validators/line-count.md)     | Enforces lower or upper bounds on the number of lines in a block                             | `line-count`, `line-count-pattern`                                              |
 | [`check-ai`](docs/validators/check-ai.md)         | Validates content against natural language rules using an LLM                                | `check-ai`, `check-ai-pattern`                                                  |
 | [`check-lua`](docs/validators/check-lua.md)       | Runs custom validation logic written in Lua                                                  | `check-lua`, `check-lua-pattern`, `check-lua-timeout`                           |
 

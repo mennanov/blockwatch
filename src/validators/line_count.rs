@@ -3,13 +3,14 @@ use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{
     SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
+    compile_pattern, regex_value, trimmed_line_value,
 };
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use serde::Serialize;
 use std::sync::Arc;
 
 /// Enforces `line-count="<N"` and friends: the number of non-empty lines in the block must satisfy
-/// the given comparison.
+/// the given comparison. With `line-count-pattern`, only the lines that give a value count.
 ///
 /// Useful for keeping a section from silently growing past the size it was designed for — a code
 /// sample that must stay readable, or a list with a hard limit.
@@ -39,21 +40,32 @@ impl SyncValidator for LineCountValidator {
                     block_with_context.block.label(file_path),
                     e
                 ))?;
-                let actual = if block_with_context
+                let pattern = block_with_context
+                    .block
+                    .attributes
+                    .get("line-count-pattern")
+                    .map(|pattern| {
+                        compile_pattern(pattern).with_context(|| {
+                            format!(
+                                "invalid line-count-pattern in {}",
+                                block_with_context.block.label(file_path)
+                            )
+                        })
+                    })
+                    .transpose()?;
+                let actual = block_with_context
                     .block
                     .content
                     .text(&file_blocks.file_content)
-                    .is_empty()
-                {
-                    0
-                } else {
-                    block_with_context
-                        .block
-                        .content
-                        .text(&file_blocks.file_content)
-                        .lines()
-                        .filter(|line| !line.trim().is_empty())
-                        .count()
+                    .lines()
+                    .filter(|line| match &pattern {
+                        None => trimmed_line_value(line).is_some(),
+                        Some(pattern) => regex_value(line, pattern).is_some(),
+                    })
+                    .count();
+                let counted = match pattern {
+                    None => "lines",
+                    Some(_) => "lines that match line-count-pattern",
                 };
                 let ok = match op {
                     Op::Lt => actual < expected,
@@ -71,6 +83,7 @@ impl SyncValidator for LineCountValidator {
                         op,
                         expected,
                         actual,
+                        counted,
                     )?]
                 };
                 report.add_all(file_path, &block_with_context.block, block_violations);
@@ -94,11 +107,13 @@ fn create_violation(
     operation: Op,
     expected: usize,
     actual: usize,
+    counted: &str,
 ) -> anyhow::Result<Violation> {
     let message = format!(
-        "Block {} has {} lines, which does not satisfy {}{}",
+        "Block {} has {} {}, which does not satisfy {}{}",
         block.label(block_file_path),
         actual,
+        counted,
         operation.as_str(),
         expected
     );
@@ -124,7 +139,7 @@ fn create_violation(
 /// sorted. So declare the fields in alphabetical order.
 #[derive(Serialize, Debug)]
 pub(crate) struct LineCountTrace {
-    /// The lines of the content that aren't blank.
+    /// The lines of the content that aren't blank, or that `line-count-pattern` gives a value for.
     actual: usize,
     expected: usize,
     op: &'static str,
@@ -381,6 +396,148 @@ mod tests {
         let violations = validator.validate(context)?.violations;
         assert!(violations.is_empty());
         Ok(())
+    }
+
+    #[test]
+    fn pattern_counts_only_the_lines_it_matches() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-count="==2" line-count-pattern='^"\w+",$'>
+"red",
+# a comment
+"blue",
+# </block>
+# <block line-count="<2" line-count-pattern='^"\w+",$'>
+"red",
+# a comment
+"blue",
+# </block>"#,
+        );
+
+        let violations = LineCountValidator.validate(context)?.violations;
+
+        let violations = violations
+            .get(&RepoPath::from_reference("example.py")?)
+            .unwrap();
+        assert_eq!(violations.len(), 1);
+        assert_eq!(
+            violations[0].message,
+            "Block example.py:(unnamed) at line 6 has 2 lines that match line-count-pattern, which does not satisfy <2"
+        );
+        assert_eq!(
+            violations[0].data,
+            Some(json!({
+                "actual": 2,
+                "op": "<",
+                "expected": 2,
+            }))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_matching_no_line_counts_zero() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-count=">0" line-count-pattern="^id">
+red
+blue
+# </block>"#,
+        );
+
+        let violations = LineCountValidator.validate(context)?.violations;
+
+        let violations = violations
+            .get(&RepoPath::from_reference("example.py")?)
+            .unwrap();
+        assert_eq!(
+            violations[0].message,
+            "Block example.py:(unnamed) at line 1 has 0 lines that match line-count-pattern, which does not satisfy >0"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_matches_within_the_trimmed_line() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-count="==2" line-count-pattern="^\w+$">
+    red
+    blue
+    red, blue
+# </block>"#,
+        );
+
+        let violations = LineCountValidator.validate(context)?.violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_with_an_empty_value_skips_the_line() -> anyhow::Result<()> {
+        // `red` matches, but its `value` group is empty, so only `1` counts.
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-count="==1" line-count-pattern="(?P<value>\d*)">
+red
+1
+# </block>"#,
+        );
+
+        let violations = LineCountValidator.validate(context)?.violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_with_a_value_group_not_in_the_match_skips_the_line() -> anyhow::Result<()> {
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-count="==1" line-count-pattern="^(?:none|(?P<value>\w+))$">
+none
+red
+# </block>"#,
+        );
+
+        let violations = LineCountValidator.validate(context)?.violations;
+
+        assert!(violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_with_invalid_regex_returns_an_error() {
+        let context = validation_context(
+            "example.py",
+            r#"# <block line-count="==1" line-count-pattern="(unclosed">
+red
+# </block>"#,
+        );
+
+        let error = LineCountValidator.validate(context).unwrap_err();
+
+        assert!(
+            format!("{error:#}")
+                .starts_with("invalid line-count-pattern in example.py:(unnamed) at line 1: "),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn pattern_with_a_line_break_returns_an_error() {
+        let context = validation_context(
+            "example.py",
+            "# <block line-count=\"==1\" line-count-pattern=\"^red\n# $\">\nred\n# </block>",
+        );
+
+        let error = LineCountValidator.validate(context).unwrap_err();
+
+        assert!(
+            format!("{error:#}").contains("the pattern has a line break"),
+            "{error}"
+        );
     }
 
     #[test]

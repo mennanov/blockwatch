@@ -14,6 +14,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Added
 
+- `line-count-pattern` makes `line-count` count only the lines that match the regex. For example,
+  `line-count="<=20" line-count-pattern='^"\w+",$'` skips comments and blank lines in a list. See
+  [`line-count`](docs/validators/line-count.md).
 - `blockwatch explain FILE:BLOCK_NAME` checks one named block and prints it as JSON: its attributes, the text its
   validators read and where that text is. For example: `blockwatch explain package.json:version`. The output also lists
   the validators the block asks for but the settings turn off (`"disabled"`). Under `"checks"`, it shows what each
