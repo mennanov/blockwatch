@@ -282,6 +282,12 @@ pub(crate) enum Subcommand {
     },
     /// Print the agent skill for this version of blockwatch, as Markdown.
     Skill,
+    /// Check one block, and print what its validators saw, as JSON.
+    Explain {
+        /// The block to check, e.g. docs/cli.md:cli-docs
+        #[arg(value_name = "FILE:BLOCK_NAME", value_parser = ValueParser::new(BlockAddress::parse))]
+        address: BlockAddress,
+    },
 }
 
 impl Args {
@@ -345,22 +351,33 @@ impl Args {
         Ok(addresses)
     }
 
-    /// The path and glob arguments as written: those before `list`, then those after it.
+    /// The path and glob arguments as written: those before `list`, then those after it. For
+    /// `explain`, the file of its address.
     pub(crate) fn path_arguments(&self) -> Vec<String> {
         let mut arguments = self.paths.clone();
         match &self.command {
             Some(Subcommand::List { paths }) => arguments.extend(paths.iter().cloned()),
+            Some(Subcommand::Explain { address }) => arguments.push(address.file().to_string()),
             Some(Subcommand::Skill) | None => {}
         }
         arguments
     }
 
-    /// Checks that the `list` and `skill` subcommands got none of the flags meant for validation,
-    /// such as `--format` and `--suppress`. Reads no file.
+    /// Checks that the subcommands got none of the flags meant for validation, such as `--format`
+    /// and `--suppress`. `explain` also takes no `--only-changed`. Reads no file.
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
         let subcommand = match self.command {
             Some(Subcommand::List { .. }) => "list",
             Some(Subcommand::Skill) => "skill",
+            Some(Subcommand::Explain { .. }) => {
+                if self.only_changed {
+                    anyhow::bail!(
+                        "the `explain` subcommand doesn't take --only-changed, because the \
+                         address already selects the block"
+                    );
+                }
+                "explain"
+            }
             None => return Ok(()),
         };
         if self.validation != ValidationFlags::default() {
@@ -524,6 +541,72 @@ mod tests {
                 "unexpected error for {argv:?}: {error}"
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn validation_flag_before_explain_is_rejected() -> anyhow::Result<()> {
+        for argv in [
+            ["blockwatch", "--enable", "check-ai", "explain", "a.md:n"],
+            ["blockwatch", "--disable", "check-ai", "explain", "a.md:n"],
+            ["blockwatch", "--verbosity", "full", "explain", "a.md:n"],
+            ["blockwatch", "--format", "sarif", "explain", "a.md:n"],
+            [
+                "blockwatch",
+                "--suppress",
+                "a.md:n:keep-sorted",
+                "explain",
+                "a.md:n",
+            ],
+            [
+                "blockwatch",
+                "--suppress-from",
+                "msg.txt",
+                "explain",
+                "a.md:n",
+            ],
+            ["blockwatch", "--only-block", "a.md:n", "explain", "a.md:n"],
+            ["blockwatch", "--skip-block", "a.md:n", "explain", "a.md:n"],
+        ] {
+            let error = parse(&argv)?
+                .validate()
+                .expect_err("`explain` must reject a flag it doesn't take");
+            assert!(
+                error.to_string().contains("`explain` subcommand"),
+                "unexpected error for {argv:?}: {error}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn only_changed_with_explain_is_rejected() -> anyhow::Result<()> {
+        let error = parse(&[
+            "blockwatch",
+            "explain",
+            "--diff",
+            "--only-changed",
+            "a.md:n",
+        ])?
+        .validate()
+        .expect_err("`explain` must reject --only-changed");
+        assert_eq!(
+            error.to_string(),
+            "the `explain` subcommand doesn't take --only-changed, because the address already \
+             selects the block"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn explain_with_diff_parses_the_address() -> anyhow::Result<()> {
+        let args = parse(&["blockwatch", "explain", "--diff", "a.md:n"])?;
+        args.validate()?;
+        assert!(args.diff);
+        assert!(matches!(
+            args.command,
+            Some(Subcommand::Explain { address }) if address.to_string() == "a.md:n"
+        ));
         Ok(())
     }
 

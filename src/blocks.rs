@@ -184,6 +184,15 @@ impl Content {
         }
     }
 
+    /// Describes the content for JSON. `source` must be the text of the block's file.
+    pub(crate) fn listing<'a>(&'a self, source: &'a str) -> ContentListing<'a> {
+        ContentListing {
+            start: self.positions.start,
+            end: self.positions.end,
+            text: self.text(source),
+        }
+    }
+
     /// Returns the content's text. `source` must be the text of the block's file.
     pub(crate) fn text<'a>(&'a self, source: &'a str) -> &'a str {
         match &self.text {
@@ -423,6 +432,19 @@ pub(crate) struct BlockListing<'a> {
     name: &'a str,
 }
 // </block>
+
+/// The content of a block, as it is written in JSON: its text, and where the block's file writes
+/// it.
+#[derive(Serialize, Debug)]
+pub(crate) struct ContentListing<'a> {
+    /// The position of the content's first character.
+    start: Position,
+    /// The first position after the content.
+    end: Position,
+    /// The text the validators read. For a virtual block around a quoted or escaped value, it is
+    /// the decoded value.
+    text: &'a str,
+}
 
 impl<'a> From<&'a BlockWithContext> for BlockListing<'a> {
     /// Describes the block, with no `checks`.

@@ -24,6 +24,7 @@ mod blocks;
 mod cli;
 mod config;
 mod diff_parser;
+mod explain;
 mod flags;
 mod fs;
 mod language_parsers;

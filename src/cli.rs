@@ -1,9 +1,10 @@
-//! The whole run: reads the flags and the input, runs the validators or `list`, and writes the
-//! output.
+//! The whole run: reads the flags and the input, runs the validators, `list` or `explain`, and
+//! writes the output.
 
-use crate::blocks::BlockSeverity;
+use crate::blocks::{BlockAddress, BlockSeverity};
 use crate::config;
 use crate::diff_parser::{self, DiffChanges};
+use crate::explain::Explanation;
 use crate::flags;
 use crate::fs::FileSystem;
 use crate::language_parsers;
@@ -12,7 +13,7 @@ use crate::repo_path::RepoPath;
 use crate::report;
 use crate::sarif;
 use crate::scan;
-use crate::settings::Settings;
+use crate::settings::{BlockSelection, Settings};
 use crate::validators;
 use crate::validators::Violation;
 use crate::violation_address::ViolationAddress;
@@ -27,7 +28,8 @@ use std::sync::Arc;
 use std::{env, fs};
 
 /// Runs the program with the command-line flags of the process: validates the blocks, lists them
-/// with the `list` subcommand, or prints the agent skill with the `skill` subcommand.
+/// with the `list` subcommand, checks one block with the `explain` subcommand, or prints the agent
+/// skill with the `skill` subcommand.
 ///
 /// Returns the exit code of the process:
 /// - `0` when no violation fails the run.
@@ -41,6 +43,7 @@ pub fn run() -> ExitCode {
     let result = args.validate().and_then(|()| match &args.command {
         Some(flags::Subcommand::List { .. }) => run_list(&args).map(|()| ExitCode::SUCCESS),
         Some(flags::Subcommand::Skill) => run_skill().map(|()| ExitCode::SUCCESS),
+        Some(flags::Subcommand::Explain { address }) => run_explain(&args, address),
         None => run_validators(&args),
     });
     result.unwrap_or_else(|error| {
@@ -63,6 +66,43 @@ fn run_skill() -> anyhow::Result<()> {
     let skill = include_str!("skill.md").replace("{{version}}", env!("CARGO_PKG_VERSION"));
     // `write_line` adds the newline that ends the output, so the file's own one is dropped.
     write_line(std::io::stdout(), skill.trim_end())
+}
+
+/// Runs the `explain` subcommand: checks the one block that `address` selects, writes what its
+/// validators saw to stdout as JSON, and writes its violations to stderr.
+///
+/// Returns the exit code of a validation run: 1 when a violation of error severity is found, and 0
+/// otherwise.
+fn run_explain(args: &flags::Args, address: &BlockAddress) -> anyhow::Result<ExitCode> {
+    let Prepared {
+        file_system,
+        settings,
+        mut context,
+        ..
+    } = prepare(args)?;
+    // The address picks the block, so the config's `only-blocks` and `skip-blocks` play no part.
+    context.apply_block_selection(
+        &BlockSelection::Only(vec![address.clone()]),
+        file_system.as_ref(),
+    )?;
+    let (sync_validators, async_validators) = validators::detect_validators(
+        &context,
+        validators::Validator::detect,
+        settings.validator_selection(),
+        &file_system,
+    )?;
+    let context = Arc::new(context);
+    let log = validators::run(Arc::clone(&context), sync_validators, async_validators)?;
+
+    // Violations are what the run is for, so they are written first, as in `run_validators`. A
+    // failure to write the explanation then can't discard them.
+    let has_error_severity = process_violations(&log.violations, flags::OutputFormat::Json)?;
+    write_json(std::io::stdout(), &Explanation::new(&context, &settings))?;
+    Ok(if has_error_severity {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    })
 }
 
 /// Runs the `list` subcommand: parses every block in scope and writes a JSON report to stdout.

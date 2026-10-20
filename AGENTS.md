@@ -193,7 +193,8 @@ The whole pipeline is in `src/cli.rs`. `src/main.rs` only calls `blockwatch::run
    report goes to stdout. The exit code depends on the error-severity violations that are not suppressed.
 
 The `list` subcommand stops after step 6 and writes the blocks it found to stdout as JSON. The `skill` subcommand
-prints `src/skill.md` right after step 1.
+prints `src/skill.md` right after step 1. The `explain` subcommand runs like `--only-block` with the file of its
+address as the only path. It then writes that block to stdout as JSON.
 
 The main modules:
 
