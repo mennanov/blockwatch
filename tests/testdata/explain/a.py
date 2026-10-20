@@ -6,3 +6,7 @@ banana
 red
 blue
 # </block>
+# <block name="colors-copy" same-as=":colors">
+red
+blue
+# </block>

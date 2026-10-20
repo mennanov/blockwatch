@@ -1,3 +1,4 @@
+use crate::LineIndex;
 use crate::blocks::{Block, BlockWithContext, FileBlocks};
 use crate::fs::FileSystem;
 use crate::paths_glob::PathsGlob;
@@ -5,8 +6,8 @@ use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
 use crate::target_reference::{TargetKind, TargetReference};
 use crate::validators::{
-    self, SyncValidator, TargetFiles, TargetResult, ValidationReport, Validator, ValidatorType,
-    Violation, compile_pattern, parse_keyword, parse_number,
+    self, SyncValidator, TargetFiles, TargetResult, ValidationReport, Validator, ValidatorTrace,
+    ValidatorType, Violation, compile_pattern, parse_keyword, parse_number,
 };
 use anyhow::{Context, anyhow, bail};
 use heck::ToSnakeCase;
@@ -14,7 +15,7 @@ use serde::Serialize;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use strum_macros::{Display, EnumIter, EnumString};
 
@@ -56,13 +57,21 @@ impl<Fs: FileSystem + 'static> SyncValidator for SameAsValidator<Fs> {
                 {
                     continue;
                 }
-                let violations = block_violations(
+                let (violations, trace) = block_violations(
                     &mut targets,
                     file_path,
                     &file_blocks.file_content,
                     &block_with_context.block,
+                    context.traces_requested,
                 )?;
                 report.add_all(file_path, &block_with_context.block, violations);
+                if let Some(trace) = trace {
+                    report.add_trace(
+                        file_path,
+                        &block_with_context.block,
+                        ValidatorTrace::SameAs(trace),
+                    );
+                }
             }
         }
         Ok(report)
@@ -108,26 +117,46 @@ impl Comparison {
             }
         }
     }
+
+    /// `records` after the block's `same-as-format`, or `None` when a value fails it.
+    fn formatted(&self, records: &[Record]) -> Option<Vec<Record>> {
+        canonicalize(records.to_vec(), &self.formats).ok()
+    }
 }
 
 /// Every violation one block's `same-as` and `same-as-paths` produce: at most one per reference in
-/// `same-as`, then at most one for `same-as-paths`.
+/// `same-as`, then at most one for `same-as-paths`. With `traced`, also returns what the validator
+/// saw in the block.
 fn block_violations<Fs: FileSystem>(
     targets: &mut TargetItems<'_, Fs>,
     file_path: &RepoPath,
     file_content: &str,
     block: &Block,
-) -> anyhow::Result<Vec<Violation>> {
+    traced: bool,
+) -> anyhow::Result<(Vec<Violation>, Option<SameAsTrace>)> {
     let comparison = Comparison::new(block, file_content).with_context(|| {
         format!(
             "invalid same-as attributes on block {}",
             block.label(file_path)
         )
     })?;
+    let mut trace = traced.then(|| SameAsTrace {
+        mode: comparison.mode,
+        paths: None,
+        records: comparison.source_items.as_ref().ok().cloned(),
+        targets: Vec::new(),
+    });
     let mut violations = Vec::new();
     if let Some(same_as) = block.attributes.get("same-as") {
         for reference in parse_references(file_path, block, same_as)? {
-            let violation = reference_violation(targets, &comparison, file_path, block, reference)?;
+            let violation = reference_violation(
+                targets,
+                &comparison,
+                file_path,
+                block,
+                reference,
+                trace.as_mut().map(|trace| &mut trace.targets),
+            )?;
             violations.extend(violation);
         }
     }
@@ -138,13 +167,14 @@ fn block_violations<Fs: FileSystem>(
             file_path,
             block,
             glob,
+            trace.as_mut().map(|trace| &mut trace.paths),
         )?);
     }
-    Ok(violations)
+    Ok((violations, trace))
 }
 
 /// The violation a `same-as-paths` glob produces, or `None` when the block agrees with the
-/// repository paths that match `glob`.
+/// repository paths that match `glob`. Sets `trace`, when given, to what the comparison saw.
 ///
 /// # Errors
 /// Returns an error if the block has no `same-as-pattern`, if `glob` is not a valid glob, or if the
@@ -155,6 +185,7 @@ fn paths_violation(
     file_path: &RepoPath,
     block: &Block,
     glob: &str,
+    trace: Option<&mut Option<PathsTrace>>,
 ) -> anyhow::Result<Option<Violation>> {
     // Without a pattern, all the paths would make one value. A mismatch would then show the whole
     // list as one string, and every mode would act the same.
@@ -183,11 +214,24 @@ fn paths_violation(
             .map(ToString::to_string)
             .collect(),
     };
+    let items = extract_items_from(&paths.join("\n"), Some(pattern), |_| None)?;
+    let records = trace
+        .is_some()
+        .then(|| comparison.formatted(&items))
+        .flatten();
     let reason = if paths.is_empty() {
         Some("no paths match".to_string())
     } else {
-        comparison.disagreement_with(extract_items_from(&paths.join("\n"), Some(pattern))?)
+        comparison.disagreement_with(items)
     };
+    if let Some(trace) = trace {
+        *trace = Some(PathsTrace {
+            glob: glob.to_string(),
+            matched: paths,
+            reason: reason.clone(),
+            records,
+        });
+    }
     reason
         .map(|reason| {
             create_violation(
@@ -220,7 +264,8 @@ fn parse_references(
     })
 }
 
-/// The violation one reference produces, or `None` when the block and the target agree.
+/// The violation one reference produces, or `None` when the block and the target agree. Adds what
+/// the comparison saw to `trace`, when given.
 ///
 /// A target that cannot be found is reported rather than aborting the run; a target *file* that
 /// cannot be read is an `Err`, which is [`TargetItems`]'s call to make.
@@ -230,6 +275,7 @@ fn reference_violation<Fs: FileSystem>(
     file_path: &RepoPath,
     block: &Block,
     reference: TargetReference,
+    trace: Option<&mut Vec<TargetTrace>>,
 ) -> anyhow::Result<Option<Violation>> {
     let target = reference.resolve(file_path);
     let resolution = match &target.kind {
@@ -241,10 +287,26 @@ fn reference_violation<Fs: FileSystem>(
             targets.symbol_items(&target.file, path, comparison.pattern.as_deref())?
         }
     };
+    let records = trace
+        .is_some()
+        .then(|| {
+            resolution
+                .as_ref()
+                .ok()
+                .and_then(|items| comparison.formatted(items))
+        })
+        .flatten();
     let reason = match resolution {
         Ok(target_items) => comparison.disagreement_with(target_items),
         Err(reason) => Some(reason),
     };
+    if let Some(trace) = trace {
+        trace.push(TargetTrace {
+            reason: reason.clone(),
+            records,
+            target: target.to_string(),
+        });
+    }
     let target_name = target.name();
     reason
         .map(|reason| {
@@ -272,18 +334,42 @@ const WHOLE_GROUP: &str = "value";
 /// A pattern without named groups, or no pattern at all, gives the one group `value`, so it can be
 /// compared with a pattern whose only group is `value`. Every record of one pattern has the same
 /// groups, because a match without one of them is skipped.
-#[derive(PartialEq, Eq, Hash)]
+///
+/// Two records are equal when their values are, wherever and however each one is written.
+#[derive(Clone, Debug, Eq, Serialize)]
 struct Record {
     /// The text of each group, by group name. Sorted by name, so two patterns that list the same
     /// groups in a different order give equal records.
+    #[serde(rename = "groups")]
     values: BTreeMap<String, String>,
+    /// The line of the file where the match is. `None` for a match in a list of paths.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<usize>,
+    /// The text that the whole pattern matched, or the block's whole content.
+    #[serde(rename = "match")]
+    matched: String,
+}
+
+impl PartialEq for Record {
+    fn eq(&self, other: &Self) -> bool {
+        self.values == other.values
+    }
+}
+
+impl Hash for Record {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.values.hash(state);
+    }
 }
 
 impl Record {
-    /// The record of a whole match, or of a block's whole content: the one group `value`.
-    fn whole(text: String) -> Self {
+    /// The record of a whole match, or of a block's whole content, at `line`: the one group
+    /// `value`.
+    fn whole(text: String, line: Option<usize>) -> Self {
         Self {
-            values: BTreeMap::from([(WHOLE_GROUP.to_string(), text)]),
+            values: BTreeMap::from([(WHOLE_GROUP.to_string(), text.clone())]),
+            line,
+            matched: text,
         }
     }
 
@@ -335,26 +421,43 @@ fn extract_items(block: &Block, file_content: &str) -> anyhow::Result<Vec<Record
     extract_items_from(
         block.content.text(file_content),
         block.attributes.get("same-as-pattern").map(String::as_str),
+        |index| Some(block.content.position(index, 0).line),
     )
 }
 
-/// Extracts items from `content` for the given `pattern`.
+/// Extracts items from `content` for the given `pattern`. `line_of` maps the 0-based index of a
+/// line of `content` to the line of the file that each record of it gets.
 ///
 /// If `pattern` is `None` then the whole `content` is returned.
-fn extract_items_from(content: &str, pattern: Option<&str>) -> anyhow::Result<Vec<Record>> {
+fn extract_items_from(
+    content: &str,
+    pattern: Option<&str>,
+    line_of: impl Fn(usize) -> Option<usize>,
+) -> anyhow::Result<Vec<Record>> {
     let Some(pattern) = pattern else {
-        return Ok(vec![Record::whole(normalize_content(content))]);
+        // Normalizing drops the blank lines, so the text starts at the first line that isn't
+        // blank.
+        let first_line = content
+            .lines()
+            .position(|line| !line.trim().is_empty())
+            .unwrap_or(0);
+        return Ok(vec![Record::whole(
+            normalize_content(content),
+            line_of(first_line),
+        )]);
     };
     let regex = same_as_regex(pattern)?;
     let groups: Vec<&str> = regex.capture_names().flatten().collect();
-    Ok(content
-        .lines()
-        .flat_map(|line| {
+    let mut records = Vec::new();
+    for (index, line) in content.lines().enumerate() {
+        let line_number = line_of(index);
+        records.extend(
             regex
                 .captures_iter(line.trim())
-                .filter_map(|captures| record(&groups, &captures))
-        })
-        .collect())
+                .filter_map(|captures| record(&groups, &captures, line_number)),
+        );
+    }
+    Ok(records)
 }
 
 /// Compiles a `same-as-pattern`.
@@ -381,17 +484,21 @@ fn pattern_groups(pattern: Option<&str>) -> anyhow::Result<Vec<String>> {
     })
 }
 
-/// The record of one match: the text of each group in `groups`, or the whole match when `groups`
-/// is empty. Returns `None` when a group took no part in the match or captured nothing.
-fn record(groups: &[&str], captures: &regex::Captures<'_>) -> Option<Record> {
+/// The record of one match at `line`: the text of each group in `groups`, or the whole match when
+/// `groups` is empty. Returns `None` when a group took no part in the match or captured nothing.
+fn record(groups: &[&str], captures: &regex::Captures<'_>, line: Option<usize>) -> Option<Record> {
     if groups.is_empty() {
-        return non_empty(captures.get(0)).map(Record::whole);
+        return non_empty(captures.get(0)).map(|text| Record::whole(text, line));
     }
     let values = groups
         .iter()
         .map(|group| Some((group.to_string(), non_empty(captures.name(group))?)))
         .collect::<Option<_>>()?;
-    Some(Record { values })
+    Some(Record {
+        values,
+        line,
+        matched: captures[0].to_string(),
+    })
 }
 
 /// The text of `matched`, or `None` when its group took no part in the match or captured nothing.
@@ -497,7 +604,7 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
             .files
             .content(target_file)
             .with_context(|| format!("failed to read same-as target file: {target_file}"))?;
-        extract_items_from(content, pattern)
+        extract_items_from(content, pattern, |index| Some(index + 1))
     }
 
     /// Resolves a symbol target's comparable items from the symbol's value, or from the text of
@@ -513,10 +620,14 @@ impl<'a, Fs: FileSystem> TargetItems<'a, Fs> {
     ) -> anyhow::Result<TargetResult<Vec<Record>>> {
         let (content, resolution) = self.files.resolve_symbol(target_file, path)?;
         match resolution {
-            Ok(symbol) => Ok(Ok(extract_items_from(
-                &symbol.value_or_definition(content),
-                pattern,
-            )?)),
+            Ok(symbol) => {
+                let symbol_content = symbol.content(content, &LineIndex::new(content));
+                Ok(Ok(extract_items_from(
+                    symbol_content.text(content),
+                    pattern,
+                    |index| Some(symbol_content.position(index, 0).line),
+                )?))
+            }
             Err(reason) => Ok(Err(reason)),
         }
     }
@@ -610,7 +721,7 @@ fn canonicalize(records: Vec<Record>, formats: &Formats) -> Result<Vec<Record>, 
                     Ok((group, value))
                 })
                 .collect::<Result<_, String>>()?;
-            Ok(Record { values })
+            Ok(Record { values, ..record })
         })
         .collect()
 }
@@ -645,8 +756,9 @@ fn canonicalize_value(value: String, format: Format) -> Result<String, String> {
 }
 
 /// How two item lists are compared.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumString, EnumIter, Display)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumString, EnumIter, Display, Serialize)]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 enum Mode {
     /// Order- and duplicate-insensitive set equality (the default).
     Set,
@@ -816,6 +928,47 @@ fn create_violation(
     ))
 }
 
+/// What `same-as` saw in one block.
+///
+/// serde writes the keys in the order the fields are declared, and the output keeps its keys
+/// sorted. So declare the fields in alphabetical order.
+#[derive(Serialize, Debug)]
+pub(crate) struct SameAsTrace {
+    mode: Mode,
+    /// What `same-as-paths` saw. `None` for a block without it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    paths: Option<PathsTrace>,
+    /// The block's records after `same-as-format`. `None` when a value fails the format.
+    records: Option<Vec<Record>>,
+    /// One entry for each reference in `same-as`, in the order the attribute lists them.
+    targets: Vec<TargetTrace>,
+}
+
+/// What `same-as` saw in one target of a block.
+#[derive(Serialize, Debug)]
+struct TargetTrace {
+    /// The reason the violation shows, or `None` when the two sides agree.
+    reason: Option<String>,
+    /// The target's records after the block's `same-as-format`. `None` when the target can't be
+    /// found, or when a value fails the format.
+    records: Option<Vec<Record>>,
+    /// The target, as the violation shows it.
+    target: String,
+}
+
+/// What `same-as` saw in the paths that a `same-as-paths` glob matches.
+#[derive(Serialize, Debug)]
+struct PathsTrace {
+    glob: String,
+    /// The paths the glob matches, sorted. A directory ends with `/`.
+    matched: Vec<String>,
+    /// The reason the violation shows, or `None` when the two sides agree.
+    reason: Option<String>,
+    /// The records of the paths after the block's `same-as-format`. `None` when a value fails the
+    /// format.
+    records: Option<Vec<Record>>,
+}
+
 /// Selects [`SameAsValidator`] for blocks carrying a `same-as` or a `same-as-paths` attribute.
 pub(super) fn detect<Fs: FileSystem + 'static>(
     block_with_context: &BlockWithContext,
@@ -841,7 +994,7 @@ mod validate_tests {
 
     /// Build a validator with a fake filesystem seeded with `files` (path, contents). Used by every
     /// same-as unit test; pass `&[]` when the target is in-scope (no disk read).
-    fn validator(files: &[(&str, &str)]) -> SameAsValidator<FakeFileSystem> {
+    pub(super) fn validator(files: &[(&str, &str)]) -> SameAsValidator<FakeFileSystem> {
         let map = files
             .iter()
             .map(|(p, c)| (p.to_string(), c.to_string()))
@@ -2327,6 +2480,247 @@ alpha
         // Only the block with the `same-as` attribute is checked. The target block is not.
         assert_eq!(checked_lines(&report), vec![1]);
         assert_eq!(violation_count(&report), 0);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod trace_tests {
+    use super::validate_tests::validator;
+    use crate::repo_path::RepoPath;
+    use crate::test_utils::validation_context;
+    use crate::validators::SyncValidator;
+    use crate::validators::test_utils::{trace_json, with_traces};
+    use serde_json::json;
+
+    #[test]
+    fn block_with_a_pattern_records_each_match_with_its_line() -> anyhow::Result<()> {
+        let context = with_traces(validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-pattern='"(?P<value>[a-z]+)"'>
+x = "red"
+y = "blue"
+# </block>
+# <block name="b" same-as-pattern='"(?P<value>[a-z]+)"'>
+"blue", "red"
+# </block>
+"#,
+        ));
+
+        let report = validator(&[]).validate(context)?;
+
+        assert_eq!(
+            trace_json(&report),
+            json!({
+                "mode": "set",
+                "records": [
+                    { "groups": { "value": "red" }, "line": 2, "match": "\"red\"" },
+                    { "groups": { "value": "blue" }, "line": 3, "match": "\"blue\"" }
+                ],
+                "targets": [
+                    {
+                        "records": [
+                            { "groups": { "value": "blue" }, "line": 6, "match": "\"blue\"" },
+                            { "groups": { "value": "red" }, "line": 6, "match": "\"red\"" }
+                        ],
+                        "reason": null,
+                        "target": "a.py:b"
+                    }
+                ]
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn targets_record_the_reason_of_their_violation_in_the_order_same_as_lists_them()
+    -> anyhow::Result<()> {
+        let context = with_traces(validation_context(
+            "a.py",
+            r#"# <block same-as=":b, :c">
+red
+# </block>
+# <block name="b">
+red
+# </block>
+# <block name="c">
+blue
+# </block>
+"#,
+        ));
+
+        let report = validator(&[]).validate(context)?;
+
+        let violation = &report.violations[&RepoPath::from_reference("a.py")?][0];
+        let reason = &violation.data.as_ref().unwrap()["reason"];
+        let targets = &trace_json(&report)["targets"];
+        assert_eq!(
+            [&targets[0]["target"], &targets[0]["reason"]],
+            [&json!("a.py:b"), &json!(null)]
+        );
+        assert_eq!(
+            [&targets[1]["target"], &targets[1]["reason"]],
+            [&json!("a.py:c"), reason]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn format_records_the_groups_after_formatting_and_the_match_as_written() -> anyhow::Result<()> {
+        let context = with_traces(validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-format="identifier">
+DarkRed
+# </block>
+# <block name="b">
+dark-red
+# </block>
+"#,
+        ));
+
+        let report = validator(&[]).validate(context)?;
+
+        let trace = trace_json(&report);
+        assert_eq!(
+            trace["records"],
+            json!([{ "groups": { "value": "dark_red" }, "line": 2, "match": "DarkRed" }])
+        );
+        assert_eq!(
+            trace["targets"][0]["records"],
+            json!([{ "groups": { "value": "dark_red" }, "line": 5, "match": "dark-red" }])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn symbol_target_records_the_lines_of_its_file() -> anyhow::Result<()> {
+        let context = with_traces(validation_context(
+            "a.py",
+            r#"# <block same-as="doc.md#/Colors" same-as-pattern="[a-z]+$">
+red
+blue
+# </block>
+"#,
+        ));
+
+        let report = validator(&[("doc.md", "# Colors\n\n- red\n- blue\n")]).validate(context)?;
+
+        assert_eq!(
+            trace_json(&report)["targets"][0]["records"],
+            json!([
+                { "groups": { "value": "red" }, "line": 3, "match": "red" },
+                { "groups": { "value": "blue" }, "line": 4, "match": "blue" }
+            ])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn whole_file_target_records_the_lines_of_the_file() -> anyhow::Result<()> {
+        let context = with_traces(validation_context(
+            "a.py",
+            r#"# <block same-as="colors.txt" same-as-pattern="[a-z]+">
+red
+blue
+# </block>
+"#,
+        ));
+
+        let report = validator(&[("colors.txt", "\nred\nblue\n")]).validate(context)?;
+
+        assert_eq!(
+            trace_json(&report)["targets"][0]["records"],
+            json!([
+                { "groups": { "value": "red" }, "line": 2, "match": "red" },
+                { "groups": { "value": "blue" }, "line": 3, "match": "blue" }
+            ])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn paths_target_records_the_matched_paths_and_records_without_lines() -> anyhow::Result<()> {
+        let context = with_traces(validation_context(
+            "README.md",
+            r#"<!-- <block same-as-paths="services/*/" same-as-pattern="services/(?P<value>[a-z]+)"> -->
+- [auth](services/auth)
+<!-- </block> -->
+"#,
+        ));
+
+        let report = validator(&[("services/auth/a.rs", ""), ("services/billing/a.rs", "")])
+            .validate(context)?;
+
+        assert_eq!(
+            trace_json(&report),
+            json!({
+                "mode": "set",
+                "paths": {
+                    "glob": "services/*/",
+                    "matched": ["services/auth/", "services/billing/"],
+                    "records": [
+                        { "groups": { "value": "auth" }, "match": "services/auth" },
+                        { "groups": { "value": "billing" }, "match": "services/billing" }
+                    ],
+                    "reason": "[\"auth\"] != [\"auth\", \"billing\"]"
+                },
+                "records": [
+                    { "groups": { "value": "auth" }, "line": 2, "match": "services/auth" }
+                ],
+                "targets": []
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn missing_target_records_no_records_and_the_reason() -> anyhow::Result<()> {
+        let source = "# <block same-as=\":nope\">\nred\n# </block>\n";
+        let context = with_traces(validation_context("a.py", source));
+
+        let report = validator(&[("a.py", source)]).validate(context)?;
+
+        assert_eq!(
+            trace_json(&report)["targets"],
+            json!([{ "records": null, "reason": "target block not found", "target": "a.py:nope" }])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn block_whose_value_fails_the_format_records_no_records() -> anyhow::Result<()> {
+        let context = with_traces(validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-format="numeric">
+ten
+# </block>
+# <block name="b">
+10
+# </block>
+"#,
+        ));
+
+        let report = validator(&[]).validate(context)?;
+
+        let trace = trace_json(&report);
+        assert_eq!(trace["records"], json!(null));
+        assert_eq!(
+            trace["targets"][0]["reason"],
+            json!("same-as-format=numeric but \"ten\" is not a number")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_without_traces_requested_records_no_trace() -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.py",
+            "# <block same-as=\":b\">\nred\n# </block>\n# <block name=\"b\">\nred\n# </block>\n",
+        );
+
+        let report = validator(&[]).validate(context)?;
+
+        assert!(report.traces.is_empty());
         Ok(())
     }
 }

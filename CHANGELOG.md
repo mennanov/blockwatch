@@ -16,8 +16,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 - `blockwatch explain FILE:BLOCK_NAME` checks one named block and prints it as JSON: its attributes, the text its
   validators read and where that text is. For example: `blockwatch explain package.json:version`. The output also lists
-  the validators the block asks for but the settings turn off (`"disabled"`). Violations go to stderr, and the exit
-  code is the same as for a normal run.
+  the validators the block asks for but the settings turn off (`"disabled"`). Under `"checks"`, it shows what
+  `same-as` compared: each value the pattern matched, with its line, on both sides, and the reason of each mismatch.
+  Violations go to stderr, and the exit code is the same as for a normal run.
 
 ## [0.14.1] - 2026-10-17
 

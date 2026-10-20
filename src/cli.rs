@@ -91,13 +91,17 @@ fn run_explain(args: &flags::Args, address: &BlockAddress) -> anyhow::Result<Exi
         settings.validator_selection(),
         &file_system,
     )?;
+    context.request_traces();
     let context = Arc::new(context);
     let log = validators::run(Arc::clone(&context), sync_validators, async_validators)?;
 
     // Violations are what the run is for, so they are written first, as in `run_validators`. A
     // failure to write the explanation then can't discard them.
     let has_error_severity = process_violations(&log.violations, flags::OutputFormat::Json)?;
-    write_json(std::io::stdout(), &Explanation::new(&context, &settings))?;
+    write_json(
+        std::io::stdout(),
+        &Explanation::new(&context, &settings, &log),
+    )?;
     Ok(if has_error_severity {
         ExitCode::from(1)
     } else {

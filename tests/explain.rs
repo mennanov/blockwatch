@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 
 mod common;
 
-/// `colors` in this file fails `keep-sorted`, and `fruits` passes.
+/// `colors` in this file fails `keep-sorted`, and `fruits` passes. `colors-copy` has the same
+/// content as `colors`, which `same-as` checks.
 const FIXTURE: &str = "tests/testdata/explain/a.py";
 
 /// The text of [`FIXTURE`], for a repository that a test creates.
@@ -45,6 +46,7 @@ fn named_block_writes_its_explanation_to_stdout() -> anyhow::Result<()> {
                 "line": 1,
                 "name": "fruits"
             },
+            "checks": {},
             "content": {
                 "start": { "line": 1, "character": 42 },
                 "end": { "line": 4, "character": 1 },
@@ -52,6 +54,30 @@ fn named_block_writes_its_explanation_to_stdout() -> anyhow::Result<()> {
             },
             "disabled": [],
             "file": FIXTURE
+        })
+    );
+    Ok(())
+}
+
+#[test]
+fn block_with_same_as_writes_its_trace_under_checks() -> anyhow::Result<()> {
+    let output = cargo_bin_cmd!()
+        .args(["explain", &format!("{FIXTURE}:colors-copy")])
+        .output()?;
+
+    output.clone().assert().success().stderr("");
+    let record =
+        |line| json!({ "groups": { "value": "red\nblue" }, "line": line, "match": "red\nblue" });
+    assert_eq!(
+        json_from(&output.stdout)?["checks"],
+        json!({
+            "same-as": {
+                "mode": "set",
+                "records": [record(10)],
+                "targets": [
+                    { "records": [record(6)], "reason": null, "target": format!("{FIXTURE}:colors") }
+                ]
+            }
         })
     );
     Ok(())

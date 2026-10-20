@@ -250,6 +250,9 @@ pub(crate) struct ValidationReport {
     violations: HashMap<RepoPath, Vec<Violation>>,
     /// The key of every block this validator checked.
     checked_blocks: Vec<(RepoPath, BlockKey)>,
+    /// What the validator saw in each block it checked. Empty unless the context asks for
+    /// traces.
+    traces: Vec<(RepoPath, BlockKey, ValidatorTrace)>,
 }
 
 impl ValidationReport {
@@ -262,6 +265,11 @@ impl ValidationReport {
     /// Adds `block` in `file` to the blocks this validator checked.
     fn add_checked_block(&mut self, file: &RepoPath, block: &Block) {
         self.checked_blocks.push((file.clone(), block.key()));
+    }
+
+    /// Adds what the validator saw in `block` in `file`.
+    pub(crate) fn add_trace(&mut self, file: &RepoPath, block: &Block, trace: ValidatorTrace) {
+        self.traces.push((file.clone(), block.key(), trace));
     }
 
     /// Stores violations found in `file`.
@@ -287,6 +295,9 @@ pub(crate) struct ValidationLog {
     /// Every block that was examined, and by which validators. BTreeMap is used so the
     /// `--verbosity` report comes out in a stable order regardless of the validators order.
     pub(crate) checked_blocks: BTreeMap<RepoPath, BTreeMap<BlockKey, BTreeSet<Validator>>>,
+    /// What each validator saw in each block, by file and block. Empty unless the context asks
+    /// for traces.
+    pub(crate) traces: BTreeMap<(RepoPath, BlockKey), BTreeMap<Validator, ValidatorTrace>>,
 }
 
 impl ValidationLog {
@@ -299,6 +310,12 @@ impl ValidationLog {
                 .entry(key)
                 .or_default()
                 .insert(validator);
+        }
+        for (file, key, trace) in report.traces {
+            self.traces
+                .entry((file, key))
+                .or_default()
+                .insert(validator, trace);
         }
         for (file, violations) in report.violations {
             self.violations.entry(file).or_default().extend(violations);
@@ -313,10 +330,20 @@ impl ValidationLog {
                 checked_in_file.entry(key).or_default().extend(validators);
             }
         }
+        for (block, traces) in other.traces {
+            self.traces.entry(block).or_default().extend(traces);
+        }
         for (file, violations) in other.violations {
             self.violations.entry(file).or_default().extend(violations);
         }
     }
+}
+
+/// What one validator saw in one block. Each variant is the trace of one [`Validator`].
+#[derive(Serialize, Debug)]
+#[serde(untagged)]
+pub(crate) enum ValidatorTrace {
+    SameAs(same_as::SameAsTrace),
 }
 
 /// The span an editor should highlight for a violation. 1-based and half-open: the start is
@@ -425,6 +452,8 @@ pub(crate) struct ValidationContext {
     /// The declarations of every virtual block in the config file, in its order. Unlike `blocks`,
     /// they are not resolved, and they cover the files the run did not keep too.
     virtual_blocks: Vec<VirtualBlock>,
+    /// Whether the validators describe what they saw, in [`ValidationReport`]'s traces.
+    traces_requested: bool,
 }
 
 impl ValidationContext {
@@ -440,7 +469,13 @@ impl ValidationContext {
             parsers,
             line_changes,
             virtual_blocks,
+            traces_requested: false,
         }
+    }
+
+    /// Asks the validators to describe what they saw in each block.
+    pub(crate) fn request_traces(&mut self) {
+        self.traces_requested = true;
     }
 
     /// The blocks the run validates, with the text of their files, by file.
@@ -1134,7 +1169,7 @@ mod tests {
                         )
                     })
                     .collect(),
-                checked_blocks: Vec::new(),
+                ..ValidationReport::default()
             })
         }
     }
@@ -1164,7 +1199,7 @@ mod tests {
                         )
                     })
                     .collect(),
-                checked_blocks: Vec::new(),
+                ..ValidationReport::default()
             })
         }
     }
@@ -1803,6 +1838,24 @@ mod test_utils {
     /// How many violations a validator reported, across every file.
     pub(super) fn violation_count(report: &ValidationReport) -> usize {
         report.violations.values().map(Vec::len).sum()
+    }
+
+    /// The JSON of the one trace in `report`.
+    ///
+    /// # Panics
+    /// Panics if `report` doesn't hold exactly one trace.
+    pub(super) fn trace_json(report: &ValidationReport) -> serde_json::Value {
+        let [(_, _, trace)] = report.traces.as_slice() else {
+            panic!("expected one trace, got {}", report.traces.len());
+        };
+        serde_json::to_value(trace).expect("a trace serializes")
+    }
+
+    /// `context` with traces requested.
+    pub(super) fn with_traces(context: Arc<ValidationContext>) -> Arc<ValidationContext> {
+        let mut context = Arc::into_inner(context).expect("the context is not shared");
+        context.request_traces();
+        Arc::new(context)
     }
 
     /// `context` with `virtual_blocks` as the config file's virtual blocks.

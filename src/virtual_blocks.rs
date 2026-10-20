@@ -250,16 +250,7 @@ impl VirtualBlock {
             }
         };
         // The content is what a reference to the symbol reads, so that the two always agree.
-        let content = match &symbol.value {
-            // A value written as is, such as a number or a Markdown section, keeps the position of
-            // each of its lines.
-            Some(value) if source.get(value.byte_range.clone()) == Some(value.text.as_str()) => {
-                Content::source(value.byte_range.clone(), lines.range(&value.byte_range))
-            }
-            Some(value) => Content::decoded(value.text.clone(), lines.range(&value.byte_range)),
-            None => Content::source(definition.clone(), lines.range(definition)),
-        };
-        Ok((definition.clone(), content))
+        Ok((definition.clone(), symbol.content(source, lines)))
     }
 
     /// Finds the one place in `source` that `pattern` matches, with `lines` indexing `source`.
