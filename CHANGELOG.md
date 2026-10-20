@@ -32,6 +32,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - A message of `affects` or `same-as` about a whole-file target shows the path alone, without `file` in front. For
   example: `Block a.py:b at line 1 is modified, but config.json is not`.
 
+### Fixed
+
+- A `check-lua` script got no `ctx.affects` entry for a block target that the run didn't check, such as with
+  `--only-block` or `--diff --only-changed`. Now `ctx.affects` holds the same targets in every run.
+
 ## [0.14.1] - 2026-10-17
 
 ### Changed

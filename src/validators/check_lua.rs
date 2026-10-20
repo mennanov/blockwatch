@@ -1,6 +1,7 @@
-use crate::blocks::{Block, BlockWithContext};
+use crate::blocks::{Block, BlockWithContext, FileBlocks};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
+use crate::symbol_path::SymbolPath;
 use crate::target_reference::{TargetKind, TargetReference};
 use crate::validators::{
     AsyncValidator, PatternContent, TargetFiles, ValidationContext, ValidationReport, Validator,
@@ -487,11 +488,11 @@ struct AffectedTarget {
 ///
 /// References that don't resolve are skipped (the `affects` validator is responsible for reporting
 /// those). The content is trimmed to mirror how the validated block's own content is presented.
-/// A symbol's content is its value, or its definition's text when it has none.
 ///
 /// # Errors
 /// Returns an error if a symbol reference points into a file that cannot be read, has no symbols,
-/// or does not parse. The `affects` validator ends the run for the same reference.
+/// or does not parse. The same goes for a block reference into a file that cannot be read or has
+/// a malformed tag. The `affects` validator ends the run for the same reference.
 fn resolve_affected_targets<Fs: FileSystem>(
     context: &ValidationContext,
     file_system: &Fs,
@@ -511,56 +512,70 @@ fn resolve_affected_targets<Fs: FileSystem>(
     let mut files = TargetFiles::new(context, file_system);
     for reference in references {
         let target = reference.resolve(current_file_path);
-        match &target.kind {
-            TargetKind::Block(name) => {
-                let Some(file_blocks) = context.blocks.get(&target.file) else {
-                    continue;
-                };
-                for block_with_context in &file_blocks.blocks_with_context {
-                    if block_with_context.block.name() == Some(name.as_str()) {
-                        result.push(AffectedTarget {
-                            file: target.file.clone(),
-                            name: target.name(),
-                            content: block_with_context
-                                .block
-                                .content
-                                .text(&file_blocks.file_content)
-                                .trim()
-                                .to_string(),
-                        });
-                    }
-                }
-            }
-            TargetKind::WholeFile => {
-                let content = match context.blocks.get(&target.file) {
-                    Some(file_blocks) => file_blocks.file_content.clone(),
-                    None => match file_system.read_to_string(target.file.as_path()) {
-                        Ok(content) => content,
-                        Err(_) => continue,
-                    },
-                };
-                result.push(AffectedTarget {
-                    name: target.name(),
-                    file: target.file,
-                    content: content.trim().to_string(),
-                });
-            }
-            TargetKind::Symbol(path) => {
-                let (content, resolution) = files.resolve_symbol(&target.file, path)?;
-                let symbol = match resolution {
-                    Ok(symbol) => symbol,
-                    // A missing or ambiguous symbol is skipped: the `affects` validator reports it.
-                    Err(_) => continue,
-                };
-                result.push(AffectedTarget {
-                    content: symbol.value_or_definition(content).trim().to_string(),
-                    name: target.name(),
-                    file: target.file,
-                });
-            }
+        let content = match &target.kind {
+            TargetKind::Block(name) => block_content(context, file_system, &target.file, name)?,
+            TargetKind::WholeFile => files.content(&target.file).ok().map(str::to_string),
+            TargetKind::Symbol(path) => symbol_content(&mut files, &target.file, path)?,
+        };
+        if let Some(content) = content {
+            result.push(AffectedTarget {
+                name: target.name(),
+                file: target.file,
+                content: content.trim().to_string(),
+            });
         }
     }
     Ok(result)
+}
+
+/// The content of the block `name` in `file`. Returns `None` when `file` holds no block with that
+/// name, or its format is unsupported.
+///
+/// # Errors
+/// Returns an error if the run didn't keep the block, and its file cannot be read or has a
+/// malformed tag.
+fn block_content<Fs: FileSystem>(
+    context: &ValidationContext,
+    file_system: &Fs,
+    file: &RepoPath,
+    name: &str,
+) -> anyhow::Result<Option<String>> {
+    let content_of = |file_blocks: &FileBlocks| {
+        let block_with_context = file_blocks
+            .blocks_with_context
+            .iter()
+            .find(|block_with_context| block_with_context.block.name() == Some(name))?;
+        let content = block_with_context
+            .block
+            .content
+            .text(&file_blocks.file_content);
+        Some(content.to_string())
+    };
+    // The run may have left the block out, such as with `--only-block`, so its file is parsed
+    // again. The script then sees the same targets in every run.
+    match context.blocks.get(file).and_then(content_of) {
+        Some(content) => Ok(Some(content)),
+        None => Ok(context
+            .parse_file(file_system, file)?
+            .as_ref()
+            .and_then(content_of)),
+    }
+}
+
+/// The value of the symbol at `path` in `file`, or its definition's text when it has none.
+/// Returns `None` when no symbol, or more than one, has `path`.
+///
+/// # Errors
+/// Returns an error if `file` cannot be read, has no symbols, or does not parse.
+fn symbol_content<Fs: FileSystem>(
+    files: &mut TargetFiles<'_, Fs>,
+    file: &RepoPath,
+    path: &SymbolPath,
+) -> anyhow::Result<Option<String>> {
+    let (content, resolution) = files.resolve_symbol(file, path)?;
+    Ok(resolution
+        .ok()
+        .map(|symbol| symbol.value_or_definition(content).to_string()))
 }
 
 /// Selects [`CheckLuaValidator`] for blocks carrying a `check-lua` attribute.
@@ -1145,14 +1160,12 @@ function validate(ctx, content)
     return nil
 end
 "#;
-        let context = validation_context(
-            "example.py",
-            r#"# <block check-lua="check.lua" affects=":does-not-exist">
+        let source = r#"# <block check-lua="check.lua" affects=":does-not-exist">
 some content
-# </block>"#,
-        );
+# </block>"#;
+        let context = validation_context("example.py", source);
 
-        let violations = validator(&[("check.lua", script)])
+        let violations = validator(&[("check.lua", script), ("example.py", source)])
             .validate(context)
             .await?
             .violations;
@@ -1189,20 +1202,16 @@ some content
     }
 
     #[tokio::test]
-    async fn lua_context_excludes_affected_blocks_absent_from_the_diff() -> anyhow::Result<()> {
-        // The affected block lives in a file that has no diff changes, so it is filtered out of the
-        // validation context entirely. It must therefore NOT appear in ctx.affects.
+    async fn lua_context_includes_affected_blocks_that_the_run_left_out() -> anyhow::Result<()> {
+        // The diff doesn't touch other.py, so the run keeps none of its blocks.
         let script = r#"
 function validate(ctx, content)
-    if ctx.affects == nil then
-        return "ctx.affects is nil"
-    end
-    if #ctx.affects ~= 0 then
-        return "expected 0 affected blocks, got " .. tostring(#ctx.affects)
-    end
-    return nil
+    return #ctx.affects .. " " .. ctx.affects[1].name .. ": " .. ctx.affects[1].content
 end
 "#;
+        let other = r#"# <block name="remote-block">
+remote content
+# </block>"#;
         let context = merge_validation_contexts(vec![
             validation_context(
                 "example.py",
@@ -1210,21 +1219,17 @@ end
 some content
 # </block>"#,
             ),
-            validation_context_with_changes(
-                "other.py",
-                r#"# <block name="remote-block">
-remote content
-# </block>"#,
-                vec![], // No changes: this block is absent from the diff.
-            ),
+            validation_context_with_changes("other.py", other, vec![]),
         ]);
 
-        let violations = validator(&[("check.lua", script)])
+        let report = validator(&[("check.lua", script), ("other.py", other)])
             .validate(context)
-            .await?
-            .violations;
+            .await?;
 
-        assert!(violations.is_empty());
+        assert_eq!(
+            report.violations[&RepoPath::from_reference("example.py")?][0].data,
+            Some(json!({ "lua_error": "1 remote-block: remote content", "script": "check.lua" }))
+        );
         Ok(())
     }
 
