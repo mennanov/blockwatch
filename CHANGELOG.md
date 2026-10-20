@@ -25,7 +25,7 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   - `keep-sorted` and `keep-unique`: the value each line gives, up to the first line out of order or repeated.
   - `line-pattern`: what each pattern matched on each line, up to the first line that fails.
   - `affects`: whether the block changed, and for each target, whether it changed or why it doesn't resolve.
-  - `line-count`: how many lines the block has, and the rule they were checked against.
+  - `line-count`: the value each line gives, how many lines count, and the rule they were checked against.
   - `check-lua`: the `content` and `ctx.affects` the script got, and the message it returned.
   - `check-ai`: the model, the prompt it was sent and its answer.
 

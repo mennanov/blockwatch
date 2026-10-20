@@ -6,6 +6,7 @@ use crate::validators::{
     compile_pattern, regex_value, trimmed_line_value,
 };
 use anyhow::{Context, anyhow};
+use regex::Regex;
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -31,69 +32,38 @@ impl SyncValidator for LineCountValidator {
         let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
-                let Some(expr) = block_with_context.block.attributes.get("line-count") else {
+                let block = &block_with_context.block;
+                let Some(expr) = block.attributes.get("line-count") else {
                     continue;
                 };
                 let (op, expected) = parse_constraint(expr).map_err(|e| anyhow!(
                     "line-count expected a comparator like <N, <=N, ==N, >=N, >N; got \"{}\" in {} (error: {})",
                     expr,
-                    block_with_context.block.label(file_path),
+                    block.label(file_path),
                     e
                 ))?;
-                let pattern = block_with_context
-                    .block
-                    .attributes
-                    .get("line-count-pattern")
-                    .map(|pattern| {
-                        compile_pattern(pattern).with_context(|| {
-                            format!(
-                                "invalid line-count-pattern in {}",
-                                block_with_context.block.label(file_path)
-                            )
-                        })
+                let pattern = compile_count_pattern(file_path, block)?;
+                let mut lines = context.traces_requested.then(Vec::new);
+                let actual = count_lines(
+                    block,
+                    &file_blocks.file_content,
+                    pattern.as_ref(),
+                    lines.as_mut(),
+                );
+                let violation = (!op.accepts(actual, expected))
+                    .then(|| {
+                        create_violation(file_path, block, op, expected, actual, pattern.as_ref())
                     })
                     .transpose()?;
-                let actual = block_with_context
-                    .block
-                    .content
-                    .text(&file_blocks.file_content)
-                    .lines()
-                    .filter(|line| match &pattern {
-                        None => trimmed_line_value(line).is_some(),
-                        Some(pattern) => regex_value(line, pattern).is_some(),
-                    })
-                    .count();
-                let counted = match pattern {
-                    None => "lines",
-                    Some(_) => "lines that match line-count-pattern",
-                };
-                let ok = match op {
-                    Op::Lt => actual < expected,
-                    Op::Le => actual <= expected,
-                    Op::Eq => actual == expected,
-                    Op::Ge => actual >= expected,
-                    Op::Gt => actual > expected,
-                };
-                let block_violations = if ok {
-                    Vec::new()
-                } else {
-                    vec![create_violation(
-                        file_path,
-                        &block_with_context.block,
-                        op,
-                        expected,
-                        actual,
-                        counted,
-                    )?]
-                };
-                report.add_all(file_path, &block_with_context.block, block_violations);
-                if context.traces_requested {
+                report.add_all(file_path, block, violation.into_iter().collect());
+                if let Some(lines) = lines {
                     let trace = ValidatorTrace::LineCount(LineCountTrace {
                         actual,
                         expected,
+                        lines,
                         op: op.as_str(),
                     });
-                    report.add_trace(file_path, &block_with_context.block, trace);
+                    report.add_trace(file_path, block, trace);
                 }
             }
         }
@@ -101,14 +71,68 @@ impl SyncValidator for LineCountValidator {
     }
 }
 
+/// Compiles the `line-count-pattern` of `block`, which is in `file_path`. Returns `None` when the
+/// block doesn't have one.
+///
+/// # Errors
+/// Returns an error when the pattern is not a valid regex or has a line break.
+fn compile_count_pattern(file_path: &RepoPath, block: &Block) -> anyhow::Result<Option<Regex>> {
+    block
+        .attributes
+        .get("line-count-pattern")
+        .map(|pattern| {
+            compile_pattern(pattern).with_context(|| {
+                format!("invalid line-count-pattern in {}", block.label(file_path))
+            })
+        })
+        .transpose()
+}
+
+/// Returns how many lines of `block` count: the lines that `pattern` gives a value for, or every
+/// line that isn't blank when there is no `pattern`. Adds each line that isn't blank to `trace`,
+/// when given.
+fn count_lines(
+    block: &Block,
+    file_content: &str,
+    pattern: Option<&Regex>,
+    mut trace: Option<&mut Vec<LineCountLine>>,
+) -> usize {
+    let mut actual = 0;
+    for (line_number, line) in block.content.text(file_content).lines().enumerate() {
+        let value = match pattern {
+            None => trimmed_line_value(line),
+            Some(pattern) => regex_value(line, pattern),
+        };
+        if value.is_some() {
+            actual += 1;
+        }
+        if let Some(trace) = &mut trace
+            && !line.trim().is_empty()
+        {
+            trace.push(LineCountLine {
+                line: block.content.position(line_number, 0).line,
+                text: line.trim().to_string(),
+                value: value.map(|(value, _)| value.to_string()),
+            });
+        }
+    }
+    actual
+}
+
+/// Returns the violation for `block`, which is in `block_file_path`, when `actual` lines count but
+/// the rule is `operation` and `expected`. `pattern` is the block's `line-count-pattern`, if any.
 fn create_violation(
     block_file_path: &RepoPath,
     block: &Block,
     operation: Op,
     expected: usize,
     actual: usize,
-    counted: &str,
+    pattern: Option<&Regex>,
 ) -> anyhow::Result<Violation> {
+    let counted = match pattern {
+        None => "lines",
+        Some(_) => "lines that match line-count-pattern",
+    };
     let message = format!(
         "Block {} has {} {}, which does not satisfy {}{}",
         block.label(block_file_path),
@@ -142,7 +166,21 @@ pub(crate) struct LineCountTrace {
     /// The lines of the content that aren't blank, or that `line-count-pattern` gives a value for.
     actual: usize,
     expected: usize,
+    /// The lines that aren't blank.
+    lines: Vec<LineCountLine>,
     op: &'static str,
+}
+
+/// One line that `line-count` read.
+#[derive(Serialize, Debug)]
+struct LineCountLine {
+    /// The line in the block's file.
+    line: usize,
+    /// The line, trimmed.
+    text: String,
+    /// The `value` group of `line-count-pattern`, the whole match, or the trimmed line. `None`
+    /// when the pattern skips the line, so the line isn't counted.
+    value: Option<String>,
 }
 
 /// Selects [`LineCountValidator`] for blocks carrying a `line-count` attribute.
@@ -170,6 +208,17 @@ impl Op {
             Op::Eq => "==",
             Op::Ge => ">=",
             Op::Gt => ">",
+        }
+    }
+
+    /// Returns whether `actual` satisfies the rule this operator forms with `expected`.
+    fn accepts(self, actual: usize, expected: usize) -> bool {
+        match self {
+            Op::Lt => actual < expected,
+            Op::Le => actual <= expected,
+            Op::Eq => actual == expected,
+            Op::Ge => actual >= expected,
+            Op::Gt => actual > expected,
         }
     }
 }
@@ -589,6 +638,39 @@ mod trace_tests {
     use serde_json::json;
 
     #[test]
+    fn block_with_a_pattern_records_the_value_of_each_line() -> anyhow::Result<()> {
+        // `# a comment` doesn't match, so it has no value and isn't counted. The blank line is
+        // left out.
+        let context = with_traces(validation_context(
+            "a.py",
+            r#"# <block line-count="<=1" line-count-pattern='^"(?P<value>\w+)",$'>
+"red",
+
+# a comment
+"blue",
+# </block>
+"#,
+        ));
+
+        let report = LineCountValidator.validate(context)?;
+
+        assert_eq!(
+            trace_json(&report),
+            json!({
+                "actual": 2,
+                "expected": 1,
+                "lines": [
+                    { "line": 2, "text": "\"red\",", "value": "red" },
+                    { "line": 4, "text": "# a comment", "value": null },
+                    { "line": 5, "text": "\"blue\",", "value": "blue" }
+                ],
+                "op": "<="
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
     fn block_records_the_lines_it_counted_and_the_rule() -> anyhow::Result<()> {
         // The blank line is not counted.
         let context = with_traces(validation_context(
@@ -600,7 +682,15 @@ mod trace_tests {
 
         assert_eq!(
             trace_json(&report),
-            json!({ "actual": 2, "expected": 1, "op": "<=" })
+            json!({
+                "actual": 2,
+                "expected": 1,
+                "lines": [
+                    { "line": 2, "text": "red", "value": "red" },
+                    { "line": 4, "text": "blue", "value": "blue" }
+                ],
+                "op": "<="
+            })
         );
         Ok(())
     }
