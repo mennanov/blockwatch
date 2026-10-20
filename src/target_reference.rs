@@ -178,8 +178,8 @@ impl ResolvedTarget {
     }
 }
 
-/// How a message shows the target: `file:name` for a block, `file#/path` for a symbol, and
-/// `file <path>` for a whole file.
+/// How a message shows the target: `file:name` for a block, `file#/path` for a symbol, and the
+/// path alone for a whole file.
 impl fmt::Display for ResolvedTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let file = &self.file;
@@ -187,7 +187,7 @@ impl fmt::Display for ResolvedTarget {
             TargetKind::Block(name) => write!(f, "{file}:{name}"),
             // A symbol path keeps its `#`, which already separates it from the file.
             TargetKind::Symbol(path) => write!(f, "{file}#{path}"),
-            TargetKind::WholeFile => write!(f, "file {file}"),
+            TargetKind::WholeFile => write!(f, "{file}"),
         }
     }
 }

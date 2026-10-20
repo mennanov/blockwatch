@@ -523,7 +523,7 @@ index abc123..def456 100644
                 violations[0]["message"],
                 json!(
                     "Block tests/testdata/affects/whole_file_source.rs:(unnamed) at line 2 is \
-                     modified, but file tests/testdata/affects/whole_file_target.json is not"
+                     modified, but tests/testdata/affects/whole_file_target.json is not"
                 )
             );
             assert_eq!(
@@ -606,7 +606,7 @@ rename to tests/testdata/affects/whole_file_target.json
                 violations[0]["message"],
                 json!(
                     "Block tests/testdata/affects/whole_file_source.rs:(unnamed) at line 2 is \
-                     modified, but file tests/testdata/affects/whole_file_target.json is not"
+                     modified, but tests/testdata/affects/whole_file_target.json is not"
                 )
             );
             true

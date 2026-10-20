@@ -5,7 +5,8 @@ use crate::symbol_path::SymbolPath;
 use crate::target_reference::{ResolvedTarget, TargetKind, TargetReference};
 use crate::validators;
 use crate::validators::{
-    TargetFiles, TargetResult, ValidationReport, Validator, ValidatorType, Violation,
+    TargetFiles, TargetResult, ValidationReport, Validator, ValidatorTrace, ValidatorType,
+    Violation,
 };
 use anyhow::{Context, anyhow};
 use serde::Serialize;
@@ -52,9 +53,22 @@ impl<Fs: FileSystem + 'static> validators::SyncValidator for AffectsValidator<Fs
                 let Some(affects) = block_with_context.block.attributes.get("affects") else {
                     continue;
                 };
-                let violations =
-                    reference_violations(&mut targets, file_path, block_with_context, affects)?;
+                let mut trace = context.traces_requested.then(|| AffectsTrace {
+                    block_changed: block_with_context.is_content_modified,
+                    targets: Vec::new(),
+                });
+                let violations = reference_violations(
+                    &mut targets,
+                    file_path,
+                    block_with_context,
+                    affects,
+                    trace.as_mut().map(|trace| &mut trace.targets),
+                )?;
                 report.add_all(file_path, &block_with_context.block, violations);
+                if let Some(trace) = trace {
+                    let trace = ValidatorTrace::Affects(trace);
+                    report.add_trace(file_path, &block_with_context.block, trace);
+                }
             }
         }
         Ok(report)
@@ -169,32 +183,59 @@ impl<'a, Fs: FileSystem> TargetIndex<'a, Fs> {
     }
 }
 
-/// One violation per reference listed in the `affects` attribute.
+/// One violation per reference listed in the `affects` attribute. Adds what the validator saw
+/// in each target to `trace`, when given.
 ///
 /// 2 violation kinds possible:
 /// 1. The referenced target no longer exists.
 /// 2. The referenced target is not modified while `block_with_context` is.
 ///
 /// `affects` is the attribute's raw value from the block in `block_with_context`.
+///
+/// # Errors
+/// Returns an error when a target file is missing or can't be parsed.
 fn reference_violations<Fs: FileSystem>(
     targets: &mut TargetIndex<'_, Fs>,
     file_path: &RepoPath,
     block_with_context: &BlockWithContext,
     affects: &str,
+    mut trace: Option<&mut Vec<AffectsTarget>>,
 ) -> anyhow::Result<Vec<Violation>> {
+    let block = &block_with_context.block;
     let mut violations = Vec::new();
-    for reference in parse_references(file_path, &block_with_context.block, affects)? {
+    for reference in parse_references(file_path, block, affects)? {
         let target = reference.resolve(file_path);
-        let violation = match &target.kind {
-            TargetKind::Block(name) => {
-                block_reference_violation(targets, file_path, block_with_context, &target, name)?
-            }
+        let changed = match &target.kind {
+            TargetKind::Block(name) => targets
+                .block_modified(&target.file, name)?
+                .ok_or_else(|| "does not exist".to_string()),
             TargetKind::WholeFile => {
-                file_reference_violation(targets, file_path, block_with_context, &target)?
+                // A whole-file target is never parsed, so its existence is the only integrity
+                // signal there is; a missing one aborts the run, as a missing file holding a named
+                // target does.
+                if !targets.file_exists(&target.file) {
+                    return Err(anyhow!(
+                        "affects target file does not exist: {}",
+                        target.file
+                    ));
+                }
+                Ok(targets.file_modified(&target.file))
             }
-            TargetKind::Symbol(path) => {
-                symbol_reference_violation(targets, file_path, block_with_context, &target, path)?
-            }
+            TargetKind::Symbol(path) => targets.modifies_symbol(&target.file, path)?,
+        };
+        if let Some(trace) = trace.as_deref_mut() {
+            trace.push(AffectsTarget {
+                changed: changed.as_ref().ok().copied(),
+                reason: changed.as_ref().err().cloned(),
+                target: target.to_string(),
+            });
+        }
+        let violation = match changed {
+            // An unchanged block places no obligation on the targets it references.
+            Ok(changed) => (block_with_context.is_content_modified && !changed)
+                .then(|| create_violation(file_path, block, &target))
+                .transpose()?,
+            Err(reason) => Some(unresolved_violation(file_path, block, &target, &reason)?),
         };
         violations.extend(violation);
     }
@@ -216,84 +257,6 @@ fn parse_references(
     })
 }
 
-/// The violation a reference to the block `target_name` produces, if any.
-fn block_reference_violation<Fs: FileSystem>(
-    targets: &mut TargetIndex<'_, Fs>,
-    file_path: &RepoPath,
-    block_with_context: &BlockWithContext,
-    target: &ResolvedTarget,
-    target_name: &str,
-) -> anyhow::Result<Option<Violation>> {
-    let Some(target_modified) = targets.block_modified(&target.file, target_name)? else {
-        return Ok(Some(dangling_reference_violation(
-            file_path,
-            &block_with_context.block,
-            target,
-        )?));
-    };
-    // The "affects" only applies when this block's content changed: an unchanged block places no
-    // obligation on the blocks it references.
-    if block_with_context.is_content_modified && !target_modified {
-        return Ok(Some(create_violation(
-            file_path,
-            &block_with_context.block,
-            target,
-        )?));
-    }
-    Ok(None)
-}
-
-/// The violation a reference to the symbol at `path` produces, if any.
-fn symbol_reference_violation<Fs: FileSystem>(
-    targets: &mut TargetIndex<'_, Fs>,
-    file_path: &RepoPath,
-    block_with_context: &BlockWithContext,
-    target: &ResolvedTarget,
-    path: &SymbolPath,
-) -> anyhow::Result<Option<Violation>> {
-    let block = &block_with_context.block;
-    let target_modified = match targets.modifies_symbol(&target.file, path)? {
-        Ok(target_modified) => target_modified,
-        Err(reason) => {
-            let message = format!(
-                "Block {} references {target}: {reason}",
-                block.label(file_path),
-            );
-            return Ok(Some(affects_violation(file_path, block, target, message)?));
-        }
-    };
-    // As for a named block, only a change to this block's content obliges the target to change.
-    if block_with_context.is_content_modified && !target_modified {
-        return Ok(Some(create_violation(file_path, block, target)?));
-    }
-    Ok(None)
-}
-
-/// The violation a whole-file reference produces, if any.
-fn file_reference_violation<Fs: FileSystem>(
-    targets: &TargetIndex<'_, Fs>,
-    file_path: &RepoPath,
-    block_with_context: &BlockWithContext,
-    target: &ResolvedTarget,
-) -> anyhow::Result<Option<Violation>> {
-    // A whole-file target is never parsed, so its existence is the only integrity signal there is;
-    // a missing one aborts the run, as a missing file holding a named target does.
-    if !targets.file_exists(&target.file) {
-        return Err(anyhow!(
-            "affects target file does not exist: {}",
-            target.file
-        ));
-    }
-    if block_with_context.is_content_modified && !targets.file_modified(&target.file) {
-        return Ok(Some(create_violation(
-            file_path,
-            &block_with_context.block,
-            target,
-        )?));
-    }
-    Ok(None)
-}
-
 /// Builds a map of the named blocks in `file_blocks` together with their modification bit.
 fn name_index(file_blocks: &FileBlocks) -> HashMap<String, bool> {
     let mut index = HashMap::new();
@@ -305,6 +268,31 @@ fn name_index(file_blocks: &FileBlocks) -> HashMap<String, bool> {
         }
     }
     index
+}
+
+/// What `affects` saw in one block.
+#[derive(Serialize, Debug)]
+pub(crate) struct AffectsTrace {
+    /// Whether the diff changed the block's content. Only then must its targets change too.
+    block_changed: bool,
+    /// One entry for each reference in `affects`, in the order the attribute lists them.
+    targets: Vec<AffectsTarget>,
+}
+
+/// What `affects` saw in one target. Exactly one of `changed` and `reason` is set.
+///
+/// serde writes the keys in the order the fields are declared, and the output keeps its keys
+/// sorted. So declare the fields in alphabetical order.
+#[derive(Serialize, Debug)]
+struct AffectsTarget {
+    /// Whether the diff changed the target. `None` when the target doesn't resolve.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    changed: Option<bool>,
+    /// Why the target doesn't resolve, as the violation shows it. `None` when it resolves.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+    /// The target, as the violation shows it.
+    target: String,
 }
 
 /// Selects [`AffectsValidator`] for every block that carries an `affects` attribute.
@@ -335,24 +323,26 @@ fn create_violation(
     affects_violation(modified_block_file_path, modified_block, target, message)
 }
 
-/// A reference whose target block no longer exists (renamed or deleted). Reported instead of
+/// The violation of a reference whose target doesn't resolve, for `reason`. Reported instead of
 /// `create_violation`'s "is modified, but X is not", which would misdescribe a missing target as an
 /// unchanged one.
-fn dangling_reference_violation(
-    referencing_block_file_path: &RepoPath,
-    referencing_block: &Block,
+fn unresolved_violation(
+    file_path: &RepoPath,
+    block: &Block,
     target: &ResolvedTarget,
+    reason: &str,
 ) -> anyhow::Result<Violation> {
-    let message = format!(
-        "Block {} references {target}, which does not exist",
-        referencing_block.label(referencing_block_file_path),
-    );
-    affects_violation(
-        referencing_block_file_path,
-        referencing_block,
-        target,
-        message,
-    )
+    let message = match &target.kind {
+        TargetKind::Block(_) => format!(
+            "Block {} references {target}, which {reason}",
+            block.label(file_path)
+        ),
+        TargetKind::Symbol(_) | TargetKind::WholeFile => format!(
+            "Block {} references {target}: {reason}",
+            block.label(file_path)
+        ),
+    };
+    affects_violation(file_path, block, target, message)
 }
 
 /// Builds an `affects` violation anchored on the referencing block's start tag, carrying the
@@ -396,7 +386,7 @@ mod validate_tests {
     };
 
     /// Builds a validator with a fake filesystem seeded with `files` (path, contents).
-    fn validator(files: &[(&str, &str)]) -> AffectsValidator<FakeFileSystem> {
+    pub(super) fn validator(files: &[(&str, &str)]) -> AffectsValidator<FakeFileSystem> {
         validator_with_symlinks(files, &[])
     }
 
@@ -1000,7 +990,7 @@ pass
     ///
     /// A changed file need not hold blocks or even be parseable by tree-sitter: that is what a
     /// whole-file reference is for.
-    fn context_with_changed_files(
+    pub(super) fn context_with_changed_files(
         files: &[(&str, &str)],
         changed_files: &[&str],
     ) -> anyhow::Result<Arc<validators::ValidationContext>> {
@@ -1070,7 +1060,7 @@ pass
         assert_eq!(source_violations.len(), 1);
         assert_eq!(
             source_violations[0].message,
-            "Block source.py:s at line 1 is modified, but file config.json is not"
+            "Block source.py:s at line 1 is modified, but config.json is not"
         );
         assert_eq!(
             source_violations[0].data,
@@ -1366,6 +1356,125 @@ b = 2
 
         // Only the block with the `affects` attribute is checked. The target block is not.
         assert_eq!(checked_lines(&report), vec![1]);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod trace_tests {
+    use super::validate_tests::{context_with_changed_files, validator};
+    use crate::diff_parser::{LineChange, LineChangeKind};
+    use crate::test_utils::{validation_context, validation_context_with_changes};
+    use crate::validators::SyncValidator;
+    use crate::validators::test_utils::{trace_json, with_traces};
+    use serde_json::json;
+
+    #[test]
+    fn changed_block_records_which_of_its_targets_changed() -> anyhow::Result<()> {
+        let source = r#"# <block affects=":changed, :unchanged">
+red
+# </block>
+# <block name="changed">
+red
+# </block>
+# <block name="unchanged">
+red
+# </block>
+"#;
+        let context = with_traces(validation_context_with_changes(
+            "a.py",
+            source,
+            vec![
+                LineChange {
+                    line: 2,
+                    kind: LineChangeKind::Added,
+                },
+                LineChange {
+                    line: 5,
+                    kind: LineChangeKind::Added,
+                },
+            ],
+        ));
+
+        let report = validator(&[("a.py", source)]).validate(context)?;
+
+        assert_eq!(
+            trace_json(&report),
+            json!({
+                "block_changed": true,
+                "targets": [
+                    { "changed": true, "target": "a.py:changed" },
+                    { "changed": false, "target": "a.py:unchanged" }
+                ]
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn symbol_and_whole_file_targets_record_whether_the_diff_changed_them() -> anyhow::Result<()> {
+        let files = [
+            (
+                "a.py",
+                "# <block affects=\"colors.txt, package.json#/version\">\nred\n# </block>\n",
+            ),
+            ("colors.txt", "red\n"),
+            ("package.json", "{\"version\": \"1.0\"}\n"),
+        ];
+        let context = with_traces(context_with_changed_files(
+            &files,
+            &["a.py", "package.json"],
+        )?);
+
+        let report = validator(&files).validate(context)?;
+
+        assert_eq!(
+            trace_json(&report)["targets"],
+            json!([
+                { "changed": false, "target": "colors.txt" },
+                { "changed": true, "target": "package.json#/version" }
+            ])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn targets_that_do_not_resolve_record_why() -> anyhow::Result<()> {
+        let source = "# <block affects=\":missing, package.json#/versoin\">\nred\n# </block>\n";
+        let files = [
+            ("a.py", source),
+            ("package.json", "{\"version\": \"1.0\"}\n"),
+        ];
+        let context = with_traces(context_with_changed_files(&files, &[])?);
+
+        let report = validator(&files).validate(context)?;
+
+        assert_eq!(
+            trace_json(&report),
+            json!({
+                "block_changed": false,
+                "targets": [
+                    { "reason": "does not exist", "target": "a.py:missing" },
+                    {
+                        "reason": "symbol not found; did you mean: /version",
+                        "target": "package.json#/versoin"
+                    }
+                ]
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_without_traces_requested_records_no_trace() -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.py",
+            "# <block affects=\":b\">\nred\n# </block>\n# <block name=\"b\">\nred\n# </block>\n",
+        );
+
+        let report = validator(&[]).validate(context)?;
+
+        assert!(report.traces.is_empty());
         Ok(())
     }
 }

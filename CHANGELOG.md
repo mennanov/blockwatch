@@ -21,8 +21,16 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   - `same-as`: each record the pattern matched, with its line, on both sides, and the reason of each mismatch.
   - `keep-sorted` and `keep-unique`: the value each line gives, up to the first line out of order or repeated.
   - `line-pattern`: what each pattern matched on each line, up to the first line that fails.
+  - `affects`: whether the block changed, and for each target, whether it changed or why it doesn't resolve.
+  - `line-count`: how many lines the block has, and the rule they were checked against.
 
-  Violations go to stderr, and the exit code is the same as for a normal run.
+  `"with_diff"` says whether `--diff` was given. Without it, no block counts as changed. Violations go to stderr, and
+  the exit code is the same as for a normal run.
+
+### Changed
+
+- A message of `affects` or `same-as` about a whole-file target shows the path alone, without `file` in front. For
+  example: `Block a.py:b at line 1 is modified, but config.json is not`.
 
 ## [0.14.1] - 2026-10-17
 

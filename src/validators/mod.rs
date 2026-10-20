@@ -343,8 +343,10 @@ impl ValidationLog {
 #[derive(Serialize, Debug)]
 #[serde(untagged)]
 pub(crate) enum ValidatorTrace {
+    Affects(affects::AffectsTrace),
     KeepSorted(keep_sorted::KeepSortedTrace),
     KeepUnique(keep_unique::KeepUniqueTrace),
+    LineCount(line_count::LineCountTrace),
     LinePattern(line_pattern::LinePatternTrace),
     SameAs(same_as::SameAsTrace),
 }

@@ -22,11 +22,13 @@ pub(crate) struct Explanation<'a> {
     /// The validators that the block's attributes ask for, but the settings turn off.
     disabled: BTreeSet<Validator>,
     file: &'a RepoPath,
+    /// Whether the run was given a diff. Without one, no block counts as changed.
+    with_diff: bool,
 }
 
 impl<'a> Explanation<'a> {
     /// Describes the one block that `context` keeps, as `settings` treat it, with the traces that
-    /// `log` holds for it.
+    /// `log` holds for it. `with_diff` is whether the run was given a diff.
     ///
     /// # Panics
     /// Panics if `context` doesn't keep exactly one block.
@@ -34,6 +36,7 @@ impl<'a> Explanation<'a> {
         context: &'a ValidationContext,
         settings: &Settings,
         log: &'a ValidationLog,
+        with_diff: bool,
     ) -> Self {
         assert_eq!(context.blocks().len(), 1, "the context keeps one file");
         let (file, file_blocks) = context.blocks().iter().next().expect("one file");
@@ -58,6 +61,7 @@ impl<'a> Explanation<'a> {
                 })
                 .collect(),
             file,
+            with_diff,
         }
     }
 }

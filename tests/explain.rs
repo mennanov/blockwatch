@@ -62,7 +62,8 @@ fn named_block_writes_its_explanation_to_stdout() -> anyhow::Result<()> {
                 "text": "\napple\nbanana\n"
             },
             "disabled": [],
-            "file": FIXTURE
+            "file": FIXTURE,
+            "with_diff": false
         })
     );
     Ok(())
@@ -136,7 +137,7 @@ fn address_that_matches_no_block_exits_with_2() -> anyhow::Result<()> {
 }
 
 #[test]
-fn diff_marks_the_block_as_changed() -> anyhow::Result<()> {
+fn with_diff_is_recorded_and_marks_the_block_as_changed() -> anyhow::Result<()> {
     let diff = format!(
         r#"diff --git a/{FIXTURE} b/{FIXTURE}
 --- a/{FIXTURE}
@@ -155,10 +156,9 @@ fn diff_marks_the_block_as_changed() -> anyhow::Result<()> {
         .output()?;
 
     output.clone().assert().success();
-    assert_eq!(
-        json_from(&output.stdout)?["block"]["is_content_modified"],
-        true
-    );
+    let explanation = json_from(&output.stdout)?;
+    assert_eq!(explanation["with_diff"], true);
+    assert_eq!(explanation["block"]["is_content_modified"], true);
     Ok(())
 }
 

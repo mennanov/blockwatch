@@ -1,7 +1,9 @@
 use crate::blocks::{Block, BlockWithContext};
 use crate::repo_path::RepoPath;
 use crate::validators;
-use crate::validators::{SyncValidator, ValidationReport, Validator, ValidatorType, Violation};
+use crate::validators::{
+    SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
+};
 use anyhow::anyhow;
 use serde::Serialize;
 use std::sync::Arc;
@@ -72,6 +74,14 @@ impl SyncValidator for LineCountValidator {
                     )?]
                 };
                 report.add_all(file_path, &block_with_context.block, block_violations);
+                if context.traces_requested {
+                    let trace = ValidatorTrace::LineCount(LineCountTrace {
+                        actual,
+                        expected,
+                        op: op.as_str(),
+                    });
+                    report.add_trace(file_path, &block_with_context.block, trace);
+                }
             }
         }
         Ok(report)
@@ -106,6 +116,18 @@ fn create_violation(
             expected,
         })?),
     ))
+}
+
+/// What `line-count` saw in one block. The keys are those of its violation.
+///
+/// serde writes the keys in the order the fields are declared, and the output keeps its keys
+/// sorted. So declare the fields in alphabetical order.
+#[derive(Serialize, Debug)]
+pub(crate) struct LineCountTrace {
+    /// The lines of the content that aren't blank.
+    actual: usize,
+    expected: usize,
+    op: &'static str,
 }
 
 /// Selects [`LineCountValidator`] for blocks carrying a `line-count` attribute.
@@ -398,6 +420,41 @@ c = 3
         // The block without a line-count attribute is not checked, so it records nothing.
         assert_eq!(checked_lines(&report), vec![1, 4]);
         assert_eq!(violation_count(&report), 1);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod trace_tests {
+    use super::*;
+    use crate::test_utils::validation_context;
+    use crate::validators::test_utils::{trace_json, with_traces};
+    use serde_json::json;
+
+    #[test]
+    fn block_records_the_lines_it_counted_and_the_rule() -> anyhow::Result<()> {
+        // The blank line is not counted.
+        let context = with_traces(validation_context(
+            "a.py",
+            "# <block line-count=\"<=1\">\nred\n\n blue\n# </block>\n",
+        ));
+
+        let report = LineCountValidator.validate(context)?;
+
+        assert_eq!(
+            trace_json(&report),
+            json!({ "actual": 2, "expected": 1, "op": "<=" })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_without_traces_requested_records_no_trace() -> anyhow::Result<()> {
+        let context = validation_context("a.py", "# <block line-count=\"<=1\">\nred\n# </block>\n");
+
+        let report = LineCountValidator.validate(context)?;
+
+        assert!(report.traces.is_empty());
         Ok(())
     }
 }

@@ -100,7 +100,7 @@ index 1111111..2222222 100644
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "disagrees with file tests/testdata/same_as/whole_file_target.json",
+            "disagrees with tests/testdata/same_as/whole_file_target.json",
         ));
 }
 

@@ -2088,7 +2088,7 @@ red: 1
         assert!(
             file[0]
                 .message
-                .starts_with("Block version.rs:(unnamed) at line 1 disagrees with file VERSION:"),
+                .starts_with("Block version.rs:(unnamed) at line 1 disagrees with VERSION:"),
             "unexpected message: {}",
             file[0].message
         );

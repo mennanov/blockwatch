@@ -100,7 +100,7 @@ fn run_explain(args: &flags::Args, address: &BlockAddress) -> anyhow::Result<Exi
     let has_error_severity = process_violations(&log.violations, flags::OutputFormat::Json)?;
     write_json(
         std::io::stdout(),
-        &Explanation::new(&context, &settings, &log),
+        &Explanation::new(&context, &settings, &log, args.diff),
     )?;
     Ok(if has_error_severity {
         ExitCode::from(1)
