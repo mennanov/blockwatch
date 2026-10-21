@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.15.0] - 2026-10-21
+
 ### Changed
 
 - In Markdown, a `<!--` is a comment only where HTML is kept as it is: in an HTML block or in raw HTML in a line of
