@@ -43,6 +43,14 @@ repos:
         types: [ rust ]
         stages: [ pre-commit ]
         pass_filenames: false
+      - id: cargo-test
+        name: cargo test
+        description: Run the unit, integration and doc tests.
+        entry: cargo test --quiet
+        language: system
+        types: [ rust ]
+        stages: [ pre-commit ]
+        pass_filenames: false
 
   # Rules and the set of files linted live in `.markdownlint-cli2.yaml`, which the tool picks up
   # from the repository root. The hook passes only the staged Markdown files, so a commit is judged
