@@ -65,9 +65,9 @@ For example:
 - *Always* handle the variants of an enum with an exhaustive `match`. A `let ... else`, or an `if` that handles one
   variant and sends the rest to a single branch, quietly gives any new variant whatever that branch does. With a
   `match`, the compiler makes you decide what to do with each new variant. One exception: a `match` on another
-  crate's enum can end with `_` when it only asks whether a value is one variant, and no new variant could be that
-  one. For example, every Markdown heading is `mdast::Node::Heading`, so the other node types can go to `_ => None`.
-  Say why in a comment next to the `_`.
+  crate's enum can end with `_` when it only picks out one or a few variants, and no new variant could be one of
+  them. For example, every Markdown heading is `mdast::Node::Heading`, so the other node types can go to
+  `_ => None`. Say why in a comment next to the `_`.
 - *Always* give an item the narrowest visibility that compiles: private, then `pub(super)`, then `pub(crate)`.
   blockwatch is a program, not a library. Only `run` and `count_rust_blocks` in `lib.rs` are `pub`, for `main.rs` and
   the fuzz target. The `unreachable_pub` lint makes `cargo clippy -- -D warnings` fail on any other `pub`.
@@ -173,8 +173,9 @@ The whole pipeline is in `src/cli.rs`. `src/main.rs` only calls `blockwatch::run
    from the command line select, and that don't match the settings' ignore globs. `PathArguments::resolve` turns an
    existing file or directory into a glob first, so `src` selects `src/**`. Pick each file's language by its
    extension, using the settings' extension mappings too.
-6. For each file, the matching `language_parsers::<lang>` (a tree-sitter grammar) finds the comments. `tag_parser` and
-   `block_parser` turn the comment text into `Block` values, with their attributes and their byte and line ranges.
+6. For each file, the matching `language_parsers::<lang>` (usually a tree-sitter grammar) finds the comments.
+   `tag_parser` and `block_parser` turn the comment text into `Block` values, with their attributes and their byte and
+   line ranges.
    `VirtualBlock::resolve` finds each virtual block in the file, by its `Locator`, and adds it as a `Block` too. A file
    without a grammar is read as plain text: it has no tags, only its virtual blocks. A target that does not resolve
    stops the run. `--only-changed` also parses the file of a virtual block whose entry the diff
@@ -224,7 +225,8 @@ The main modules:
 - `src/repo_path.rs` — `RepoPath`, the one way to write a path relative to the repository root. A diff header
   (`b/src/main.rs`), a path found in the walk and a `file:name` attribute all become a `RepoPath`. So the same file is
   always the same map key.
-- `src/language_parsers/` — one tree-sitter grammar for each language. Each language has a `parser()` that returns a
+- `src/language_parsers/` — one parser for each language, most of them a tree-sitter grammar. Markdown and MDX use
+  the `markdown` crate, and Lean has its own scanner. Each language has a `parser()` that returns a
   `LanguageParser`, which knows which syntax nodes are comments. `src/block_parser.rs` turns those comments into
   blocks. `language_parsers()` in `language_parsers/mod.rs` returns `LanguageParsers`: the parser of each extension.
   Its `parser_for` picks the parser of a file, using the settings' extension mappings too. **To add a language, add a
@@ -238,8 +240,7 @@ The main modules:
     syntax tree is nested.
   - YAML walks its syntax tree itself. An alias has a position in a sequence but can't be addressed, and a query can't
     express that.
-  - Markdown finds its sections with the `markdown` crate. The `section` nodes of `tree-sitter-md` don't end at a
-    heading underlined with `---`.
+  - Markdown finds its sections with the `markdown` crate, the same parser that finds its comments.
 
   Each language's tests list every symbol it finds. When you give a language symbols, also document its paths in
   `docs/symbols.md` and in the "Symbols" section of the skill, `src/skill.md`. A test in `language_parsers/mod.rs` and the

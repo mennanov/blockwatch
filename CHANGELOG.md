@@ -12,6 +12,23 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Changed
+
+- In Markdown, a `<!--` is a comment only where HTML is kept as it is: in an HTML block or in raw HTML in a line of
+  text. These were read as comments before and are not now:
+  - the alt text of an image: `![Logo <!-- x -->](logo.png)`;
+  - the title of a link: `[Docs](docs.md "<!-- x -->")`;
+  - an escaped `<`: `\<!-- x -->`.
+
+  In a line of text, `<!-->` is now a whole comment, so a tag after it on that line is not read.
+
+### Fixed
+
+- In Markdown, blockwatch skipped every tag after a fenced code block that holds a line like `` ``` `` indented by 4
+  spaces or a tab, or `` echo x``` ``. Such a line closed the code block too early, so the rest of the file became
+  code. The run gave no error. Now such a line stays in the code block, as CommonMark says
+  ([#176](https://github.com/mennanov/blockwatch/issues/176)).
+
 ## [0.14.2] - 2026-10-21
 
 ### Added

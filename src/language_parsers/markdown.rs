@@ -1,15 +1,13 @@
-use crate::language_parsers;
+use crate::LineIndex;
 use crate::language_parsers::{
     Comment, CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
-    blank_preserving_line_breaks, node_text, xml_style_comments_parser,
+    blank_preserving_line_breaks, xml_style_comments_parser,
 };
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{ScalarValue, Symbol, SymbolsParser};
-use anyhow::Context;
-use markdown::mdast::Node;
+use markdown::mdast::{Definition, Node};
 use markdown::{Constructs, ParseOptions};
 use std::ops::Range;
-use tree_sitter::StreamingIterator;
 
 /// Returns a [`LanguageParser`] for Markdown. Its symbols are the sections of a file.
 pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
@@ -32,22 +30,42 @@ struct SectionsParser;
 
 impl SymbolsParser for SectionsParser {
     fn parse(&mut self, source: &str) -> anyhow::Result<Vec<Symbol>> {
-        // tree-sitter-md, which finds the comments, nests sections too, but not the way a reader
-        // sees them: a setext heading starts no section, and a heading in a quote or a list item
-        // starts one.
-        let options = ParseOptions {
-            constructs: Constructs {
-                // Without it, the `---` that closes the front matter makes the line above it a
-                // heading.
-                frontmatter: true,
-                ..Constructs::gfm()
-            },
-            ..ParseOptions::default()
-        };
-        let root = markdown::to_mdast(source, &options)
-            .expect("only MDX has syntax errors, and these options leave it off");
-        Ok(section_symbols(&root, source))
+        Ok(section_symbols(&parse_markdown(source), source))
     }
+}
+
+/// Parses `source` as GitHub-flavored Markdown that can start with frontmatter.
+fn parse_markdown(source: &str) -> Node {
+    let options = ParseOptions {
+        constructs: Constructs {
+            // Without it, the `---` that closes the front matter makes the line above it a
+            // heading.
+            frontmatter: true,
+            ..Constructs::gfm()
+        },
+        ..ParseOptions::default()
+    };
+    markdown::to_mdast(source, &options)
+        .expect("only MDX has syntax errors, and these options leave it off")
+}
+
+/// Every node in `root`, `root` included, in source order: each node comes before its children.
+pub(super) fn nodes_in_order(root: &Node) -> impl Iterator<Item = &Node> {
+    // A stack instead of recursion, so that deeply nested block quotes or lists can't overflow the
+    // call stack.
+    let mut nodes = vec![root];
+    std::iter::from_fn(move || {
+        let node = nodes.pop()?;
+        if let Some(children) = node.children() {
+            nodes.extend(children.iter().rev());
+        }
+        Some(node)
+    })
+}
+
+/// The byte range of a node at `position` in the source that markdown-rs parsed.
+fn byte_range(position: &markdown::unist::Position) -> Range<usize> {
+    position.start.offset..position.end.offset
 }
 
 /// A section whose heading has been read, but not the heading that ends it.
@@ -121,10 +139,10 @@ impl<'s> Sections<'s> {
 
     /// Reads `node`, the next top-level node of the file.
     fn read(&mut self, node: &Node) {
-        let position = node
-            .position()
-            .expect("markdown-rs gives every node it parses a position");
-        let range = position.start.offset..position.end.offset;
+        let range = byte_range(
+            node.position()
+                .expect("markdown-rs gives every node it parses a position"),
+        );
         match heading_depth(node) {
             Some(depth) => {
                 self.close(depth);
@@ -194,126 +212,85 @@ fn heading_depth(node: &Node) -> Option<u8> {
     }
 }
 
-/// Parses Markdown `[//]:` comments and the HTML comments embedded in Markdown.
+/// Finds the `[//]:` comments and the HTML comments in Markdown.
 ///
-/// HTML comments live either in [HTML blocks](https://github.github.com/gfm/#html-block) or in
-/// the inline content of other blocks (a comment with text before it on the same line).
+/// An HTML comment is read only where Markdown keeps HTML as it is: in an
+/// [HTML block](https://spec.commonmark.org/0.31.2/#html-blocks), or in
+/// [raw HTML](https://spec.commonmark.org/0.31.2/#raw-html) in a line of text. So a `<!--` in code
+/// is not a comment.
 struct MdCommentsParser {
-    md_tree_sitter_parser: tree_sitter::Parser,
-    md_regions_query: tree_sitter::Query,
-    inline_tree_sitter_parser: tree_sitter::Parser,
-    code_span_query: tree_sitter::Query,
     html_comments_parser: TreeSitterCommentsParser,
 }
 
 impl MdCommentsParser {
     fn new() -> anyhow::Result<Self> {
-        let markdown_lang: tree_sitter::Language = tree_sitter_md::LANGUAGE.into();
-        let md_tree_sitter_parser = language_parsers::tree_sitter_parser(&markdown_lang)?;
-        let md_regions_query = tree_sitter::Query::new(
-            &markdown_lang,
-            "(html_block) @html_block \
-             (inline) @inline \
-             (pipe_table_cell) @pipe_table_cell \
-             (link_reference_definition) @link_reference_definition",
-        )
-        .context("failed to compile tree-sitter markdown regions query")?;
-
-        let inline_lang: tree_sitter::Language = tree_sitter_md::INLINE_LANGUAGE.into();
-        let inline_tree_sitter_parser = language_parsers::tree_sitter_parser(&inline_lang)?;
-        let code_span_query = tree_sitter::Query::new(&inline_lang, "(code_span) @code_span")
-            .context("failed to compile tree-sitter code span query")?;
-
         let html_lang = tree_sitter_html::LANGUAGE.into();
-        let html_comments_parser = xml_style_comments_parser(&html_lang, "comment")?;
         Ok(Self {
-            md_tree_sitter_parser,
-            md_regions_query,
-            inline_tree_sitter_parser,
-            code_span_query,
-            html_comments_parser,
+            html_comments_parser: xml_style_comments_parser(&html_lang, "comment")?,
         })
     }
 
-    /// Extracts the `[//]:` comments and the HTML comments (from `html_block` and `inline`
-    /// regions) from a single parse of the Markdown tree.
-    fn parse_comments(&mut self, contents: &str) -> Vec<Comment> {
-        let tree = self.md_tree_sitter_parser.parse(contents, None).unwrap();
-        let mut query_cursor = tree_sitter::QueryCursor::new();
-        let mut matches = query_cursor.matches(
-            &self.md_regions_query,
-            tree.root_node(),
-            contents.as_bytes(),
-        );
+    /// Returns the comments in `source`, in source order.
+    fn comments(&mut self, source: &str) -> Vec<Comment> {
+        // Most Markdown files hold no comment, and markdown-rs is slow on some text, such as a
+        // long paragraph with many `<?`.
+        if !source.contains("<!--") && !source.contains("[//]:") {
+            return Vec::new();
+        }
+        let root = parse_markdown(source);
+        let lines = LineIndex::new(source);
         let mut comments = Vec::new();
-        while let Some(query_match) = matches.next() {
-            let node = query_match
-                .captures()
-                .first()
-                .expect("Empty Tree-sitter region query match")
-                .node;
-            let region = node_text(&node, contents);
-
-            // `[//]:` comments are direct nodes of the Markdown tree, so their positions are
-            // already the source positions.
-            if node.kind() == "link_reference_definition" {
-                if let Some(text) = link_reference_definition_comment_text(&node, contents) {
-                    comments.push(Comment::from_node(&node, contents, text));
-                }
-                continue;
-            }
-
-            // The remaining regions carry HTML comments, which require a `<!--`.
-            if !region.contains("<!--") {
-                continue;
-            }
-            // Inline regions may contain code spans whose contents must not be mistaken for
-            // comments, but a code span requires a backtick; without one the region is parsed
-            // as is. A table cell carries inline content too, code spans included.
-            let html_comments: Vec<Comment> =
-                if matches!(node.kind(), "inline" | "pipe_table_cell") && region.contains('`') {
-                    let view = Self::inline_html_view(
-                        &mut self.inline_tree_sitter_parser,
-                        &self.code_span_query,
-                        region,
+        for node in nodes_in_order(&root) {
+            match node {
+                Node::Html(_) => {
+                    comments.extend(
+                        self.html_comments(
+                            byte_range(
+                                node.position()
+                                    .expect("markdown-rs gives every node it parses a position"),
+                            ),
+                            source,
+                            &lines,
+                        ),
                     );
-                    self.html_comments_parser.parse(&view).collect()
-                } else {
-                    self.html_comments_parser.parse(region).collect()
-                };
-            for mut comment in html_comments {
-                // The comment's positions are relative to the region; shift them to the source.
-                comment.shift_into_source(node.start_position().row, node.start_byte(), contents);
-                comments.push(comment);
+                }
+                Node::Definition(definition) => {
+                    comments.extend(link_reference_comment(definition, source, &lines));
+                }
+                // Raw HTML that Markdown keeps as HTML is always `Node::Html`, and every link
+                // reference definition is `Node::Definition`. A `<!--` in the alt text of an image
+                // or in the title of a link is part of an attribute, not a comment.
+                _ => {}
             }
         }
         comments
     }
 
-    /// Returns a copy of the inline `region` with its code spans blanked to whitespace (line
-    /// breaks kept), so that a `<!--` inside inline code is not mistaken for an HTML comment.
-    /// The copy is byte-for-byte aligned with the region, so comment positions parsed from it
-    /// are valid in the region.
-    fn inline_html_view(
-        inline_tree_sitter_parser: &mut tree_sitter::Parser,
-        code_span_query: &tree_sitter::Query,
-        region: &str,
-    ) -> String {
-        let mut view = region.as_bytes().to_vec();
-        let tree = inline_tree_sitter_parser.parse(region, None).unwrap();
-        let mut query_cursor = tree_sitter::QueryCursor::new();
-        let mut matches =
-            query_cursor.matches(code_span_query, tree.root_node(), region.as_bytes());
-        while let Some(query_match) = matches.next() {
-            let range = query_match
-                .captures()
-                .first()
-                .expect("Empty Tree-sitter code_span query match")
-                .node
-                .byte_range();
-            blank_preserving_line_breaks(&mut view[range]);
+    /// Returns the HTML comments in `html`, the byte range of an HTML block or of raw HTML in
+    /// `source`, in source order.
+    fn html_comments(
+        &mut self,
+        html: Range<usize>,
+        source: &str,
+        lines: &LineIndex,
+    ) -> Vec<Comment> {
+        #[expect(
+            clippy::string_slice,
+            reason = "markdown-rs gives offsets of whole characters"
+        )]
+        let region = &source[html.clone()];
+        // Most raw HTML is a tag such as `<br>`, which can't hold a comment, so it isn't parsed.
+        if !region.contains("<!--") {
+            return Vec::new();
         }
-        String::from_utf8(view).expect("view is built from the valid-UTF-8 region")
+        let start_row = lines.position(html.start).line - 1;
+        self.html_comments_parser
+            .parse(region)
+            .map(|mut comment| {
+                comment.shift_into_source(start_row, html.start, source);
+                comment
+            })
+            .collect()
     }
 }
 
@@ -322,41 +299,70 @@ impl CommentsParser for MdCommentsParser {
         &'source mut self,
         contents: &'source str,
     ) -> impl Iterator<Item = Comment> + 'source {
-        // `[//]:` and HTML comments come out of the merged parse interleaved by region; sort them
-        // into a single source-ordered stream so a block can span comments of different kinds.
-        let mut comments = self.parse_comments(contents);
-        comments.sort_by_key(|comment| comment.source_range.start);
-        comments.into_iter()
+        self.comments(contents).into_iter()
     }
 }
 
-/// Returns the text of `node`, a link reference definition in `contents`, with everything but its
-/// title blanked, so the length is preserved. Returns `None` when `node` is not a `[//]:` comment,
-/// or has no title.
-fn link_reference_definition_comment_text(
-    node: &tree_sitter::Node,
-    contents: &str,
-) -> Option<String> {
-    let mut cursor = node.walk();
-    let mut label = None;
-    let mut title = None;
-    for child in node.named_children(&mut cursor) {
-        match child.kind() {
-            "link_label" => label = Some(child),
-            "link_title" => title = Some(child),
-            _ => {}
-        }
-    }
-    if node_text(&label?, contents) != "[//]" {
+/// Returns the comment in `definition`, a link reference definition in `source`: its text up to
+/// the end of its line, with everything before the title blanked, so the length is kept. Returns
+/// `None` when `definition` is not a `[//]:` comment, or has no title.
+fn link_reference_comment(
+    definition: &Definition,
+    source: &str,
+    lines: &LineIndex,
+) -> Option<Comment> {
+    if definition.label.as_deref() != Some("//") || definition.title.is_none() {
         return None;
     }
-    // A title is read from the tree, not found in the text, because its delimiters, such as `'`,
-    // can also appear in the destination.
-    let title = title?;
-    let mut text = contents.as_bytes()[node.byte_range()].to_vec();
-    blank_preserving_line_breaks(&mut text[..title.start_byte() - node.start_byte()]);
-    blank_preserving_line_breaks(&mut text[title.end_byte() - node.start_byte()..]);
-    Some(String::from_utf8(text).expect("only whole characters are blanked"))
+    let definition_range = byte_range(
+        definition
+            .position
+            .as_ref()
+            .expect("markdown-rs gives every node it parses a position"),
+    );
+    // Nothing else can be on the line of a definition, so the comment takes the line break too,
+    // and a block's content starts on the next line.
+    let range = definition_range.start..line_end(source.as_bytes(), definition_range.end);
+    let mut text = source.as_bytes()[range.clone()].to_vec();
+    let title_start = title_start(&text[..definition_range.len()]);
+    blank_preserving_line_breaks(&mut text[..title_start]);
+    Some(Comment {
+        position_range: lines.range(&range),
+        source_range: range,
+        comment_text: String::from_utf8(text).expect("only whole characters are blanked"),
+    })
+}
+
+/// The byte offset right after the first line break in `source` at or after `offset`, or the end
+/// of `source` when no line break follows. As in CommonMark, a line break is `\r\n`, `\n` or `\r`.
+fn line_end(source: &[u8], offset: usize) -> usize {
+    let rest = &source[offset..];
+    let length = match rest.iter().position(|&byte| byte == b'\n' || byte == b'\r') {
+        Some(line_break) if rest[line_break..].starts_with(b"\r\n") => line_break + 2,
+        Some(line_break) => line_break + 1,
+        None => rest.len(),
+    };
+    offset + length
+}
+
+/// The byte offset of the opening delimiter of the title in `definition`, the text of a link
+/// reference definition that ends with a title, such as `(text)`, `"text"` or `'text'`.
+///
+/// # Panics
+/// Panics if `definition` doesn't end with a title.
+fn title_start(definition: &[u8]) -> usize {
+    // markdown-rs gives the title decoded, so where it is in the source has to be found here.
+    let close = definition.len() - 1;
+    let open_delimiter = match definition[close] {
+        b')' => b'(',
+        quote => quote,
+    };
+    // The title can hold its opening delimiter only after a backslash, as in `(a\(b)`.
+    definition[..close]
+        .windows(2)
+        .rposition(|pair| pair[1] == open_delimiter && pair[0] != b'\\')
+        .expect("a title starts with its opening delimiter")
+        + 1
 }
 
 #[cfg(test)]
@@ -383,6 +389,15 @@ mod tests {
         symbols
             .iter()
             .map(|(path, value)| Ok((SymbolPath::parse(path)?, value.to_string())))
+            .collect()
+    }
+
+    /// The `name` of each block in `content`, in the order of their start tags.
+    fn block_names(content: &str) -> anyhow::Result<Vec<String>> {
+        let mut parser = parser()?;
+        parser
+            .parse_blocks(content)
+            .map(|block| Ok(block?.name_display().to_string()))
             .collect()
     }
 
@@ -756,6 +771,59 @@ Text
     }
 
     #[test]
+    fn link_reference_comment_with_each_title_delimiter_parse_blocks_reads_title()
+    -> anyhow::Result<()> {
+        let content = r#"[//]: # (<block name="a">)
+[//]: # '<block name="b">'
+[//]: # "<block name='c'>"
+
+Text
+
+[//]: # "</block>"
+[//]: # '</block>'
+[//]: # (</block>)
+"#;
+
+        assert_eq!(block_names(content)?, ["a", "b", "c"]);
+        Ok(())
+    }
+
+    #[test]
+    fn link_reference_comment_with_escaped_parentheses_parse_blocks_reads_whole_title()
+    -> anyhow::Result<()> {
+        let content = r#"[//]: # (<block name="a\(b\)">)
+Text
+
+[//]: # (</block>)
+"#;
+
+        assert_eq!(block_names(content)?, [r"a\(b\)"]);
+        Ok(())
+    }
+
+    #[test]
+    fn link_reference_comment_with_each_line_ending_parse_blocks_returns_content_from_next_line()
+    -> anyhow::Result<()> {
+        for line_ending in ["\n", "\r\n", "\r"] {
+            let mut parser = parser()?;
+            let content = format!(
+                r#"[//]: # (<block name="a">){line_ending}Text{line_ending}{line_ending}[//]: # (</block>){line_ending}"#
+            );
+
+            let blocks = parser
+                .parse_blocks(&content)
+                .collect::<anyhow::Result<Vec<_>>>()?;
+
+            assert_eq!(
+                blocks[0].content.text(&content),
+                format!("Text{line_ending}{line_ending}"),
+                "{line_ending:?}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn inline_comment_after_a_code_span_holding_non_ascii_reports_a_character_column()
     -> anyhow::Result<()> {
         let mut parser = parser()?;
@@ -853,6 +921,22 @@ Closing text <!-- </block> --> tail.
             Position::new(3, 8)
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn comments_in_block_quote_parse_blocks_returns_the_text_between_them() -> anyhow::Result<()> {
+        let mut parser = parser()?;
+        let content = r#"> <!-- <block name="a"> -->
+> Text
+> <!-- </block> -->
+"#;
+
+        let blocks = parser
+            .parse_blocks(content)
+            .collect::<anyhow::Result<Vec<_>>>()?;
+
+        assert_eq!(blocks[0].content.text(content), "\n> Text\n> ");
         Ok(())
     }
 
@@ -975,6 +1059,74 @@ Not wrapped in HTML tags on multiple lines
             ]
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn code_block_with_fence_lookalike_parse_blocks_returns_the_block_after_it()
+    -> anyhow::Result<()> {
+        // A closing fence is indented by at most 3 spaces, where a tab counts as 4, and only
+        // spaces can follow it. So none of these lines ends the code block.
+        for lookalike in ["    ```", "\t```", "text```", "``` text"] {
+            let content = format!(
+                r#"```
+{lookalike}
+```
+
+<!-- <block name="a"> -->
+Text
+<!-- </block> -->
+"#
+            );
+
+            assert_eq!(block_names(&content)?, ["a"], "{lookalike:?}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn code_block_closed_by_fence_indented_three_spaces_parse_blocks_returns_only_the_block_after_it()
+    -> anyhow::Result<()> {
+        let content = r#"```
+<!-- <block name="in_code"> -->
+   ```
+<!-- <block name="a"> -->
+Text
+<!-- </block> -->
+"#;
+
+        assert_eq!(block_names(content)?, ["a"]);
+        Ok(())
+    }
+
+    #[test]
+    fn comment_outside_raw_html_parse_blocks_returns_no_block_from_it() -> anyhow::Result<()> {
+        // In HTML, the alt text of an image and the title of a link are attribute values, and an
+        // escaped `<` is text, so none of these is a comment.
+        let content = r#"<!-- <block name="a"> -->
+![Alt <!-- <block name="in_alt"> -->](image.png)
+[Link](page.md "<!-- <block name='in_title'> -->")
+\<!-- <block name="escaped"> -->
+<!-- </block> -->
+"#;
+
+        assert_eq!(block_names(content)?, ["a"]);
+        Ok(())
+    }
+
+    #[test]
+    fn frontmatter_parse_blocks_returns_no_block_from_it() -> anyhow::Result<()> {
+        // Frontmatter is YAML, where `<!--` starts no comment.
+        let content = r#"---
+title: <!-- <block name="in_frontmatter"> -->
+---
+
+<!-- <block name="a"> -->
+Text
+<!-- </block> -->
+"#;
+
+        assert_eq!(block_names(content)?, ["a"]);
         Ok(())
     }
 }

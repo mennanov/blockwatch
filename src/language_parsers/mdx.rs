@@ -7,7 +7,7 @@
 use crate::LineIndex;
 use crate::block_parser::Blocks;
 use crate::blocks::Block;
-use crate::language_parsers::markdown::section_symbols;
+use crate::language_parsers::markdown::{nodes_in_order, section_symbols};
 use crate::language_parsers::{
     Comment, CommentsParser, LanguageParser, TreeSitterCommentsParser, c_style_comments_parser,
 };
@@ -108,18 +108,9 @@ fn parse_mdx(source: &str) -> anyhow::Result<Node> {
 /// Returns the byte ranges of the JavaScript in `tree`, in source order. An empty expression, such
 /// as `{}`, has no range.
 fn javascript_ranges(tree: &Node) -> impl Iterator<Item = Range<usize>> + '_ {
-    // A stack instead of recursion, so that deeply nested block quotes or lists can't overflow the
-    // call stack.
-    let mut nodes = vec![tree];
-    std::iter::from_fn(move || {
-        let node = nodes.pop()?;
-        if let Some(children) = node.children() {
-            nodes.extend(children.iter().rev());
-        }
-        Some(node)
-    })
-    .flat_map(javascript_spans)
-    .filter_map(|(value, stops)| source_range(value, stops))
+    nodes_in_order(tree)
+        .flat_map(javascript_spans)
+        .filter_map(|(value, stops)| source_range(value, stops))
 }
 
 /// Returns the byte range in the source of `value`, whose slices start where `stops` say, or
