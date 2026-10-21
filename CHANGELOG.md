@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.14.2] - 2026-10-21
+
 ### Added
 
 - `line-count-pattern` makes `line-count` count only the lines that match the regex. For example,
