@@ -77,16 +77,24 @@ fn block_with_same_as_writes_its_trace_under_checks() -> anyhow::Result<()> {
         .output()?;
 
     output.clone().assert().success().stderr("");
-    let record =
-        |line| json!({ "groups": { "value": "red\nblue" }, "line": line, "match": "red\nblue" });
+    let records = |line| {
+        json!([
+            { "groups": { "value": "red" }, "line": line, "match": "red" },
+            { "groups": { "value": "blue" }, "line": line + 1, "match": "blue" }
+        ])
+    };
     assert_eq!(
         json_from(&output.stdout)?["checks"],
         json!({
             "same-as": {
-                "mode": "set",
-                "records": [record(10)],
+                "mode": "sequence",
+                "records": records(10),
                 "targets": [
-                    { "records": [record(6)], "reason": null, "target": format!("{FIXTURE}:colors") }
+                    {
+                        "records": records(6),
+                        "reason": null,
+                        "target": format!("{FIXTURE}:colors")
+                    }
                 ]
             }
         })

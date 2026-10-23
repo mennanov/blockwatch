@@ -118,6 +118,33 @@ fn paths_target_with_an_unlisted_directory_fails() {
 }
 
 #[test]
+fn block_with_a_mode_and_no_same_as_fails() -> anyhow::Result<()> {
+    // No block in the run has `same-as`, so only the mode can start the validator. The repository
+    // is made here because the error stops the run, and a fixture in `tests/testdata` would stop
+    // every test that runs on the whole tree.
+    let temp = tempfile::tempdir()?;
+    let root = temp.path().join("repo");
+    std::fs::create_dir_all(root.join(".git"))?;
+    std::fs::write(
+        root.join("a.py"),
+        r#"# <block name="colors" same-as-mode="set">
+red
+# </block>
+"#,
+    )?;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.current_dir(&root);
+    cmd.output()?
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "same-as-mode needs same-as or same-as-paths on block a.py:colors at line 1",
+        ));
+    Ok(())
+}
+
+#[test]
 fn block_with_same_as_and_same_as_paths_fails_for_each_target() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/same_as/paths_and_block_source.md");

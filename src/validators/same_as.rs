@@ -19,6 +19,10 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use strum_macros::{Display, EnumIter, EnumString};
 
+/// The attributes that set how a block with `same-as` or `same-as-paths` compares. On any other
+/// block, they stop the run.
+const COMPARISON_ATTRIBUTES: [&str; 2] = ["same-as-mode", "same-as-format"];
+
 /// Enforces `same-as="file:name"`: the block's content must equal that of the blocks it names.
 ///
 /// Where `affects` only checks that linked blocks were edited together, this compares their actual
@@ -55,6 +59,18 @@ impl<Fs: FileSystem + 'static> SyncValidator for SameAsValidator<Fs> {
                 let attributes = &block_with_context.block.attributes;
                 if !attributes.contains_key("same-as") && !attributes.contains_key("same-as-paths")
                 {
+                    // Only the block with `same-as` decides how to compare. On a target, these
+                    // attributes would do nothing, and the check would pass without them.
+                    if let Some(attribute) = COMPARISON_ATTRIBUTES
+                        .into_iter()
+                        .find(|attribute| attributes.contains_key(*attribute))
+                    {
+                        bail!(
+                            "{attribute} needs same-as or same-as-paths on block {}. A target's \
+                             {attribute} is not used: put it on the block with same-as",
+                            block_with_context.block.label(file_path)
+                        );
+                    }
                     continue;
                 }
                 let (violations, trace) = block_violations(
@@ -177,8 +193,7 @@ fn block_violations<Fs: FileSystem>(
 /// repository paths that match `glob`. Sets `trace`, when given, to what the comparison saw.
 ///
 /// # Errors
-/// Returns an error if the block has no `same-as-pattern`, if `glob` is not a valid glob, or if the
-/// repository can't be walked.
+/// Returns an error if `glob` is not a valid glob, or if the repository can't be walked.
 fn paths_violation(
     file_system: &impl FileSystem,
     comparison: &Comparison,
@@ -187,15 +202,6 @@ fn paths_violation(
     glob: &str,
     trace: Option<&mut Option<PathsTrace>>,
 ) -> anyhow::Result<Option<Violation>> {
-    // Without a pattern, all the paths would make one value. A mismatch would then show the whole
-    // list as one string, and every mode would act the same.
-    let Some(pattern) = &comparison.pattern else {
-        bail!(
-            "same-as-paths needs same-as-pattern on block {}. To compare whole lines, use \
-             same-as-pattern=\".+\"",
-            block.label(file_path)
-        );
-    };
     let invalid_glob = || {
         format!(
             "invalid same-as-paths glob on block {}",
@@ -214,7 +220,7 @@ fn paths_violation(
             .map(ToString::to_string)
             .collect(),
     };
-    let records = extract_records_from(&paths.join("\n"), Some(pattern), |_| None)?;
+    let records = extract_records_from(&paths.join("\n"), comparison.pattern.as_deref(), |_| None)?;
     let formatted = trace
         .is_some()
         .then(|| comparison.formatted(&records))
@@ -325,7 +331,7 @@ fn reference_violation<Fs: FileSystem>(
         .transpose()
 }
 
-/// The group of a whole match, or of a block's whole content. It is the name of the group that
+/// The group of a whole match, or of a line read without a pattern. It is the name of the group that
 /// picks the value in every `*-pattern` attribute, so `(?P<value>\d+)` and `\d+` give equal records.
 const WHOLE_GROUP: &str = "value";
 
@@ -345,7 +351,7 @@ struct Record {
     /// The line of the file where the match is. `None` for a match in a list of paths.
     #[serde(skip_serializing_if = "Option::is_none")]
     line: Option<usize>,
-    /// The text that the whole pattern matched, or the block's whole content.
+    /// The text that the whole pattern matched, or the trimmed line read without a pattern.
     #[serde(rename = "match")]
     matched: String,
 }
@@ -363,8 +369,8 @@ impl Hash for Record {
 }
 
 impl Record {
-    /// The record of a whole match, or of a block's whole content, at `line`: the one group
-    /// `value`.
+    /// The record of a whole match, or of a line read without a pattern, at `line`: the one
+    /// group `value`.
     fn whole(text: String, line: Option<usize>) -> Self {
         Self {
             values: BTreeMap::from([(WHOLE_GROUP.to_string(), text.clone())]),
@@ -416,7 +422,7 @@ impl fmt::Display for Record {
 /// the entry rather than to its indentation, and the records stay in the order the two sides list
 /// them.
 ///
-/// Without a pattern, the block's normalized whole content is a single record.
+/// Without a pattern, each line that isn't blank gives one record: the trimmed line.
 fn extract_records(block: &Block, file_content: &str) -> anyhow::Result<Vec<Record>> {
     extract_records_from(
         block.content.text(file_content),
@@ -428,23 +434,20 @@ fn extract_records(block: &Block, file_content: &str) -> anyhow::Result<Vec<Reco
 /// Extracts records from `content` for the given `pattern`. `line_of` maps the 0-based index of a
 /// line of `content` to the line of the file that each record of it gets.
 ///
-/// If `pattern` is `None` then the whole `content` is returned.
+/// If `pattern` is `None`, each line that isn't blank gives one record: the trimmed line.
 fn extract_records_from(
     content: &str,
     pattern: Option<&str>,
     line_of: impl Fn(usize) -> Option<usize>,
 ) -> anyhow::Result<Vec<Record>> {
     let Some(pattern) = pattern else {
-        // Normalizing drops the blank lines, so the text starts at the first line that isn't
-        // blank.
-        let first_line = content
+        return Ok(content
             .lines()
-            .position(|line| !line.trim().is_empty())
-            .unwrap_or(0);
-        return Ok(vec![Record::whole(
-            normalize_content(content),
-            line_of(first_line),
-        )]);
+            .enumerate()
+            .map(|(index, line)| (index, line.trim()))
+            .filter(|(_, line)| !line.is_empty())
+            .map(|(index, line)| Record::whole(line.to_string(), line_of(index)))
+            .collect());
     };
     let regex = same_as_regex(pattern)?;
     let groups: Vec<&str> = regex.capture_names().flatten().collect();
@@ -507,23 +510,6 @@ fn non_empty(matched: Option<regex::Match<'_>>) -> Option<String> {
         .map(|matched| matched.as_str())
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-}
-
-/// Trim each line, drop blanks, rejoin — matching `line-pattern` / `keep-unique` normalization.
-///
-/// Folded rather than joined so the retained lines are never collected into an intermediate `Vec`.
-fn normalize_content(content: &str) -> String {
-    content
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .fold(String::new(), |mut normalized, line| {
-            if !normalized.is_empty() {
-                normalized.push('\n');
-            }
-            normalized.push_str(line);
-            normalized
-        })
 }
 
 /// Find a named block in a file and extract its records.
@@ -763,9 +749,9 @@ fn canonicalize_value(value: String, format: Format) -> Result<String, String> {
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
 enum Mode {
-    /// Order- and duplicate-insensitive set equality (the default).
+    /// Order- and duplicate-insensitive set equality (the default with a `same-as-pattern`).
     Set,
-    /// Order-sensitive list equality.
+    /// Order-sensitive list equality (the default without a `same-as-pattern`).
     Sequence,
     /// Exactly one value per side, compared directly.
     Single,
@@ -773,11 +759,15 @@ enum Mode {
     Subset,
 }
 
-/// Reads a block's `same-as-mode` attribute, defaulting to [`Mode::Set`].
+/// Reads a block's `same-as-mode` attribute. Without one, the mode is [`Mode::Sequence`] for a
+/// block without a `same-as-pattern`, and [`Mode::Set`] for a block with one.
 fn parse_mode(block: &Block) -> anyhow::Result<Mode> {
     match block.attributes.get("same-as-mode") {
-        None => Ok(Mode::Set),
         Some(value) => parse_keyword("same-as-mode", value),
+        // Without a pattern, each line is a record. Comparing the lines in order fails exactly when
+        // the two texts differ. A pattern finds values, and the order of values rarely matters.
+        None if block.attributes.contains_key("same-as-pattern") => Ok(Mode::Set),
+        None => Ok(Mode::Sequence),
     }
 }
 
@@ -787,7 +777,7 @@ fn parse_mode(block: &Block) -> anyhow::Result<Mode> {
 /// A side without records is a mismatch in every mode.
 fn disagreement(source: &[Record], target: &[Record], mode: Mode) -> Option<String> {
     if source.is_empty() || target.is_empty() {
-        return Some("same-as-pattern matched no values in this block or its target".to_string());
+        return Some("this block or its target has no values to compare".to_string());
     }
     match mode {
         Mode::Single => single_disagreement(source, target),
@@ -972,13 +962,17 @@ struct PathsTrace {
     records: Option<Vec<Record>>,
 }
 
-/// Selects [`SameAsValidator`] for blocks carrying a `same-as` or a `same-as-paths` attribute.
+/// Selects [`SameAsValidator`] for blocks carrying a `same-as` or a `same-as-paths` attribute, or
+/// one of [`COMPARISON_ATTRIBUTES`], which the validator rejects on a block without the first two.
 pub(super) fn detect<Fs: FileSystem + 'static>(
     block_with_context: &BlockWithContext,
     file_system: &Arc<Fs>,
 ) -> Option<ValidatorType> {
     let attributes = &block_with_context.block.attributes;
-    (attributes.contains_key("same-as") || attributes.contains_key("same-as-paths"))
+    ["same-as", "same-as-paths"]
+        .into_iter()
+        .chain(COMPARISON_ATTRIBUTES)
+        .any(|attribute| attributes.contains_key(attribute))
         .then(|| ValidatorType::Sync(Box::new(SameAsValidator::new(Arc::clone(file_system)))))
 }
 
@@ -1145,6 +1139,169 @@ mod validate_tests {
         );
         let v = validator(&[("config.py", source)]);
         assert!(v.validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn no_pattern_in_the_default_mode_with_lines_in_another_order_returns_a_violation()
+    -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b">
+red
+blue
+# </block>
+# <block name="b">
+blue
+red
+# </block>
+"#,
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0]
+                .message
+                .ends_with(r#"["red", "blue"] != ["blue", "red"]"#),
+            "unexpected message: {}",
+            file[0].message
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn no_pattern_in_set_mode_with_lines_in_another_order_returns_no_violations()
+    -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-mode="set">
+red
+blue
+# </block>
+# <block name="b">
+blue
+red
+blue
+# </block>
+"#,
+        );
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn no_pattern_in_subset_mode_with_each_line_in_the_target_returns_no_violations()
+    -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-mode="subset">
+blue
+# </block>
+# <block name="b">
+red
+blue
+# </block>
+"#,
+        );
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn no_pattern_in_single_mode_with_two_lines_returns_a_violation() -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-mode="single">
+red
+blue
+# </block>
+# <block name="b">
+red
+blue
+# </block>
+"#,
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0].message.ends_with("(got 2 and 2)"),
+            "unexpected message: {}",
+            file[0].message
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn no_pattern_and_a_target_with_one_in_another_order_returns_a_violation() -> anyhow::Result<()>
+    {
+        // Only the block's own pattern decides the default mode. The target's pattern doesn't.
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b">
+red
+blue
+# </block>
+# <block name="b" same-as-pattern="[a-z]+">
+blue, red, blue
+# </block>
+"#,
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0]
+                .message
+                .ends_with(r#"["red", "blue"] != ["blue", "red", "blue"]"#),
+            "unexpected message: {}",
+            file[0].message
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn pattern_and_a_target_without_one_in_another_order_returns_no_violations()
+    -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-pattern="[a-z]+">
+red, blue
+# </block>
+# <block name="b">
+blue
+red
+# </block>
+"#,
+        );
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn no_pattern_with_empty_blocks_returns_a_violation() -> anyhow::Result<()> {
+        // Two empty blocks agree, but they keep nothing in sync. That is almost always a start or
+        // an end tag in the wrong place.
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b">
+# </block>
+# <block name="b">
+
+# </block>
+"#,
+        );
+        let violations = validator(&[]).validate(context)?.violations;
+        let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
+        assert_eq!(file.len(), 1);
+        assert!(
+            file[0]
+                .message
+                .ends_with("this block or its target has no values to compare"),
+            "unexpected message: {}",
+            file[0].message
+        );
         Ok(())
     }
 
@@ -1381,7 +1538,7 @@ id=1
         let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
-            file[0].message.contains("matched no values"),
+            file[0].message.contains("has no values to compare"),
             "unexpected message: {}",
             file[0].message
         );
@@ -1405,7 +1562,7 @@ ids = 1, 2
         let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
-            file[0].message.contains("matched no values"),
+            file[0].message.contains("has no values to compare"),
             "unexpected message: {}",
             file[0].message
         );
@@ -1588,6 +1745,24 @@ red: 2
                 "// <block name=\"port\" same-as-pattern=\"(?P<value>[0-9.]+)\">\n8080.0\n// </block>",
             ),
         ]);
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_format_without_a_pattern_compares_each_line() -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-format="numeric">
+1
+2
+# </block>
+# <block name="b">
+1.0
+2
+# </block>
+"#,
+        );
         assert!(validator(&[]).validate(context)?.violations.is_empty());
         Ok(())
     }
@@ -1929,7 +2104,7 @@ red-color: 1.0
     #[test]
     fn format_for_the_value_group_of_a_block_without_a_pattern_returns_no_violations()
     -> anyhow::Result<()> {
-        // Without a pattern, the whole content is the one group `value`.
+        // Without a pattern, each line is the one group `value`.
         let context = validation_context(
             "a.py",
             r#"# <block same-as=":b" same-as-format="value:numeric">
@@ -2028,6 +2203,50 @@ red: 1
             format!("{error:#}"),
             "invalid same-as attributes on block a.rs:(unnamed) at line 1: invalid same-as-mode \
              \"sorted\" (expected set, sequence, single or subset)"
+        );
+    }
+
+    #[test]
+    fn block_with_a_mode_and_no_same_as_returns_an_error() {
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b">
+red
+# </block>
+# <block name="b" same-as-mode="sequence">
+red
+# </block>
+"#,
+        );
+
+        let error = validator(&[]).validate(context).unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "same-as-mode needs same-as or same-as-paths on block a.py:b at line 4. A target's \
+             same-as-mode is not used: put it on the block with same-as"
+        );
+    }
+
+    #[test]
+    fn block_with_a_format_and_no_same_as_returns_an_error() {
+        let context = validation_context(
+            "a.py",
+            r#"# <block same-as=":b">
+1
+# </block>
+# <block name="b" same-as-format="numeric">
+1
+# </block>
+"#,
+        );
+
+        let error = validator(&[]).validate(context).unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "same-as-format needs same-as or same-as-paths on block a.py:b at line 4. A target's \
+             same-as-format is not used: put it on the block with same-as"
         );
     }
 
@@ -2406,21 +2625,26 @@ services/auth/
     }
 
     #[test]
-    fn paths_target_without_a_pattern_returns_an_error() {
+    fn paths_target_without_a_pattern_and_lines_in_another_order_returns_a_violation()
+    -> anyhow::Result<()> {
         let context = validation_context(
             "README.md",
             r#"<!-- <block same-as-paths="services/*/"> -->
+services/billing/
 services/auth/
 <!-- </block> -->"#,
         );
 
-        let error = validator(SERVICES).validate(context).unwrap_err();
+        let violations = validator(SERVICES).validate(context)?.violations;
 
-        assert_eq!(
-            format!("{error:#}"),
-            "same-as-paths needs same-as-pattern on block README.md:(unnamed) at line 1. To \
-             compare whole lines, use same-as-pattern=\".+\""
+        let message = &violations[&RepoPath::from_reference("README.md")?][0].message;
+        assert!(
+            message.ends_with(
+                r#"["services/billing/", "services/auth/"] != ["services/auth/", "services/billing/"]"#
+            ),
+            "unexpected message: {message}"
         );
+        Ok(())
     }
 
     #[test]
@@ -2525,6 +2749,47 @@ y = "blue"
                         "records": [
                             { "groups": { "value": "blue" }, "line": 6, "match": "\"blue\"" },
                             { "groups": { "value": "red" }, "line": 6, "match": "\"red\"" }
+                        ],
+                        "reason": null,
+                        "target": "a.py:b"
+                    }
+                ]
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn block_without_a_pattern_records_each_line_and_the_sequence_mode() -> anyhow::Result<()> {
+        let context = with_traces(validation_context(
+            "a.py",
+            r#"# <block same-as=":b">
+red
+
+  blue
+# </block>
+# <block name="b">
+red
+blue
+# </block>
+"#,
+        ));
+
+        let report = validator(&[]).validate(context)?;
+
+        assert_eq!(
+            trace_json(&report),
+            json!({
+                "mode": "sequence",
+                "records": [
+                    { "groups": { "value": "red" }, "line": 2, "match": "red" },
+                    { "groups": { "value": "blue" }, "line": 4, "match": "blue" }
+                ],
+                "targets": [
+                    {
+                        "records": [
+                            { "groups": { "value": "red" }, "line": 7, "match": "red" },
+                            { "groups": { "value": "blue" }, "line": 8, "match": "blue" }
                         ],
                         "reason": null,
                         "target": "a.py:b"

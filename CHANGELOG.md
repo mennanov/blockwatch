@@ -12,6 +12,24 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Changed
+
+- Without `same-as-pattern`, `same-as` compares each line that isn't blank as one value. Before, the whole block was
+  one value, so `same-as-mode` and `same-as-format` didn't work on a block of several lines. For example,
+  `same-as-mode="single"` passed with two lines, `subset` failed on a line that the target had, and `numeric` reported
+  that `1` and `2` together are not a number ([#179](https://github.com/mennanov/blockwatch/issues/179)).
+- Without `same-as-mode`, a block without `same-as-pattern` compares in `sequence` mode. So it still fails when its
+  lines differ from the target's or come in another order. A block with a pattern still compares in `set` mode.
+- A block without `same-as-pattern` now fails when its target's pattern finds a value more than once, or in another
+  order: `["1.2.3"] != ["1.2.3", "1.2.3"]`. Before, the default `set` mode ignored this. To keep the old result, add
+  `same-as-mode="set"`, or `same-as-mode="subset"` when the target may hold other values too.
+- `same-as` now fails on two empty blocks, as it does on a pattern that matches nothing. The message for both is
+  `this block or its target has no values to compare`.
+- `same-as-paths` no longer needs `same-as-pattern`. Without one, each line of the block must be a path, in sorted
+  order.
+- `same-as-mode` and `same-as-format` stop the run on a block without `same-as` or `same-as-paths`, such as a target.
+  Before, they did nothing there, so `same-as-mode="sequence"` on a target let values in another order pass.
+
 ## [0.15.0] - 2026-10-21
 
 ### Changed

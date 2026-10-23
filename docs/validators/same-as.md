@@ -8,13 +8,13 @@ It runs on every scan, with or without a diff.
 
 ## Syntax
 
-| Attribute         | Value                                                                                | Default           |
-|-------------------|--------------------------------------------------------------------------------------|-------------------|
-| `same-as`         | One or more [targets](#targets), comma-separated                                     | —                 |
-| `same-as-paths`   | A [glob](#paths-as-targets) of paths to compare                                      | —                 |
-| `same-as-pattern` | A regex that picks the values to compare                                             | the whole content |
-| `same-as-mode`    | `set`, `sequence`, `single` or `subset`                                              | `set`             |
-| `same-as-format`  | `numeric`, `identifier` or `flat`, or [one for each group](#a-format-for-each-group) | text              |
+| Attribute         | Value                                                                                | Default                                  |
+|-------------------|--------------------------------------------------------------------------------------|------------------------------------------|
+| `same-as`         | One or more [targets](#targets), comma-separated                                     | —                                        |
+| `same-as-paths`   | A [glob](#paths-as-targets) of paths to compare                                      | —                                        |
+| `same-as-pattern` | A regex that picks the values to compare                                             | each line                                |
+| `same-as-mode`    | `set`, `sequence`, `single` or `subset`                                              | [`sequence` or `set`](#comparison-modes) |
+| `same-as-format`  | `numeric`, `identifier` or `flat`, or [one for each group](#a-format-for-each-group) | text                                     |
 
 ## Targets
 
@@ -28,7 +28,8 @@ It runs on every scan, with or without a diff.
 
 ## Example
 
-With no other attributes, both blocks must hold **identical** text. Blank lines and indentation don't count. This suits
+With no other attributes, both blocks must hold **identical** text: the same lines in the same order. Blank lines and
+indentation don't count. This suits
 text you can't share any other way, such as a command shown in two docs:
 
 **README.md**:
@@ -145,7 +146,8 @@ pub const NODE_VERSION: &str = "20.11.1";
 ```
 
 The file has no block of its own, so the referencing block's pattern reads both sides. For anything longer than one
-line, you will want a pattern: without one, the block must equal the entire file.
+line, you will want a pattern: without one, the block must equal the entire file. Or add `same-as-mode="subset"`: then
+each line of the block must be a line of the file.
 
 ## Symbols as targets
 
@@ -187,10 +189,10 @@ show every entry of a directory, such as the services in a README:
 The glob lists `services/auth/`, `services/billing/` and `services/search/`. The pattern picks `auth`, `billing` and
 `search` from them, and `billing` and `search` from the block. So the run reports that `auth` is missing.
 
-- **`same-as-pattern` is required.** It reads both the block and the paths. To compare whole lines, use
-  `same-as-pattern=".+"`.
-- **The paths are sorted, and each one is listed once.** So `same-as-mode="sequence"` also checks that the block
-  lists them in that order.
+- **The block's `same-as-pattern` reads both the block and the paths.** Without a pattern, each line of the block must
+  be a path, such as `services/billing/`.
+- **The paths are sorted, and each one is listed once.** Without a pattern, or with `same-as-mode="sequence"`, the
+  block must list them in that order. To allow any order, add `same-as-mode="set"`.
 - **A trailing `/` lists directories.** A directory is listed when it holds a file, and `services/billing/` is listed
   once however many files it holds. Without the `/`, the glob lists files: `crates/*/AGENTS.md`.
 - **`*` stops at `/`.** `services/*/` lists `services/billing/`, but not `services/billing/src/`. `**` matches any
@@ -205,12 +207,22 @@ A block can have both `same-as` and `same-as-paths`. Each target is compared wit
 
 ## Comparison modes
 
-| `same-as-mode`  | Passes when                                                       |
-|-----------------|-------------------------------------------------------------------|
-| `set` (default) | both sides hold the same values, in any order, ignoring repeats   |
-| `sequence`      | both sides hold the same values in the same order                 |
-| `single`        | each side holds exactly one value, and the two are equal          |
-| `subset`        | every value in this block also appears in the target              |
+| `same-as-mode` | Passes when                                                     |
+|----------------|-----------------------------------------------------------------|
+| `set`          | both sides hold the same values, in any order, ignoring repeats |
+| `sequence`     | both sides hold the same values in the same order               |
+| `single`       | each side holds exactly one value, and the two are equal        |
+| `subset`       | every value in this block also appears in the target            |
+
+Without `same-as-mode`, the mode depends on the block's own `same-as-pattern`. A target's pattern doesn't change it.
+
+- **The block has no pattern:** `sequence`. Each line that isn't blank is a value, so the two sides must hold the same
+  lines in the same order, as in the [example](#example).
+- **The block has a pattern:** `set`.
+
+So adding a pattern stops order from mattering. To keep the order, add `same-as-mode="sequence"` too. And a block
+without a pattern fails when its target's pattern finds a value twice: `["1.2.3"] != ["1.2.3", "1.2.3"]`. To allow
+repeats, add `same-as-mode="set"` or `same-as-mode="subset"`.
 
 `subset` checks one direction only. Use it when one side should hold part of the other, like a test that uses only
 some of the environment variables:
@@ -356,14 +368,17 @@ const TIMEOUT_SECS: f64 = 2.0;
 ## Notes
 
 - **Which block's attributes count.** The referencing block's `same-as-mode` and `same-as-format` decide how to compare.
-  Each block's `same-as-pattern` reads only that block. A whole file, a symbol or a list of paths has no block, so the
-  referencing block's pattern reads it too.
+  On a target, or any block without `same-as` or `same-as-paths`, they stop the run, because they would do nothing
+  there. Each block's `same-as-pattern` reads only that block. A whole file, a symbol or a list of paths has no block,
+  so the referencing block's pattern reads it too.
 - **Violations:** a missing block, a missing or repeated key, a value that is not a number under `numeric`, a `single`
-  side without exactly one value, a pattern that matches nothing on either side, two patterns with different groups,
-  and a `same-as-paths` glob that matches no path. Two empty sides do not count as equal.
-- **Errors that stop the run:** an unknown `same-as-mode` or `same-as-format`, a `same-as-format` entry for a group
-  that the pattern doesn't have, an invalid regex or glob, `same-as-paths` without `same-as-pattern`, a missing target
-  file, and a symbol in a file with a syntax error, without symbols, or with several YAML documents.
+  side without exactly one value, a side with no values (such as an empty block, or a pattern that matches nothing),
+  two patterns with different groups, and a `same-as-paths` glob that matches no path. Two empty sides do not count as
+  equal.
+- **Errors that stop the run:** an unknown `same-as-mode` or `same-as-format`, either of them on a block without
+  `same-as` or `same-as-paths`, a `same-as-format` entry for a group
+  that the pattern doesn't have, an invalid regex or glob, a missing target file, and a symbol in a file with a syntax
+  error, without symbols, or with several YAML documents.
 - **Run it on the whole tree now and then.** `same-as` needs no diff, so a plain `blockwatch` run catches drift that
   `--only-changed` misses. See [CI integration](../ci.md).
 - **A rename alone goes unnoticed in a diff.** Renaming a target file without changing it (a plain `git mv`) gives
