@@ -3,7 +3,7 @@ use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{
     SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
-    compile_pattern, regex_value, trimmed_line_value,
+    compile_pattern, regex_value, require_main, trimmed_line_value,
 };
 use anyhow::{Context, anyhow};
 use regex::Regex;
@@ -189,7 +189,7 @@ struct LineCountLine {
 /// # Errors
 /// Returns an error that quotes `line-count-pattern` when it comes without `line-count`.
 pub(super) fn check_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<()> {
-    validators::require_main(attributes, &["line-count"], &["line-count-pattern"])
+    require_main(attributes, &["line-count"], &["line-count-pattern"])
 }
 
 /// Selects [`LineCountValidator`] for blocks carrying a `line-count` attribute.

@@ -272,7 +272,9 @@ fn is_entry_modified(
 /// - the target's file is a glob that is not valid or that matches no file;
 /// - `target-pattern` comes with a symbol, or is not a valid regex;
 /// - an attribute is not one a tag can have, or has a value that is not a string, `true` or an
-///   integer.
+///   integer;
+/// - an attribute comes without the attribute its validator needs, such as `check-lua-timeout`
+///   without `check-lua`.
 fn entry_blocks(
     block_entry: BlockEntry,
     entry: ConfigEntry,

@@ -16,6 +16,10 @@ It runs on every scan, with or without a diff.
 | `same-as-mode`    | `set`, `sequence`, `single` or `subset`                                              | [`sequence` or `set`](#comparison-modes) |
 | `same-as-format`  | `numeric`, `identifier` or `flat`, or [one for each group](#a-format-for-each-group) | text                                     |
 
+`same-as-mode` and `same-as-format` work only next to `same-as` or `same-as-paths`. `same-as-pattern` also works next
+to `name`, because a block with a name can be a target. On any other block, they stop the run, because they would do
+nothing there.
+
 ## Targets
 
 | Target       | Compares against                                             |

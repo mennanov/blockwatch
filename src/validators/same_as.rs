@@ -7,7 +7,7 @@ use crate::symbol_path::SymbolPath;
 use crate::target_reference::{TargetKind, TargetReference};
 use crate::validators::{
     self, SyncValidator, TargetFiles, TargetResult, ValidationReport, Validator, ValidatorTrace,
-    ValidatorType, Violation, compile_pattern, parse_keyword, parse_number,
+    ValidatorType, Violation, compile_pattern, parse_keyword, parse_number, require_main,
 };
 use anyhow::{Context, anyhow, bail};
 use heck::ToSnakeCase;
@@ -749,7 +749,7 @@ fn parse_mode(block: &Block) -> anyhow::Result<Mode> {
     match block.attributes.get("same-as-mode") {
         Some(value) => parse_keyword("same-as-mode", value),
         // Without a pattern, each line is a record. A block of plain lines is usually a copy of
-        // its target, so its lines must match the target's one for one, in order. A pattern finds
+        // its target, so each line must equal the target's line at the same place. A pattern finds
         // values, and the order of values rarely matters.
         None if block.attributes.contains_key("same-as-pattern") => Ok(Mode::Set),
         None => Ok(Mode::Sequence),
@@ -953,13 +953,13 @@ struct PathsTrace {
 /// # Errors
 /// Returns an error that quotes the first attribute found without them.
 pub(super) fn check_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<()> {
-    validators::require_main(
+    require_main(
         attributes,
         &["same-as", "same-as-paths"],
         &["same-as-mode", "same-as-format"],
     )?;
     // A target's own pattern picks its values, but only a block with a name can be a target.
-    validators::require_main(
+    require_main(
         attributes,
         &["same-as", "same-as-paths", "name"],
         &["same-as-pattern"],
@@ -2977,7 +2977,7 @@ mod check_attributes_tests {
 
         assert_eq!(
             error.to_string(),
-            "`same-as-pattern` without `same-as` or `same-as-paths` or `name`"
+            "`same-as-pattern` without `same-as`, `same-as-paths` or `name`"
         );
     }
 }

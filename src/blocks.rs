@@ -517,6 +517,36 @@ pub(crate) fn validate_attributes(attributes: &HashMap<String, String>) -> anyho
 }
 
 #[cfg(test)]
+mod validate_attributes_tests {
+    use crate::blocks::{RECOGNIZED_ATTRIBUTES, validate_attributes};
+    use crate::validators::Validator;
+    use std::collections::HashMap;
+    use strum::IntoEnumIterator;
+
+    #[test]
+    fn single_attribute_returns_an_error_only_when_it_needs_another() {
+        // A new attribute must either work alone or stop the run alone. Otherwise a block with
+        // only that attribute would pass without being checked.
+        let needs_no_other: Vec<&str> = Validator::iter()
+            .map(Validator::as_str)
+            .chain([
+                "line-pattern-forbidden",
+                "name",
+                "same-as-paths",
+                "severity",
+            ])
+            .collect();
+        for name in RECOGNIZED_ATTRIBUTES {
+            let attributes = HashMap::from([(name.to_string(), String::new())]);
+
+            let result = validate_attributes(&attributes);
+
+            assert_eq!(result.is_ok(), needs_no_other.contains(name), "{name}");
+        }
+    }
+}
+
+#[cfg(test)]
 mod block_severity_from_str_tests {
     use crate::blocks::BlockSeverity;
     use std::collections::HashMap;

@@ -2,7 +2,8 @@ use crate::blocks::{Block, BlockWithContext};
 use crate::repo_path::RepoPath;
 use crate::validators::{
     SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
-    ViolationRange, compile_pattern, parse_keyword, parse_number, regex_value, trimmed_line_value,
+    ViolationRange, compile_pattern, parse_keyword, parse_number, regex_value, require_main,
+    trimmed_line_value,
 };
 use crate::{Position, validators};
 use anyhow::{Context, anyhow};
@@ -222,7 +223,7 @@ struct KeepSortedLine {
 /// # Errors
 /// Returns an error that quotes the first of the two attributes found without it.
 pub(super) fn check_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<()> {
-    validators::require_main(
+    require_main(
         attributes,
         &["keep-sorted"],
         &["keep-sorted-pattern", "keep-sorted-format"],

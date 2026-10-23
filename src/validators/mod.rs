@@ -982,6 +982,9 @@ fn block_content_for_pattern<'c>(
 /// # Errors
 /// Returns an error that quotes the first attribute in `extras` found without one in `main`, such
 /// as ``"`keep-sorted-pattern` without `keep-sorted`"``.
+///
+/// # Panics
+/// Panics if `main` is empty.
 fn require_main(
     attributes: &HashMap<String, String>,
     main: &[&str],
@@ -994,7 +997,11 @@ fn require_main(
     }
     if let Some(extra) = extras.iter().find(|name| attributes.contains_key(**name)) {
         let main: Vec<String> = main.iter().map(|name| format!("`{name}`")).collect();
-        bail!("`{extra}` without {}", main.join(" or "));
+        let (last, others) = main.split_last().expect("a validator has a main attribute");
+        if others.is_empty() {
+            bail!("`{extra}` without {last}");
+        }
+        bail!("`{extra}` without {} or {last}", others.join(", "));
     }
     Ok(())
 }
