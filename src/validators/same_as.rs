@@ -748,8 +748,9 @@ enum Mode {
 fn parse_mode(block: &Block) -> anyhow::Result<Mode> {
     match block.attributes.get("same-as-mode") {
         Some(value) => parse_keyword("same-as-mode", value),
-        // Without a pattern, each line is a record. Comparing the lines in order fails exactly when
-        // the two texts differ. A pattern finds values, and the order of values rarely matters.
+        // Without a pattern, each line is a record. A block of plain lines is usually a copy of
+        // its target, so its lines must match the target's one for one, in order. A pattern finds
+        // values, and the order of values rarely matters.
         None if block.attributes.contains_key("same-as-pattern") => Ok(Mode::Set),
         None => Ok(Mode::Sequence),
     }
@@ -1743,7 +1744,8 @@ red: 2
     }
 
     #[test]
-    fn numeric_format_without_a_pattern_compares_each_line() -> anyhow::Result<()> {
+    fn numeric_format_without_a_pattern_and_equal_numbers_returns_no_violations()
+    -> anyhow::Result<()> {
         let context = validation_context(
             "a.py",
             r#"# <block same-as=":b" same-as-format="numeric">
