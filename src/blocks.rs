@@ -13,6 +13,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::ops::Range;
 use std::str::FromStr;
+use strum::IntoEnumIterator;
 use strum_macros::EnumString;
 
 const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
@@ -496,11 +497,12 @@ const RECOGNIZED_ATTRIBUTES: &[&str] = &[
     // </block>
 ];
 
-/// Checks that each attribute of a block is recognized. It does not check the values: see
+/// Checks that each attribute of a block is recognized, and that each validator accepts the
+/// attributes it reads (see [`Validator::check_attributes`]). It does not check the values: see
 /// [`BlockSeverity::from_attributes`] for `severity`.
 ///
 /// # Errors
-/// Returns an error that quotes the attribute that is not recognized, such as
+/// Returns an error that quotes the first attribute found to be wrong, such as
 /// ``unrecognized attribute `keep-sortd` ``.
 pub(crate) fn validate_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<()> {
     if let Some(name) = attributes
@@ -509,7 +511,9 @@ pub(crate) fn validate_attributes(attributes: &HashMap<String, String>) -> anyho
     {
         bail!("unrecognized attribute `{name}`");
     }
-    Ok(())
+    // A block can be in a file that the run reads only to find a target, and no validator runs on
+    // such a block. Every parsed block passes here.
+    Validator::iter().try_for_each(|validator| validator.check_attributes(attributes))
 }
 
 #[cfg(test)]

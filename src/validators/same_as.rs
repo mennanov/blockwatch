@@ -19,10 +19,6 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use strum_macros::{Display, EnumIter, EnumString};
 
-/// The attributes that set how a block with `same-as` or `same-as-paths` compares. On any other
-/// block, they stop the run.
-const COMPARISON_ATTRIBUTES: [&str; 2] = ["same-as-mode", "same-as-format"];
-
 /// Enforces `same-as="file:name"`: the block's content must equal that of the blocks it names.
 ///
 /// Where `affects` only checks that linked blocks were edited together, this compares their actual
@@ -59,18 +55,6 @@ impl<Fs: FileSystem + 'static> SyncValidator for SameAsValidator<Fs> {
                 let attributes = &block_with_context.block.attributes;
                 if !attributes.contains_key("same-as") && !attributes.contains_key("same-as-paths")
                 {
-                    // Only the block with `same-as` decides how to compare. On a target, these
-                    // attributes would do nothing, and the check would pass without them.
-                    if let Some(attribute) = COMPARISON_ATTRIBUTES
-                        .into_iter()
-                        .find(|attribute| attributes.contains_key(*attribute))
-                    {
-                        bail!(
-                            "{attribute} needs same-as or same-as-paths on block {}. A target's \
-                             {attribute} is not used: put it on the block with same-as",
-                            block_with_context.block.label(file_path)
-                        );
-                    }
                     continue;
                 }
                 let (violations, trace) = block_violations(
@@ -962,17 +946,31 @@ struct PathsTrace {
     records: Option<Vec<Record>>,
 }
 
-/// Selects [`SameAsValidator`] for blocks carrying a `same-as` or a `same-as-paths` attribute, or
-/// one of [`COMPARISON_ATTRIBUTES`], which the validator rejects on a block without the first two.
+/// Checks that `same-as-mode` and `same-as-format` come with `same-as` or `same-as-paths`.
+///
+/// # Errors
+/// Returns an error that quotes the first of the two attributes found without them.
+pub(super) fn check_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<()> {
+    // Only the block with `same-as` decides how to compare. A target's mode or format would do
+    // nothing, and the check would pass without it.
+    if !attributes.contains_key("same-as")
+        && !attributes.contains_key("same-as-paths")
+        && let Some(name) = ["same-as-mode", "same-as-format"]
+            .into_iter()
+            .find(|name| attributes.contains_key(*name))
+    {
+        bail!("`{name}` without `same-as` or `same-as-paths`");
+    }
+    Ok(())
+}
+
+/// Selects [`SameAsValidator`] for blocks carrying a `same-as` or a `same-as-paths` attribute.
 pub(super) fn detect<Fs: FileSystem + 'static>(
     block_with_context: &BlockWithContext,
     file_system: &Arc<Fs>,
 ) -> Option<ValidatorType> {
     let attributes = &block_with_context.block.attributes;
-    ["same-as", "same-as-paths"]
-        .into_iter()
-        .chain(COMPARISON_ATTRIBUTES)
-        .any(|attribute| attributes.contains_key(attribute))
+    (attributes.contains_key("same-as") || attributes.contains_key("same-as-paths"))
         .then(|| ValidatorType::Sync(Box::new(SameAsValidator::new(Arc::clone(file_system)))))
 }
 
@@ -2207,50 +2205,6 @@ red: 1
     }
 
     #[test]
-    fn block_with_a_mode_and_no_same_as_returns_an_error() {
-        let context = validation_context(
-            "a.py",
-            r#"# <block same-as=":b">
-red
-# </block>
-# <block name="b" same-as-mode="sequence">
-red
-# </block>
-"#,
-        );
-
-        let error = validator(&[]).validate(context).unwrap_err();
-
-        assert_eq!(
-            format!("{error:#}"),
-            "same-as-mode needs same-as or same-as-paths on block a.py:b at line 4. A target's \
-             same-as-mode is not used: put it on the block with same-as"
-        );
-    }
-
-    #[test]
-    fn block_with_a_format_and_no_same_as_returns_an_error() {
-        let context = validation_context(
-            "a.py",
-            r#"# <block same-as=":b">
-1
-# </block>
-# <block name="b" same-as-format="numeric">
-1
-# </block>
-"#,
-        );
-
-        let error = validator(&[]).validate(context).unwrap_err();
-
-        assert_eq!(
-            format!("{error:#}"),
-            "same-as-format needs same-as or same-as-paths on block a.py:b at line 4. A target's \
-             same-as-format is not used: put it on the block with same-as"
-        );
-    }
-
-    #[test]
     fn mode_in_capitals_is_read_like_the_lowercase_mode() -> anyhow::Result<()> {
         let context = validation_context(
             "a.rs",
@@ -2990,5 +2944,25 @@ ten
 
         assert!(report.traces.is_empty());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod check_attributes_tests {
+    use super::check_attributes;
+    use std::collections::HashMap;
+
+    #[test]
+    fn mode_or_format_without_same_as_returns_an_error() {
+        for (name, value) in [("same-as-mode", "set"), ("same-as-format", "flat")] {
+            let attributes = HashMap::from([(name.to_string(), value.to_string())]);
+
+            let error = check_attributes(&attributes).unwrap_err();
+
+            assert_eq!(
+                error.to_string(),
+                format!("`{name}` without `same-as` or `same-as-paths`")
+            );
+        }
     }
 }

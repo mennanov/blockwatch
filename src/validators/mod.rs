@@ -145,6 +145,28 @@ impl Validator {
         }
     }
 
+    /// Checks the attributes of one block that this validator reads, before any validator runs.
+    /// It runs for every validator, even one that the settings turn off, so a block that is wrong
+    /// fails the same way in every run.
+    ///
+    /// # Errors
+    /// Returns an error that quotes the attribute that is wrong.
+    pub(crate) fn check_attributes(
+        self,
+        attributes: &HashMap<String, String>,
+    ) -> anyhow::Result<()> {
+        match self {
+            Validator::Affects
+            | Validator::CheckAi
+            | Validator::CheckLua
+            | Validator::KeepSorted
+            | Validator::KeepUnique
+            | Validator::LineCount
+            | Validator::LinePattern => Ok(()),
+            Validator::SameAs => same_as::check_attributes(attributes),
+        }
+    }
+
     /// The name of this validator as a static string.
     pub(crate) fn as_str(self) -> &'static str {
         self.into()

@@ -118,16 +118,23 @@ fn paths_target_with_an_unlisted_directory_fails() {
 }
 
 #[test]
-fn block_with_a_mode_and_no_same_as_fails() -> anyhow::Result<()> {
-    // No block in the run has `same-as`, so only the mode can start the validator. The repository
-    // is made here because the error stops the run, and a fixture in `tests/testdata` would stop
-    // every test that runs on the whole tree.
+fn mode_without_same_as_in_a_target_file_fails() -> anyhow::Result<()> {
+    // The run reads `b.py` only to find the target. The repository is made here because the error
+    // stops the run, and a fixture in `tests/testdata` would stop every test that runs on the whole
+    // tree.
     let temp = tempfile::tempdir()?;
     let root = temp.path().join("repo");
     std::fs::create_dir_all(root.join(".git"))?;
     std::fs::write(
         root.join("a.py"),
-        r#"# <block name="colors" same-as-mode="set">
+        r#"# <block same-as="b.py:colors">
+red
+# </block>
+"#,
+    )?;
+    std::fs::write(
+        root.join("b.py"),
+        r#"# <block name="colors" same-as-mode="sequence">
 red
 # </block>
 "#,
@@ -135,11 +142,12 @@ red
 
     let mut cmd = cargo_bin_cmd!();
     cmd.current_dir(&root);
+    cmd.arg("a.py");
     cmd.output()?
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "same-as-mode needs same-as or same-as-paths on block a.py:colors at line 1",
+            "block colors at line 1 contains `same-as-mode` without `same-as` or `same-as-paths`",
         ));
     Ok(())
 }
