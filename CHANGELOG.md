@@ -31,6 +31,7 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   attribute. Before, it did nothing there. For example, `same-as-mode="sequence"` on a target let values in another
   order pass. The attributes are:
   - `same-as-mode` and `same-as-format`, without `same-as` or `same-as-paths`;
+  - `same-as-pattern`, without `same-as`, `same-as-paths` or `name`, because only a block with a name can be a target;
   - `keep-sorted-pattern` and `keep-sorted-format`, without `keep-sorted`;
   - `line-count-pattern`, without `line-count`;
   - `check-ai-pattern`, without `check-ai`;

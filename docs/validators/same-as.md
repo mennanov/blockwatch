@@ -370,7 +370,8 @@ const TIMEOUT_SECS: f64 = 2.0;
 - **Which block's attributes count.** The referencing block's `same-as-mode` and `same-as-format` decide how to compare.
   On a target, or any block without `same-as` or `same-as-paths`, they stop the run, because they would do nothing
   there. Each block's `same-as-pattern` reads only that block. A whole file, a symbol or a list of paths has no block,
-  so the referencing block's pattern reads it too.
+  so the referencing block's pattern reads it too. Only a block with a name can be a target, so `same-as-pattern` on a
+  block without `same-as`, `same-as-paths` or `name` stops the run.
 - **Violations:** a missing block, a missing or repeated key, a value that is not a number under `numeric`, a `single`
   side without exactly one value, a side with no values (such as an empty block, or a pattern that matches nothing),
   two patterns with different groups, and a `same-as-paths` glob that matches no path. Two empty sides do not count as

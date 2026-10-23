@@ -143,7 +143,7 @@ pub enum Language { Rust, Python }
 
 An attribute that changes how a validator works, such as `keep-sorted-pattern` or `check-lua-timeout`, needs the
 validator's main attribute on the same block. Alone, it stops the run, because it would do nothing. `same-as-pattern`
-is the one exception: a target may have it, to pick its own values.
+is the one exception: a target may have it, to pick its own values. So it needs `same-as`, `same-as-paths` or `name`.
 
 ## Symbols
 

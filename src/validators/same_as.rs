@@ -947,16 +947,22 @@ struct PathsTrace {
     records: Option<Vec<Record>>,
 }
 
-/// Checks that `same-as-mode` and `same-as-format` come with `same-as` or `same-as-paths`.
+/// Checks that `same-as-mode` and `same-as-format` come with `same-as` or `same-as-paths`, and
+/// that `same-as-pattern` comes with one of them or with `name`.
 ///
 /// # Errors
-/// Returns an error that quotes the first of the two attributes found without them.
+/// Returns an error that quotes the first attribute found without them.
 pub(super) fn check_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<()> {
-    // `same-as-pattern` is not in the list: a target's pattern picks the target's values.
     validators::require_main(
         attributes,
         &["same-as", "same-as-paths"],
         &["same-as-mode", "same-as-format"],
+    )?;
+    // A target's own pattern picks its values, but only a block with a name can be a target.
+    validators::require_main(
+        attributes,
+        &["same-as", "same-as-paths", "name"],
+        &["same-as-pattern"],
     )
 }
 
@@ -2961,5 +2967,17 @@ mod check_attributes_tests {
                 format!("`{name}` without `same-as` or `same-as-paths`")
             );
         }
+    }
+
+    #[test]
+    fn pattern_without_same_as_or_name_returns_an_error() {
+        let attributes = HashMap::from([("same-as-pattern".to_string(), "\\d+".to_string())]);
+
+        let error = Validator::SameAs.check_attributes(&attributes).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "`same-as-pattern` without `same-as` or `same-as-paths` or `name`"
+        );
     }
 }
