@@ -27,8 +27,14 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   `this block or its target has no values to compare`.
 - `same-as-paths` no longer needs `same-as-pattern`. Without one, each line of the block must be a path, in sorted
   order.
-- `same-as-mode` and `same-as-format` stop the run on a block without `same-as` or `same-as-paths`, such as a target.
-  Before, they did nothing there, so `same-as-mode="sequence"` on a target let values in another order pass.
+- An attribute that changes how a validator works now stops the run on a block without the validator's main
+  attribute. Before, it did nothing there. For example, `same-as-mode="sequence"` on a target let values in another
+  order pass. The attributes are:
+  - `same-as-mode` and `same-as-format`, without `same-as` or `same-as-paths`;
+  - `keep-sorted-pattern` and `keep-sorted-format`, without `keep-sorted`;
+  - `line-count-pattern`, without `line-count`;
+  - `check-ai-pattern`, without `check-ai`;
+  - `check-lua-pattern` and `check-lua-timeout`, without `check-lua`.
 
 ## [0.15.0] - 2026-10-21
 

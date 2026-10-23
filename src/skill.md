@@ -141,6 +141,10 @@ pub enum Language { Rust, Python }
 | `check-lua-timeout`      | `check-lua-timeout="60"`                                                                                                              | Wall-clock budget for the script, in whole seconds; default `30`. A script that runs past it fails the run with an error, not a violation. A value below `1` is a hard error.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `severity`               | `severity="error"` (default) `/ warning / info / hint`                                                                                | Only `error` fails the run (exit 1); the others are reported but exit 0.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
+An attribute that changes how a validator works, such as `keep-sorted-pattern` or `check-lua-timeout`, needs the
+validator's main attribute on the same block. Alone, it stops the run, because it would do nothing. `same-as-pattern`
+is the one exception: a target may have it, to pick its own values.
+
 ## Symbols
 
 A symbol is one value inside a file, such as the `version` key in `package.json`. `affects` and `same-as` point at one

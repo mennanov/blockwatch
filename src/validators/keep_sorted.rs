@@ -8,6 +8,7 @@ use crate::{Position, validators};
 use anyhow::{Context, anyhow};
 use serde::Serialize;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 use strum_macros::{Display, EnumIter, EnumString};
@@ -214,6 +215,18 @@ struct KeepSortedLine {
     /// What is compared: the `value` group of `keep-sorted-pattern`, the whole match, or the
     /// trimmed line. `None` when the pattern skips the line.
     value: Option<String>,
+}
+
+/// Checks that `keep-sorted-pattern` and `keep-sorted-format` come with `keep-sorted`.
+///
+/// # Errors
+/// Returns an error that quotes the first of the two attributes found without it.
+pub(super) fn check_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<()> {
+    validators::require_main(
+        attributes,
+        &["keep-sorted"],
+        &["keep-sorted-pattern", "keep-sorted-format"],
+    )
 }
 
 /// Selects [`KeepSortedValidator`] for blocks carrying a `keep-sorted` attribute.
@@ -1201,5 +1214,27 @@ id: 3 green
 
         assert!(report.traces.is_empty());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod check_attributes_tests {
+    use crate::validators::Validator;
+    use std::collections::HashMap;
+
+    #[test]
+    fn pattern_or_format_without_keep_sorted_returns_an_error() {
+        for (name, value) in [
+            ("keep-sorted-pattern", "id: (?P<value>\\d+)"),
+            ("keep-sorted-format", "numeric"),
+        ] {
+            let attributes = HashMap::from([(name.to_string(), value.to_string())]);
+
+            let error = Validator::KeepSorted
+                .check_attributes(&attributes)
+                .unwrap_err();
+
+            assert_eq!(error.to_string(), format!("`{name}` without `keep-sorted`"));
+        }
     }
 }

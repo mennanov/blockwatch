@@ -10,6 +10,9 @@ mention the company name", "no TODOs left", "the tone matches the rest of the pa
 | `check-ai`         | the condition, in natural language                        | —           |
 | `check-ai-pattern` | regex; every match's `(?P<value>…)` group, or whole match | whole block |
 
+`check-ai-pattern` works only next to `check-ai`. On a block without it, it stops the run, because it would do nothing
+there.
+
 ## Example
 
 ```html

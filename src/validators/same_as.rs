@@ -951,17 +951,12 @@ struct PathsTrace {
 /// # Errors
 /// Returns an error that quotes the first of the two attributes found without them.
 pub(super) fn check_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<()> {
-    // Only the block with `same-as` decides how to compare. A target's mode or format would do
-    // nothing, and the check would pass without it.
-    if !attributes.contains_key("same-as")
-        && !attributes.contains_key("same-as-paths")
-        && let Some(name) = ["same-as-mode", "same-as-format"]
-            .into_iter()
-            .find(|name| attributes.contains_key(*name))
-    {
-        bail!("`{name}` without `same-as` or `same-as-paths`");
-    }
-    Ok(())
+    // `same-as-pattern` is not in the list: a target's pattern picks the target's values.
+    validators::require_main(
+        attributes,
+        &["same-as", "same-as-paths"],
+        &["same-as-mode", "same-as-format"],
+    )
 }
 
 /// Selects [`SameAsValidator`] for blocks carrying a `same-as` or a `same-as-paths` attribute.
@@ -2949,7 +2944,7 @@ ten
 
 #[cfg(test)]
 mod check_attributes_tests {
-    use super::check_attributes;
+    use crate::validators::Validator;
     use std::collections::HashMap;
 
     #[test]
@@ -2957,7 +2952,7 @@ mod check_attributes_tests {
         for (name, value) in [("same-as-mode", "set"), ("same-as-format", "flat")] {
             let attributes = HashMap::from([(name.to_string(), value.to_string())]);
 
-            let error = check_attributes(&attributes).unwrap_err();
+            let error = Validator::SameAs.check_attributes(&attributes).unwrap_err();
 
             assert_eq!(
                 error.to_string(),

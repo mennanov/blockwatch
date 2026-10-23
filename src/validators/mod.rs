@@ -156,13 +156,11 @@ impl Validator {
         attributes: &HashMap<String, String>,
     ) -> anyhow::Result<()> {
         match self {
-            Validator::Affects
-            | Validator::CheckAi
-            | Validator::CheckLua
-            | Validator::KeepSorted
-            | Validator::KeepUnique
-            | Validator::LineCount
-            | Validator::LinePattern => Ok(()),
+            Validator::Affects | Validator::KeepUnique | Validator::LinePattern => Ok(()),
+            Validator::CheckAi => check_ai::check_attributes(attributes),
+            Validator::CheckLua => check_lua::check_attributes(attributes),
+            Validator::KeepSorted => keep_sorted::check_attributes(attributes),
+            Validator::LineCount => line_count::check_attributes(attributes),
             Validator::SameAs => same_as::check_attributes(attributes),
         }
     }
@@ -977,6 +975,28 @@ fn block_content_for_pattern<'c>(
             .filter(|value| !value.is_empty())
             .collect(),
     ))
+}
+
+/// Checks that each attribute in `extras` comes with at least one attribute in `main`.
+///
+/// # Errors
+/// Returns an error that quotes the first attribute in `extras` found without one in `main`, such
+/// as ``"`keep-sorted-pattern` without `keep-sorted`"``.
+fn require_main(
+    attributes: &HashMap<String, String>,
+    main: &[&str],
+    extras: &[&str],
+) -> anyhow::Result<()> {
+    // Without a main attribute, no validator reads the extra one, so the block would pass as if it
+    // were not there.
+    if main.iter().any(|name| attributes.contains_key(*name)) {
+        return Ok(());
+    }
+    if let Some(extra) = extras.iter().find(|name| attributes.contains_key(**name)) {
+        let main: Vec<String> = main.iter().map(|name| format!("`{name}`")).collect();
+        bail!("`{extra}` without {}", main.join(" or "));
+    }
+    Ok(())
 }
 
 /// Parses `value`, the value of `attribute`, as one of the keywords of `T`. `T` decides the case of

@@ -2,7 +2,7 @@ use crate::blocks::{Block, BlockWithContext};
 use crate::repo_path::RepoPath;
 use crate::validators::{
     AsyncValidator, PatternContent, ValidationContext, ValidationReport, Validator, ValidatorTrace,
-    ValidatorType, Violation, block_content_for_pattern,
+    ValidatorType, Violation, block_content_for_pattern, require_main,
 };
 use anyhow::{Context, anyhow};
 use async_openai::Client;
@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use secrecy::ExposeSecret;
 use serde::Serialize;
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::task::JoinSet;
 
@@ -145,6 +146,14 @@ async fn check_block<C: AiClient>(
         Vec::from_iter(violation),
         trace(Some(prompt), Some(response)),
     ))
+}
+
+/// Checks that `check-ai-pattern` comes with `check-ai`.
+///
+/// # Errors
+/// Returns an error that quotes `check-ai-pattern` when it comes without `check-ai`.
+pub(super) fn check_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<()> {
+    require_main(attributes, &["check-ai"], &["check-ai-pattern"])
 }
 
 /// Selects [`CheckAiValidator`] for blocks carrying a `check-ai` attribute, building a client from
@@ -752,5 +761,22 @@ mod trace_tests {
 
         assert!(report.traces.is_empty());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod check_attributes_tests {
+    use crate::validators::Validator;
+    use std::collections::HashMap;
+
+    #[test]
+    fn pattern_without_check_ai_returns_an_error() {
+        let attributes = HashMap::from([("check-ai-pattern".to_string(), "\\d+".to_string())]);
+
+        let error = Validator::CheckAi
+            .check_attributes(&attributes)
+            .unwrap_err();
+
+        assert_eq!(error.to_string(), "`check-ai-pattern` without `check-ai`");
     }
 }

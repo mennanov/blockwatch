@@ -433,6 +433,7 @@ mod tests {
 target = 'package.json#/version'
 name = 'version'
 keep-unique = true
+check-lua = 'check.lua'
 check-lua-timeout = 30
 
 [[block]]
@@ -450,6 +451,7 @@ target = 'a.yaml#/b'
                     attributes: HashMap::from([
                         ("name".to_string(), "version".to_string()),
                         ("keep-unique".to_string(), String::new()),
+                        ("check-lua".to_string(), "check.lua".to_string()),
                         ("check-lua-timeout".to_string(), "30".to_string()),
                     ]),
                     entry: ConfigEntry {
@@ -465,7 +467,7 @@ target = 'a.yaml#/b'
                     attributes: HashMap::new(),
                     entry: ConfigEntry {
                         file: PathBuf::from(DEFAULT_FILE),
-                        line: 9,
+                        line: 10,
                     },
                     is_entry_modified: false,
                     severity: BlockSeverity::Error,

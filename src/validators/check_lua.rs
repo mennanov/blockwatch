@@ -6,11 +6,13 @@ use crate::target_reference::{TargetKind, TargetReference};
 use crate::validators::{
     AsyncValidator, PatternContent, TargetFiles, ValidationContext, ValidationReport, Validator,
     ValidatorTrace, ValidatorType, Violation, block_content_for_pattern, parse_keyword,
+    require_main,
 };
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use mlua::{HookTriggers, Lua, StdLib, VmState};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::Path;
 use std::sync::Arc;
@@ -619,6 +621,18 @@ fn symbol_content<Fs: FileSystem>(
     Ok(resolution
         .ok()
         .map(|symbol| symbol.value_or_definition(content).to_string()))
+}
+
+/// Checks that `check-lua-pattern` and `check-lua-timeout` come with `check-lua`.
+///
+/// # Errors
+/// Returns an error that quotes the first of the two attributes found without it.
+pub(super) fn check_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<()> {
+    require_main(
+        attributes,
+        &["check-lua"],
+        &["check-lua-pattern", "check-lua-timeout"],
+    )
 }
 
 /// Selects [`CheckLuaValidator`] for blocks carrying a `check-lua` attribute.
@@ -1711,5 +1725,24 @@ red
 
         assert!(report.traces.is_empty());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod check_attributes_tests {
+    use crate::validators::Validator;
+    use std::collections::HashMap;
+
+    #[test]
+    fn pattern_or_timeout_without_check_lua_returns_an_error() {
+        for (name, value) in [("check-lua-pattern", "\\d+"), ("check-lua-timeout", "60")] {
+            let attributes = HashMap::from([(name.to_string(), value.to_string())]);
+
+            let error = Validator::CheckLua
+                .check_attributes(&attributes)
+                .unwrap_err();
+
+            assert_eq!(error.to_string(), format!("`{name}` without `check-lua`"));
+        }
     }
 }

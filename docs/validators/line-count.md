@@ -10,6 +10,9 @@ size of the enum it maps.
 | `line-count`         | `<N`, `<=N`, `==N`, `>=N`, `>N`            | —                        |
 | `line-count-pattern` | regex; a line counts when it gives a value | every line that has text |
 
+`line-count-pattern` works only next to `line-count`. On a block without it, it stops the run, because it would do
+nothing there.
+
 ## Example
 
 ```python

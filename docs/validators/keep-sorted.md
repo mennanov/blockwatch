@@ -10,6 +10,9 @@ Keeps a list ordered. Eliminates "please sort this" review nits.
 | `keep-sorted-pattern` | regex; the `(?P<value>…)` group, or the whole match | whole line |
 | `keep-sorted-format`  | `numeric`                                           | text       |
 
+`keep-sorted-pattern` and `keep-sorted-format` work only next to `keep-sorted`. On a block without it, they stop the
+run, because they would do nothing there.
+
 ## Example
 
 ```python

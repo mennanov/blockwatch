@@ -19,6 +19,9 @@ string when it fails.
 
 <!-- </block> -->
 
+`check-lua-pattern` and `check-lua-timeout` work only next to `check-lua`. On a block without it, they stop the run,
+because they would do nothing there.
+
 The script path must point to a file inside the repository. Paths that escape it — absolute paths outside the project,
 `../` traversal, or symlinks pointing outward — are rejected.
 

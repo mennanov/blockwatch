@@ -8,6 +8,7 @@ use crate::validators::{
 use anyhow::{Context, anyhow};
 use regex::Regex;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Enforces `line-count="<N"` and friends: the number of non-empty lines in the block must satisfy
@@ -181,6 +182,14 @@ struct LineCountLine {
     /// The `value` group of `line-count-pattern`, the whole match, or the trimmed line. `None`
     /// when the pattern skips the line, so the line isn't counted.
     value: Option<String>,
+}
+
+/// Checks that `line-count-pattern` comes with `line-count`.
+///
+/// # Errors
+/// Returns an error that quotes `line-count-pattern` when it comes without `line-count`.
+pub(super) fn check_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<()> {
+    validators::require_main(attributes, &["line-count"], &["line-count-pattern"])
 }
 
 /// Selects [`LineCountValidator`] for blocks carrying a `line-count` attribute.
@@ -703,5 +712,25 @@ mod trace_tests {
 
         assert!(report.traces.is_empty());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod check_attributes_tests {
+    use crate::validators::Validator;
+    use std::collections::HashMap;
+
+    #[test]
+    fn pattern_without_line_count_returns_an_error() {
+        let attributes = HashMap::from([("line-count-pattern".to_string(), "\\w+".to_string())]);
+
+        let error = Validator::LineCount
+            .check_attributes(&attributes)
+            .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "`line-count-pattern` without `line-count`"
+        );
     }
 }
