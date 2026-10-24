@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.16.0] - 2026-10-24
+
 ### Changed
 
 - Without `same-as-pattern`, `same-as` compares each line that isn't blank as one value. Before, the whole block was
