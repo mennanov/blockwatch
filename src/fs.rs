@@ -263,7 +263,11 @@ impl PathFilter {
 fn glob_set(globs: impl IntoIterator<Item = impl AsRef<str>>) -> GlobSet {
     let mut builder = GlobSet::builder();
     for glob in globs {
-        builder.add(globset::Glob::new(glob.as_ref()).expect("malformed test glob"));
+        builder.add(
+            crate::paths_glob::glob_builder(glob.as_ref())
+                .build()
+                .expect("malformed test glob"),
+        );
     }
     builder.build().expect("failed to build test glob set")
 }

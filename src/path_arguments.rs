@@ -1,9 +1,10 @@
 //! The paths and globs given on the command line, and the check that each selects a file.
 
 use crate::fs::{Entry, FileSystem};
+use crate::paths_glob::glob_builder;
 use crate::repo_path::RepoPath;
 use anyhow::{Context, bail};
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::{GlobSet, GlobSetBuilder};
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -42,7 +43,9 @@ impl PathArguments {
                 None => argument.trim_start_matches("./").to_string(),
             };
             builder.add(
-                Glob::new(&glob).with_context(|| format!("invalid glob pattern: {argument}"))?,
+                glob_builder(&glob)
+                    .build()
+                    .with_context(|| format!("invalid glob pattern: {argument}"))?,
             );
         }
         Ok(Self {
@@ -55,7 +58,7 @@ impl PathArguments {
     /// no arguments, because then every file is checked.
     pub(crate) fn allowed_globs(&self) -> anyhow::Result<GlobSet> {
         if self.written.is_empty() {
-            return Ok(GlobSet::new([Glob::new("**")?])?);
+            return Ok(GlobSet::new([glob_builder("**").build()?])?);
         }
         Ok(self.globs.clone())
     }
@@ -176,6 +179,15 @@ mod tests {
         assert_eq!(
             selected_files(&["src/a.py", "b.py"], &["./src/*.py"])?,
             ["src/a.py"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn glob_argument_with_empty_alternative_selects_the_path_without_it() -> anyhow::Result<()> {
+        assert_eq!(
+            selected_files(&["a.py", "sub/a.py", "other/a.py"], &["{,sub/}a.py"])?,
+            ["a.py", "sub/a.py"]
         );
         Ok(())
     }

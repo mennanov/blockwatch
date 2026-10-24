@@ -3,3 +3,9 @@
 disallowed-macros = [
     { path = "assert_cmd::cargo_bin_cmd", reason = "use common::cargo_bin_cmd!, which passes an empty config" },
 ]
+# globset drops an empty alternative in braces by default, so `{,sub/}a.yml` would not match
+# `a.yml`.
+disallowed-methods = [
+    { path = "globset::Glob::new", reason = "use paths_glob::glob_builder, which keeps an empty alternative" },
+    { path = "globset::GlobBuilder::new", reason = "use paths_glob::glob_builder, which keeps an empty alternative" },
+]

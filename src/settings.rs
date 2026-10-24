@@ -1,6 +1,7 @@
 //! Project settings: how they are validated, and how the flags and the config file are merged.
 
 use crate::blocks::BlockAddress;
+use crate::paths_glob::glob_builder;
 use crate::validators::Validator;
 use anyhow::{Context, bail};
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -36,7 +37,9 @@ impl RawSettings {
             .ignore
             .iter()
             .map(|glob| {
-                Glob::new(glob).with_context(|| format!("invalid ignore glob pattern: {glob}"))
+                glob_builder(glob)
+                    .build()
+                    .with_context(|| format!("invalid ignore glob pattern: {glob}"))
             })
             .collect::<anyhow::Result<_>>()?;
         let extensions = self
@@ -283,6 +286,19 @@ mod tests {
         assert!(settings.ignored_globs.is_match("generated/a.rs"));
         assert!(settings.ignored_globs.is_match("vendor/b.rs"));
         assert!(!settings.ignored_globs.is_match("src/c.rs"));
+        Ok(())
+    }
+
+    #[test]
+    fn ignore_glob_with_empty_alternative_ignores_the_path_without_it() -> anyhow::Result<()> {
+        let config_file = RawSettings {
+            ignore: to_string_vec(&["{,sub/}a.rs"]),
+            ..RawSettings::default()
+        };
+        let settings = resolve(RawSettings::default(), config_file)?;
+        assert!(settings.ignored_globs.is_match("a.rs"));
+        assert!(settings.ignored_globs.is_match("sub/a.rs"));
+        assert!(!settings.ignored_globs.is_match("other/a.rs"));
         Ok(())
     }
 

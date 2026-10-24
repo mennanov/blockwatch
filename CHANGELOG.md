@@ -37,6 +37,12 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   - `check-ai-pattern`, without `check-ai`;
   - `check-lua-pattern` and `check-lua-timeout`, without `check-lua`.
 
+### Fixed
+
+- An empty alternative in braces now matches, so `{,sub/}a.yml` matches both `a.yml` and `sub/a.yml`. Before, it
+  matched only `sub/a.yml`, with no error. This was true of every glob: a `[[block]]` target, `same-as-paths`, the
+  `ignore` setting and `--ignore`, and a path argument ([#177](https://github.com/mennanov/blockwatch/issues/177)).
+
 ## [0.15.0] - 2026-10-21
 
 ### Changed

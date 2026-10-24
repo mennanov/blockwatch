@@ -9,6 +9,20 @@ use std::collections::BTreeSet;
 /// path it spells.
 pub(crate) const GLOB_CHARACTERS: [char; 5] = ['*', '?', '[', '{', '\\'];
 
+/// Starts building `glob`, so that an empty alternative in braces matches the empty string:
+/// `{,sub/}a.yml` matches both `a.yml` and `sub/a.yml`.
+pub(crate) fn glob_builder(glob: &str) -> GlobBuilder<'_> {
+    // globset drops an empty alternative by default, so `{,sub/}a.yml` would match only
+    // `sub/a.yml`. Shells and most other glob tools match both.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the one place that sets empty_alternates"
+    )]
+    let mut builder = GlobBuilder::new(glob);
+    builder.empty_alternates(true);
+    builder
+}
+
 /// A glob over the repository's paths, compiled to list the files or the directories it matches.
 pub(crate) struct PathsGlob {
     /// Matches a path written without a trailing `/`.
@@ -25,7 +39,7 @@ impl PathsGlob {
     pub(crate) fn new(glob: &str) -> anyhow::Result<Self> {
         // `*` stops at `/`, so `services/*` matches the services and not the directories inside
         // them.
-        let matcher = GlobBuilder::new(glob)
+        let matcher = glob_builder(glob)
             .literal_separator(true)
             .build()?
             .compile_matcher();
@@ -92,4 +106,55 @@ fn base_directory(glob: &str) -> Option<RepoPath> {
     // A directory that isn't a repository path, such as an empty one or one with `..`, can't narrow
     // the walk. Walking the whole repository gives the same paths, only more slowly.
     RepoPath::from_reference(&fixed_segments.join("/")).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fs::test_utils::FakeFileSystem;
+
+    /// The files that `glob` matches in a repository that holds `files`, sorted.
+    fn matching_files(glob: &str, files: &[&str]) -> anyhow::Result<Vec<String>> {
+        let file_system = FakeFileSystem::new(
+            files
+                .iter()
+                .map(|file| (file.to_string(), String::new()))
+                .collect(),
+        );
+        Ok(PathsGlob::new(glob)?
+            .matching_files(&file_system)?
+            .iter()
+            .map(ToString::to_string)
+            .collect())
+    }
+
+    #[test]
+    fn empty_first_alternative_matches_the_path_without_it() -> anyhow::Result<()> {
+        assert_eq!(
+            matching_files(
+                "{,sub/}a.yml",
+                &["a.yml", "sub/a.yml", "other/a.yml", "b.yml"]
+            )?,
+            ["a.yml", "sub/a.yml"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn empty_last_alternative_matches_the_path_without_it() -> anyhow::Result<()> {
+        assert_eq!(
+            matching_files("a{.yml,}", &["a", "a.yml", "a.json", "ab"])?,
+            ["a", "a.yml"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn empty_nested_alternative_matches_the_path_without_it() -> anyhow::Result<()> {
+        assert_eq!(
+            matching_files("{x,{,y}}a", &["a", "xa", "ya", "za"])?,
+            ["a", "xa", "ya"]
+        );
+        Ok(())
+    }
 }
