@@ -2,7 +2,7 @@
 //! language shares: what a value is, and which names a syntax error makes unreadable.
 
 use super::{ScalarValue, Symbol, Symbols, SymbolsParser};
-use crate::language_parsers::{node_text, tree_sitter_parser};
+use crate::language_parsers::{node_text, tree_sitter_parser, walk_tree};
 use crate::symbol_path::SymbolPath;
 use crate::{Position, character_column_at};
 use anyhow::{Context, anyhow};
@@ -239,33 +239,27 @@ pub(crate) fn node_value<'tree>(
 /// file.
 fn syntax_errors(tree: &Tree) -> Vec<Node<'_>> {
     let root = tree.root_node();
-    if !root.has_error() {
-        return Vec::new();
-    }
-    // The walk keeps its own stack, as deeply nested source could overflow the call stack. It
-    // enters only the nodes that hold an error.
+    // A token that the parser skipped is an error node that doesn't hold an error.
+    let holds_error = |node: &Node| node.is_error() || node.has_error();
     let mut errors = Vec::new();
-    let mut pending = vec![root];
     let mut cursor = tree.walk();
-    while let Some(node) = pending.pop() {
+    // The walk enters only the nodes that hold an error.
+    walk_tree(root, |node| {
         if node.is_error() || node.is_missing() {
             errors.push(node);
-        } else {
-            let first = pending.len();
-            // A token that the parser skipped is an error node that doesn't hold an error.
-            pending.extend(
-                node.children(&mut cursor)
-                    .filter(|child| child.is_error() || child.has_error()),
-            );
-            // Such as the line end of a C macro that a `/* */` comment cut short. At the end of
-            // the file, the hidden token is the last line end, which a file may leave out.
-            if pending.len() == first && node.end_byte() < root.end_byte() {
-                errors.push(node);
-            }
-            // The stack takes the last child first, so the children go on it in reverse.
-            pending[first..].reverse();
+            return false;
         }
-    }
+        if !holds_error(&node) {
+            return false;
+        }
+        // Such as the line end of a C macro that a `/* */` comment cut short. At the end of the
+        // file, the hidden token is the last line end, which a file may leave out.
+        if node.end_byte() < root.end_byte() && !node.children(&mut cursor).any(|c| holds_error(&c))
+        {
+            errors.push(node);
+        }
+        true
+    });
     errors
 }
 

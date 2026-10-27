@@ -1,5 +1,6 @@
 use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, node_text, python_style_comments_parser,
+    walk_tree,
 };
 use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, Value};
 use anyhow::anyhow;
@@ -23,21 +24,14 @@ impl CodeLanguage for Python {
     /// tree, in document order. `source` is the text of the file.
     fn definitions<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Definition<'tree>> {
         let mut definitions = Vec::new();
-        // The walk keeps its own stack, as deeply nested source could overflow the call stack.
-        let mut pending = vec![root];
-        let mut cursor = root.walk();
-        while let Some(node) = pending.pop() {
+        walk_tree(root, |node| {
             let definition = match node.kind() {
                 // Python gives the names in these bodies to the module, as it does at the top
                 // level. A loop or a `match` binds a name each time it runs, so its body doesn't
                 // count.
                 "module" | "block" | "if_statement" | "elif_clause" | "else_clause"
                 | "try_statement" | "except_clause" | "finally_clause" | "with_statement" => {
-                    let first = pending.len();
-                    pending.extend(node.named_children(&mut cursor));
-                    // The stack takes the last child first, so the children go on it in reverse.
-                    pending[first..].reverse();
-                    None
+                    return true;
                 }
                 "expression_statement" => node
                     .named_child(0)
@@ -59,7 +53,8 @@ impl CodeLanguage for Python {
                 _ => None,
             };
             definitions.extend(definition);
-        }
+            false
+        });
         definitions
     }
 

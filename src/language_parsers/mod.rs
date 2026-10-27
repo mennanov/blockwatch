@@ -497,6 +497,26 @@ pub(crate) fn node_text<'source>(node: &Node, source: &'source str) -> &'source 
     &source[node.byte_range()]
 }
 
+/// Calls `visit` on `root` and then on the nodes below it, in document order. `visit` returns
+/// whether to visit the children of the node it gets.
+pub(crate) fn walk_tree<'tree>(root: Node<'tree>, mut visit: impl FnMut(Node<'tree>) -> bool) {
+    // A cursor moves through the tree without a stack of its own, so deeply nested source can't
+    // overflow the call stack, and the walk allocates nothing for each node. It never leaves the
+    // node it starts at.
+    let mut cursor = root.walk();
+    loop {
+        if visit(cursor.node()) && cursor.goto_first_child() {
+            continue;
+        }
+        // The next node is the next sibling of this node, or of the nearest parent with one.
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return;
+            }
+        }
+    }
+}
+
 struct Comments<'source> {
     cursor: TreeCursor<'source>,
     node_visitor: &'source NodeVisitor,
