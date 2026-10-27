@@ -237,48 +237,19 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod symbols_tests {
     use super::*;
-    use crate::symbol_path::SymbolPath;
+    use crate::symbols::code::test_utils::{self, decode_error, symbol, syntax_error};
 
-    /// Each symbol of `source`: its path, the text of its definition, and its value.
+    /// Each symbol of `source`, as [`test_utils::symbols`] lists it.
     fn symbols(source: &str) -> anyhow::Result<Vec<(String, String, Option<String>)>> {
-        Ok(parser()?
-            .parse_symbols(source)?
-            .symbols
-            .into_iter()
-            .map(|symbol| {
-                let [range] = symbol.def_byte_ranges.as_slice() else {
-                    panic!("a Go symbol is written in one place");
-                };
-                let definition = source[range.clone()].to_string();
-                (
-                    symbol.path.to_string(),
-                    definition,
-                    symbol.value.map(|value| value.text),
-                )
-            })
-            .collect())
-    }
-
-    /// A symbol as [`symbols`] lists it.
-    fn symbol(
-        path: &str,
-        definition: &str,
-        value: Option<&str>,
-    ) -> (String, String, Option<String>) {
-        (
-            path.to_string(),
-            definition.to_string(),
-            value.map(str::to_string),
-        )
+        Ok(test_utils::symbols(
+            &parser()?.parse_symbols(source)?,
+            source,
+        ))
     }
 
     /// Why a reference to `path` in `source` does not resolve.
     fn unresolved(source: &str, path: &str) -> anyhow::Result<String> {
-        let symbols = parser()?.parse_symbols(source)?;
-        let error = symbols
-            .resolve(&SymbolPath::parse(path)?)
-            .expect_err("the path does not resolve");
-        Ok(error.reason(source))
+        test_utils::unresolved(&parser()?.parse_symbols(source)?, source, path)
     }
 
     #[test]
@@ -405,19 +376,19 @@ var Fine = "ok"
         );
         assert_eq!(
             unresolved(source, "/NotText")?,
-            "blockwatch can't decode the string at line 3, column 15: its bytes are not UTF-8 text"
+            decode_error(3, 15, "its bytes are not UTF-8 text")
         );
         assert_eq!(
             unresolved(source, "/NoEscape")?,
-            r"blockwatch can't decode the string at line 4, column 16: `\'` is not an escape in a Go string"
+            decode_error(4, 16, r"`\'` is not an escape in a Go string")
         );
         assert_eq!(
             unresolved(source, "/Surrogate")?,
-            r"blockwatch can't decode the string at line 5, column 17: `\ud800` stands for no character"
+            decode_error(5, 17, r"`\ud800` stands for no character")
         );
         assert_eq!(
             unresolved(source, "/ShortOctal")?,
-            r"blockwatch can't decode the string at line 6, column 18: `\07` is not an escape in a Go string"
+            decode_error(6, 18, r"`\07` is not an escape in a Go string")
         );
         Ok(())
     }
@@ -446,14 +417,9 @@ const (
                 symbol("/C", "C = 3", Some("3")),
             ]
         );
-        let reason = |line: usize, column: usize, name: &str| {
-            format!(
-                "file has a syntax error at line {line}, column {column} near {name}, and the path could resolve to the wrong value"
-            )
-        };
-        assert_eq!(unresolved(source, "/F")?, reason(5, 25, "F"));
-        assert_eq!(unresolved(source, "/X")?, reason(10, 2, "X"));
-        assert_eq!(unresolved(source, "/B")?, reason(10, 2, "B"));
+        assert_eq!(unresolved(source, "/F")?, syntax_error(5, 25, "F"));
+        assert_eq!(unresolved(source, "/X")?, syntax_error(10, 2, "X"));
+        assert_eq!(unresolved(source, "/B")?, syntax_error(10, 2, "B"));
         Ok(())
     }
 
@@ -478,9 +444,7 @@ const B = 3
         for name in ["X", "Y", "B"] {
             assert_eq!(
                 unresolved(source, &format!("/{name}"))?,
-                format!(
-                    "file has a syntax error at line 5, column 1 near {name}, and the path could resolve to the wrong value"
-                )
+                syntax_error(5, 1, name)
             );
         }
         Ok(())

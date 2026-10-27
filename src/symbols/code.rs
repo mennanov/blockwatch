@@ -220,12 +220,89 @@ fn names_in(text: &str) -> impl Iterator<Item = &str> {
 }
 // </block>
 
+/// Helpers for the tests of each language's symbols, which check the same things: the symbols a
+/// file gives, and why a path does not resolve.
+#[cfg(test)]
+pub(crate) mod test_utils {
+    use crate::symbol_path::SymbolPath;
+    use crate::symbols::Symbols;
+
+    /// Each of `symbols`, the symbols of `source`, as [`symbol`] writes it.
+    ///
+    /// # Panics
+    /// Panics if a symbol is written in several places, which no code symbol is.
+    pub(crate) fn symbols(
+        symbols: &Symbols,
+        source: &str,
+    ) -> Vec<(String, String, Option<String>)> {
+        symbols
+            .symbols
+            .iter()
+            .map(|symbol| {
+                let [range] = symbol.def_byte_ranges.as_slice() else {
+                    panic!("a code symbol is written in one place");
+                };
+                (
+                    symbol.path.to_string(),
+                    source[range.clone()].to_string(),
+                    symbol.value.as_ref().map(|value| value.text.clone()),
+                )
+            })
+            .collect()
+    }
+
+    /// A symbol with its path, the text of its definition, and its value.
+    pub(crate) fn symbol(
+        path: &str,
+        definition: &str,
+        value: Option<&str>,
+    ) -> (String, String, Option<String>) {
+        (
+            path.to_string(),
+            definition.to_string(),
+            value.map(str::to_string),
+        )
+    }
+
+    /// Why a reference to `path` does not resolve among `symbols`, the symbols of `source`.
+    ///
+    /// # Errors
+    /// Returns an error if `path` is not a valid path.
+    ///
+    /// # Panics
+    /// Panics if `path` resolves.
+    pub(crate) fn unresolved(
+        symbols: &Symbols,
+        source: &str,
+        path: &str,
+    ) -> anyhow::Result<String> {
+        let error = symbols
+            .resolve(&SymbolPath::parse(path)?)
+            .expect_err("the path does not resolve");
+        Ok(error.reason(source))
+    }
+
+    /// The reason a name near a syntax error at `line` and `column` is unreadable.
+    pub(crate) fn syntax_error(line: usize, column: usize, name: &str) -> String {
+        format!(
+            "file has a syntax error at line {line}, column {column} near {name}, and the path could resolve to the wrong value"
+        )
+    }
+
+    /// The reason a name is unreadable when its string at `line` and `column` can't be decoded,
+    /// because of `problem`.
+    pub(crate) fn decode_error(line: usize, column: usize, problem: &str) -> String {
+        format!("blockwatch can't decode the string at line {line}, column {column}: {problem}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // `symbols` reads a real syntax tree, with the spans the parser skipped and the tokens it
     // assumed were missing, and only a grammar can make one. Python stands in for any language:
     // its top-level assignments are the shortest walk, and it has parenthesized values. The walk
     // and the decoder here are only as complete as these tests need.
+    use super::test_utils::{self, decode_error, symbol, syntax_error};
     use super::*;
     use crate::language_parsers::tree_sitter_parser;
     use anyhow::{Context, bail};
@@ -286,25 +363,11 @@ mod tests {
         Ok(Some(text[1..text.len() - 1].to_string()))
     }
 
-    /// The path of each symbol, with the text of its definition.
-    fn definitions(symbols: &Symbols, source: &str) -> Vec<(String, String)> {
-        symbols
-            .symbols
-            .iter()
-            .map(|symbol| {
-                let [range] = symbol.def_byte_ranges.as_slice() else {
-                    panic!("a code symbol is written in one place");
-                };
-                (symbol.path.to_string(), source[range.clone()].to_string())
-            })
-            .collect()
-    }
-
     /// The unreadable names, with their reasons.
-    fn unreadable(entries: &[(&str, &str)]) -> HashMap<String, String> {
+    fn unreadable(entries: &[(&str, String)]) -> HashMap<String, String> {
         entries
             .iter()
-            .map(|(name, reason)| (name.to_string(), reason.to_string()))
+            .map(|(name, reason)| (name.to_string(), reason.clone()))
             .collect()
     }
 
@@ -364,18 +427,12 @@ def function():
         let symbols = symbols_of(source)?;
 
         assert_eq!(
-            definitions(&symbols, source),
+            test_utils::symbols(&symbols, source),
             vec![
-                ("/A".to_string(), "A = B = 5".to_string()),
-                ("/B".to_string(), "A = B = 5".to_string()),
+                symbol("/A", "A = B = 5", Some("5")),
+                symbol("/B", "A = B = 5", Some("5")),
             ]
         );
-        let values: Vec<Option<&str>> = symbols
-            .symbols
-            .iter()
-            .map(|symbol| symbol.value.as_ref().map(|value| value.text.as_str()))
-            .collect();
-        assert_eq!(values, vec![Some("5"), Some("5")]);
         Ok(())
     }
 
@@ -393,23 +450,17 @@ C = 3
         let symbols = symbols_of(source)?;
 
         assert_eq!(
-            definitions(&symbols, source),
+            test_utils::symbols(&symbols, source),
             vec![
-                ("/A".to_string(), "A = 1".to_string()),
-                ("/C".to_string(), "C = 3".to_string()),
+                symbol("/A", "A = 1", Some("1")),
+                symbol("/C", "C = 3", Some("3")),
             ]
         );
         assert_eq!(
             symbols.unreadable,
             unreadable(&[
-                (
-                    "X",
-                    "file has a syntax error at line 2, column 3 near X, and the path could resolve to the wrong value"
-                ),
-                (
-                    "B",
-                    "file has a syntax error at line 2, column 3 near B, and the path could resolve to the wrong value"
-                ),
+                ("X", syntax_error(2, 3, "X")),
+                ("B", syntax_error(2, 3, "B")),
             ])
         );
         Ok(())
@@ -426,15 +477,12 @@ Y = 2
         let symbols = symbols_of(source)?;
 
         assert_eq!(
-            definitions(&symbols, source),
-            vec![("/Y".to_string(), "Y = 2".to_string())]
+            test_utils::symbols(&symbols, source),
+            vec![symbol("/Y", "Y = 2", Some("2"))]
         );
         assert_eq!(
             symbols.unreadable,
-            unreadable(&[(
-                "f",
-                "file has a syntax error at line 1, column 7 near f, and the path could resolve to the wrong value"
-            )])
+            unreadable(&[("f", syntax_error(1, 7, "f"))])
         );
         Ok(())
     }
@@ -449,10 +497,7 @@ N = [1, for, 2, for]
 
         let symbols = symbols_of(source)?;
 
-        assert_eq!(
-            symbols.unreadable["N"],
-            "file has a syntax error at line 2, column 9 near N, and the path could resolve to the wrong value"
-        );
+        assert_eq!(symbols.unreadable["N"], syntax_error(2, 9, "N"));
         Ok(())
     }
 
@@ -466,8 +511,8 @@ print(AB A_1 Aé A1 1A x)
         let symbols = symbols_of(source)?;
 
         assert_eq!(
-            definitions(&symbols, source),
-            vec![("/A".to_string(), "A = 1".to_string())]
+            test_utils::symbols(&symbols, source),
+            vec![symbol("/A", "A = 1", Some("1"))]
         );
         let mut names: Vec<&str> = symbols.unreadable.keys().map(String::as_str).collect();
         names.sort();
@@ -484,14 +529,14 @@ B = "plain"
         let symbols = symbols_of(source)?;
 
         assert_eq!(
-            definitions(&symbols, source),
-            vec![("/B".to_string(), r#"B = "plain""#.to_string())]
+            test_utils::symbols(&symbols, source),
+            vec![symbol("/B", r#"B = "plain""#, Some("plain"))]
         );
         assert_eq!(
             symbols.unreadable,
             unreadable(&[(
                 "A",
-                r"blockwatch can't decode the string at line 1, column 5: `\N{...}` needs the Unicode name table"
+                decode_error(1, 5, r"`\N{...}` needs the Unicode name table")
             )])
         );
         Ok(())
