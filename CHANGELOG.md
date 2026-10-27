@@ -14,12 +14,13 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Added
 
-- Symbols in Go, C, C++, Python, Starlark and Rust files. `consts.go#/MaxPorts` points at a top-level constant, variable,
-  type or function, and `limits.h#/MAX_PORTS` at a macro. A value is the initializer as written, such as
-  `20 * 1024 * 1024`, so `same-as` can compare it with a constant in another file without a `target-pattern`. A
-  syntax error stops the run only for the names near it. See [Code files](docs/symbols.md#code-files),
+- Symbols in Go, C, C++, Python, Starlark, Rust, TypeScript and JavaScript files. `consts.go#/MaxPorts` points at a
+  top-level constant, variable, type or function, and `limits.h#/MAX_PORTS` at a macro. A value is the initializer as
+  written, such as `20 * 1024 * 1024`, so `same-as` can compare it with a constant in another file without a
+  `target-pattern`. A syntax error stops the run only for the names near it. See [Code files](docs/symbols.md#code-files),
   [Go](docs/symbols.md#go), [C and C++](docs/symbols.md#c-and-c),
-  [Python and Starlark](docs/symbols.md#python-and-starlark) and [Rust](docs/symbols.md#rust).
+  [Python and Starlark](docs/symbols.md#python-and-starlark), [Rust](docs/symbols.md#rust) and
+  [TypeScript and JavaScript](docs/symbols.md#typescript-and-javascript).
 
 ## [0.16.0] - 2026-10-24
 

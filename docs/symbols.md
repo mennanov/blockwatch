@@ -22,19 +22,21 @@ declares, instead of tags in a comment.
 ## Files with symbols
 
 <!-- <block name="extensions-with-symbols" same-as="src/language_parsers/mod.rs:extensions-with-symbols"
-     same-as-pattern="`\.?(?P<value>[A-Za-z]+)`"> -->
+     same-as-pattern="`\.?(?P<value>[A-Za-z.]+)`"> -->
 
-| Language | Files                                                                          | Paths                                       |
-|----------|--------------------------------------------------------------------------------|---------------------------------------------|
-| JSON     | `.json`, `.jsonc`, `.webmanifest`                                              | [JSON](#json)                               |
-| TOML     | `.toml`, `Pipfile`                                                             | [TOML](#toml)                               |
-| YAML     | `.yaml`, `.yml`, `.cff`                                                        | [YAML](#yaml)                               |
-| Markdown | `.md`, `.markdown`, `.mdx`                                                     | [Markdown](#markdown)                       |
-| Go       | `.go`                                                                          | [Go](#go)                                   |
-| C, C++   | `.c`, `.h`, `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx`                       | [C and C++](#c-and-c)                       |
-| Python   | `.py`, `.pyi`, `.pyw`                                                          | [Python and Starlark](#python-and-starlark) |
-| Starlark | `.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`, `BUCK`, `WORKSPACE`, `Tiltfile` | [Python and Starlark](#python-and-starlark) |
-| Rust     | `.rs`                                                                          | [Rust](#rust)                               |
+| Language   | Files                                                                          | Paths                                                   |
+|------------|--------------------------------------------------------------------------------|---------------------------------------------------------|
+| JSON       | `.json`, `.jsonc`, `.webmanifest`                                              | [JSON](#json)                                           |
+| TOML       | `.toml`, `Pipfile`                                                             | [TOML](#toml)                                           |
+| YAML       | `.yaml`, `.yml`, `.cff`                                                        | [YAML](#yaml)                                           |
+| Markdown   | `.md`, `.markdown`, `.mdx`                                                     | [Markdown](#markdown)                                   |
+| Go         | `.go`                                                                          | [Go](#go)                                               |
+| C, C++     | `.c`, `.h`, `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx`                       | [C and C++](#c-and-c)                                   |
+| Python     | `.py`, `.pyi`, `.pyw`                                                          | [Python and Starlark](#python-and-starlark)             |
+| Starlark   | `.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`, `BUCK`, `WORKSPACE`, `Tiltfile` | [Python and Starlark](#python-and-starlark)             |
+| Rust       | `.rs`                                                                          | [Rust](#rust)                                           |
+| TypeScript | `.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`                                         | [TypeScript and JavaScript](#typescript-and-javascript) |
+| JavaScript | `.js`, `.mjs`, `.cjs`, `.jsx`                                                  | [TypeScript and JavaScript](#typescript-and-javascript) |
 
 <!-- </block> -->
 
@@ -429,6 +431,49 @@ fn run() {}
   symbols.**
 - **Strings follow Rust's escapes.** `"\u{e9}"` is `é`. A backslash at the end of a line also skips the spaces that
   start the next line. A raw string is its text. Byte strings, C strings and characters stay as written.
+
+<!-- </block> -->
+
+## TypeScript and JavaScript
+
+<!-- <block name="typescript-paths"> -->
+
+```ts
+export const MAX_RETRIES = 5;
+const MODE = "dev" as const;
+const A = 1, B = 2;
+
+@sealed
+export class Point {}
+
+type Mode = "dev" | "prod";
+
+function normalize(text: string): string {
+  return text;
+}
+```
+
+| Path             | Points at                                  |
+|------------------|--------------------------------------------|
+| `#/MAX_RETRIES`  | `5`                                        |
+| `#/MODE`         | `dev`                                      |
+| `#/B`            | `2`, and covers only `B = 2`               |
+| `#/Point`        | the whole class, `@sealed` included        |
+| `#/Mode`         | the whole type                             |
+| `#/normalize`    | the whole function                         |
+
+- **`const`, `let`, `var`, functions, classes, enums, interfaces, type aliases and namespaces are symbols.**
+  `export default function main() {}` is `#/main`.
+- **Type syntax is not part of a value.** `"dev" as const` is `dev`, `x satisfies T` is `x`, and `x!` is `x`.
+- **A function with overloads is its implementation**, the one with a body.
+- **`declare const`, `declare function`, `declare module "x"` and `declare global` are not symbols.** They only state
+  types. A `declare class`, `enum` or `namespace` is one.
+- **Imports, `export { ... }`, `const { a } = b`, `module.exports`, an anonymous `export default` and `_` are not
+  symbols.**
+- **Strings follow JavaScript's escapes.** `"\uD83D\uDE00"` is `😀`. A template without `${...}` is its text. A template
+  with a field and a tagged template, such as ``String.raw`a` ``, stay as written. A legacy escape, such as `\07`,
+  stops the run for its name.
+- **Enum members, class members and the contents of a namespace are not symbols yet.**
 
 <!-- </block> -->
 

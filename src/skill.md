@@ -156,7 +156,8 @@ the file cannot hold a comment. To put rules on the value itself, wrap it in a `
 Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`.toml`, `Pipfile`), YAML (`.yaml`,
 `.yml`, `.cff`), Markdown (`.md`, `.markdown`, `.mdx`), Go (`.go`), C and C++ (`.c`, `.h`, `.cc`, `.cpp`, `.cxx`,
 `.hh`, `.hpp`, `.hxx`), Python (`.py`, `.pyi`, `.pyw`), Starlark (`.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`,
-`BUCK`, `WORKSPACE`, `Tiltfile`), and Rust (`.rs`). A path into any other file fails the run.
+`BUCK`, `WORKSPACE`, `Tiltfile`), Rust (`.rs`), TypeScript (`.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`), and JavaScript
+(`.js`, `.mjs`, `.cjs`, `.jsx`). A path into any other file fails the run.
 
 ### Writing a path
 
@@ -275,6 +276,17 @@ as `consts.go#/MaxPorts`.
 - A module with a body is a symbol, but the items in it are not yet. `mod file;`, `impl` blocks, `use`, `extern`
   blocks, `const _` and items that a macro makes are not symbols.
 - Strings follow Rust's escapes. Byte strings, C strings and characters stay as written.
+
+### TypeScript and JavaScript
+
+- `const`, `let`, `var`, functions, classes, enums, interfaces, type aliases and namespaces are symbols. A type and a
+  value with one name, such as `type Mode` and `const Mode`, are defined twice.
+- In `const A = 1, B = 2;`, a name covers only its own part. Type syntax is not part of a value: `"dev" as const` is
+  `dev`.
+- A function with overloads is its implementation. `declare const`, `declare function`, imports, `export { ... }`,
+  `const { a } = b` and `module.exports` are not symbols.
+- Strings follow JavaScript's escapes. A template with a field stays as written. A legacy escape, such as `\07`, fails
+  the run for its name.
 
 ## The config file (`blockwatch.toml`)
 

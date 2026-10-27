@@ -50,4 +50,4 @@ same-as-pattern = '^\|\s*`(?P<value>[a-z-]+)`'
 [[block]]
 target = 'src/skill.md#/blockwatch/Symbols/Files with symbols'
 name = 'extensions-with-symbols'
-same-as-pattern = '`\.?(?P<value>[A-Za-z]+)`'
+same-as-pattern = '`\.?(?P<value>[A-Za-z.]+)`'

@@ -84,6 +84,27 @@ fn rs_target_resolves() {
 }
 
 #[test]
+fn ts_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/ts_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
+fn tsx_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/tsx_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
+fn js_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/js_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
 fn json_target_resolves() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/symbol_references/json_source.rs");
