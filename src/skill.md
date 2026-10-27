@@ -155,8 +155,8 @@ the file cannot hold a comment. To put rules on the value itself, wrap it in a `
 
 Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`.toml`, `Pipfile`), YAML (`.yaml`,
 `.yml`, `.cff`), Markdown (`.md`, `.markdown`, `.mdx`), Go (`.go`), C and C++ (`.c`, `.h`, `.cc`, `.cpp`, `.cxx`,
-`.hh`, `.hpp`, `.hxx`), Python (`.py`, `.pyi`, `.pyw`), and Starlark (`.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`,
-`BUCK`, `WORKSPACE`, `Tiltfile`). A path into any other file fails the run.
+`.hh`, `.hpp`, `.hxx`), Python (`.py`, `.pyi`, `.pyw`), Starlark (`.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`,
+`BUCK`, `WORKSPACE`, `Tiltfile`), and Rust (`.rs`). A path into any other file fails the run.
 
 ### Writing a path
 
@@ -265,6 +265,16 @@ as `consts.go#/MaxPorts`.
 - Strings follow Python's escapes. An f-string with a field and bytes stay as written. A `\N{...}` escape fails the
   run for its name.
 - Starlark files, such as `BUILD` and `.bzl`, follow the same rules. A rule call is not a symbol.
+
+### Rust
+
+- Constants, statics, functions, types, traits, `macro_rules!` macros and modules are symbols. A type is not part of a
+  value: `const X: u8 = 3` is `3`.
+- The attributes above an item, such as `#[cfg(...)]`, are part of it. So a name defined under both `#[cfg(unix)]` and
+  `#[cfg(windows)]` is defined twice.
+- A module with a body is a symbol, but the items in it are not yet. `mod file;`, `impl` blocks, `use`, `extern`
+  blocks, `const _` and items that a macro makes are not symbols.
+- Strings follow Rust's escapes. Byte strings, C strings and characters stay as written.
 
 ## The config file (`blockwatch.toml`)
 

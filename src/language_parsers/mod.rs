@@ -1028,6 +1028,7 @@ mod tests {
             "py",
             "pyi",
             "pyw",
+            "rs",
             "star",
             "toml",
             "webmanifest",
@@ -1041,9 +1042,9 @@ mod tests {
 
     #[test]
     fn language_without_symbols_parse_symbols_returns_error() -> anyhow::Result<()> {
-        let mut parser = rust::parser()?;
+        let mut parser = ruby::parser()?;
 
-        let err = parser.parse_symbols("fn main() {}").unwrap_err();
+        let err = parser.parse_symbols("def main; end").unwrap_err();
 
         assert!(
             err.to_string()

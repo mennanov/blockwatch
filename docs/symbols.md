@@ -34,6 +34,7 @@ declares, instead of tags in a comment.
 | C, C++   | `.c`, `.h`, `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx`                       | [C and C++](#c-and-c)                       |
 | Python   | `.py`, `.pyi`, `.pyw`                                                          | [Python and Starlark](#python-and-starlark) |
 | Starlark | `.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`, `BUCK`, `WORKSPACE`, `Tiltfile` | [Python and Starlark](#python-and-starlark) |
+| Rust     | `.rs`                                                                          | [Rust](#rust)                               |
 
 <!-- </block> -->
 
@@ -387,6 +388,47 @@ def load(path):
 - **Starlark files, such as `BUILD` and `.bzl`, follow the same rules.** A rule call, such as
   `cc_library(name = "lib")`, is not a symbol.
 - **Class members are not symbols yet.**
+
+<!-- </block> -->
+
+## Rust
+
+<!-- <block name="rust-paths"> -->
+
+```rust
+pub(crate) const MAX_MESSAGE_SIZE: usize = 20 * 1024 * 1024;
+static NAMES: [&str; 2] = ["a", "b"];
+
+#[cfg(unix)]
+const PLATFORM: &str = "unix";
+#[cfg(windows)]
+const PLATFORM: &str = "windows";
+
+#[derive(Debug)]
+pub enum LogLevel {
+    Error,
+}
+
+fn run() {}
+```
+
+| Path                 | Points at                                     |
+|----------------------|-----------------------------------------------|
+| `#/MAX_MESSAGE_SIZE` | `20 * 1024 * 1024`                            |
+| `#/NAMES`            | `["a", "b"]`                                  |
+| `#/PLATFORM`         | a violation, as `PLATFORM` is defined twice   |
+| `#/LogLevel`         | the whole enum, `#[derive(Debug)]` included   |
+| `#/run`              | the whole function                            |
+
+- **Constants, statics, functions, types, traits, `macro_rules!` macros and modules are symbols.** A type is not part
+  of a value: `const X: u8 = 3` is `3`.
+- **The attributes above an item are part of it**, such as `#[cfg(...)]`. Its doc comments are not.
+- **A module with a body, such as `mod tests { ... }`, is a symbol, but the items in it are not yet.** `mod file;` is
+  not a symbol.
+- **`impl` blocks, `use`, `extern` blocks, `const _` and items that a macro makes, such as in `lazy_static!`, are not
+  symbols.**
+- **Strings follow Rust's escapes.** `"\u{e9}"` is `é`. A backslash at the end of a line also skips the spaces that
+  start the next line. A raw string is its text. Byte strings, C strings and characters stay as written.
 
 <!-- </block> -->
 
