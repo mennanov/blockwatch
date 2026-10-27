@@ -210,7 +210,9 @@ fn push_escape(escape: &str, bytes: &mut Vec<u8>) -> anyhow::Result<()> {
         'v' => 0x0b,
         '\\' => b'\\',
         '"' => b'"',
-        '0'..='7' => u8::from_str_radix(body, 8).map_err(|_| not_an_escape())?,
+        // Go needs all three digits: `\07` doesn't compile, though the grammar reads it as an
+        // escape.
+        '0'..='7' if body.len() == 3 => u8::from_str_radix(body, 8).map_err(|_| not_an_escape())?,
         'x' => u8::from_str_radix(digits, 16).map_err(|_| not_an_escape())?,
         'u' | 'U' => {
             let code = u32::from_str_radix(digits, 16).map_err(|_| not_an_escape())?;
@@ -392,6 +394,7 @@ var Raw = `a\n`
 var NotText = "\xff"
 var NoEscape = "\'"
 var Surrogate = "\ud800"
+var ShortOctal = "\07"
 var Fine = "ok"
 "#;
 
@@ -410,6 +413,10 @@ var Fine = "ok"
         assert_eq!(
             unresolved(source, "/Surrogate")?,
             r"blockwatch can't decode the string at line 5, column 17: `\ud800` stands for no character"
+        );
+        assert_eq!(
+            unresolved(source, "/ShortOctal")?,
+            r"blockwatch can't decode the string at line 6, column 18: `\07` is not an escape in a Go string"
         );
         Ok(())
     }

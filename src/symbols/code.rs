@@ -42,7 +42,8 @@ pub(crate) type StringDecoder = fn(&Node, &str) -> anyhow::Result<Option<String>
 /// - it appears as a whole word in a span the parser skipped anywhere in the file;
 /// - `decode_string` can't decode its value.
 ///
-/// A name unreadable for its own definition or value gets no symbol.
+/// A definition with a problem of its own gives no symbol. Another definition of the same name
+/// keeps its symbol, and so does a clean definition whose name a skipped span holds.
 // <block affects="docs/symbols.md:code-files, src/skill.md#/blockwatch/Symbols/Code files">
 pub(crate) fn symbols(
     tree: &Tree,
