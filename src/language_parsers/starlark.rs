@@ -1,13 +1,15 @@
-use crate::language_parsers::python::PythonSymbolsParser;
+use crate::language_parsers::python::Python;
 use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, python_style_comments_parser,
 };
+use crate::symbols::code::CodeSymbolsParser;
 
 /// Returns a [`LanguageParser`] for Starlark (Bazel), with its symbols.
 pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
     Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(PythonSymbolsParser::new(
+        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
             &tree_sitter_starlark::LANGUAGE.into(),
+            Python,
         )?),
     )
 }

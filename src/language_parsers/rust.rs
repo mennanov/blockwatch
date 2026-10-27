@@ -1,116 +1,100 @@
 use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
-    c_style_multiline_comment_processor, comment_visitor, node_text, tree_sitter_parser,
+    c_style_multiline_comment_processor, comment_visitor, node_text,
 };
-use crate::symbols::code::{self, Definition, Value};
-use crate::symbols::{Symbols, SymbolsParser};
-use anyhow::{Context, anyhow};
+use crate::symbols::code::{CodeLanguage, CodeSymbolsParser, Definition, Value};
+use anyhow::anyhow;
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Rust, with its symbols.
 pub(crate) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?).with_symbols(RustSymbolsParser::new()?))
+    Ok(
+        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
+            &tree_sitter_rust::LANGUAGE.into(),
+            Rust,
+        )?),
+    )
 }
 
-/// Finds the top-level items of a Rust file: constants, statics, functions, types, traits,
-/// macros and modules.
-struct RustSymbolsParser {
-    parser: tree_sitter::Parser,
-}
+/// Rust, whose top-level items are constants, statics, functions, types, traits, macros and
+/// modules.
+struct Rust;
 
-impl RustSymbolsParser {
-    /// # Errors
-    /// Returns an error if the Rust grammar cannot be loaded.
-    fn new() -> anyhow::Result<Self> {
-        let parser = tree_sitter_parser(&tree_sitter_rust::LANGUAGE.into())?;
-        Ok(Self { parser })
-    }
-}
-
-impl SymbolsParser for RustSymbolsParser {
-    fn parse(&mut self, source: &str) -> anyhow::Result<Symbols> {
-        let tree = self
-            .parser
-            .parse(source, None)
-            .context("failed to parse syntax tree")?;
-        let definitions = definitions(tree.root_node(), source);
-        Ok(code::symbols(&tree, source, &definitions, decode_string))
-    }
-}
-
-/// The top-level items under `root`, the root of a Rust file's syntax tree, in document order.
-/// `source` is the text of the file.
-fn definitions<'tree>(root: Node<'tree>, source: &str) -> Vec<Definition<'tree>> {
-    let mut cursor = root.walk();
-    root.named_children(&mut cursor)
-        .filter_map(|item| {
-            let value = match item.kind() {
-                "const_item" | "static_item" => item.child_by_field_name("value"),
-                "enum_item" | "struct_item" | "union_item" | "type_item" | "trait_item"
-                | "function_item" | "macro_definition" => None,
-                // `mod file;` only says which file holds the module.
-                "mod_item" if item.child_by_field_name("body").is_some() => None,
-                _ => return None,
-            };
-            // `const _` runs a check at compile time, and code can't refer to it.
-            let name = item
-                .child_by_field_name("name")
-                .filter(|name| node_text(name, source) != "_")?;
-            // The attributes above an item belong to it, even with comments between them.
-            let start = std::iter::successors(item.prev_sibling(), Node::prev_sibling)
-                .take_while(|node| node.kind() == "attribute_item" || node.is_extra())
-                .filter(|node| node.kind() == "attribute_item")
-                .last()
-                .unwrap_or(item)
-                .start_byte();
-            Some(Definition {
-                names: vec![name],
-                range: start..item.end_byte(),
-                value: value.map(Value::Node),
+impl CodeLanguage for Rust {
+    /// The top-level items under `root`, the root of a Rust file's syntax tree, in document order.
+    /// `source` is the text of the file.
+    fn definitions<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Definition<'tree>> {
+        let mut cursor = root.walk();
+        root.named_children(&mut cursor)
+            .filter_map(|item| {
+                let value = match item.kind() {
+                    "const_item" | "static_item" => item.child_by_field_name("value"),
+                    "enum_item" | "struct_item" | "union_item" | "type_item" | "trait_item"
+                    | "function_item" | "macro_definition" => None,
+                    // `mod file;` only says which file holds the module.
+                    "mod_item" if item.child_by_field_name("body").is_some() => None,
+                    _ => return None,
+                };
+                // `const _` runs a check at compile time, and code can't refer to it.
+                let name = item
+                    .child_by_field_name("name")
+                    .filter(|name| node_text(name, source) != "_")?;
+                // The attributes above an item belong to it, even with comments between them.
+                let start = std::iter::successors(item.prev_sibling(), Node::prev_sibling)
+                    .take_while(|node| node.kind() == "attribute_item" || node.is_extra())
+                    .filter(|node| node.kind() == "attribute_item")
+                    .last()
+                    .unwrap_or(item)
+                    .start_byte();
+                Some(Definition {
+                    names: vec![name],
+                    range: start..item.end_byte(),
+                    value: value.map(Value::Node),
+                })
             })
-        })
-        .collect()
-}
+            .collect()
+    }
 
-/// Decodes a Rust string literal. Returns `None` for any other node, and for a byte string or a
-/// C string.
-///
-/// # Errors
-/// Returns an error if an escape stands for no character.
-fn decode_string(node: &Node, source: &str) -> anyhow::Result<Option<String>> {
-    match node.kind() {
-        // A byte string or a C string starts with its prefix, such as `br"` or `c"`.
-        "string_literal" | "raw_string_literal"
-            if !node_text(node, source).starts_with(['b', 'c']) =>
-        {
-            let mut text = String::new();
-            // After a backslash at the end of a line, Rust skips the white space that starts the
-            // next lines.
-            let mut joined = false;
-            let mut cursor = node.walk();
-            // A raw string has no escapes, only its content.
-            for part in node.named_children(&mut cursor) {
-                let written = node_text(&part, source);
-                match part.kind() {
-                    "escape_sequence" if matches!(written, "\\\n" | "\\\r") => joined = true,
-                    "escape_sequence" => {
-                        joined = false;
-                        text.push(escaped_character(written)?);
-                    }
-                    _ => {
-                        let written = if joined {
-                            written.trim_start_matches([' ', '\t', '\n', '\r'])
-                        } else {
-                            written
-                        };
-                        // Rust reads a CRLF line end in a file as a line feed.
-                        text.push_str(&written.replace("\r\n", "\n"));
+    /// Decodes a Rust string literal. Returns `None` for any other node, and for a byte string or a
+    /// C string.
+    ///
+    /// # Errors
+    /// Returns an error if an escape stands for no character.
+    fn decode_string(&self, node: &Node, source: &str) -> anyhow::Result<Option<String>> {
+        match node.kind() {
+            // A byte string or a C string starts with its prefix, such as `br"` or `c"`.
+            "string_literal" | "raw_string_literal"
+                if !node_text(node, source).starts_with(['b', 'c']) =>
+            {
+                let mut text = String::new();
+                // After a backslash at the end of a line, Rust skips the white space that starts
+                // the next lines.
+                let mut joined = false;
+                let mut cursor = node.walk();
+                // A raw string has no escapes, only its content.
+                for part in node.named_children(&mut cursor) {
+                    let written = node_text(&part, source);
+                    match part.kind() {
+                        "escape_sequence" if matches!(written, "\\\n" | "\\\r") => joined = true,
+                        "escape_sequence" => {
+                            joined = false;
+                            text.push(escaped_character(written)?);
+                        }
+                        _ => {
+                            let written = if joined {
+                                written.trim_start_matches([' ', '\t', '\n', '\r'])
+                            } else {
+                                written
+                            };
+                            // Rust reads a CRLF line end in a file as a line feed.
+                            text.push_str(&written.replace("\r\n", "\n"));
+                        }
                     }
                 }
+                Ok(Some(text))
             }
-            Ok(Some(text))
+            _ => Ok(None),
         }
-        _ => Ok(None),
     }
 }
 
@@ -169,10 +153,11 @@ mod symbols_tests {
     use crate::symbols::code::test_utils::{
         decode_error, symbol, symbols, syntax_error, unresolved, value, values,
     };
+    use crate::symbols::{Symbols, SymbolsParser};
 
     /// The symbols of `source`, a Rust file.
     fn rust(source: &str) -> anyhow::Result<Symbols> {
-        RustSymbolsParser::new()?.parse(source)
+        CodeSymbolsParser::new(&tree_sitter_rust::LANGUAGE.into(), Rust)?.parse(source)
     }
 
     #[test]

@@ -1,18 +1,16 @@
 use crate::language_parsers;
-use crate::language_parsers::{
-    CommentsParser, LanguageParser, LanguageParserImpl, node_text, tree_sitter_parser,
-};
-use crate::symbols::code::{self, Definition, Value};
-use crate::symbols::{Symbols, SymbolsParser};
-use anyhow::{Context, anyhow, bail};
+use crate::language_parsers::{CommentsParser, LanguageParser, LanguageParserImpl, node_text};
+use crate::symbols::code::{CodeLanguage, CodeSymbolsParser, Definition, Value};
+use anyhow::{anyhow, bail};
 use std::ops::Range;
-use tree_sitter::{Language, Node};
+use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for TypeScript, with its symbols.
 pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
     Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(EcmaScriptSymbolsParser::new(
+        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
             &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            EcmaScript,
         )?),
     )
 }
@@ -23,84 +21,96 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     )
 }
 
-/// Finds the top-level names of a TypeScript or JavaScript file: variables, functions, classes,
-/// enums, interfaces, type aliases and namespaces.
-pub(super) struct EcmaScriptSymbolsParser {
-    parser: tree_sitter::Parser,
-}
+/// TypeScript or JavaScript, whose top-level names are variables, functions, classes, enums,
+/// interfaces, type aliases and namespaces.
+pub(super) struct EcmaScript;
 
-impl EcmaScriptSymbolsParser {
-    /// A parser for files in `language`: the TypeScript, the TSX or the JavaScript grammar.
+impl CodeLanguage for EcmaScript {
+    /// The top-level definitions under `root`, the root of a TypeScript or JavaScript file's syntax
+    /// tree, in document order. `source` is the text of the file.
+    fn definitions<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Definition<'tree>> {
+        let mut definitions = Vec::new();
+        let mut cursor = root.walk();
+        for statement in root.named_children(&mut cursor) {
+            let Some(declaration) = declaration(statement) else {
+                continue;
+            };
+            match declaration.kind() {
+                "lexical_declaration" | "variable_declaration" => {
+                    let mut inner = declaration.walk();
+                    let declarators: Vec<Node> = declaration
+                        .named_children(&mut inner)
+                        .filter(|child| child.kind() == "variable_declarator")
+                        .collect();
+                    // In `const A = 1, B = 2;`, each name covers only its own part.
+                    let several = declarators.len() > 1;
+                    for declarator in declarators {
+                        let range = if several {
+                            declarator.byte_range()
+                        } else {
+                            statement.byte_range()
+                        };
+                        let value = declarator
+                            .child_by_field_name("value")
+                            .map(|value| Value::Node(without_type_syntax(value)));
+                        definitions.extend(definition(declarator, range, value, source));
+                    }
+                }
+                "function_declaration"
+                | "generator_function_declaration"
+                | "class_declaration"
+                | "abstract_class_declaration"
+                | "interface_declaration"
+                | "type_alias_declaration"
+                | "enum_declaration"
+                | "internal_module"
+                | "module" => {
+                    definitions.extend(definition(
+                        declaration,
+                        statement.byte_range(),
+                        None,
+                        source,
+                    ));
+                }
+                _ => {}
+            }
+        }
+        definitions
+    }
+
+    /// Decodes a string, or a template without a `${...}` field. Returns `None` for any other node.
     ///
     /// # Errors
-    /// Returns an error if the grammar cannot be loaded.
-    pub(super) fn new(language: &Language) -> anyhow::Result<Self> {
-        let parser = tree_sitter_parser(language)?;
-        Ok(Self { parser })
-    }
-}
-
-impl SymbolsParser for EcmaScriptSymbolsParser {
-    fn parse(&mut self, source: &str) -> anyhow::Result<Symbols> {
-        let tree = self
-            .parser
-            .parse(source, None)
-            .context("failed to parse syntax tree")?;
-        let definitions = definitions(tree.root_node(), source);
-        Ok(code::symbols(&tree, source, &definitions, decode_string))
-    }
-}
-
-/// The top-level definitions under `root`, the root of a TypeScript or JavaScript file's syntax
-/// tree, in document order. `source` is the text of the file.
-fn definitions<'tree>(root: Node<'tree>, source: &str) -> Vec<Definition<'tree>> {
-    let mut definitions = Vec::new();
-    let mut cursor = root.walk();
-    for statement in root.named_children(&mut cursor) {
-        let Some(declaration) = declaration(statement) else {
-            continue;
-        };
-        match declaration.kind() {
-            "lexical_declaration" | "variable_declaration" => {
-                let mut inner = declaration.walk();
-                let declarators: Vec<Node> = declaration
-                    .named_children(&mut inner)
-                    .filter(|child| child.kind() == "variable_declarator")
-                    .collect();
-                // In `const A = 1, B = 2;`, each name covers only its own part.
-                let several = declarators.len() > 1;
-                for declarator in declarators {
-                    let range = if several {
-                        declarator.byte_range()
-                    } else {
-                        statement.byte_range()
-                    };
-                    let value = declarator
-                        .child_by_field_name("value")
-                        .map(|value| Value::Node(without_type_syntax(value)));
-                    definitions.extend(definition(declarator, range, value, source));
-                }
-            }
-            "function_declaration"
-            | "generator_function_declaration"
-            | "class_declaration"
-            | "abstract_class_declaration"
-            | "interface_declaration"
-            | "type_alias_declaration"
-            | "enum_declaration"
-            | "internal_module"
-            | "module" => {
-                definitions.extend(definition(
-                    declaration,
-                    statement.byte_range(),
-                    None,
-                    source,
-                ));
-            }
-            _ => {}
+    /// Returns an error if an escape is a legacy octal escape, or the string is not text, such as
+    /// half of a character.
+    fn decode_string(&self, node: &Node, source: &str) -> anyhow::Result<Option<String>> {
+        if !matches!(node.kind(), "string" | "template_string") {
+            return Ok(None);
         }
+        // A JavaScript string is UTF-16, so it is built from code units: an escape can give half of
+        // a character, which the next escape completes.
+        let mut units = Vec::new();
+        let mut cursor = node.walk();
+        for part in node.named_children(&mut cursor) {
+            let written = node_text(&part, source);
+            match part.kind() {
+                "escape_sequence" => push_escape(written, &mut units)?,
+                // A template with a field has no fixed text.
+                "template_substitution" => return Ok(None),
+                // A template reads a CRLF line end as a line feed. A string can't hold a line end.
+                _ => units.extend(written.replace("\r\n", "\n").encode_utf16()),
+            }
+        }
+        char::decode_utf16(units)
+            .collect::<Result<String, _>>()
+            .map(Some)
+            .map_err(|error| {
+                anyhow!(
+                    "the string holds U+{:04X}, which is only half of a character",
+                    error.unpaired_surrogate()
+                )
+            })
     }
-    definitions
 }
 
 /// The declaration that `statement`, a top-level statement, holds: past its `export` and its
@@ -168,40 +178,6 @@ fn without_type_syntax(mut value: Node<'_>) -> Node<'_> {
     value
 }
 
-/// Decodes a string, or a template without a `${...}` field. Returns `None` for any other node.
-///
-/// # Errors
-/// Returns an error if an escape is a legacy octal escape, or the string is not text, such as
-/// half of a character.
-fn decode_string(node: &Node, source: &str) -> anyhow::Result<Option<String>> {
-    if !matches!(node.kind(), "string" | "template_string") {
-        return Ok(None);
-    }
-    // A JavaScript string is UTF-16, so it is built from code units: an escape can give half of
-    // a character, which the next escape completes.
-    let mut units = Vec::new();
-    let mut cursor = node.walk();
-    for part in node.named_children(&mut cursor) {
-        let written = node_text(&part, source);
-        match part.kind() {
-            "escape_sequence" => push_escape(written, &mut units)?,
-            // A template with a field has no fixed text.
-            "template_substitution" => return Ok(None),
-            // A template reads a CRLF line end as a line feed. A string can't hold a line end.
-            _ => units.extend(written.replace("\r\n", "\n").encode_utf16()),
-        }
-    }
-    char::decode_utf16(units)
-        .collect::<Result<String, _>>()
-        .map(Some)
-        .map_err(|error| {
-            anyhow!(
-                "the string holds U+{:04X}, which is only half of a character",
-                error.unpaired_surrogate()
-            )
-        })
-}
-
 /// Adds the UTF-16 code units that `escape`, such as `\n` or `\u{e9}`, stands for to `units`.
 ///
 /// # Errors
@@ -247,21 +223,26 @@ mod symbols_tests {
     use crate::symbols::code::test_utils::{
         decode_error, symbol, symbols, syntax_error, unresolved, value, values,
     };
+    use crate::symbols::{Symbols, SymbolsParser};
 
     /// The symbols of `source`, a TypeScript file.
     fn typescript(source: &str) -> anyhow::Result<Symbols> {
-        EcmaScriptSymbolsParser::new(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())?
-            .parse(source)
+        CodeSymbolsParser::new(
+            &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            EcmaScript,
+        )?
+        .parse(source)
     }
 
     /// The symbols of `source`, a TSX file.
     fn tsx(source: &str) -> anyhow::Result<Symbols> {
-        EcmaScriptSymbolsParser::new(&tree_sitter_typescript::LANGUAGE_TSX.into())?.parse(source)
+        CodeSymbolsParser::new(&tree_sitter_typescript::LANGUAGE_TSX.into(), EcmaScript)?
+            .parse(source)
     }
 
     /// The symbols of `source`, a JavaScript file.
     fn javascript(source: &str) -> anyhow::Result<Symbols> {
-        EcmaScriptSymbolsParser::new(&tree_sitter_javascript::LANGUAGE.into())?.parse(source)
+        CodeSymbolsParser::new(&tree_sitter_javascript::LANGUAGE.into(), EcmaScript)?.parse(source)
     }
 
     #[test]

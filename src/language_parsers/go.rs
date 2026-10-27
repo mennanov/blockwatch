@@ -1,16 +1,18 @@
 use crate::language_parsers;
-use crate::language_parsers::{
-    CommentsParser, LanguageParser, LanguageParserImpl, node_text, tree_sitter_parser,
-};
-use crate::symbols::code::{self, Definition, Value};
-use crate::symbols::{Symbols, SymbolsParser};
+use crate::language_parsers::{CommentsParser, LanguageParser, LanguageParserImpl, node_text};
+use crate::symbols::code::{CodeLanguage, CodeSymbolsParser, Definition, Value};
 use anyhow::{Context, anyhow};
 use std::ops::Range;
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Go source files, with their symbols.
 pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?).with_symbols(GoSymbolsParser::new()?))
+    Ok(
+        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
+            &tree_sitter_go::LANGUAGE.into(),
+            Go,
+        )?),
+    )
 }
 
 /// Returns a [`LanguageParser`] for `go.mod`, `go.sum` and `go.work`. They have Go's comments,
@@ -19,45 +21,48 @@ pub(super) fn module_files_parser() -> anyhow::Result<impl LanguageParser> {
     Ok(LanguageParserImpl::new(comments_parser()?))
 }
 
-/// Finds the top-level names of a Go file: constants, variables, types and functions.
-struct GoSymbolsParser {
-    parser: tree_sitter::Parser,
-}
+/// Go, whose top-level names are constants, variables, types and functions.
+struct Go;
 
-impl GoSymbolsParser {
+impl CodeLanguage for Go {
+    /// The top-level definitions under `root`, the root of a Go file's syntax tree, in document
+    /// order. `source` is the text of the file.
+    fn definitions<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Definition<'tree>> {
+        let mut cursor = root.walk();
+        root.named_children(&mut cursor)
+            .flat_map(|node| match node.kind() {
+                "const_declaration" | "var_declaration" | "type_declaration" => {
+                    declaration_definitions(node, source)
+                }
+                "function_declaration" => function_definition(node, source).into_iter().collect(),
+                // A method belongs to its type, so it gets a path under the type, not one of its
+                // own.
+                _ => Vec::new(),
+            })
+            .collect()
+    }
+
+    /// Decodes a Go string literal, following Go's escapes. Returns `None` for any other node.
+    ///
     /// # Errors
-    /// Returns an error if the Go grammar cannot be loaded.
-    fn new() -> anyhow::Result<Self> {
-        let parser = tree_sitter_parser(&tree_sitter_go::LANGUAGE.into())?;
-        Ok(Self { parser })
-    }
-}
-
-impl SymbolsParser for GoSymbolsParser {
-    fn parse(&mut self, source: &str) -> anyhow::Result<Symbols> {
-        let tree = self
-            .parser
-            .parse(source, None)
-            .context("failed to parse syntax tree")?;
-        let definitions = definitions(tree.root_node(), source);
-        Ok(code::symbols(&tree, source, &definitions, decode_string))
-    }
-}
-
-/// The top-level definitions under `root`, the root of a Go file's syntax tree, in document
-/// order. `source` is the text of the file.
-fn definitions<'tree>(root: Node<'tree>, source: &str) -> Vec<Definition<'tree>> {
-    let mut cursor = root.walk();
-    root.named_children(&mut cursor)
-        .flat_map(|node| match node.kind() {
-            "const_declaration" | "var_declaration" | "type_declaration" => {
-                declaration_definitions(node, source)
+    /// Returns an error if an escape is not one Go has, stands for no character, or makes bytes
+    /// that are not UTF-8 text.
+    fn decode_string(&self, node: &Node, source: &str) -> anyhow::Result<Option<String>> {
+        match node.kind() {
+            "interpreted_string_literal" => decode_interpreted_string(node, source).map(Some),
+            "raw_string_literal" => {
+                let text = node_text(node, source);
+                let content = text
+                    .strip_prefix('`')
+                    .and_then(|text| text.strip_suffix('`'))
+                    .context("a raw string is between backquotes")?;
+                // Go drops each carriage return in a raw string, so a file saved with CRLF line
+                // endings gives the same value.
+                Ok(Some(content.replace('\r', "")))
             }
-            "function_declaration" => function_definition(node, source).into_iter().collect(),
-            // A method belongs to its type, so it gets a path under the type, not one of its own.
-            _ => Vec::new(),
-        })
-        .collect()
+            _ => Ok(None),
+        }
+    }
 }
 
 /// The definitions of `declaration`, a `const`, `var` or `type` declaration, with one for each
@@ -146,28 +151,6 @@ fn function_definition<'tree>(function: Node<'tree>, source: &str) -> Option<Def
             range: function.byte_range(),
             value: None,
         }),
-    }
-}
-
-/// Decodes a Go string literal, following Go's escapes. Returns `None` for any other node.
-///
-/// # Errors
-/// Returns an error if an escape is not one Go has, stands for no character, or makes bytes that
-/// are not UTF-8 text.
-fn decode_string(node: &Node, source: &str) -> anyhow::Result<Option<String>> {
-    match node.kind() {
-        "interpreted_string_literal" => decode_interpreted_string(node, source).map(Some),
-        "raw_string_literal" => {
-            let text = node_text(node, source);
-            let content = text
-                .strip_prefix('`')
-                .and_then(|text| text.strip_suffix('`'))
-                .context("a raw string is between backquotes")?;
-            // Go drops each carriage return in a raw string, so a file saved with CRLF line
-            // endings gives the same value.
-            Ok(Some(content.replace('\r', "")))
-        }
-        _ => Ok(None),
     }
 }
 

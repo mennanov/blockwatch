@@ -39,7 +39,7 @@ impl SymbolsParser for CSymbolsParser {
             .parse(fixed_directive_line_ends(source).as_ref(), None)
             .context("failed to parse syntax tree")?;
         let definitions = definitions(tree.root_node(), source, &mut self.parser)?;
-        Ok(code::symbols(&tree, source, &definitions, decode_string))
+        Ok(code::symbols(&tree, source, &definitions, &decode_string))
     }
 }
 
@@ -428,7 +428,7 @@ fn macro_value<'tree>(
             byte_range: body.start_byte()..body.start_byte() + written.len(),
         })));
     };
-    let value = code::node_value(initializer, &text, decode_string)
+    let value = code::node_value(initializer, &text, &decode_string)
         .map(|value| ScalarValue {
             text: value.text,
             byte_range: in_file(value.byte_range.start)..in_file(value.byte_range.end),

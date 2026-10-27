@@ -1,90 +1,107 @@
 use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, node_text, python_style_comments_parser,
-    tree_sitter_parser,
 };
-use crate::symbols::code::{self, Definition, Value};
-use crate::symbols::{Symbols, SymbolsParser};
-use anyhow::{Context, anyhow};
-use tree_sitter::{Language, Node};
+use crate::symbols::code::{CodeLanguage, CodeSymbolsParser, Definition, Value};
+use anyhow::anyhow;
+use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Python, with its symbols.
 pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
     Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(PythonSymbolsParser::new(
+        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
             &tree_sitter_python::LANGUAGE.into(),
+            Python,
         )?),
     )
 }
 
-/// Finds the top-level names of a Python or Starlark file: variables, functions, classes and
-/// type aliases.
-pub(super) struct PythonSymbolsParser {
-    parser: tree_sitter::Parser,
-}
+/// Python or Starlark, whose top-level names are variables, functions, classes and type aliases.
+pub(super) struct Python;
 
-impl PythonSymbolsParser {
-    /// A parser for files in `language`, the Python or the Starlark grammar.
+impl CodeLanguage for Python {
+    /// The top-level definitions under `root`, the root of a Python or Starlark file's syntax
+    /// tree, in document order. `source` is the text of the file.
+    fn definitions<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Definition<'tree>> {
+        let mut definitions = Vec::new();
+        // The walk keeps its own stack, as deeply nested source could overflow the call stack.
+        let mut pending = vec![root];
+        let mut cursor = root.walk();
+        while let Some(node) = pending.pop() {
+            let definition = match node.kind() {
+                // Python gives the names in these bodies to the module, as it does at the top
+                // level. A loop or a `match` binds a name each time it runs, so its body doesn't
+                // count.
+                "module" | "block" | "if_statement" | "elif_clause" | "else_clause"
+                | "try_statement" | "except_clause" | "finally_clause" | "with_statement" => {
+                    let first = pending.len();
+                    pending.extend(node.named_children(&mut cursor));
+                    // The stack takes the last child first, so the children go on it in reverse.
+                    pending[first..].reverse();
+                    None
+                }
+                "expression_statement" => node
+                    .named_child(0)
+                    .filter(|child| child.kind() == "assignment")
+                    .and_then(|assignment| assignment_definition(node, assignment, source)),
+                "function_definition" | "class_definition" => named_definition(node, node, source),
+                "decorated_definition" => node
+                    .child_by_field_name("definition")
+                    .and_then(|definition| named_definition(node, definition, source)),
+                "type_alias_statement" => node
+                    .child_by_field_name("left")
+                    .and_then(|alias| alias.named_child(0))
+                    // `type Pair[T] = ...` writes its name in a generic type.
+                    .and_then(|alias| match alias.kind() {
+                        "generic_type" => alias.named_child(0),
+                        _ => Some(alias),
+                    })
+                    .and_then(|name| definition(node, vec![name], None, source)),
+                _ => None,
+            };
+            definitions.extend(definition);
+        }
+        definitions
+    }
+
+    /// Decodes a Python string, or several written one after the other, which Python joins. Returns
+    /// `None` for any other node, for bytes, and for an f-string with a field, such as `f"{x}"`.
     ///
     /// # Errors
-    /// Returns an error if the grammar cannot be loaded.
-    pub(super) fn new(language: &Language) -> anyhow::Result<Self> {
-        let parser = tree_sitter_parser(language)?;
-        Ok(Self { parser })
-    }
-}
-
-impl SymbolsParser for PythonSymbolsParser {
-    fn parse(&mut self, source: &str) -> anyhow::Result<Symbols> {
-        let tree = self
-            .parser
-            .parse(source, None)
-            .context("failed to parse syntax tree")?;
-        let definitions = definitions(tree.root_node(), source);
-        Ok(code::symbols(&tree, source, &definitions, decode_string))
-    }
-}
-
-/// The top-level definitions under `root`, the root of a Python or Starlark file's syntax tree,
-/// in document order. `source` is the text of the file.
-fn definitions<'tree>(root: Node<'tree>, source: &str) -> Vec<Definition<'tree>> {
-    let mut definitions = Vec::new();
-    // The walk keeps its own stack, as deeply nested source could overflow the call stack.
-    let mut pending = vec![root];
-    let mut cursor = root.walk();
-    while let Some(node) = pending.pop() {
-        let definition = match node.kind() {
-            // Python gives the names in these bodies to the module, as it does at the top level.
-            // A loop or a `match` binds a name each time it runs, so its body doesn't count.
-            "module" | "block" | "if_statement" | "elif_clause" | "else_clause"
-            | "try_statement" | "except_clause" | "finally_clause" | "with_statement" => {
-                let first = pending.len();
-                pending.extend(node.named_children(&mut cursor));
-                // The stack takes the last child first, so the children go on it in reverse.
-                pending[first..].reverse();
-                None
+    /// Returns an error if an escape gives a character by its name, or stands for no character.
+    fn decode_string(&self, node: &Node, source: &str) -> anyhow::Result<Option<String>> {
+        let mut cursor = node.walk();
+        match node.kind() {
+            "concatenated_string" => {
+                let mut joined = String::new();
+                for part in node.named_children(&mut cursor) {
+                    if part.is_extra() {
+                        continue;
+                    }
+                    match self.decode_string(&part, source)? {
+                        Some(text) => joined.push_str(&text),
+                        None => return Ok(None),
+                    }
+                }
+                Ok(Some(joined))
             }
-            "expression_statement" => node
-                .named_child(0)
-                .filter(|child| child.kind() == "assignment")
-                .and_then(|assignment| assignment_definition(node, assignment, source)),
-            "function_definition" | "class_definition" => named_definition(node, node, source),
-            "decorated_definition" => node
-                .child_by_field_name("definition")
-                .and_then(|definition| named_definition(node, definition, source)),
-            "type_alias_statement" => node
-                .child_by_field_name("left")
-                .and_then(|alias| alias.named_child(0))
-                // `type Pair[T] = ...` writes its name in a generic type.
-                .and_then(|alias| match alias.kind() {
-                    "generic_type" => alias.named_child(0),
-                    _ => Some(alias),
-                })
-                .and_then(|name| definition(node, vec![name], None, source)),
-            _ => None,
-        };
-        definitions.extend(definition);
+            "string" => {
+                // The start holds the prefix and the opening quotes, such as `rb"`.
+                let bytes = node
+                    .child(0)
+                    .is_some_and(|start| node_text(&start, source).contains(['b', 'B']));
+                let parts: Vec<Node> = node.named_children(&mut cursor).collect();
+                if bytes || parts.iter().any(|part| part.kind() == "interpolation") {
+                    return Ok(None);
+                }
+                let mut text = String::new();
+                for part in parts.iter().filter(|part| part.kind() == "string_content") {
+                    push_content(part, source, &mut text)?;
+                }
+                Ok(Some(text))
+            }
+            _ => Ok(None),
+        }
     }
-    definitions
 }
 
 /// The definition of `statement`, which holds `assignment`, or `None` when it assigns to no name,
@@ -129,46 +146,6 @@ fn definition<'tree>(
         range: node.byte_range(),
         value,
     })
-}
-
-/// Decodes a Python string, or several written one after the other, which Python joins. Returns
-/// `None` for any other node, for bytes, and for an f-string with a field, such as `f"{x}"`.
-///
-/// # Errors
-/// Returns an error if an escape gives a character by its name, or stands for no character.
-fn decode_string(node: &Node, source: &str) -> anyhow::Result<Option<String>> {
-    let mut cursor = node.walk();
-    match node.kind() {
-        "concatenated_string" => {
-            let mut joined = String::new();
-            for part in node.named_children(&mut cursor) {
-                if part.is_extra() {
-                    continue;
-                }
-                match decode_string(&part, source)? {
-                    Some(text) => joined.push_str(&text),
-                    None => return Ok(None),
-                }
-            }
-            Ok(Some(joined))
-        }
-        "string" => {
-            // The start holds the prefix and the opening quotes, such as `rb"`.
-            let bytes = node
-                .child(0)
-                .is_some_and(|start| node_text(&start, source).contains(['b', 'B']));
-            let parts: Vec<Node> = node.named_children(&mut cursor).collect();
-            if bytes || parts.iter().any(|part| part.kind() == "interpolation") {
-                return Ok(None);
-            }
-            let mut text = String::new();
-            for part in parts.iter().filter(|part| part.kind() == "string_content") {
-                push_content(part, source, &mut text)?;
-            }
-            Ok(Some(text))
-        }
-        _ => Ok(None),
-    }
 }
 
 /// Adds the text of `content`, a part of a string between its quotes and its fields, to `text`.
@@ -265,15 +242,16 @@ mod symbols_tests {
     use crate::symbols::code::test_utils::{
         decode_error, symbol, symbols, syntax_error, unresolved, value, values,
     };
+    use crate::symbols::{Symbols, SymbolsParser};
 
     /// The symbols of `source`, a Python file.
     fn python(source: &str) -> anyhow::Result<Symbols> {
-        PythonSymbolsParser::new(&tree_sitter_python::LANGUAGE.into())?.parse(source)
+        CodeSymbolsParser::new(&tree_sitter_python::LANGUAGE.into(), Python)?.parse(source)
     }
 
     /// The symbols of `source`, a Starlark file.
     fn starlark(source: &str) -> anyhow::Result<Symbols> {
-        PythonSymbolsParser::new(&tree_sitter_starlark::LANGUAGE.into())?.parse(source)
+        CodeSymbolsParser::new(&tree_sitter_starlark::LANGUAGE.into(), Python)?.parse(source)
     }
 
     #[test]

@@ -1,13 +1,14 @@
 //! Turns the top-level definitions of a code file into symbols, with the rules every programming
 //! language shares: what a value is, and which names a syntax error makes unreadable.
 
-use super::{ScalarValue, Symbol, Symbols};
-use crate::language_parsers::node_text;
+use super::{ScalarValue, Symbol, Symbols, SymbolsParser};
+use crate::language_parsers::{node_text, tree_sitter_parser};
 use crate::symbol_path::SymbolPath;
 use crate::{Position, character_column_at};
+use anyhow::Context;
 use std::collections::HashMap;
 use std::ops::Range;
-use tree_sitter::{Node, Tree};
+use tree_sitter::{Language, Node, Tree};
 
 /// A top-level definition that a language's walk found in a syntax tree.
 pub(crate) struct Definition<'tree> {
@@ -30,14 +31,56 @@ pub(crate) enum Value<'tree> {
     Read(Result<ScalarValue, (Position, anyhow::Error)>),
 }
 
-/// Turns a string literal into its text, following the language's own quoting and escaping
-/// rules. Returns `None` for a node that is not a string literal, and for a string that is not
-/// text, such as bytes. Their value is kept as written.
-///
-/// # Errors
-/// Returns an error if the string uses an escape that blockwatch can't decode. The error shows
-/// the escape.
-type StringDecoder = fn(&Node, &str) -> anyhow::Result<Option<String>>;
+/// Turns a string literal into its text, as [`CodeLanguage::decode_string`] does.
+type StringDecoder<'a> = &'a dyn Fn(&Node, &str) -> anyhow::Result<Option<String>>;
+
+/// A programming language whose top-level definitions are its symbols.
+pub(crate) trait CodeLanguage: Send + Sync {
+    /// The top-level definitions under `root`, the root of a file's syntax tree, in document
+    /// order. `source` is the text of the file.
+    fn definitions<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Definition<'tree>>;
+
+    /// Turns a string literal into its text, following the language's own quoting and escaping
+    /// rules. Returns `None` for a node that is not a string literal, and for a string that is
+    /// not text, such as bytes. Their value is kept as written.
+    ///
+    /// # Errors
+    /// Returns an error if the string uses an escape that blockwatch can't decode. The error
+    /// shows the escape.
+    fn decode_string(&self, node: &Node, source: &str) -> anyhow::Result<Option<String>>;
+}
+
+/// Finds the symbols of a file in `language`.
+pub(crate) struct CodeSymbolsParser<L> {
+    parser: tree_sitter::Parser,
+    language: L,
+}
+
+impl<L: CodeLanguage> CodeSymbolsParser<L> {
+    /// A parser for files written in `grammar`, a tree-sitter grammar of `language`.
+    ///
+    /// # Errors
+    /// Returns an error if the grammar cannot be loaded.
+    pub(crate) fn new(grammar: &Language, language: L) -> anyhow::Result<Self> {
+        Ok(Self {
+            parser: tree_sitter_parser(grammar)?,
+            language,
+        })
+    }
+}
+
+impl<L: CodeLanguage> SymbolsParser for CodeSymbolsParser<L> {
+    fn parse(&mut self, source: &str) -> anyhow::Result<Symbols> {
+        let tree = self
+            .parser
+            .parse(source, None)
+            .context("failed to parse syntax tree")?;
+        let definitions = self.language.definitions(tree.root_node(), source);
+        Ok(symbols(&tree, source, &definitions, &|node, source| {
+            self.language.decode_string(node, source)
+        }))
+    }
+}
 
 /// The symbols of `source`, a code file parsed into `tree`, built from the top-level
 /// `definitions` that a language's walk found in it.
@@ -60,7 +103,7 @@ pub(crate) fn symbols(
     tree: &Tree,
     source: &str,
     definitions: &[Definition],
-    decode_string: StringDecoder,
+    decode_string: StringDecoder<'_>,
 ) -> Symbols {
     let errors = syntax_errors(tree);
     let mut symbols = Vec::new();
@@ -142,7 +185,7 @@ fn read_value<'tree>(
     definition: &Definition<'tree>,
     source: &str,
     errors: &[Node<'tree>],
-    decode_string: StringDecoder,
+    decode_string: StringDecoder<'_>,
 ) -> Result<Option<ScalarValue>, Problem<'tree>> {
     // The parser may have read the definition wrongly around the error, so its value could be
     // another definition's.
@@ -176,7 +219,7 @@ fn read_value<'tree>(
 pub(crate) fn node_value<'tree>(
     node: Node<'tree>,
     source: &str,
-    decode_string: StringDecoder,
+    decode_string: StringDecoder<'_>,
 ) -> Result<ScalarValue, (Node<'tree>, anyhow::Error)> {
     let value = without_parentheses(node);
     let text = match decode_string(&value, source) {
@@ -375,7 +418,7 @@ mod tests {
             .parse(source, None)
             .context("failed to parse syntax tree")?;
         let definitions = python_definitions(&tree);
-        Ok(symbols(&tree, source, &definitions, decode_plain_string))
+        Ok(symbols(&tree, source, &definitions, &decode_plain_string))
     }
 
     /// The top-level definitions of a Python file that the tests use: assignments to names,

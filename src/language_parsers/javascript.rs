@@ -1,12 +1,14 @@
 use crate::language_parsers;
-use crate::language_parsers::typescript::EcmaScriptSymbolsParser;
+use crate::language_parsers::typescript::EcmaScript;
 use crate::language_parsers::{CommentsParser, LanguageParser, LanguageParserImpl};
+use crate::symbols::code::CodeSymbolsParser;
 
 /// Returns a [`LanguageParser`] for JavaScript, with its symbols.
 pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
     Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(EcmaScriptSymbolsParser::new(
+        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
             &tree_sitter_javascript::LANGUAGE.into(),
+            EcmaScript,
         )?),
     )
 }
