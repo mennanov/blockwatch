@@ -24,11 +24,13 @@ pub(crate) struct Definition<'tree> {
 /// The value of a [`Definition`].
 pub(crate) enum Value<'tree> {
     /// An initializer in the syntax tree, such as `20 * 1024` or `"text"`.
-    Node(Node<'tree>),
+    Initializer(Node<'tree>),
     /// A value that the walk read from the text itself, because the grammar doesn't parse it,
-    /// such as the body of a C macro. Or why it couldn't: the position of the problem and the
-    /// error.
-    Read(Result<ScalarValue, (Position, anyhow::Error)>),
+    /// such as the body of a C macro.
+    Read(ScalarValue),
+    /// A value that the walk could not read from the text, with the position of the problem and
+    /// the error.
+    Undecodable(Position, anyhow::Error),
 }
 
 /// Turns a string literal into its text, as [`CodeLanguage::decode_string`] does.
@@ -196,15 +198,13 @@ fn read_value<'tree>(
         return Err(Problem::SyntaxError(*error));
     }
     match &definition.value {
-        Some(Value::Node(value)) => {
-            node_value(*value, source, decode_string)
-                .map(Some)
-                .map_err(|(string, error)| {
-                    Problem::Undecodable(position(&string, source), format!("{error:#}"))
-                })
-        }
-        Some(Value::Read(Ok(value))) => Ok(Some(value.clone())),
-        Some(Value::Read(Err((position, error)))) => {
+        Some(Value::Initializer(value)) => node_value(*value, source, decode_string)
+            .map(Some)
+            .map_err(|(string, error)| {
+                Problem::Undecodable(position(&string, source), format!("{error:#}"))
+            }),
+        Some(Value::Read(value)) => Ok(Some(value.clone())),
+        Some(Value::Undecodable(position, error)) => {
             Err(Problem::Undecodable(*position, format!("{error:#}")))
         }
         None => Ok(None),
@@ -512,7 +512,7 @@ mod tests {
         (!names.is_empty()).then_some(Definition {
             names,
             range: statement.byte_range(),
-            value: value.map(Value::Node),
+            value: value.map(Value::Initializer),
         })
     }
 

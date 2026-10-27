@@ -52,7 +52,7 @@ impl CodeLanguage for EcmaScript {
                         };
                         let value = declarator
                             .child_by_field_name("value")
-                            .map(|value| Value::Node(without_type_syntax(value)));
+                            .map(|value| Value::Initializer(without_type_syntax(value)));
                         definitions.extend(definition(declarator, range, value, source));
                     }
                 }

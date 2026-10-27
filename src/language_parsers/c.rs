@@ -208,7 +208,7 @@ fn declaration_definitions(declaration: Node<'_>, start: usize) -> Vec<Definitio
             } else {
                 declarator.byte_range()
             },
-            value: value.map(Value::Node),
+            value: value.map(Value::Initializer),
         });
     }
     definitions
@@ -304,7 +304,9 @@ fn enumerators(specifier: Node<'_>) -> Vec<Definition<'_>> {
             Some(Definition {
                 names: vec![enumerator.child_by_field_name("name")?],
                 range: enumerator.byte_range(),
-                value: enumerator.child_by_field_name("value").map(Value::Node),
+                value: enumerator
+                    .child_by_field_name("value")
+                    .map(Value::Initializer),
             })
         })
         .collect()
@@ -380,10 +382,10 @@ fn macro_value<'tree>(
     parser: &mut tree_sitter::Parser,
 ) -> anyhow::Result<Value<'tree>> {
     let Some(body) = node.child_by_field_name("value") else {
-        return Ok(Value::Read(Ok(ScalarValue {
+        return Ok(Value::Read(ScalarValue {
             text: String::new(),
             byte_range: name.end_byte()..name.end_byte(),
-        })));
+        }));
     };
     // The grammar keeps the body as one token. As the value of a variable, its strings,
     // parentheses and comments parse as they do in code.
@@ -423,23 +425,23 @@ fn macro_value<'tree>(
         .and_then(|declarator| declarator.child_by_field_name("value"))
         .filter(|value| !root.has_error() && value.end_byte() == PREFIX.len() + written.len());
     let Some(initializer) = initializer else {
-        return Ok(Value::Read(Ok(ScalarValue {
+        return Ok(Value::Read(ScalarValue {
             text: written.to_string(),
             byte_range: body.start_byte()..body.start_byte() + written.len(),
-        })));
+        }));
     };
-    let value = code::node_value(initializer, &text, &decode_string)
-        .map(|value| ScalarValue {
+    Ok(match code::node_value(initializer, &text, &decode_string) {
+        Ok(value) => Value::Read(ScalarValue {
             text: value.text,
             byte_range: in_file(value.byte_range.start)..in_file(value.byte_range.end),
-        })
-        .map_err(|(string, error)| {
+        }),
+        Err((string, error)) => {
             // The body starts on the macro's line, so the rows of `text` count from there.
             let line = body.start_position().row + string.start_position().row + 1;
             let at = in_file(string.start_byte());
-            (Position::new(line, character_column_at(source, at)), error)
-        });
-    Ok(Value::Read(value))
+            Value::Undecodable(Position::new(line, character_column_at(source, at)), error)
+        }
+    })
 }
 
 /// Decodes a C or C++ string literal, or several written one after the other, which C joins.

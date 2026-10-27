@@ -136,7 +136,7 @@ fn spec_definitions<'tree>(
         .map(|(index, name)| Definition {
             names: vec![*name],
             range: range.clone(),
-            value: paired.then(|| Value::Node(values[index])),
+            value: paired.then(|| Value::Initializer(values[index])),
         })
         .collect()
 }

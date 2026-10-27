@@ -48,7 +48,7 @@ impl CodeLanguage for Rust {
                 Some(Definition {
                     names: vec![name],
                     range: start..item.end_byte(),
-                    value: value.map(Value::Node),
+                    value: value.map(Value::Initializer),
                 })
             })
             .collect()

@@ -107,7 +107,7 @@ fn assignment_definition<'tree>(
         match assignment.child_by_field_name("right") {
             Some(right) if right.kind() == "assignment" => assignment = right,
             // `X: int` declares a name without a value.
-            value => return definition(statement, names, value.map(Value::Node), source),
+            value => return definition(statement, names, value.map(Value::Initializer), source),
         }
     }
 }
