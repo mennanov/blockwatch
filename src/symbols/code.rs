@@ -2,7 +2,7 @@
 //! language shares: what a value is, and which names a syntax error makes unreadable.
 
 use super::{ScalarValue, Symbol, Symbols};
-use crate::LineIndex;
+use crate::character_column_at;
 use crate::language_parsers::node_text;
 use crate::symbol_path::SymbolPath;
 use std::collections::HashMap;
@@ -44,14 +44,13 @@ pub(crate) type StringDecoder = fn(&Node, &str) -> anyhow::Result<Option<String>
 ///
 /// A definition with a problem of its own gives no symbol. Another definition of the same name
 /// keeps its symbol, and so does a clean definition whose name a skipped span holds.
-// <block affects="docs/symbols.md:code-files, src/skill.md#/blockwatch/Symbols/Code files">
+// <block name="code-symbol-rules" affects="docs/symbols.md:code-files, src/skill.md#/blockwatch/Symbols/Code files">
 pub(crate) fn symbols(
     tree: &Tree,
     source: &str,
     definitions: &[Definition],
     decode_string: StringDecoder,
 ) -> Symbols {
-    let lines = LineIndex::new(source);
     let errors = syntax_errors(tree);
     let mut symbols = Vec::new();
     let mut unreadable = HashMap::new();
@@ -67,7 +66,7 @@ pub(crate) fn symbols(
                 for name in names {
                     unreadable
                         .entry(name.to_string())
-                        .or_insert_with(|| problem.reason(name, &lines));
+                        .or_insert_with(|| problem.reason(name, source));
                 }
             }
         }
@@ -79,7 +78,7 @@ pub(crate) fn symbols(
         for name in names_in(node_text(error, source)) {
             unreadable
                 .entry(name.to_string())
-                .or_insert_with(|| Problem::SyntaxError(*error).reason(name, &lines));
+                .or_insert_with(|| Problem::SyntaxError(*error).reason(name, source));
         }
     }
     Symbols {
@@ -97,23 +96,21 @@ enum Problem<'tree> {
 }
 
 impl Problem<'_> {
-    /// The reason to report for `name`, with `lines` indexing the source.
-    fn reason(&self, name: &str, lines: &LineIndex) -> String {
+    /// The reason to report for `name`, which shows where in `source` the problem is.
+    fn reason(&self, name: &str, source: &str) -> String {
+        let node = match self {
+            Problem::SyntaxError(node) | Problem::Undecodable(node, _) => node,
+        };
+        // tree-sitter counts the rows, so only the column needs the text, and only of one line.
+        let line = node.start_position().row + 1;
+        let column = character_column_at(source, node.start_byte());
         match self {
-            Problem::SyntaxError(node) => {
-                let position = lines.position(node.start_byte());
-                format!(
-                    "file has a syntax error at line {}, column {} near {name}, and the path could resolve to the wrong value",
-                    position.line, position.character
-                )
-            }
-            Problem::Undecodable(node, error) => {
-                let position = lines.position(node.start_byte());
-                format!(
-                    "blockwatch can't decode the string at line {}, column {}: {error:#}",
-                    position.line, position.character
-                )
-            }
+            Problem::SyntaxError(_) => format!(
+                "file has a syntax error at line {line}, column {column} near {name}, and the path could resolve to the wrong value"
+            ),
+            Problem::Undecodable(_, error) => format!(
+                "blockwatch can't decode the string at line {line}, column {column}: {error:#}"
+            ),
         }
     }
 }
