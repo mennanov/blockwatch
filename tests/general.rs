@@ -31,8 +31,8 @@ index da567bd..5586a8d 100644
  
  def main():
    # <block affects=":foo">
--  print("Hello world"!)
-+  print("Hello world"!)  # Modified.
+-  print("Hello world!")
++  print("Hello world!")  # Modified.
    # </block>
  
  def foo():

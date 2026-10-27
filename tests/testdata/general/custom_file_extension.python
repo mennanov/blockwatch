@@ -2,7 +2,7 @@
 
 def main():
   # <block affects=":foo">
-  print("Hello world"!)  # Modified.
+  print("Hello world!")  # Modified.
   # </block>
 
 def foo():
