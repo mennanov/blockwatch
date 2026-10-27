@@ -27,7 +27,7 @@ pub(crate) struct Definition<'tree> {
 /// # Errors
 /// Returns an error if the string uses an escape that blockwatch can't decode. The error shows
 /// the escape.
-pub(crate) type StringDecoder = fn(&Node, &str) -> anyhow::Result<Option<String>>;
+type StringDecoder = fn(&Node, &str) -> anyhow::Result<Option<String>>;
 
 /// The symbols of `source`, a code file parsed into `tree`, built from the top-level
 /// `definitions` that a language's walk found in it.
