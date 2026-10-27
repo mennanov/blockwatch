@@ -2,8 +2,7 @@ use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
     c_style_multiline_comment_processor, comment_visitor, node_text,
 };
-use crate::symbols::code::{CodeLanguage, CodeSymbolsParser, Definition, Value};
-use anyhow::anyhow;
+use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, Value};
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Rust, with its symbols.
@@ -111,12 +110,15 @@ fn escaped_character(escape: &str) -> anyhow::Result<char> {
         r"\\" => Ok('\\'),
         r"\'" => Ok('\''),
         r#"\""# => Ok('"'),
-        _ => escape
-            .strip_prefix(r"\x")
-            .or_else(|| escape.strip_prefix(r"\u{")?.strip_suffix('}'))
-            .and_then(|digits| u32::from_str_radix(digits, 16).ok())
-            .and_then(char::from_u32)
-            .ok_or_else(|| anyhow!("`{escape}` stands for no character")),
+        _ => {
+            // An escape that Rust doesn't have, such as `\d`, has no digits, so it stands for no
+            // character.
+            let digits = escape
+                .strip_prefix(r"\x")
+                .or_else(|| escape.strip_prefix(r"\u{")?.strip_suffix('}'))
+                .unwrap_or_default();
+            code::char_from_digits(escape, digits, 16)
+        }
     }
 }
 

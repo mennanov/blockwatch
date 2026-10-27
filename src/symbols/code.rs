@@ -5,7 +5,7 @@ use super::{ScalarValue, Symbol, Symbols, SymbolsParser};
 use crate::language_parsers::{node_text, tree_sitter_parser};
 use crate::symbol_path::SymbolPath;
 use crate::{Position, character_column_at};
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 use std::collections::HashMap;
 use std::ops::Range;
 use tree_sitter::{Language, Node, Tree};
@@ -309,6 +309,68 @@ fn names_in(text: &str) -> impl Iterator<Item = &str> {
         .filter(|word| word.chars().next().is_some_and(|first| !first.is_numeric()))
 }
 // </block>
+
+/// Joins the text of the parts of `node`, several strings written one after the other.
+/// `decode_string` decodes each part, and a comment between the parts is not a part. Returns
+/// `None` if `decode_string` gives `None` for a part, such as the macro in C's `"%" PRIu64`.
+///
+/// # Errors
+/// Returns the first error that `decode_string` gives for a part.
+pub(crate) fn decode_concatenated(
+    node: &Node,
+    source: &str,
+    decode_string: StringDecoder<'_>,
+) -> anyhow::Result<Option<String>> {
+    let mut joined = String::new();
+    let mut cursor = node.walk();
+    for part in node.named_children(&mut cursor) {
+        if part.is_extra() {
+            continue;
+        }
+        match decode_string(&part, source)? {
+            Some(text) => joined.push_str(&text),
+            None => return Ok(None),
+        }
+    }
+    Ok(Some(joined))
+}
+
+/// Decodes `literal`, a string whose parts are text and `escape_sequence` nodes, where an escape
+/// can give a byte that is only part of a character. `push_escape` adds the bytes of an escape.
+///
+/// # Errors
+/// Returns the error of `push_escape`, or an error if the bytes are not UTF-8 text.
+pub(crate) fn decode_bytes(
+    literal: &Node,
+    source: &str,
+    push_escape: fn(&str, &mut Vec<u8>) -> anyhow::Result<()>,
+) -> anyhow::Result<String> {
+    // Two escapes can make one character together: `\xc3\xa9` is `é`. So the text is built as
+    // bytes.
+    let mut bytes = Vec::new();
+    let mut cursor = literal.walk();
+    for part in literal.named_children(&mut cursor) {
+        let text = node_text(&part, source);
+        match part.kind() {
+            "escape_sequence" => push_escape(text, &mut bytes)?,
+            _ => bytes.extend_from_slice(text.as_bytes()),
+        }
+    }
+    String::from_utf8(bytes).map_err(|_| anyhow!("its bytes are not UTF-8 text"))
+}
+
+/// The character whose code is `digits`, a number in `radix`, which `escape` writes. For
+/// example, `é` writes `00e9` in base 16, which is `é`.
+///
+/// # Errors
+/// Returns an error that shows `escape` if `digits` is not a number in `radix`, or the number is
+/// not a character.
+pub(crate) fn char_from_digits(escape: &str, digits: &str, radix: u32) -> anyhow::Result<char> {
+    u32::from_str_radix(digits, radix)
+        .ok()
+        .and_then(char::from_u32)
+        .ok_or_else(|| anyhow!("`{escape}` stands for no character"))
+}
 
 /// Helpers for the tests of each language's symbols, which check the same things: the symbols a
 /// file gives, and why a path does not resolve.

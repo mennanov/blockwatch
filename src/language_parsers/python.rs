@@ -1,7 +1,7 @@
 use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, node_text, python_style_comments_parser,
 };
-use crate::symbols::code::{CodeLanguage, CodeSymbolsParser, Definition, Value};
+use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, Value};
 use anyhow::anyhow;
 use tree_sitter::Node;
 
@@ -71,19 +71,9 @@ impl CodeLanguage for Python {
     fn decode_string(&self, node: &Node, source: &str) -> anyhow::Result<Option<String>> {
         let mut cursor = node.walk();
         match node.kind() {
-            "concatenated_string" => {
-                let mut joined = String::new();
-                for part in node.named_children(&mut cursor) {
-                    if part.is_extra() {
-                        continue;
-                    }
-                    match self.decode_string(&part, source)? {
-                        Some(text) => joined.push_str(&text),
-                        None => return Ok(None),
-                    }
-                }
-                Ok(Some(joined))
-            }
+            "concatenated_string" => code::decode_concatenated(node, source, &|part, source| {
+                self.decode_string(part, source)
+            }),
             "string" => {
                 // The start holds the prefix and the opening quotes, such as `rb"`.
                 let bytes = node
@@ -193,12 +183,6 @@ fn push_escape(escape: &str, text: &mut String) -> anyhow::Result<()> {
     let rest = characters.as_str();
     let first = characters.next().unwrap_or_default();
     let digits = characters.as_str();
-    let code = |digits: &str, radix: u32| {
-        u32::from_str_radix(digits, radix)
-            .ok()
-            .and_then(char::from_u32)
-            .ok_or_else(|| anyhow!("`{escape}` stands for no character"))
-    };
     match first {
         // An octal escape takes up to three digits, so `\18` is `\1` and `8`. The grammar also
         // reads `\8` as an escape, which Python keeps as written.
@@ -206,10 +190,10 @@ fn push_escape(escape: &str, text: &mut String) -> anyhow::Result<()> {
             let octal = rest.chars().take_while(|c| matches!(c, '0'..='7')).count();
             #[expect(clippy::string_slice, reason = "the digits are ASCII")]
             let (digits, after) = (&rest[..octal], &rest[octal..]);
-            text.push(code(digits, 8)?);
+            text.push(code::char_from_digits(escape, digits, 8)?);
             text.push_str(after);
         }
-        'x' | 'u' | 'U' => text.push(code(digits, 16)?),
+        'x' | 'u' | 'U' => text.push(code::char_from_digits(escape, digits, 16)?),
         'N' => {
             return Err(anyhow!(
                 "`{escape}` gives a character by its name, which blockwatch can't look up"

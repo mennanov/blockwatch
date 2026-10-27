@@ -451,23 +451,10 @@ fn macro_value<'tree>(
 fn decode_string(node: &Node, source: &str) -> anyhow::Result<Option<String>> {
     let mut cursor = node.walk();
     match node.kind() {
-        "concatenated_string" => {
-            let mut joined = String::new();
-            for part in node.named_children(&mut cursor) {
-                if part.is_extra() {
-                    continue;
-                }
-                match decode_string(&part, source)? {
-                    Some(text) => joined.push_str(&text),
-                    // Such as `PRIu64` in `"%" PRIu64`, a macro.
-                    None => return Ok(None),
-                }
-            }
-            Ok(Some(joined))
-        }
+        "concatenated_string" => code::decode_concatenated(node, source, &decode_string),
         // The prefix and the opening quote make one token, such as `u8"`.
         "string_literal" => match node.child(0).map(|open| open.kind()) {
-            Some("\"" | "u8\"") => decode_escapes(node, source).map(Some),
+            Some("\"" | "u8\"") => code::decode_bytes(node, source, push_escape).map(Some),
             _ => Ok(None),
         },
         "raw_string_literal" => match node.child(0).map(|open| open.kind()) {
@@ -479,26 +466,6 @@ fn decode_string(node: &Node, source: &str) -> anyhow::Result<Option<String>> {
         },
         _ => Ok(None),
     }
-}
-
-/// Decodes `literal`, a narrow string literal such as `"a\n"`, from its parts: text and escapes.
-///
-/// # Errors
-/// Returns an error if an escape is not one C has, stands for no character, doesn't fit in a
-/// byte, or makes bytes that are not UTF-8 text.
-fn decode_escapes(literal: &Node, source: &str) -> anyhow::Result<String> {
-    // `\x` and octal escapes give bytes, not characters, so the text is built as bytes. Two of
-    // them can make one character together: `\xc3\xa9` is `é`.
-    let mut bytes = Vec::new();
-    let mut cursor = literal.walk();
-    for part in literal.named_children(&mut cursor) {
-        let text = node_text(&part, source);
-        match part.kind() {
-            "escape_sequence" => push_escape(text, &mut bytes)?,
-            _ => bytes.extend_from_slice(text.as_bytes()),
-        }
-    }
-    String::from_utf8(bytes).map_err(|_| anyhow!("its bytes are not UTF-8 text"))
 }
 
 /// Adds the bytes that `escape`, such as `\n` or `\x41`, stands for to `bytes`. The grammar
@@ -524,10 +491,7 @@ fn push_escape(escape: &str, bytes: &mut Vec<u8>) -> anyhow::Result<()> {
         '0'..='9' if rest.chars().all(|c| matches!(c, '0'..='7')) => bytes.push(byte(rest, 8)?),
         'x' => bytes.push(byte(digits, 16)?),
         'u' | 'U' => {
-            let character = u32::from_str_radix(digits, 16)
-                .ok()
-                .and_then(char::from_u32)
-                .ok_or_else(|| anyhow!("`{escape}` stands for no character"))?;
+            let character = code::char_from_digits(escape, digits, 16)?;
             bytes.extend_from_slice(character.encode_utf8(&mut [0; 4]).as_bytes());
         }
         // A backslash at the end of a line joins the next line to it.

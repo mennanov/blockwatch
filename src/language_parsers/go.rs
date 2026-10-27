@@ -1,6 +1,6 @@
 use crate::language_parsers;
 use crate::language_parsers::{CommentsParser, LanguageParser, LanguageParserImpl, node_text};
-use crate::symbols::code::{CodeLanguage, CodeSymbolsParser, Definition, Value};
+use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, Value};
 use anyhow::{Context, anyhow};
 use std::ops::Range;
 use tree_sitter::Node;
@@ -49,7 +49,7 @@ impl CodeLanguage for Go {
     /// that are not UTF-8 text.
     fn decode_string(&self, node: &Node, source: &str) -> anyhow::Result<Option<String>> {
         match node.kind() {
-            "interpreted_string_literal" => decode_interpreted_string(node, source).map(Some),
+            "interpreted_string_literal" => code::decode_bytes(node, source, push_escape).map(Some),
             "raw_string_literal" => {
                 let text = node_text(node, source);
                 let content = text
@@ -154,26 +154,6 @@ fn function_definition<'tree>(function: Node<'tree>, source: &str) -> Option<Def
     }
 }
 
-/// Decodes `node`, a Go string in double quotes.
-///
-/// # Errors
-/// Returns an error if an escape is not one Go has, stands for no character, or makes bytes that
-/// are not UTF-8 text.
-fn decode_interpreted_string(node: &Node, source: &str) -> anyhow::Result<String> {
-    // `\x` and octal escapes give bytes, not characters, so the text is built as bytes. Two of
-    // them can make one character together: `\xc3\xa9` is `é`.
-    let mut bytes = Vec::new();
-    let mut cursor = node.walk();
-    for part in node.named_children(&mut cursor) {
-        let text = node_text(&part, source);
-        match part.kind() {
-            "escape_sequence" => push_escape(text, &mut bytes)?,
-            _ => bytes.extend_from_slice(text.as_bytes()),
-        }
-    }
-    String::from_utf8(bytes).map_err(|_| anyhow!("its bytes are not UTF-8 text"))
-}
-
 /// Adds the bytes that `escape`, such as `\n` or `\x41`, stands for to `bytes`.
 ///
 /// # Errors
@@ -199,9 +179,7 @@ fn push_escape(escape: &str, bytes: &mut Vec<u8>) -> anyhow::Result<()> {
         '0'..='7' if body.len() == 3 => u8::from_str_radix(body, 8).map_err(|_| not_an_escape())?,
         'x' => u8::from_str_radix(digits, 16).map_err(|_| not_an_escape())?,
         'u' | 'U' => {
-            let code = u32::from_str_radix(digits, 16).map_err(|_| not_an_escape())?;
-            let character = char::from_u32(code)
-                .ok_or_else(|| anyhow!("`{escape}` stands for no character"))?;
+            let character = code::char_from_digits(escape, digits, 16)?;
             bytes.extend_from_slice(character.encode_utf8(&mut [0; 4]).as_bytes());
             return Ok(());
         }
