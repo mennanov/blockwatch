@@ -68,19 +68,20 @@ fn declaration_definitions<'tree>(
 ) -> Vec<Definition<'tree>> {
     let mut cursor = declaration.walk();
     let children: Vec<Node> = declaration.children(&mut cursor).collect();
+    // A `var` group keeps its lines in a node of their own.
+    let list = children
+        .iter()
+        .copied()
+        .find(|child| child.kind() == "var_spec_list");
     // In a group, such as `const ( ... )`, each line declares its own names. So a change to one
     // line does not touch the names on the others.
-    let grouped = children
-        .iter()
-        .any(|child| matches!(child.kind(), "(" | "var_spec_list"));
-    let specs = children.iter().flat_map(|child| match child.kind() {
-        "var_spec_list" => {
-            let mut cursor = child.walk();
-            child.named_children(&mut cursor).collect()
-        }
-        _ => vec![*child],
-    });
+    let grouped = list.is_some() || children.iter().any(|child| child.kind() == "(");
+    let specs = match list {
+        Some(list) => list.named_children(&mut cursor).collect(),
+        None => children,
+    };
     specs
+        .into_iter()
         .filter(|spec| {
             matches!(
                 spec.kind(),

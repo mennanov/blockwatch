@@ -194,18 +194,20 @@ fn error_in(definition: &Range<usize>, error: &Range<usize>) -> bool {
 /// `node` without the parentheses around it, however many there are. In `(1) + (2)`, the
 /// parentheses are not around the whole value, so they stay.
 fn without_parentheses(mut node: Node<'_>) -> Node<'_> {
+    let mut cursor = node.walk();
     // Every grammar with code symbols gives parentheses this node kind.
     while node.kind() == "parenthesized_expression" {
-        let mut cursor = node.walk();
-        // A comment inside the parentheses is a child too, but not part of the value.
-        let inner: Vec<Node> = node
-            .named_children(&mut cursor)
-            .filter(|child| !child.is_extra())
-            .collect();
-        match inner.as_slice() {
-            [only] => node = *only,
-            _ => break,
-        }
+        let only = {
+            // A comment inside the parentheses is a child too, but not part of the value.
+            let mut inner = node
+                .named_children(&mut cursor)
+                .filter(|child| !child.is_extra());
+            match (inner.next(), inner.next()) {
+                (Some(only), None) => only,
+                _ => break,
+            }
+        };
+        node = only;
     }
     node
 }
