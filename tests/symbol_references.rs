@@ -63,6 +63,20 @@ fn go_target_resolves() {
 }
 
 #[test]
+fn py_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/py_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
+fn bzl_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/bzl_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
 fn json_target_resolves() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/symbol_references/json_source.rs");

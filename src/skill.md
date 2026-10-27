@@ -154,8 +154,9 @@ the file cannot hold a comment. To put rules on the value itself, wrap it in a `
 ### Files with symbols
 
 Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`.toml`, `Pipfile`), YAML (`.yaml`,
-`.yml`, `.cff`), Markdown (`.md`, `.markdown`, `.mdx`), Go (`.go`), and C and C++ (`.c`, `.h`, `.cc`, `.cpp`, `.cxx`,
-`.hh`, `.hpp`, `.hxx`). A path into any other file fails the run.
+`.yml`, `.cff`), Markdown (`.md`, `.markdown`, `.mdx`), Go (`.go`), C and C++ (`.c`, `.h`, `.cc`, `.cpp`, `.cxx`,
+`.hh`, `.hpp`, `.hxx`), Python (`.py`, `.pyi`, `.pyw`), and Starlark (`.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`,
+`BUCK`, `WORKSPACE`, `Tiltfile`). A path into any other file fails the run.
 
 ### Writing a path
 
@@ -253,6 +254,17 @@ as `consts.go#/MaxPorts`.
 - Prototypes, `extern` variables, namespaces, class members and names such as `Foo::bar` are not symbols.
 - Strings follow C's escapes, and strings written one after the other are joined. `L`, `u` and `U` strings stay as
   written.
+
+### Python and Starlark
+
+- The bodies of a top-level `if`, `try` or `with` are top-level too. So a name defined under both `if TYPE_CHECKING:`
+  and `else:` is defined twice. The bodies of `for`, `while` and `match` don't count.
+- `A = B = 5` gives both names the whole statement. `X: int` has no value. A decorator is part of the definition.
+- Imports, `as` targets, `a, b = 1, 2`, `obj.x = 1` and `_` are not symbols. A type alias is one, without a value:
+  `type Pair[T] = tuple[T, T]` is `#/Pair`.
+- Strings follow Python's escapes. An f-string with a field and bytes stay as written. A `\N{...}` escape fails the
+  run for its name.
+- Starlark files, such as `BUILD` and `.bzl`, follow the same rules. A rule call is not a symbol.
 
 ## The config file (`blockwatch.toml`)
 

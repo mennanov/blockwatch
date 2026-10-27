@@ -1174,9 +1174,9 @@ mod target_files_tests {
     #[test]
     fn language_without_symbols_resolve_symbol_returns_an_error_with_the_reference()
     -> anyhow::Result<()> {
-        let message = resolve_symbol_error("config.py", "x = 1\n", "/x")?;
+        let message = resolve_symbol_error("config.rb", "x = 1\n", "/x")?;
         assert!(
-            message.starts_with("failed to resolve symbol reference config.py#/x: "),
+            message.starts_with("failed to resolve symbol reference config.rb#/x: "),
             "unexpected message: {message}"
         );
         Ok(())

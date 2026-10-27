@@ -1002,7 +1002,14 @@ mod tests {
         same-as="docs/symbols.md:extensions-with-symbols, src/skill.md:extensions-with-symbols"
         same-as-pattern='"(?P<value>[^"]+)"'> */
         let documented = [
+            "BUCK",
+            "BUILD",
             "Pipfile",
+            "Tiltfile",
+            "WORKSPACE",
+            "bazel",
+            "bzl",
+            "bzlmod",
             "c",
             "cc",
             "cff",
@@ -1018,6 +1025,10 @@ mod tests {
             "markdown",
             "md",
             "mdx",
+            "py",
+            "pyi",
+            "pyw",
+            "star",
             "toml",
             "webmanifest",
             "yaml",

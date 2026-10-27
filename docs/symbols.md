@@ -24,14 +24,16 @@ declares, instead of tags in a comment.
 <!-- <block name="extensions-with-symbols" same-as="src/language_parsers/mod.rs:extensions-with-symbols"
      same-as-pattern="`\.?(?P<value>[A-Za-z]+)`"> -->
 
-| Language | Files                                                    | Paths                 |
-|----------|----------------------------------------------------------|-----------------------|
-| JSON     | `.json`, `.jsonc`, `.webmanifest`                        | [JSON](#json)         |
-| TOML     | `.toml`, `Pipfile`                                       | [TOML](#toml)         |
-| YAML     | `.yaml`, `.yml`, `.cff`                                  | [YAML](#yaml)         |
-| Markdown | `.md`, `.markdown`, `.mdx`                               | [Markdown](#markdown) |
-| Go       | `.go`                                                    | [Go](#go)             |
-| C, C++   | `.c`, `.h`, `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx` | [C and C++](#c-and-c) |
+| Language | Files                                                                          | Paths                                       |
+|----------|--------------------------------------------------------------------------------|---------------------------------------------|
+| JSON     | `.json`, `.jsonc`, `.webmanifest`                                              | [JSON](#json)                               |
+| TOML     | `.toml`, `Pipfile`                                                             | [TOML](#toml)                               |
+| YAML     | `.yaml`, `.yml`, `.cff`                                                        | [YAML](#yaml)                               |
+| Markdown | `.md`, `.markdown`, `.mdx`                                                     | [Markdown](#markdown)                       |
+| Go       | `.go`                                                                          | [Go](#go)                                   |
+| C, C++   | `.c`, `.h`, `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx`                       | [C and C++](#c-and-c)                       |
+| Python   | `.py`, `.pyi`, `.pyw`                                                          | [Python and Starlark](#python-and-starlark) |
+| Starlark | `.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`, `BUCK`, `WORKSPACE`, `Tiltfile` | [Python and Starlark](#python-and-starlark) |
 
 <!-- </block> -->
 
@@ -338,6 +340,53 @@ int helper(void) { return 0; }
 - **Strings follow C's escapes, and strings written one after the other are joined.** A raw string, `R"(...)"`, is its
   text. `L`, `u` and `U` strings and character literals stay as written.
 - **Namespaces, class members and names such as `Foo::bar` are not symbols yet.**
+
+<!-- </block> -->
+
+## Python and Starlark
+
+<!-- <block name="python-paths"> -->
+
+```python
+PYTHON_VERSION = "3.12"
+TIMEOUT: Final[int] = 30
+A = B = 5
+
+if TYPE_CHECKING:
+    MODE = "check"
+else:
+    MODE = "run"
+
+@dataclass
+class Point:
+    x: int = 0
+
+def load(path):
+    return path
+```
+
+| Path               | Points at                                  |
+|--------------------|--------------------------------------------|
+| `#/PYTHON_VERSION` | `3.12`                                     |
+| `#/TIMEOUT`        | `30`                                       |
+| `#/B`              | `5`, as does `#/A`                         |
+| `#/MODE`           | a violation, as `MODE` is defined twice    |
+| `#/Point`          | the whole class, `@dataclass` included     |
+| `#/load`           | the whole function                         |
+
+- **The bodies of a top-level `if`, `try` or `with` are top-level too**, as Python treats them. So a name defined in
+  two branches is defined twice. The bodies of `for`, `while` and `match` don't count.
+- **`A = B = 5` gives both names the whole statement.** `X: int` has no value. `X += [...]` doesn't change the value
+  of `X`.
+- **A decorator is part of the definition.**
+- **Imports, `as` targets, `a, b = 1, 2`, `obj.x = 1` and `_` are not symbols.** A type alias is one, without a
+  value: `type Pair[T] = tuple[T, T]` is `#/Pair`.
+- **Strings follow Python's escapes.** `"\xe9"` is `é`. An escape Python doesn't know, such as `\d`, stays as written.
+  A raw string is its text. An f-string without a field is its text, with `{{` as `{`. An f-string with a field and
+  bytes stay as written. A `\N{...}` escape stops the run for its name.
+- **Starlark files, such as `BUILD` and `.bzl`, follow the same rules.** A rule call, such as
+  `cc_library(name = "lib")`, is not a symbol.
+- **Class members are not symbols yet.**
 
 <!-- </block> -->
 

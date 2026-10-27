@@ -2091,12 +2091,12 @@ mod parse_blocks_tests {
     fn target_file_without_symbols_parse_blocks_returns_error() -> anyhow::Result<()> {
         // The whole-file block needs no symbols, so the error shows the symbol's block.
         let virtual_blocks = [
-            test_utils::virtual_block("a.py", &[])?,
-            test_utils::virtual_block("a.py#/x", &[])?,
+            test_utils::virtual_block("a.rb", &[])?,
+            test_utils::virtual_block("a.rb#/x", &[])?,
         ];
 
         let error = parse_with_virtual_blocks(
-            &[("a.py", "x = 1\n")],
+            &[("a.rb", "x = 1\n")],
             &PathFilter::allow_all(),
             &virtual_blocks,
         )
@@ -2104,7 +2104,7 @@ mod parse_blocks_tests {
 
         assert_eq!(
             format!("{error:#}"),
-            "invalid block at line 7 of \"blockwatch.toml\": target a.py#/x does not resolve: \
+            "invalid block at line 7 of \"blockwatch.toml\": target a.rb#/x does not resolve: \
              symbols are not supported for this language"
         );
         Ok(())
