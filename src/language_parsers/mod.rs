@@ -1003,8 +1003,16 @@ mod tests {
         same-as-pattern='"(?P<value>[^"]+)"'> */
         let documented = [
             "Pipfile",
+            "c",
+            "cc",
             "cff",
+            "cpp",
+            "cxx",
             "go",
+            "h",
+            "hh",
+            "hpp",
+            "hxx",
             "json",
             "jsonc",
             "markdown",

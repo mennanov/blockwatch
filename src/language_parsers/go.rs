@@ -2,7 +2,7 @@ use crate::language_parsers;
 use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, node_text, tree_sitter_parser,
 };
-use crate::symbols::code::{self, Definition};
+use crate::symbols::code::{self, Definition, Value};
 use crate::symbols::{Symbols, SymbolsParser};
 use anyhow::{Context, anyhow};
 use std::ops::Range;
@@ -131,7 +131,7 @@ fn spec_definitions<'tree>(
         .map(|(index, name)| Definition {
             names: vec![*name],
             range: range.clone(),
-            value: if paired { Some(values[index]) } else { None },
+            value: paired.then(|| Value::Node(values[index])),
         })
         .collect()
 }

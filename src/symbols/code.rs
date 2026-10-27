@@ -2,9 +2,9 @@
 //! language shares: what a value is, and which names a syntax error makes unreadable.
 
 use super::{ScalarValue, Symbol, Symbols};
-use crate::character_column_at;
 use crate::language_parsers::node_text;
 use crate::symbol_path::SymbolPath;
+use crate::{Position, character_column_at};
 use std::collections::HashMap;
 use std::ops::Range;
 use tree_sitter::{Node, Tree};
@@ -16,8 +16,18 @@ pub(crate) struct Definition<'tree> {
     /// The byte range of the whole definition, with its keywords, attributes and decorators, but
     /// without the comments above it.
     pub(crate) range: Range<usize>,
-    /// The initializer, or `None` when the definition has none, such as a function or a class.
-    pub(crate) value: Option<Node<'tree>>,
+    /// The value, or `None` when the definition has none, such as a function or a class.
+    pub(crate) value: Option<Value<'tree>>,
+}
+
+/// The value of a [`Definition`].
+pub(crate) enum Value<'tree> {
+    /// An initializer in the syntax tree, such as `20 * 1024` or `"text"`.
+    Node(Node<'tree>),
+    /// A value that the walk read from the text itself, because the grammar doesn't parse it,
+    /// such as the body of a C macro. Or why it couldn't: the position of the problem and the
+    /// error.
+    Read(Result<ScalarValue, (Position, anyhow::Error)>),
 }
 
 /// Turns a string literal into its text, following the language's own quoting and escaping
@@ -32,15 +42,16 @@ type StringDecoder = fn(&Node, &str) -> anyhow::Result<Option<String>>;
 /// The symbols of `source`, a code file parsed into `tree`, built from the top-level
 /// `definitions` that a language's walk found in it.
 ///
-/// Each name of a definition gives a symbol at `/name`, in the order of `definitions`. The
-/// symbol's value is the definition's value without the parentheses around it: the text that
-/// `decode_string` gives, or else the value as written.
+/// Each name of a definition gives a symbol at `/name`, in the order of `definitions`. A value
+/// read by the walk is the symbol's value. An initializer loses the parentheses around it, and
+/// then the symbol's value is the text that `decode_string` gives, or else the initializer as
+/// written.
 ///
 /// A name is unreadable, with a reason that shows where the problem is, when:
 /// - its definition holds a syntax error, such as a span the parser skipped or a token it
 ///   assumed was missing;
 /// - it appears as a whole word in a span the parser skipped anywhere in the file;
-/// - `decode_string` can't decode its value.
+/// - the walk or `decode_string` can't read its value.
 ///
 /// A definition with a problem of its own gives no symbol. Another definition of the same name
 /// keeps its symbol, and so does a clean definition whose name a skipped span holds.
@@ -91,36 +102,42 @@ pub(crate) fn symbols(
 enum Problem<'tree> {
     /// The syntax error at this node.
     SyntaxError(Node<'tree>),
-    /// The string at this node, which the decoder refused with this error.
-    Undecodable(Node<'tree>, anyhow::Error),
+    /// The string at this position, which blockwatch can't decode for this reason.
+    Undecodable(Position, String),
 }
 
 impl Problem<'_> {
     /// The reason to report for `name`, which shows where in `source` the problem is.
     fn reason(&self, name: &str, source: &str) -> String {
-        let node = match self {
-            Problem::SyntaxError(node) | Problem::Undecodable(node, _) => node,
-        };
-        // tree-sitter counts the rows, so only the column needs the text, and only of one line.
-        let line = node.start_position().row + 1;
-        let column = character_column_at(source, node.start_byte());
         match self {
-            Problem::SyntaxError(_) => format!(
-                "file has a syntax error at line {line}, column {column} near {name}, and the path could resolve to the wrong value"
-            ),
-            Problem::Undecodable(_, error) => format!(
-                "blockwatch can't decode the string at line {line}, column {column}: {error:#}"
+            Problem::SyntaxError(node) => {
+                let Position { line, character } = position(node, source);
+                format!(
+                    "file has a syntax error at line {line}, column {character} near {name}, and the path could resolve to the wrong value"
+                )
+            }
+            Problem::Undecodable(Position { line, character }, why) => format!(
+                "blockwatch can't decode the string at line {line}, column {character}: {why}"
             ),
         }
     }
+}
+
+/// Where `node` starts in `source`.
+fn position(node: &Node, source: &str) -> Position {
+    // tree-sitter counts the rows, so only the column needs the text, and only of one line.
+    Position::new(
+        node.start_position().row + 1,
+        character_column_at(source, node.start_byte()),
+    )
 }
 
 /// The value of `definition` in `source`, or `None` when it has none. `errors` are the syntax
 /// errors of the file.
 ///
 /// # Errors
-/// Returns the problem when one of `errors` belongs to the definition, or when `decode_string`
-/// refuses its value.
+/// Returns the problem when one of `errors` belongs to the definition, or when its value could
+/// not be read or decoded.
 fn read_value<'tree>(
     definition: &Definition<'tree>,
     source: &str,
@@ -135,23 +152,48 @@ fn read_value<'tree>(
     {
         return Err(Problem::SyntaxError(*error));
     }
-    let value = match definition.value {
-        Some(value) => without_parentheses(value),
-        None => return Ok(None),
-    };
+    match &definition.value {
+        Some(Value::Node(value)) => {
+            node_value(*value, source, decode_string)
+                .map(Some)
+                .map_err(|(string, error)| {
+                    Problem::Undecodable(position(&string, source), format!("{error:#}"))
+                })
+        }
+        Some(Value::Read(Ok(value))) => Ok(Some(value.clone())),
+        Some(Value::Read(Err((position, error)))) => {
+            Err(Problem::Undecodable(*position, format!("{error:#}")))
+        }
+        None => Ok(None),
+    }
+}
+
+/// The value of `node`, an initializer in `source`, without the parentheses around it: the text
+/// that `decode_string` gives, or else the initializer as written.
+///
+/// # Errors
+/// Returns the string that `decode_string` can't decode, with the reason.
+pub(crate) fn node_value<'tree>(
+    node: Node<'tree>,
+    source: &str,
+    decode_string: StringDecoder,
+) -> Result<ScalarValue, (Node<'tree>, anyhow::Error)> {
+    let value = without_parentheses(node);
     let text = match decode_string(&value, source) {
         Ok(Some(text)) => text,
         Ok(None) => node_text(&value, source).to_string(),
-        Err(error) => return Err(Problem::Undecodable(value, error)),
+        Err(error) => return Err((value, error)),
     };
-    Ok(Some(ScalarValue {
+    Ok(ScalarValue {
         text,
         byte_range: value.byte_range(),
-    }))
+    })
 }
 
 /// The syntax errors of `tree`, in document order: each span the parser skipped, and each token
-/// it assumed was missing. An error inside a skipped span is part of that span.
+/// it assumed was missing. An error inside a skipped span is part of that span. A missing token
+/// that the grammar hides from the tree gives the node that lacks it, unless the node ends the
+/// file.
 fn syntax_errors(tree: &Tree) -> Vec<Node<'_>> {
     let root = tree.root_node();
     if !root.has_error() {
@@ -172,6 +214,11 @@ fn syntax_errors(tree: &Tree) -> Vec<Node<'_>> {
                 node.children(&mut cursor)
                     .filter(|child| child.is_error() || child.has_error()),
             );
+            // Such as the line end of a C macro that a `/* */` comment cut short. At the end of
+            // the file, the hidden token is the last line end, which a file may leave out.
+            if pending.len() == first && node.end_byte() < root.end_byte() {
+                errors.push(node);
+            }
             // The stack takes the last child first, so the children go on it in reverse.
             pending[first..].reverse();
         }
@@ -264,6 +311,20 @@ pub(crate) mod test_utils {
         )
     }
 
+    /// The path and value of each of `symbols`, the symbols of `source`, for a test that only
+    /// checks values. A symbol without a value has `None`.
+    pub(crate) fn values(symbols: &Symbols, source: &str) -> Vec<(String, Option<String>)> {
+        self::symbols(symbols, source)
+            .into_iter()
+            .map(|(path, _, value)| (path, value))
+            .collect()
+    }
+
+    /// A symbol with its path and its value, as [`values`] lists it.
+    pub(crate) fn value(path: &str, value: &str) -> (String, Option<String>) {
+        (path.to_string(), Some(value.to_string()))
+    }
+
     /// Why a reference to `path` does not resolve among `symbols`, the symbols of `source`.
     ///
     /// # Errors
@@ -346,7 +407,7 @@ mod tests {
         (!names.is_empty()).then_some(Definition {
             names,
             range: statement.byte_range(),
-            value,
+            value: value.map(Value::Node),
         })
     }
 

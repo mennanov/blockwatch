@@ -1,9 +1,11 @@
 use crate::language_parsers;
+use crate::language_parsers::c::CSymbolsParser;
 use crate::language_parsers::{CommentsParser, LanguageParser, LanguageParserImpl};
 
-/// Returns a [`LanguageParser`] for C++.
+/// Returns a [`LanguageParser`] for C++, with its symbols.
 pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?))
+    Ok(LanguageParserImpl::new(comments_parser()?)
+        .with_symbols(CSymbolsParser::new(&tree_sitter_cpp::LANGUAGE.into())?))
 }
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {

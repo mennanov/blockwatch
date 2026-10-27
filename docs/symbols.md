@@ -24,13 +24,14 @@ declares, instead of tags in a comment.
 <!-- <block name="extensions-with-symbols" same-as="src/language_parsers/mod.rs:extensions-with-symbols"
      same-as-pattern="`\.?(?P<value>[A-Za-z]+)`"> -->
 
-| Language | Files                             | Paths                 |
-|----------|-----------------------------------|-----------------------|
-| JSON     | `.json`, `.jsonc`, `.webmanifest` | [JSON](#json)         |
-| TOML     | `.toml`, `Pipfile`                | [TOML](#toml)         |
-| YAML     | `.yaml`, `.yml`, `.cff`           | [YAML](#yaml)         |
-| Markdown | `.md`, `.markdown`, `.mdx`        | [Markdown](#markdown) |
-| Go       | `.go`                             | [Go](#go)             |
+| Language | Files                                                    | Paths                 |
+|----------|----------------------------------------------------------|-----------------------|
+| JSON     | `.json`, `.jsonc`, `.webmanifest`                        | [JSON](#json)         |
+| TOML     | `.toml`, `Pipfile`                                       | [TOML](#toml)         |
+| YAML     | `.yaml`, `.yml`, `.cff`                                  | [YAML](#yaml)         |
+| Markdown | `.md`, `.markdown`, `.mdx`                               | [Markdown](#markdown) |
+| Go       | `.go`                                                    | [Go](#go)             |
+| C, C++   | `.c`, `.h`, `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx` | [C and C++](#c-and-c) |
 
 <!-- </block> -->
 
@@ -239,7 +240,8 @@ Clone the repository.
 
 <!-- <block name="code-files"> -->
 
-In a code file, each top-level name is a symbol: a constant, a variable, a type or a function. Its path is `#/NAME`.
+In a code file, each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is
+`#/NAME`.
 With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`.
 
 - **A value is the initializer as written.** blockwatch never works it out: `20 * 1024 * 1024` stays as it is, and so
@@ -294,6 +296,48 @@ func Helper() {}
   stays as written. A string whose bytes are not UTF-8 text stops the run for its name.
 - **Methods, `func init` and `_` are not symbols.**
 - **`go.mod`, `go.sum` and `go.work` have no symbols.**
+
+<!-- </block> -->
+
+## C and C++
+
+<!-- <block name="c-paths"> -->
+
+```c
+#define DNS_PORTS_MAX 8
+#define FLAGS (1u << 4) // bits
+#define NAME "ab" "cd"
+
+static const int Retries = 3;
+
+typedef enum throttle_mode { THROTTLE_A, THROTTLE_B = 2 } throttle_mode_t;
+
+int helper(void) { return 0; }
+```
+
+| Path                | Points at                                        |
+|---------------------|--------------------------------------------------|
+| `#/DNS_PORTS_MAX`   | `8`                                              |
+| `#/FLAGS`           | `1u << 4`                                        |
+| `#/NAME`            | `abcd`                                           |
+| `#/Retries`         | `3`                                              |
+| `#/throttle_mode_t` | the whole `typedef`, as does `#/throttle_mode`   |
+| `#/THROTTLE_B`      | `2`                                              |
+| `#/helper`          | the whole function                               |
+
+- **A macro is a symbol wherever it is defined**, even inside an `#if` or a function. Its body reads like a variable's
+  value, without comments. A body over several lines keeps its backslashes. A body that is not one value, such as
+  `static inline`, is kept as written. `#define FOO_H` is the empty string. A macro with parameters has no value.
+- **A macro defined in each branch of an `#if` is defined twice.** Wrap the copy you mean in a block instead.
+- **A `/* */` comment inside a macro, such as `#define X 1 /* c */ + 2`, stops the run for that macro.** The parser
+  reads the rest of the line as code. A comment at the end of the line is fine.
+- **The enumerators of a plain `enum` are top-level names**, as in C. Those of an `enum class` are not.
+- **In `int a = 1, b = 2;`, a name covers only its own part.** Otherwise a name covers the whole declaration.
+- **Prototypes and `extern` variables are not symbols.** The definition is.
+- **`template <...>` and `extern "C"` are part of the definition.** The contents of `extern "C" { ... }` are top-level.
+- **Strings follow C's escapes, and strings written one after the other are joined.** A raw string, `R"(...)"`, is its
+  text. `L`, `u` and `U` strings and character literals stay as written.
+- **Namespaces, class members and names such as `Foo::bar` are not symbols yet.**
 
 <!-- </block> -->
 

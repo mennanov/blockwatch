@@ -154,7 +154,8 @@ the file cannot hold a comment. To put rules on the value itself, wrap it in a `
 ### Files with symbols
 
 Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`.toml`, `Pipfile`), YAML (`.yaml`,
-`.yml`, `.cff`), Markdown (`.md`, `.markdown`, `.mdx`) and Go (`.go`). A path into any other file fails the run.
+`.yml`, `.cff`), Markdown (`.md`, `.markdown`, `.mdx`), Go (`.go`), and C and C++ (`.c`, `.h`, `.cc`, `.cpp`, `.cxx`,
+`.hh`, `.hpp`, `.hxx`). A path into any other file fails the run.
 
 ### Writing a path
 
@@ -217,8 +218,8 @@ level. Its path is the text of each heading it is under, then its own, the top `
 
 ### Code files
 
-Each top-level name is a symbol: a constant, a variable, a type or a function. Its path is `#/NAME`, such as
-`consts.go#/MaxPorts`.
+Each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is `#/NAME`, such
+as `consts.go#/MaxPorts`.
 
 - A value is the initializer as written, never worked out: `20 * 1024 * 1024` stays as it is. Use `same-as-pattern`
   to take the part you need. A string counts as the text it holds. Parentheses around the whole value are removed.
@@ -238,6 +239,20 @@ Each top-level name is a symbol: a constant, a variable, a type or a function. I
   line.
 - Strings follow Go's escapes. A rune, such as `'r'`, stays as written.
 - Methods, `func init` and `_` are not symbols. `go.mod`, `go.sum` and `go.work` have no symbols.
+
+### C and C++
+
+- A macro is a symbol wherever it is defined, even inside an `#if`. Its value is its body without comments:
+  `#define FLAGS (1u << 4) // bits` is `1u << 4`. A body that is not one value, such as `static inline`, stays as
+  written. `#define FOO_H` is the empty string. A macro with parameters has no value.
+- A macro defined in each branch of an `#if` is defined twice. A `/* */` comment inside a macro's body fails the run
+  for that macro.
+- The enumerators of a plain `enum` are top-level names. Those of an `enum class` are not.
+- In `int a = 1, b = 2;`, a name covers only its own part. In `typedef struct foo {...} foo_t;`, both names point at
+  the whole `typedef`.
+- Prototypes, `extern` variables, namespaces, class members and names such as `Foo::bar` are not symbols.
+- Strings follow C's escapes, and strings written one after the other are joined. `L`, `u` and `U` strings stay as
+  written.
 
 ## The config file (`blockwatch.toml`)
 

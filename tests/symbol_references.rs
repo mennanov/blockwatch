@@ -35,6 +35,27 @@ fn reference_list_mixing_symbols_and_blocks_resolves() {
 }
 
 #[test]
+fn c_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/c_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
+fn cpp_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/cpp_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
+fn h_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/h_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
 fn go_target_resolves() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/symbol_references/go_source.rs");
