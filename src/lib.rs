@@ -14,6 +14,9 @@
 // Slicing a `str` panics when an index falls inside a multi-byte character, such as `é`. So each
 // slice outside tests needs an `expect` that says why its indexes are on character boundaries.
 #![cfg_attr(not(test), warn(clippy::string_slice))]
+// A module with child modules keeps its own code in `mod.rs`, inside its folder, so each such
+// module looks the same.
+#![warn(clippy::self_named_module_files)]
 
 use serde::Serialize;
 use std::ffi::OsStr;

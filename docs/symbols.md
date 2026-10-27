@@ -30,6 +30,7 @@ declares, instead of tags in a comment.
 | TOML     | `.toml`, `Pipfile`                | [TOML](#toml)         |
 | YAML     | `.yaml`, `.yml`, `.cff`           | [YAML](#yaml)         |
 | Markdown | `.md`, `.markdown`, `.mdx`        | [Markdown](#markdown) |
+| Go       | `.go`                             | [Go](#go)             |
 
 <!-- </block> -->
 
@@ -93,7 +94,8 @@ Keys that look like filters still work. `[python]`, as in VS Code settings, need
 ## When a path does not resolve
 
 - **A missing key is a violation.** The message suggests similar paths: `symbol not found; did you mean: /version`.
-- **A broken file stops the run.** blockwatch does not guess what a broken file meant.
+- **A broken file stops the run.** blockwatch does not guess what a broken file meant. In a code file, only a path to
+  a name near the error stops it: see [Code files](#code-files).
 - **A missing file stops the run**, and so does a file without symbols.
 
 A virtual block's target is stricter: a missing key, or a key written twice, stops the run too. Without one symbol to
@@ -230,6 +232,68 @@ Clone the repository.
 - **An `.mdx` file gets the same paths.** The text of a JSX element in a heading counts, and so does the code in
   braces: `## Red <Badge>new</Badge> {version}` is `#/Red new version`. A heading inside a JSX element doesn't count.
   A file that isn't valid MDX stops the run.
+
+<!-- </block> -->
+
+## Code files
+
+<!-- <block name="code-files"> -->
+
+In a code file, each top-level name is a symbol: a constant, a variable, a type or a function. Its path is `#/NAME`.
+With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`.
+
+- **A value is the initializer as written.** blockwatch never works it out: `20 * 1024 * 1024` stays as it is, and so
+  does `0x10`. Use `same-as-pattern` to take the part you need.
+- **A string counts as the text it holds.** Quotes and escapes are removed.
+- **Parentheses around the whole value are removed.** `(32)` is `32`. In `(1) + (2)`, they stay.
+- **A name without a value**, such as a function or a type, gives the text of its whole definition.
+- **A symbol covers its own definition**, keywords included, but not the comments above it. `affects` counts a change
+  to that text only.
+- **A name defined twice is a violation**, because blockwatch can't tell which copy you mean.
+- **A syntax error stops the run only for the names near it**: a name whose definition holds the error, and any name in
+  the text that the parser had to skip. Other names in the file still resolve. The message shows where the error is.
+- **A string that blockwatch can't decode stops the run** for its name only.
+- **Members are not symbols yet**, such as a method or a field.
+
+<!-- </block> -->
+
+## Go
+
+<!-- <block name="go-paths"> -->
+
+```go
+const ExprStatusBits = 4
+
+const (
+    DNSPortsMax = 8
+    ModeA Mode = iota
+    ModeB
+)
+
+var Name, Port = "web", 8080
+
+type Server struct{ port int }
+
+func Helper() {}
+```
+
+| Path               | Points at                                  |
+|--------------------|--------------------------------------------|
+| `#/ExprStatusBits` | `4`                                        |
+| `#/DNSPortsMax`    | `8`                                        |
+| `#/ModeB`          | `ModeB`, its line, as it has no value      |
+| `#/Port`           | `8080`                                     |
+| `#/Server`         | the whole `type Server struct{ port int }` |
+| `#/Helper`         | the whole function                         |
+
+- **In a group, such as `const ( ... )`, a name covers only its own line.** Outside a group, it covers the whole
+  declaration, `const` included.
+- **Names get their values by position.** In `var x, y = f()`, one call gives both names, so neither has a value.
+- **A type is not part of a value.** `const X Mode = 3` is `3`.
+- **Strings follow Go's escapes.** `"\xc3\xa9"` is `é`. A raw string loses its carriage returns. A rune, such as `'r'`,
+  stays as written. A string whose bytes are not UTF-8 text stops the run for its name.
+- **Methods, `func init` and `_` are not symbols.**
+- **`go.mod`, `go.sum` and `go.work` have no symbols.**
 
 <!-- </block> -->
 

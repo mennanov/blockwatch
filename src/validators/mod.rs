@@ -20,7 +20,7 @@ use crate::repo_path::RepoPath;
 use crate::scan::{self, ScanMode};
 use crate::settings::{BlockSelection, ValidatorSelection};
 use crate::symbol_path::SymbolPath;
-use crate::symbols::{Symbol, resolve};
+use crate::symbols::{ResolveError, Symbol, Symbols};
 use crate::violation_address::ViolationAddress;
 use crate::virtual_blocks::VirtualBlock;
 use anyhow::{Context, anyhow, bail};
@@ -792,7 +792,7 @@ struct TargetFiles<'a, Fs: FileSystem> {
     /// The text of the target files that are not in `context`.
     contents: HashMap<RepoPath, String>,
     /// The symbols of every file a symbol reference points into.
-    symbols: HashMap<RepoPath, Vec<Symbol>>,
+    symbols: HashMap<RepoPath, Symbols>,
 }
 
 impl<'a, Fs: FileSystem> TargetFiles<'a, Fs> {
@@ -819,21 +819,33 @@ impl<'a, Fs: FileSystem> TargetFiles<'a, Fs> {
     ///
     /// # Errors
     /// Returns an error that shows the reference if `file` cannot be read, has no grammar, is in a
-    /// language without symbols, or does not parse.
+    /// language without symbols, or does not parse, or if `path` starts with a name whose
+    /// definition or value can't be read reliably.
     fn resolve_symbol(
         &mut self,
         file: &RepoPath,
         path: &SymbolPath,
     ) -> anyhow::Result<(&str, TargetResult<&Symbol>)> {
-        let (content, symbols) = self
-            .content_and_symbols(file)
-            .with_context(|| format!("failed to resolve symbol reference {file}#{path}"))?;
-        let resolution = resolve(symbols, path).map_err(|error| error.reason(content));
+        let context = || format!("failed to resolve symbol reference {file}#{path}");
+        let (content, symbols) = self.content_and_symbols(file).with_context(context)?;
+        let resolution = match symbols.resolve(path) {
+            Ok(symbol) => Ok(symbol),
+            // The file is as broken near the name as a data file with a syntax error is, so it
+            // stops the run the same way.
+            Err(ResolveError::Unreadable { reason }) => {
+                return Err(anyhow!(reason.to_string()).context(context()));
+            }
+            Err(
+                error @ (ResolveError::NotFound { .. }
+                | ResolveError::AmbiguousSymbol { .. }
+                | ResolveError::AmbiguousFilter { .. }),
+            ) => Err(error.reason(content)),
+        };
         Ok((content, resolution))
     }
 
     /// The text of `file` and the symbols derived from it.
-    fn content_and_symbols(&mut self, file: &RepoPath) -> anyhow::Result<(&str, &[Symbol])> {
+    fn content_and_symbols(&mut self, file: &RepoPath) -> anyhow::Result<(&str, &Symbols)> {
         let content = file_content(self.context, self.file_system, &mut self.contents, file)?;
         let symbols = match self.symbols.entry(file.clone()) {
             Entry::Occupied(entry) => entry.into_mut(),
@@ -1146,6 +1158,15 @@ mod target_files_tests {
         assert_eq!(
             resolve_symbol_error("VERSION", "1.2.3\n", "/x")?,
             "failed to resolve symbol reference VERSION#/x: file format is unsupported"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unreadable_name_resolve_symbol_returns_an_error_with_the_reference() -> anyhow::Result<()> {
+        assert_eq!(
+            resolve_symbol_error("consts.go", "package p\n\nconst X = (1\n", "/X")?,
+            "failed to resolve symbol reference consts.go#/X: file has a syntax error at line 3, column 1 near X, and the path could resolve to the wrong value"
         );
         Ok(())
     }

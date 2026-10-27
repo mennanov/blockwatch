@@ -154,7 +154,7 @@ the file cannot hold a comment. To put rules on the value itself, wrap it in a `
 ### Files with symbols
 
 Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`.toml`, `Pipfile`), YAML (`.yaml`,
-`.yml`, `.cff`) and Markdown (`.md`, `.markdown`, `.mdx`). A path into any other file fails the run.
+`.yml`, `.cff`), Markdown (`.md`, `.markdown`, `.mdx`) and Go (`.go`). A path into any other file fails the run.
 
 ### Writing a path
 
@@ -165,7 +165,8 @@ Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`
 - **Some characters in a key must be escaped:** `/` as `~1`, `~` as `~0`, `,` as `%2C`, `:` as `%3A` and `%` as
   `%25`. The key `@types/node` is `#/dependencies/@types~1node`.
 - **A missing key is a violation.** The message suggests similar paths.
-- **A missing or broken file fails the run.** blockwatch does not guess what a broken file meant.
+- **A missing or broken file fails the run.** blockwatch does not guess what a broken file meant. In a code file, only
+  a path to a name near a syntax error fails it.
 
 ### JSON
 
@@ -213,6 +214,30 @@ level. Its path is the text of each heading it is under, then its own, the top `
 - The same heading twice under one parent is a violation.
 - An `.mdx` file gets the same paths. JSX text and the code in braces count as heading text. A heading inside a JSX
   element doesn't count.
+
+### Code files
+
+Each top-level name is a symbol: a constant, a variable, a type or a function. Its path is `#/NAME`, such as
+`consts.go#/MaxPorts`.
+
+- A value is the initializer as written, never worked out: `20 * 1024 * 1024` stays as it is. Use `same-as-pattern`
+  to take the part you need. A string counts as the text it holds. Parentheses around the whole value are removed.
+- A name without a value, such as a function or a type, gives the text of its whole definition.
+- A symbol covers its own definition, but not the comments above it.
+- A name defined twice is a violation.
+- A syntax error fails the run only for a name whose definition holds it, or a name in the text the parser skipped.
+  So does a string blockwatch can't decode.
+- Members, such as a method or a field, are not symbols yet.
+
+### Go
+
+- In a group, such as `const ( ... )`, a name covers only its own line. Outside a group, it covers the whole
+  declaration.
+- Names get their values by position. In `var x, y = f()`, neither name has a value.
+- A type is not part of a value: `const X Mode = 3` is `3`. A name after `iota` with no value of its own gives its
+  line.
+- Strings follow Go's escapes. A rune, such as `'r'`, stays as written.
+- Methods, `func init` and `_` are not symbols. `go.mod`, `go.sum` and `go.work` have no symbols.
 
 ## The config file (`blockwatch.toml`)
 

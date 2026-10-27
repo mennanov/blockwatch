@@ -88,9 +88,9 @@ Two validators work across files:
 - `affects` fails when a diff touches a block without also changing what it points to.
 - `same-as` fails when a block and its target hold different values. It needs no diff.
 
-Both can point to a block, a whole file, a specific value in a file like `package.json#/version`, or a section of a
-Markdown file (see [Symbols](docs/symbols.md)). The other validators check a single block on their own: the things
-you'd otherwise have to nitpick in code review.
+Both can point to a block, a whole file, a specific value in a file like `package.json#/version`, a section of a
+Markdown file, or a constant in a Go file (see [Symbols](docs/symbols.md)). The other validators check a single block on
+their own: the things you'd otherwise have to nitpick in code review.
 
 <!-- <block name="available-validators"
      same-as="src/validators/mod.rs:validator-registry, docs/validators/README.md:validators-index"

@@ -5,6 +5,7 @@ use crate::diff_parser::{DiffChanges, LineChanges};
 use crate::fs::{FileSystem, PathFilter};
 use crate::language_parsers::{LanguageParsers, SharedLanguageParser};
 use crate::repo_path::RepoPath;
+use crate::symbols::Symbols;
 use crate::virtual_blocks::{Locator, VirtualBlock};
 use anyhow::{Context, anyhow, bail};
 use std::collections::hash_map::Entry;
@@ -495,7 +496,7 @@ fn virtual_blocks_in_file(
     // The file's symbols are the same for each of its virtual blocks. So is the error when they
     // can't be found, which then shows the first block that needs them.
     let symbols = match (first_symbol_block, parser) {
-        (None, _) => Vec::new(),
+        (None, _) => Symbols::default(),
         (Some(first), Some(parser)) => parser
             .lock()
             .expect("a thread panicked while it held the parser")

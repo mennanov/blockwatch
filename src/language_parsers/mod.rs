@@ -44,7 +44,7 @@ mod yaml;
 
 use crate::block_parser::BlocksFromCommentsParser;
 use crate::blocks::Block;
-use crate::symbols::{Symbol, SymbolsParser};
+use crate::symbols::{Symbols, SymbolsParser};
 use crate::{Position, character_column_at};
 use anyhow::Context;
 use std::collections::HashMap;
@@ -70,13 +70,13 @@ pub(crate) trait LanguageParser: Send + Sync {
         contents: &'a str,
     ) -> Box<dyn Iterator<Item = anyhow::Result<Block>> + 'a>;
 
-    /// Returns the addressable symbols defined in `contents`, in document order. Two symbols can
-    /// share a path, when the source defines the same name twice.
+    /// Returns the addressable symbols defined in `contents`, and the names a reference must not
+    /// resolve in it.
     ///
     /// # Errors
     /// Returns an error if the language has no symbols, or if they cannot be derived from
     /// `contents`.
-    fn parse_symbols(&mut self, contents: &str) -> anyhow::Result<Vec<Symbol>>;
+    fn parse_symbols(&mut self, contents: &str) -> anyhow::Result<Symbols>;
 }
 
 /// A [`LanguageParser`] that finds blocks in the comments `C` extracts, and symbols if the language
@@ -113,7 +113,7 @@ impl<C: CommentsParser> LanguageParser for LanguageParserImpl<C> {
         Box::new(self.blocks_parser.parse_blocks(contents))
     }
 
-    fn parse_symbols(&mut self, contents: &str) -> anyhow::Result<Vec<Symbol>> {
+    fn parse_symbols(&mut self, contents: &str) -> anyhow::Result<Symbols> {
         match &mut self.symbols_parser {
             Some(symbols_parser) => symbols_parser.parse(contents),
             None => anyhow::bail!("symbols are not supported for this language"),
@@ -209,6 +209,7 @@ pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
     let dockerfile_parser = parser(dockerfile::parser()?);
     let elixir_parser = parser(elixir::parser()?);
     let go_parser = parser(go::parser()?);
+    let go_module_files_parser = parser(go::module_files_parser()?);
     let graphql_parser = parser(graphql::parser()?);
     let groovy_parser = parser(groovy::parser()?);
     let hcl_parser = parser(hcl::parser()?);
@@ -287,10 +288,10 @@ pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
         ("exs".into(), elixir_parser),
         ("fsproj".into(), Arc::clone(&xml_parser)),
         ("gemspec".into(), Arc::clone(&ruby_parser)),
-        ("go".into(), Arc::clone(&go_parser)),
-        ("go.mod".into(), Arc::clone(&go_parser)),
-        ("go.sum".into(), Arc::clone(&go_parser)),
-        ("go.work".into(), go_parser),
+        ("go".into(), go_parser),
+        ("go.mod".into(), Arc::clone(&go_module_files_parser)),
+        ("go.sum".into(), Arc::clone(&go_module_files_parser)),
+        ("go.work".into(), go_module_files_parser),
         ("gql".into(), Arc::clone(&graphql_parser)),
         ("gradle".into(), Arc::clone(&groovy_parser)),
         ("graphql".into(), Arc::clone(&graphql_parser)),
@@ -488,7 +489,7 @@ where
 }
 
 /// The text of `node` in `source`, the text that tree-sitter parsed.
-fn node_text<'source>(node: &Node, source: &'source str) -> &'source str {
+pub(crate) fn node_text<'source>(node: &Node, source: &'source str) -> &'source str {
     #[expect(
         clippy::string_slice,
         reason = "tree-sitter nodes start and end on whole characters"
@@ -1003,6 +1004,7 @@ mod tests {
         let documented = [
             "Pipfile",
             "cff",
+            "go",
             "json",
             "jsonc",
             "markdown",

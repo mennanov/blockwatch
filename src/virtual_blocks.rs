@@ -5,7 +5,7 @@ use crate::blocks::{Block, BlockSeverity, BlockWithContext, Content, Declaration
 use crate::diff_parser::LineChanges;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
-use crate::symbols::{Symbol, resolve};
+use crate::symbols::Symbols;
 use anyhow::{Context, anyhow, bail};
 use regex::{Captures, Regex, RegexBuilder};
 use std::collections::HashMap;
@@ -178,7 +178,7 @@ impl VirtualBlock {
     /// The error shows the line of the entry in the config file.
     pub(crate) fn resolve(
         &self,
-        symbols: &[Symbol],
+        symbols: &Symbols,
         source: &str,
         line_changes: &LineChanges,
     ) -> anyhow::Result<BlockWithContext> {
@@ -232,11 +232,12 @@ impl VirtualBlock {
     fn symbol_definition(
         &self,
         path: &SymbolPath,
-        symbols: &[Symbol],
+        symbols: &Symbols,
         source: &str,
         lines: &LineIndex,
     ) -> anyhow::Result<(Range<usize>, Content)> {
-        let symbol = resolve(symbols, path)
+        let symbol = symbols
+            .resolve(path)
             .map_err(|error| self.unresolved(anyhow!(error.reason(source))))?;
         let definition = match symbol.def_byte_ranges.as_slice() {
             [definition] => definition,
@@ -334,7 +335,11 @@ mod tests {
     ) -> anyhow::Result<BlockWithContext> {
         let mut block = virtual_block("notes.txt", &[])?;
         block.locator = locator;
-        block.resolve(&[], source, &line_changes.iter().cloned().collect())
+        block.resolve(
+            &Symbols::default(),
+            source,
+            &line_changes.iter().cloned().collect(),
+        )
     }
 
     /// What a `target-pattern` of `pattern` wraps.
@@ -482,7 +487,7 @@ CREATE TABLE b (
     #[test]
     fn severity_attribute_resolve_returns_a_block_with_that_severity() -> anyhow::Result<()> {
         let block = virtual_block("notes.txt", &[("severity", "warning")])?
-            .resolve(&[], "a\n", &LineChanges::default())?
+            .resolve(&Symbols::default(), "a\n", &LineChanges::default())?
             .block;
 
         assert_eq!(block.severity, BlockSeverity::Warning);

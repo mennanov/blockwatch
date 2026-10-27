@@ -11,7 +11,7 @@ use crate::language_parsers::markdown::{nodes_in_order, section_symbols};
 use crate::language_parsers::{
     Comment, CommentsParser, LanguageParser, TreeSitterCommentsParser, c_style_comments_parser,
 };
-use crate::symbols::Symbol;
+use crate::symbols::Symbols;
 use markdown::mdast::{
     AttributeContent, AttributeValue, AttributeValueExpression, MdxFlowExpression, MdxJsxAttribute,
     MdxJsxExpressionAttribute, MdxJsxFlowElement, MdxJsxTextElement, MdxTextExpression, MdxjsEsm,
@@ -83,8 +83,8 @@ impl LanguageParser for MdxParser {
         }
     }
 
-    fn parse_symbols(&mut self, contents: &str) -> anyhow::Result<Vec<Symbol>> {
-        Ok(section_symbols(&parse_mdx(contents)?, contents))
+    fn parse_symbols(&mut self, contents: &str) -> anyhow::Result<Symbols> {
+        Ok(section_symbols(&parse_mdx(contents)?, contents).into())
     }
 }
 
@@ -413,7 +413,7 @@ title: <3 # not a comment
         Ok(())
     }
 
-    // <block affects="docs/symbols.md:markdown-paths, src/skill.md#/blockwatch/Symbols/Markdown">
+    // <block name="mdx-section-tests" affects="docs/symbols.md:markdown-paths, src/skill.md#/blockwatch/Symbols/Markdown">
     #[test]
     fn document_with_esm_and_jsx_parse_symbols_returns_its_sections() -> anyhow::Result<()> {
         let source = r"import {Badge} from './badge.js'
@@ -431,6 +431,7 @@ Warm.
 
         let paths: Vec<String> = parser()?
             .parse_symbols(source)?
+            .symbols
             .iter()
             .map(|symbol| symbol.path.to_string())
             .collect();

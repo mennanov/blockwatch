@@ -1,5 +1,7 @@
 //! Derives the symbols of a file: the elements a symbol reference can address.
 
+pub(crate) mod code;
+
 use crate::blocks::Content;
 use crate::symbol_path::{Segment, SymbolPath};
 use crate::{LineIndex, Position};
@@ -108,6 +110,69 @@ impl Symbol {
     }
 }
 
+/// The symbols of one file, and the names a reference must not resolve in it.
+#[derive(Debug, Default)]
+pub(crate) struct Symbols {
+    /// Every symbol, in document order. Two symbols can share a path, when the source defines the
+    /// same name twice.
+    pub(crate) symbols: Vec<Symbol>,
+    /// The names whose definition or value blockwatch can't read reliably, each with the reason to
+    /// report, such as a syntax error near it. A name here can also be in `symbols`.
+    unreadable: HashMap<String, String>,
+}
+
+impl From<Vec<Symbol>> for Symbols {
+    fn from(symbols: Vec<Symbol>) -> Self {
+        Self {
+            symbols,
+            unreadable: HashMap::new(),
+        }
+    }
+}
+
+impl Symbols {
+    /// Finds the one symbol at `path`.
+    ///
+    /// A filter in `path`, such as `~[name=blue]`, stands for the one child of the path before it
+    /// whose `name` key holds the value `blue`. A child is a list item or a map entry. A string
+    /// value matches without its quotes, and any other value as written.
+    ///
+    /// When no symbol has `path`, the hints are the paths that resemble it: those at least 60%
+    /// alike by edit distance, and those that end in the same segment. When `path` has a filter,
+    /// they are only paths under the child that the last filter matched, and they keep every
+    /// filter as written. When a filter matches no child, the hints are `path` with the filter's
+    /// value swapped for a value that exactly one child holds.
+    ///
+    /// # Errors
+    /// Returns [`ResolveError::Unreadable`] when the first segment of `path` is an unreadable name.
+    /// Returns [`ResolveError::NotFound`] when no symbol matches `path`, or a filter matches no
+    /// child. Returns [`ResolveError::AmbiguousSymbol`] when several symbols match `path`, and
+    /// [`ResolveError::AmbiguousFilter`] when a filter matches several children.
+    pub(crate) fn resolve(&self, path: &SymbolPath) -> Result<&Symbol, ResolveError<'_>> {
+        let unreadable = match path.segments().first() {
+            Some(Segment::Key(name)) => self.unreadable.get(name),
+            // A filter stands for a list item or a map entry, not for a name the file defines.
+            Some(Segment::Filter { .. }) | None => None,
+        };
+        if let Some(reason) = unreadable {
+            return Err(ResolveError::Unreadable { reason });
+        }
+        let resolved = resolve_filters(&self.symbols, path)?;
+        let candidates: Vec<&Symbol> = self
+            .symbols
+            .iter()
+            .filter(|symbol| symbol.path == resolved)
+            .collect();
+        match candidates.len() {
+            0 => Err(ResolveError::NotFound {
+                hints: path_hints(&self.symbols, path, &resolved),
+            }),
+            1 => Ok(candidates[0]),
+            _ => Err(ResolveError::AmbiguousSymbol { candidates }),
+        }
+    }
+}
+
 /// The value of a [`Symbol`]: a scalar, or the body of a Markdown section.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ScalarValue {
@@ -131,6 +196,9 @@ pub(crate) enum ResolveError<'a> {
         filter: Segment,
         keys: Vec<&'a Symbol>,
     },
+    /// The path starts with a name whose definition or value blockwatch can't read reliably.
+    /// `reason` says why.
+    Unreadable { reason: &'a str },
 }
 
 impl ResolveError<'_> {
@@ -159,6 +227,7 @@ impl ResolveError<'_> {
                     positions(keys, source)
                 )
             }
+            ResolveError::Unreadable { reason } => reason.to_string(),
         }
     }
 }
@@ -184,40 +253,6 @@ const MAX_HINTS: usize = 3;
 /// How alike a path has to be to the one that does not resolve to be a hint, as a normalized edit
 /// distance from 0 (nothing in common) to 1 (identical).
 const MIN_HINT_SIMILARITY: f64 = 0.6;
-
-/// Finds a matching `Symbol` in `symbols` for the given `path`.
-///
-/// A filter in `path`, such as `~[name=blue]`, stands for the one child of the path before it
-/// whose `name` key holds the value `blue`. A child is a list item or a map entry. A string value
-/// matches without its quotes, and any other value as written.
-///
-/// When no symbol has `path`, the hints are the paths that resemble it: those at least 60% alike
-/// by edit distance, and those that end in the same segment. When `path` has a filter, they are
-/// only paths under the child that the last filter matched, and they keep every filter as written.
-/// When a filter matches no child, the hints are `path` with the filter's value swapped for a
-/// value that exactly one child holds.
-///
-/// # Errors
-/// Returns [`ResolveError::NotFound`] when no symbol matches `path`, or a filter matches no child.
-/// Returns [`ResolveError::AmbiguousSymbol`] when several symbols match `path`, and
-/// [`ResolveError::AmbiguousFilter`] when a filter matches several children.
-pub(crate) fn resolve<'a>(
-    symbols: &'a [Symbol],
-    path: &SymbolPath,
-) -> Result<&'a Symbol, ResolveError<'a>> {
-    let resolved = resolve_filters(symbols, path)?;
-    let candidates: Vec<&Symbol> = symbols
-        .iter()
-        .filter(|symbol| symbol.path == resolved)
-        .collect();
-    match candidates.len() {
-        0 => Err(ResolveError::NotFound {
-            hints: path_hints(symbols, path, &resolved),
-        }),
-        1 => Ok(candidates[0]),
-        _ => Err(ResolveError::AmbiguousSymbol { candidates }),
-    }
-}
 
 /// Returns `path` with each filter swapped for the child it matches among `symbols`, such as
 /// `/items/1` for `/items/~[name=blue]`. A path without filters comes back unchanged.
@@ -392,13 +427,13 @@ fn hints<'p>(
 
 /// Derives the addressable symbols of one language's source files.
 pub(crate) trait SymbolsParser: Send + Sync {
-    /// Derives all the addressable symbols in `source`, in document order. Two symbols can share a
-    /// path, when the source defines the same name twice.
+    /// Derives all the addressable symbols in `source`, and the names a reference must not
+    /// resolve in it.
     ///
     /// # Errors
-    /// Returns an error if the symbols of `source` cannot be derived reliably, such as when it has
-    /// a syntax error. The error mentions the position of the problem when there is one.
-    fn parse(&mut self, source: &str) -> anyhow::Result<Vec<Symbol>>;
+    /// Returns an error if no symbol of `source` can be derived reliably, such as when a data file
+    /// has a syntax error. The error mentions the position of the problem when there is one.
+    fn parse(&mut self, source: &str) -> anyhow::Result<Symbols>;
 }
 
 /// The semantic role a query capture plays in deriving a symbol path or value.
@@ -509,14 +544,14 @@ impl SymbolsParser for QuerySymbolsParser {
     /// # Panics
     /// Panics if the query gives a `@def` no `@name`, which leaves its node without a path. Each
     /// language's own tests cover the query it ships.
-    fn parse(&mut self, source: &str) -> anyhow::Result<Vec<Symbol>> {
+    fn parse(&mut self, source: &str) -> anyhow::Result<Symbols> {
         let tree = self
             .parser
             .parse(source, None)
             .context("failed to parse syntax tree")?;
         ensure_no_syntax_error(&tree, source)?;
         let contributions = self.collect_contributions(&tree, source)?;
-        Ok(symbols_from_contributions(&tree, &contributions))
+        Ok(symbols_from_contributions(&tree, &contributions).into())
     }
 }
 
@@ -794,7 +829,7 @@ mod tests {
         let item_query = r#"(array (string (string_content) @value) @item)"#;
         let source = r#"[1, "first", 2, "second"]"#;
 
-        let symbols = json_symbols_parser(item_query)?.parse(source)?;
+        let symbols = json_symbols_parser(item_query)?.parse(source)?.symbols;
 
         let derived: Vec<(String, Option<String>)> = symbols
             .into_iter()
@@ -824,7 +859,7 @@ mod tests {
             (pair key: (string (string_content) @name) value: (object)) @container
             (pair key: (string (string_content) @name) value: (number) @value) @def
         "#;
-        let symbols = json_symbols_parser(container_query)?.parse(source)?;
+        let symbols = json_symbols_parser(container_query)?.parse(source)?.symbols;
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].path.to_string(), "/outer/inner");
         let value = symbols[0].value.as_ref().map(|value| value.text.as_str());
@@ -840,7 +875,7 @@ mod tests {
             |node, source| Ok(source[node.byte_range()].to_uppercase()),
         )?;
 
-        let symbols = parser.parse(r#"{"k": "v"}"#)?;
+        let symbols = parser.parse(r#"{"k": "v"}"#)?.symbols;
 
         assert_eq!(
             symbols,
@@ -866,7 +901,7 @@ mod tests {
   "é": [1, 22]
 }"#;
 
-        let symbols = json_symbols_parser(range_query)?.parse(source)?;
+        let symbols = json_symbols_parser(range_query)?.parse(source)?.symbols;
 
         type PathAndRanges = (String, Vec<Range<usize>>, Vec<Range<Position>>);
         let ranges: Vec<PathAndRanges> = symbols
@@ -1013,7 +1048,7 @@ mod resolve_tests {
     /// The symbols of the list `/items`, with one item for each of `names`. Each item is a map
     /// with two keys: `name`, which holds one of `names`, and `content`, which holds a list or a
     /// map.
-    fn named_items(names: &[&str]) -> Vec<Symbol> {
+    fn named_items(names: &[&str]) -> Symbols {
         names
             .iter()
             .enumerate()
@@ -1023,53 +1058,93 @@ mod resolve_tests {
                     symbol(&format!("/items/{index}/content"), 2 * index + 1),
                 ]
             })
-            .collect()
+            .collect::<Vec<Symbol>>()
+            .into()
     }
 
     #[test]
     fn path_of_one_symbol_returns_that_symbol() {
-        let symbols = [symbol("/a/b", 0), symbol("/b", 1)];
+        let symbols = Symbols::from(vec![symbol("/a/b", 0), symbol("/b", 1)]);
 
-        assert_eq!(resolve(&symbols, &path("/b")), Ok(&symbols[1]));
+        assert_eq!(symbols.resolve(&path("/b")), Ok(&symbols.symbols[1]));
     }
 
     #[test]
     fn path_of_several_symbols_returns_every_one_as_ambiguous() {
-        let symbols = [symbol("/v", 0), symbol("/w", 1), symbol("/v", 2)];
+        let symbols = Symbols::from(vec![symbol("/v", 0), symbol("/w", 1), symbol("/v", 2)]);
 
         assert_eq!(
-            resolve(&symbols, &path("/v")),
+            symbols.resolve(&path("/v")),
             Err(ResolveError::AmbiguousSymbol {
-                candidates: vec![&symbols[0], &symbols[2]]
+                candidates: vec![&symbols.symbols[0], &symbols.symbols[2]]
+            })
+        );
+    }
+
+    /// The symbols `/a`, `/b` and `/bc`, with `b` unreadable.
+    fn symbols_with_b_unreadable() -> Symbols {
+        Symbols {
+            symbols: vec![symbol("/a", 0), symbol("/b", 1), symbol("/bc", 2)],
+            unreadable: HashMap::from([("b".to_string(), "syntax error near b".to_string())]),
+        }
+    }
+
+    #[test]
+    fn unreadable_name_returns_its_reason_even_when_a_symbol_has_it() {
+        let symbols = symbols_with_b_unreadable();
+
+        let error = symbols.resolve(&path("/b")).unwrap_err();
+
+        assert_eq!(error.reason(""), "syntax error near b");
+    }
+
+    #[test]
+    fn path_under_an_unreadable_name_returns_its_reason() {
+        let symbols = symbols_with_b_unreadable();
+
+        assert_eq!(
+            symbols.resolve(&path("/b/c")),
+            Err(ResolveError::Unreadable {
+                reason: "syntax error near b"
             })
         );
     }
 
     #[test]
+    fn name_that_starts_with_an_unreadable_name_resolves() {
+        let symbols = symbols_with_b_unreadable();
+
+        assert_eq!(symbols.resolve(&path("/bc")), Ok(&symbols.symbols[2]));
+    }
+
+    #[test]
     fn misspelled_path_returns_the_alike_paths_as_hints() {
         // `/description` is 50% alike, below the floor.
-        let symbols = [
+        let symbols = Symbols::from(vec![
             symbol("/description", 0),
             symbol("/version", 1),
             symbol("/name", 2),
-        ];
+        ]);
 
         assert_eq!(
-            resolve(&symbols, &path("/verison")),
+            symbols.resolve(&path("/verison")),
             Err(ResolveError::NotFound {
-                hints: vec![symbols[1].path.clone()]
+                hints: vec![symbols.symbols[1].path.clone()]
             })
         );
     }
 
     #[test]
     fn path_with_an_unescaped_slash_returns_the_escaped_path_as_a_hint() {
-        let symbols = [symbol("/dependencies/@types~1node", 0), symbol("/name", 1)];
+        let symbols = Symbols::from(vec![
+            symbol("/dependencies/@types~1node", 0),
+            symbol("/name", 1),
+        ]);
 
         assert_eq!(
-            resolve(&symbols, &path("/dependencies/@types/node")),
+            symbols.resolve(&path("/dependencies/@types/node")),
             Err(ResolveError::NotFound {
-                hints: vec![symbols[0].path.clone()]
+                hints: vec![symbols.symbols[0].path.clone()]
             })
         );
     }
@@ -1077,15 +1152,15 @@ mod resolve_tests {
     #[test]
     fn path_moved_deeper_returns_it_as_a_hint() {
         // Both candidates are well below the floor, and only the first ends in the same segment.
-        let symbols = [
+        let symbols = Symbols::from(vec![
             symbol("/network/services/RetryConfig", 0),
             symbol("/network/services/timeout", 1),
-        ];
+        ]);
 
         assert_eq!(
-            resolve(&symbols, &path("/RetryConfig")),
+            symbols.resolve(&path("/RetryConfig")),
             Err(ResolveError::NotFound {
-                hints: vec![symbols[0].path.clone()]
+                hints: vec![symbols.symbols[0].path.clone()]
             })
         );
     }
@@ -1093,20 +1168,20 @@ mod resolve_tests {
     #[test]
     fn many_alike_paths_returns_the_three_most_alike_first() {
         // 62%, 73%, 89% and 80% alike.
-        let symbols = [
+        let symbols = Symbols::from(vec![
             symbol("/time", 0),
             symbol("/timeout_ms", 1),
             symbol("/timeouts", 2),
             symbol("/timeout_s", 3),
-        ];
+        ]);
 
         assert_eq!(
-            resolve(&symbols, &path("/timeout")),
+            symbols.resolve(&path("/timeout")),
             Err(ResolveError::NotFound {
                 hints: vec![
-                    symbols[2].path.clone(),
-                    symbols[3].path.clone(),
-                    symbols[1].path.clone(),
+                    symbols.symbols[2].path.clone(),
+                    symbols.symbols[3].path.clone(),
+                    symbols.symbols[1].path.clone(),
                 ]
             })
         );
@@ -1115,12 +1190,12 @@ mod resolve_tests {
     #[test]
     fn path_exactly_at_the_similarity_floor_returns_it_as_a_hint() {
         // Two of five characters differ in the first, which is 60% alike, and three in the second.
-        let symbols = [symbol("/abXY", 0), symbol("/aXYZ", 1)];
+        let symbols = Symbols::from(vec![symbol("/abXY", 0), symbol("/aXYZ", 1)]);
 
         assert_eq!(
-            resolve(&symbols, &path("/abcd")),
+            symbols.resolve(&path("/abcd")),
             Err(ResolveError::NotFound {
-                hints: vec![symbols[0].path.clone()]
+                hints: vec![symbols.symbols[0].path.clone()]
             })
         );
     }
@@ -1130,8 +1205,8 @@ mod resolve_tests {
         let symbols = named_items(&["red", "blue"]);
 
         assert_eq!(
-            resolve(&symbols, &path("/items/~[name=blue]/content")),
-            Ok(&symbols[3])
+            symbols.resolve(&path("/items/~[name=blue]/content")),
+            Ok(&symbols.symbols[3])
         );
     }
 
@@ -1140,10 +1215,10 @@ mod resolve_tests {
         let symbols = named_items(&["blue", "red", "blue"]);
 
         assert_eq!(
-            resolve(&symbols, &path("/items/~[name=blue]/content")),
+            symbols.resolve(&path("/items/~[name=blue]/content")),
             Err(ResolveError::AmbiguousFilter {
                 filter: path("/~[name=blue]").segments()[0].clone(),
-                keys: vec![&symbols[0], &symbols[4]]
+                keys: vec![&symbols.symbols[0], &symbols.symbols[4]]
             })
         );
     }
@@ -1154,7 +1229,7 @@ mod resolve_tests {
         let symbols = named_items(&["red", "blues"]);
 
         assert_eq!(
-            resolve(&symbols, &path("/items/~[name=blue]/content")),
+            symbols.resolve(&path("/items/~[name=blue]/content")),
             Err(ResolveError::NotFound {
                 hints: vec![
                     path("/items/~[name=blues]/content"),
@@ -1171,7 +1246,7 @@ mod resolve_tests {
         let symbols = named_items(&["blues", "red", "blues"]);
 
         assert_eq!(
-            resolve(&symbols, &path("/items/~[name=blue]/content")),
+            symbols.resolve(&path("/items/~[name=blue]/content")),
             Err(ResolveError::NotFound {
                 hints: vec![path("/items/~[name=red]/content")]
             })
@@ -1181,10 +1256,13 @@ mod resolve_tests {
     #[test]
     fn filter_at_the_end_matching_no_child_returns_hints_below_the_similarity_floor() {
         // `/~[name=crimson]` is 56% alike to `/~[name=blue]`, below the 60% that other hints need.
-        let symbols = [scalar("/0/name", 0, "red"), scalar("/1/name", 1, "crimson")];
+        let symbols = Symbols::from(vec![
+            scalar("/0/name", 0, "red"),
+            scalar("/1/name", 1, "crimson"),
+        ]);
 
         assert_eq!(
-            resolve(&symbols, &path("/~[name=blue]")),
+            symbols.resolve(&path("/~[name=blue]")),
             Err(ResolveError::NotFound {
                 hints: vec![path("/~[name=red]"), path("/~[name=crimson]")]
             })
@@ -1195,89 +1273,89 @@ mod resolve_tests {
     fn filters_in_two_segments_resolve_one_after_the_other() {
         // Both groups have an item named `blue`, so the second filter has to look only under
         // `second`.
-        let symbols = [
+        let symbols = Symbols::from(vec![
             scalar("/groups/0/name", 0, "first"),
             scalar("/groups/0/items/0/name", 1, "blue"),
             symbol("/groups/0/items/0/content", 2),
             scalar("/groups/1/name", 3, "second"),
             scalar("/groups/1/items/0/name", 4, "blue"),
             symbol("/groups/1/items/0/content", 5),
-        ];
+        ]);
 
         assert_eq!(
-            resolve(
-                &symbols,
-                &path("/groups/~[name=second]/items/~[name=blue]/content")
-            ),
-            Ok(&symbols[5])
+            symbols.resolve(&path("/groups/~[name=second]/items/~[name=blue]/content")),
+            Ok(&symbols.symbols[5])
         );
     }
 
     #[test]
     fn filter_at_the_root_selects_a_list_item() {
         // The file is a list, so no key comes before the filter.
-        let symbols = [
+        let symbols = Symbols::from(vec![
             symbol("/0", 0),
             scalar("/0/name", 1, "red"),
             symbol("/1", 2),
             scalar("/1/name", 3, "blue"),
-        ];
+        ]);
 
-        assert_eq!(resolve(&symbols, &path("/~[name=blue]")), Ok(&symbols[2]));
+        assert_eq!(
+            symbols.resolve(&path("/~[name=blue]")),
+            Ok(&symbols.symbols[2])
+        );
     }
 
     #[test]
     fn filter_selects_an_entry_of_a_map() {
         // `b` is a key of a map, not a position in a list.
-        let symbols = [
+        let symbols = Symbols::from(vec![
             symbol("/items/a", 0),
             scalar("/items/a/name", 1, "red"),
             symbol("/items/b", 2),
             scalar("/items/b/name", 3, "blue"),
-        ];
+        ]);
 
         assert_eq!(
-            resolve(&symbols, &path("/items/~[name=blue]")),
-            Ok(&symbols[2])
+            symbols.resolve(&path("/items/~[name=blue]")),
+            Ok(&symbols.symbols[2])
         );
     }
 
     #[test]
     fn filter_ignores_a_value_deeper_inside_the_key() {
-        let symbols = [
+        let symbols = Symbols::from(vec![
             symbol("/items/0", 0),
             symbol("/items/0/name", 1),
             scalar("/items/0/name/first", 2, "blue"),
-        ];
+        ]);
 
         assert_eq!(
-            resolve(&symbols, &path("/items/~[name=blue]")),
+            symbols.resolve(&path("/items/~[name=blue]")),
             Err(ResolveError::NotFound { hints: vec![] })
         );
     }
 
     #[test]
     fn filter_ignores_another_key_that_holds_the_value() {
-        let symbols = [symbol("/items/0", 0), scalar("/items/0/color", 1, "blue")];
+        let symbols = Symbols::from(vec![
+            symbol("/items/0", 0),
+            scalar("/items/0/color", 1, "blue"),
+        ]);
 
         assert_eq!(
-            resolve(&symbols, &path("/items/~[name=blue]")),
+            symbols.resolve(&path("/items/~[name=blue]")),
             Err(ResolveError::NotFound { hints: vec![] })
         );
     }
 
     #[test]
     fn second_filter_matching_no_child_returns_hints_with_the_first_filter_as_written() {
-        let symbols = [
+        let symbols = Symbols::from(vec![
             scalar("/groups/0/name", 0, "first"),
             scalar("/groups/0/items/0/name", 1, "blue"),
-        ];
+        ]);
 
         assert_eq!(
-            resolve(
-                &symbols,
-                &path("/groups/~[name=first]/items/~[name=red]/content")
-            ),
+            symbols.resolve(&path("/groups/~[name=first]/items/~[name=red]/content")),
             Err(ResolveError::NotFound {
                 hints: vec![path("/groups/~[name=first]/items/~[name=blue]/content")]
             })
@@ -1287,13 +1365,13 @@ mod resolve_tests {
     #[test]
     fn filter_on_a_key_without_a_value_leaves_that_key_out_of_hints() {
         // The `name` of the first item is a list or a map, so it has no value to compare.
-        let symbols = [
+        let symbols = Symbols::from(vec![
             symbol("/items/0/name", 0),
             scalar("/items/1/name", 1, "red"),
-        ];
+        ]);
 
         assert_eq!(
-            resolve(&symbols, &path("/items/~[name=blue]/content")),
+            symbols.resolve(&path("/items/~[name=blue]/content")),
             Err(ResolveError::NotFound {
                 hints: vec![path("/items/~[name=red]/content")]
             })
@@ -1307,7 +1385,7 @@ mod resolve_tests {
         let symbols = named_items(&["blue", "red"]);
 
         assert_eq!(
-            resolve(&symbols, &path("/items/~[name=blue]/contents")),
+            symbols.resolve(&path("/items/~[name=blue]/contents")),
             Err(ResolveError::NotFound {
                 hints: vec![
                     path("/items/~[name=blue]/content"),
@@ -1319,17 +1397,14 @@ mod resolve_tests {
 
     #[test]
     fn filters_then_missing_key_return_hints_with_every_filter_as_written() {
-        let symbols = [
+        let symbols = Symbols::from(vec![
             scalar("/groups/0/name", 0, "first"),
             scalar("/groups/0/items/0/name", 1, "blue"),
             symbol("/groups/0/items/0/content", 2),
-        ];
+        ]);
 
         assert_eq!(
-            resolve(
-                &symbols,
-                &path("/groups/~[name=first]/items/~[name=blue]/contents")
-            ),
+            symbols.resolve(&path("/groups/~[name=first]/items/~[name=blue]/contents")),
             Err(ResolveError::NotFound {
                 hints: vec![
                     path("/groups/~[name=first]/items/~[name=blue]/content"),
@@ -1342,9 +1417,9 @@ mod resolve_tests {
     #[test]
     fn duplicate_keys_on_one_line_reason_lists_each_line_and_column() {
         let source = r#"{"v": 1, "v": 2}"#;
-        let symbols = [symbol("/v", 1), symbol("/v", 9)];
+        let symbols = Symbols::from(vec![symbol("/v", 1), symbol("/v", 9)]);
         let error = ResolveError::AmbiguousSymbol {
-            candidates: vec![&symbols[0], &symbols[1]],
+            candidates: vec![&symbols.symbols[0], &symbols.symbols[1]],
         };
 
         assert_eq!(

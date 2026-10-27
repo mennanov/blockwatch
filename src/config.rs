@@ -9,7 +9,7 @@ use crate::paths_glob::{GLOB_CHARACTERS, PathsGlob};
 use crate::repo_path::RepoPath;
 use crate::settings::RawSettings;
 use crate::symbol_path::SymbolPath;
-use crate::symbols::{self, Symbol};
+use crate::symbols::Symbols;
 use crate::target_reference::TargetReference;
 use crate::virtual_blocks::{ConfigEntry, Locator, TargetPattern, VirtualBlock};
 use anyhow::{Context, anyhow, bail};
@@ -249,13 +249,15 @@ fn reject_duplicate_blocks(blocks: &[VirtualBlock]) -> anyhow::Result<()> {
 fn is_entry_modified(
     text: &str,
     lines: &LineIndex,
-    symbols: &[Symbol],
+    symbols: &Symbols,
     index: usize,
     line_changes: &LineChanges,
 ) -> anyhow::Result<bool> {
     // The symbol covers every line of the entry. The span that serde gives covers only its header.
     let path = SymbolPath::parse(&format!("/block/{index}"))?;
-    let symbol = symbols::resolve(symbols, &path).map_err(|error| anyhow!(error.reason(text)))?;
+    let symbol = symbols
+        .resolve(&path)
+        .map_err(|error| anyhow!(error.reason(text)))?;
     Ok(symbol
         .def_byte_ranges
         .iter()

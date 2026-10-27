@@ -3,7 +3,7 @@ use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, python_style_comments_parser,
 };
 use crate::symbol_path::SymbolPath;
-use crate::symbols::{ScalarValue, Symbol, SymbolsParser};
+use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser};
 use anyhow::{Context, anyhow};
 use std::ops::Range;
 use toml_edit::{InlineTable, Item, Key, Table, Value};
@@ -17,7 +17,7 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 ///
 /// # Errors
 /// Returns an error if `source` is not valid TOML.
-pub(crate) fn parse_symbols(source: &str) -> anyhow::Result<Vec<Symbol>> {
+pub(crate) fn parse_symbols(source: &str) -> anyhow::Result<Symbols> {
     TomlSymbolsParser.parse(source)
 }
 
@@ -40,13 +40,13 @@ impl SymbolsParser for TomlSymbolsParser {
     /// # Errors
     /// Returns an error if `source` is not valid TOML, a duplicate key included. The error shows
     /// the position of the problem.
-    fn parse(&mut self, source: &str) -> anyhow::Result<Vec<Symbol>> {
+    fn parse(&mut self, source: &str) -> anyhow::Result<Symbols> {
         // What a key means depends on the headers above it, not on how the syntax tree nests:
         // `[fruits.physical]` belongs to the last `[[fruits]]` before it. So the symbols come from
         // the document `toml_edit` builds, not from a tree-sitter query.
         let document =
             toml_edit::Document::parse(source).map_err(|error| toml_error(source, &error))?;
-        Walk::symbols_in(source, document.as_table())
+        Ok(Walk::symbols_in(source, document.as_table())?.into())
     }
 }
 
@@ -377,6 +377,7 @@ dob = 1979-05-27T07:32:00-08:00 # Date of birth with comment
     fn derived_symbols(source: &str) -> anyhow::Result<Vec<DerivedSymbol>> {
         Ok(parser()?
             .parse_symbols(source)?
+            .symbols
             .into_iter()
             .map(|symbol| {
                 let texts = symbol
@@ -661,6 +662,7 @@ integer = 1_000
 
         let byte_range: Vec<(String, Option<&str>)> = parser()?
             .parse_symbols(source)?
+            .symbols
             .into_iter()
             .map(|symbol| {
                 let written = symbol.value.map(|value| &source[value.byte_range]);

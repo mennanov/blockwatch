@@ -36,6 +36,7 @@ mod tests {
     fn derived_symbols(source: &str) -> anyhow::Result<Vec<(String, Option<String>)>> {
         Ok(parser()?
             .parse_symbols(source)?
+            .symbols
             .into_iter()
             .map(|symbol| {
                 let value = symbol.value.map(|value| value.text);
@@ -162,6 +163,7 @@ mod tests {
 
         let byte_range: Vec<(String, Option<&str>)> = parser()?
             .parse_symbols(source)?
+            .symbols
             .into_iter()
             .map(|symbol| {
                 let written = symbol.value.map(|value| &source[value.byte_range]);

@@ -4,7 +4,7 @@ use crate::language_parsers::{
     blank_preserving_line_breaks, xml_style_comments_parser,
 };
 use crate::symbol_path::SymbolPath;
-use crate::symbols::{ScalarValue, Symbol, SymbolsParser};
+use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser};
 use markdown::mdast::{Definition, Node};
 use markdown::{Constructs, ParseOptions};
 use std::ops::Range;
@@ -29,8 +29,8 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 struct SectionsParser;
 
 impl SymbolsParser for SectionsParser {
-    fn parse(&mut self, source: &str) -> anyhow::Result<Vec<Symbol>> {
-        Ok(section_symbols(&parse_markdown(source), source))
+    fn parse(&mut self, source: &str) -> anyhow::Result<Symbols> {
+        Ok(section_symbols(&parse_markdown(source), source).into())
     }
 }
 
@@ -376,6 +376,7 @@ mod tests {
     fn derived_symbols(source: &str) -> anyhow::Result<Vec<(SymbolPath, String)>> {
         Ok(parser()?
             .parse_symbols(source)?
+            .symbols
             .into_iter()
             .map(|symbol| {
                 let value = symbol.value.expect("every section has a value").text;
@@ -401,7 +402,7 @@ mod tests {
             .collect()
     }
 
-    // <block affects="docs/symbols.md:markdown-paths, src/skill.md#/blockwatch/Symbols/Markdown">
+    // <block name="markdown-section-tests" affects="docs/symbols.md:markdown-paths, src/skill.md#/blockwatch/Symbols/Markdown">
     #[test]
     fn nested_sections_parse_symbols_returns_each_section_with_its_body() -> anyhow::Result<()> {
         let source = r"Text before the first heading.
@@ -481,7 +482,7 @@ Crème.
 # Tea
 ";
 
-        let symbols = parser()?.parse_symbols(source)?;
+        let symbols = parser()?.parse_symbols(source)?.symbols;
 
         assert_eq!(
             symbols[0].def_byte_ranges,

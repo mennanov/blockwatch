@@ -4,7 +4,7 @@ use crate::language_parsers::{
     tree_sitter_parser,
 };
 use crate::symbol_path::SymbolPath;
-use crate::symbols::{ScalarValue, Symbol, SymbolsParser, ensure_no_syntax_error};
+use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser, ensure_no_syntax_error};
 use anyhow::{Context, bail};
 use std::ops::Range;
 use tree_sitter::Node;
@@ -41,7 +41,7 @@ impl SymbolsParser for YamlSymbolsParser {
     /// # Errors
     /// Returns an error if the file has a syntax error, holds several documents, or has a string
     /// YAML can't decode.
-    fn parse(&mut self, source: &str) -> anyhow::Result<Vec<Symbol>> {
+    fn parse(&mut self, source: &str) -> anyhow::Result<Symbols> {
         // A query can't give an alias a list position without making it a symbol, so the tree is
         // walked by hand.
         let tree = self
@@ -61,8 +61,8 @@ impl SymbolsParser for YamlSymbolsParser {
             })
             .collect();
         match contents.as_slice() {
-            [] => Ok(Vec::new()),
-            [content] => Walk::symbols_in(source, *content),
+            [] => Ok(Symbols::default()),
+            [content] => Ok(Walk::symbols_in(source, *content)?.into()),
             // A path can't say which document it means.
             [_, _, ..] => bail!(
                 "files with several YAML documents are not supported yet; use a named block instead"
@@ -688,6 +688,7 @@ list:
     fn derived_symbols(source: &str) -> anyhow::Result<Vec<DerivedSymbol>> {
         Ok(parser()?
             .parse_symbols(source)?
+            .symbols
             .into_iter()
             .map(|symbol| {
                 let [range] = symbol.def_byte_ranges.as_slice() else {
@@ -732,6 +733,7 @@ list:
     fn value_ranges(source: &str) -> anyhow::Result<Vec<(String, Option<Range<usize>>)>> {
         Ok(parser()?
             .parse_symbols(source)?
+            .symbols
             .into_iter()
             .map(|symbol| {
                 let range = symbol.value.map(|value| value.byte_range);
