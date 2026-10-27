@@ -198,19 +198,14 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod symbols_tests {
     use super::*;
-    use crate::symbols::code::test_utils::{self, decode_error, symbol, syntax_error};
+    use crate::symbols::code::test_utils::{
+        decode_error, symbol, symbols, syntax_error, unresolved, value, values,
+    };
+    use crate::symbols::{Symbols, SymbolsParser};
 
-    /// Each symbol of `source`, as [`test_utils::symbols`] lists it.
-    fn symbols(source: &str) -> anyhow::Result<Vec<(String, String, Option<String>)>> {
-        Ok(test_utils::symbols(
-            &parser()?.parse_symbols(source)?,
-            source,
-        ))
-    }
-
-    /// Why a reference to `path` in `source` does not resolve.
-    fn unresolved(source: &str, path: &str) -> anyhow::Result<String> {
-        test_utils::unresolved(&parser()?.parse_symbols(source)?, source, path)
+    /// The symbols of `source`, a Go file.
+    fn go(source: &str) -> anyhow::Result<Symbols> {
+        CodeSymbolsParser::new(&tree_sitter_go::LANGUAGE.into(), Go)?.parse(source)
     }
 
     #[test]
@@ -255,7 +250,7 @@ func _() {}
 
         // <block affects="docs/symbols.md:go-paths, src/skill.md#/blockwatch/Symbols/Go">
         assert_eq!(
-            symbols(source)?,
+            symbols(&go(source)?, source),
             vec![
                 symbol("/ExprStatusBits", "const ExprStatusBits = 4", Some("4")),
                 symbol("/DNSPortsMax", "DNSPortsMax = 8", Some("8")),
@@ -291,19 +286,11 @@ var Escapes = "a\a\b\f\n\r\t\v\\\"\101\x41\u00e9\U0001F600\xc3\xa9"
 var Raw = `a\n`
 "#;
 
-        let values: Vec<(String, Option<String>)> = symbols(source)?
-            .into_iter()
-            .map(|(path, _, value)| (path, value))
-            .collect();
-
         assert_eq!(
-            values,
+            values(&go(source)?, source),
             vec![
-                (
-                    "/Escapes".to_string(),
-                    Some("a\u{7}\u{8}\u{c}\n\r\t\u{b}\\\"AAé😀é".to_string())
-                ),
-                ("/Raw".to_string(), Some(r"a\n".to_string())),
+                value("/Escapes", "a\u{7}\u{8}\u{c}\n\r\t\u{b}\\\"AAé😀é"),
+                value("/Raw", r"a\n"),
             ]
         );
         Ok(())
@@ -314,7 +301,7 @@ var Raw = `a\n`
         let source = "package p\nvar Raw = `a\r\nb`\n";
 
         assert_eq!(
-            symbols(source)?,
+            symbols(&go(source)?, source),
             vec![symbol("/Raw", "var Raw = `a\r\nb`", Some("a\nb"))]
         );
         Ok(())
@@ -332,23 +319,23 @@ var Fine = "ok"
 "#;
 
         assert_eq!(
-            symbols(source)?,
+            symbols(&go(source)?, source),
             vec![symbol("/Fine", r#"var Fine = "ok""#, Some("ok"))]
         );
         assert_eq!(
-            unresolved(source, "/NotText")?,
+            unresolved(&go(source)?, source, "/NotText")?,
             decode_error(3, 15, "its bytes are not UTF-8 text")
         );
         assert_eq!(
-            unresolved(source, "/NoEscape")?,
+            unresolved(&go(source)?, source, "/NoEscape")?,
             decode_error(4, 16, r"`\'` is not an escape in a Go string")
         );
         assert_eq!(
-            unresolved(source, "/Surrogate")?,
+            unresolved(&go(source)?, source, "/Surrogate")?,
             decode_error(5, 17, r"`\ud800` stands for no character")
         );
         assert_eq!(
-            unresolved(source, "/ShortOctal")?,
+            unresolved(&go(source)?, source, "/ShortOctal")?,
             decode_error(6, 18, r"`\07` is not an escape in a Go string")
         );
         Ok(())
@@ -372,15 +359,24 @@ const (
 "#;
 
         assert_eq!(
-            symbols(source)?,
+            symbols(&go(source)?, source),
             vec![
                 symbol("/A", "const A = 1", Some("1")),
                 symbol("/C", "C = 3", Some("3")),
             ]
         );
-        assert_eq!(unresolved(source, "/F")?, syntax_error(5, 25, "F"));
-        assert_eq!(unresolved(source, "/X")?, syntax_error(10, 2, "X"));
-        assert_eq!(unresolved(source, "/B")?, syntax_error(10, 2, "B"));
+        assert_eq!(
+            unresolved(&go(source)?, source, "/F")?,
+            syntax_error(5, 25, "F")
+        );
+        assert_eq!(
+            unresolved(&go(source)?, source, "/X")?,
+            syntax_error(10, 2, "X")
+        );
+        assert_eq!(
+            unresolved(&go(source)?, source, "/B")?,
+            syntax_error(10, 2, "B")
+        );
         Ok(())
     }
 
@@ -399,12 +395,12 @@ const B = 3
 "#;
 
         assert_eq!(
-            symbols(source)?,
+            symbols(&go(source)?, source),
             vec![symbol("/A", "const A = 1", Some("1"))]
         );
         for name in ["X", "Y", "B"] {
             assert_eq!(
-                unresolved(source, &format!("/{name}"))?,
+                unresolved(&go(source)?, source, &format!("/{name}"))?,
                 syntax_error(5, 1, name)
             );
         }
