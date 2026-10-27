@@ -153,16 +153,27 @@ fn read_value<'tree>(
 /// The syntax errors of `tree`, in document order: each span the parser skipped, and each token
 /// it assumed was missing. An error inside a skipped span is part of that span.
 fn syntax_errors(tree: &Tree) -> Vec<Node<'_>> {
-    // The walk keeps its own stack, as deeply nested source could overflow the call stack.
+    let root = tree.root_node();
+    if !root.has_error() {
+        return Vec::new();
+    }
+    // The walk keeps its own stack, as deeply nested source could overflow the call stack. It
+    // enters only the nodes that hold an error.
     let mut errors = Vec::new();
-    let mut pending = vec![tree.root_node()];
+    let mut pending = vec![root];
+    let mut cursor = tree.walk();
     while let Some(node) = pending.pop() {
         if node.is_error() || node.is_missing() {
             errors.push(node);
-        } else if node.has_error() {
-            let mut cursor = node.walk();
-            let children: Vec<Node> = node.children(&mut cursor).collect();
-            pending.extend(children.into_iter().rev());
+        } else {
+            let first = pending.len();
+            // A token that the parser skipped is an error node that doesn't hold an error.
+            pending.extend(
+                node.children(&mut cursor)
+                    .filter(|child| child.is_error() || child.has_error()),
+            );
+            // The stack takes the last child first, so the children go on it in reverse.
+            pending[first..].reverse();
         }
     }
     errors
