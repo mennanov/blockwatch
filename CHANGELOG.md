@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.16.1] - 2026-10-28
+
 ### Added
 
 - Symbols in Go, C, C++, Python, Starlark, Rust, TypeScript and JavaScript files. `consts.go#/MaxPorts` points at a
