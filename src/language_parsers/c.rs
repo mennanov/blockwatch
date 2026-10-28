@@ -158,6 +158,7 @@ fn top_level_definitions<'tree>(
         "alias_declaration" => node
             .child_by_field_name("name")
             .map(|name| Definition {
+                parents: Vec::new(),
                 names: vec![name],
                 range: start..node.end_byte(),
                 value: None,
@@ -202,6 +203,7 @@ fn declaration_definitions(declaration: Node<'_>, start: usize) -> Vec<Definitio
             continue;
         }
         definitions.push(Definition {
+            parents: Vec::new(),
             names: vec![name],
             range: if alone {
                 start..declaration.end_byte()
@@ -242,6 +244,7 @@ fn typedef_definitions<'tree>(
     let mut definitions = Vec::new();
     if !names.is_empty() {
         definitions.push(Definition {
+            parents: Vec::new(),
             names,
             range: start..typedef.end_byte(),
             value: None,
@@ -256,6 +259,7 @@ fn typedef_definitions<'tree>(
 fn function_definition(function: Node<'_>, start: usize) -> Option<Definition<'_>> {
     let (name, _) = declared_name(function.child_by_field_name("declarator")?)?;
     Some(Definition {
+        parents: Vec::new(),
         names: vec![name],
         range: start..function.end_byte(),
         value: None,
@@ -267,6 +271,7 @@ fn function_definition(function: Node<'_>, start: usize) -> Option<Definition<'_
 fn type_definitions(specifier: Node<'_>, start: usize) -> Vec<Definition<'_>> {
     let mut definitions: Vec<Definition> = defined_type_name(specifier)
         .map(|name| Definition {
+            parents: Vec::new(),
             names: vec![name],
             range: start..specifier.end_byte(),
             value: None,
@@ -302,6 +307,7 @@ fn enumerators(specifier: Node<'_>) -> Vec<Definition<'_>> {
         .filter(|child| child.kind() == "enumerator")
         .filter_map(|enumerator| {
             Some(Definition {
+                parents: Vec::new(),
                 names: vec![enumerator.child_by_field_name("name")?],
                 range: enumerator.byte_range(),
                 value: enumerator
@@ -364,6 +370,7 @@ fn macro_definition<'tree>(
     // The node holds the line end after the macro.
     let end = node.start_byte() + node_text(&node, source).trim_end().len();
     Ok(Some(Definition {
+        parents: Vec::new(),
         names: vec![name],
         range: node.start_byte()..end,
         value,

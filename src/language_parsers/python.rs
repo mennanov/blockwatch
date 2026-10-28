@@ -127,6 +127,7 @@ fn definition<'tree>(
     // `_` names a value that the code throws away.
     names.retain(|name| name.kind() == "identifier" && node_text(name, source) != "_");
     (!names.is_empty()).then(|| Definition {
+        parents: Vec::new(),
         names,
         range: node.byte_range(),
         value,

@@ -46,6 +46,7 @@ impl CodeLanguage for Rust {
                     .unwrap_or(item)
                     .start_byte();
                 Some(Definition {
+                    parents: Vec::new(),
                     names: vec![name],
                     range: start..item.end_byte(),
                     value: value.map(Value::Initializer),

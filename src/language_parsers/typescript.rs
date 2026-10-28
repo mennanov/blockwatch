@@ -149,6 +149,7 @@ fn definition<'tree>(
         matches!(name.kind(), "identifier" | "type_identifier") && node_text(name, source) != "_"
     })?;
     Some(Definition {
+        parents: Vec::new(),
         names: vec![name],
         range,
         value,

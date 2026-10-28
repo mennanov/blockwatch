@@ -116,9 +116,12 @@ pub(crate) struct Symbols {
     /// Every symbol, in document order. Two symbols can share a path, when the source defines the
     /// same name twice.
     pub(crate) symbols: Vec<Symbol>,
-    /// The names whose definition or value blockwatch can't read reliably, each with the reason to
-    /// report, such as a syntax error near it. A name here can also be in `symbols`.
-    unreadable: HashMap<String, String>,
+    /// The paths whose definition or value blockwatch can't read reliably, each with the reason to
+    /// report, such as a syntax error in the definition. A path here can also be in `symbols`.
+    unreadable: HashMap<SymbolPath, String>,
+    /// The words in the text that the parser had to skip, each with the reason to report. That
+    /// text could define any of them, so every path with one of them as a segment is unreadable.
+    skipped: HashMap<String, String>,
 }
 
 impl From<Vec<Symbol>> for Symbols {
@@ -126,6 +129,7 @@ impl From<Vec<Symbol>> for Symbols {
         Self {
             symbols,
             unreadable: HashMap::new(),
+            skipped: HashMap::new(),
         }
     }
 }
@@ -144,16 +148,21 @@ impl Symbols {
     /// value swapped for a value that exactly one child holds.
     ///
     /// # Errors
-    /// Returns [`ResolveError::Unreadable`] when the first segment of `path` is an unreadable name.
-    /// Returns [`ResolveError::NotFound`] when no symbol matches `path`, or a filter matches no
-    /// child. Returns [`ResolveError::AmbiguousSymbol`] when several symbols match `path`, and
-    /// [`ResolveError::AmbiguousFilter`] when a filter matches several children.
+    /// Returns [`ResolveError::Unreadable`] when `path` is an unreadable path, or one of its
+    /// segments is a word the parser skipped. Returns [`ResolveError::NotFound`] when no symbol
+    /// matches `path`, or a filter matches no child. Returns [`ResolveError::AmbiguousSymbol`]
+    /// when several symbols match `path`, and [`ResolveError::AmbiguousFilter`] when a filter
+    /// matches several children.
     pub(crate) fn resolve(&self, path: &SymbolPath) -> Result<&Symbol, ResolveError<'_>> {
-        let unreadable = match path.segments().first() {
-            Some(Segment::Key(name)) => self.unreadable.get(name),
-            // A filter stands for a list item or a map entry, not for a name the file defines.
-            Some(Segment::Filter { .. }) | None => None,
-        };
+        // A problem in the path's own definition is closer than a skipped word, so it is reported
+        // first.
+        let unreadable = self.unreadable.get(path).or_else(|| {
+            path.segments().iter().find_map(|segment| match segment {
+                Segment::Key(name) => self.skipped.get(name),
+                // A filter stands for a list item or a map entry, not for a name the file defines.
+                Segment::Filter { .. } => None,
+            })
+        });
         if let Some(reason) = unreadable {
             return Err(ResolveError::Unreadable { reason });
         }
@@ -1081,17 +1090,40 @@ mod resolve_tests {
         );
     }
 
-    /// The symbols `/a`, `/b` and `/bc`, with `b` unreadable.
-    fn symbols_with_b_unreadable() -> Symbols {
+    /// The symbols `/a`, `/a/b`, `/a/c`, `/b` and `/bc`, with `/a/c` unreadable and `b` skipped.
+    fn symbols_with_unreadable_names() -> Symbols {
         Symbols {
-            symbols: vec![symbol("/a", 0), symbol("/b", 1), symbol("/bc", 2)],
-            unreadable: HashMap::from([("b".to_string(), "syntax error near b".to_string())]),
+            symbols: vec![
+                symbol("/a", 0),
+                symbol("/a/b", 1),
+                symbol("/a/c", 2),
+                symbol("/b", 3),
+                symbol("/bc", 4),
+            ],
+            unreadable: HashMap::from([(path("/a/c"), "syntax error in c".to_string())]),
+            skipped: HashMap::from([("b".to_string(), "syntax error near b".to_string())]),
         }
     }
 
     #[test]
-    fn unreadable_name_returns_its_reason_even_when_a_symbol_has_it() {
-        let symbols = symbols_with_b_unreadable();
+    fn unreadable_path_returns_its_reason_even_when_a_symbol_has_it() {
+        let symbols = symbols_with_unreadable_names();
+
+        let error = symbols.resolve(&path("/a/c")).unwrap_err();
+
+        assert_eq!(error.reason(""), "syntax error in c");
+    }
+
+    #[test]
+    fn path_around_an_unreadable_path_resolves() {
+        let symbols = symbols_with_unreadable_names();
+
+        assert_eq!(symbols.resolve(&path("/a")), Ok(&symbols.symbols[0]));
+    }
+
+    #[test]
+    fn skipped_word_returns_its_reason_even_when_a_symbol_has_it() {
+        let symbols = symbols_with_unreadable_names();
 
         let error = symbols.resolve(&path("/b")).unwrap_err();
 
@@ -1099,8 +1131,8 @@ mod resolve_tests {
     }
 
     #[test]
-    fn path_under_an_unreadable_name_returns_its_reason() {
-        let symbols = symbols_with_b_unreadable();
+    fn path_under_a_skipped_word_returns_its_reason() {
+        let symbols = symbols_with_unreadable_names();
 
         assert_eq!(
             symbols.resolve(&path("/b/c")),
@@ -1111,10 +1143,22 @@ mod resolve_tests {
     }
 
     #[test]
-    fn name_that_starts_with_an_unreadable_name_resolves() {
-        let symbols = symbols_with_b_unreadable();
+    fn path_that_ends_in_a_skipped_word_returns_its_reason() {
+        let symbols = symbols_with_unreadable_names();
 
-        assert_eq!(symbols.resolve(&path("/bc")), Ok(&symbols.symbols[2]));
+        assert_eq!(
+            symbols.resolve(&path("/a/b")),
+            Err(ResolveError::Unreadable {
+                reason: "syntax error near b"
+            })
+        );
+    }
+
+    #[test]
+    fn name_that_starts_with_a_skipped_word_resolves() {
+        let symbols = symbols_with_unreadable_names();
+
+        assert_eq!(symbols.resolve(&path("/bc")), Ok(&symbols.symbols[4]));
     }
 
     #[test]

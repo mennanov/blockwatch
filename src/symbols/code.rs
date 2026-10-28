@@ -10,8 +10,11 @@ use std::collections::HashMap;
 use std::ops::Range;
 use tree_sitter::{Language, Node, Tree};
 
-/// A top-level definition that a language's walk found in a syntax tree.
+/// A definition that a language's walk found in a syntax tree.
 pub(crate) struct Definition<'tree> {
+    /// The names of the definitions it sits in, outermost first. For a field of the class `Inner`
+    /// inside the class `Outer`, they are `Outer` and `Inner`. Empty at the top level.
+    pub(crate) parents: Vec<Node<'tree>>,
     /// The identifiers it defines, usually one. Python's `A = B = 5` defines two.
     pub(crate) names: Vec<Node<'tree>>,
     /// The byte range of the whole definition, with its keywords, attributes and decorators, but
@@ -84,21 +87,22 @@ impl<L: CodeLanguage> SymbolsParser for CodeSymbolsParser<L> {
     }
 }
 
-/// The symbols of `source`, a code file parsed into `tree`, built from the top-level
-/// `definitions` that a language's walk found in it.
+/// The symbols of `source`, a code file parsed into `tree`, built from the `definitions` that a
+/// language's walk found in it.
 ///
-/// Each name of a definition gives a symbol at `/name`, in the order of `definitions`. A value
-/// read by the walk is the symbol's value. An initializer loses the parentheses around it, and
-/// then the symbol's value is the text that `decode_string` gives, or else the initializer as
-/// written.
+/// Each name of a definition gives a symbol, in the order of `definitions`. Its path is the
+/// definition's parents and then the name, such as `/Outer/Inner/name`. A value read by the walk
+/// is the symbol's value. An initializer loses the parentheses around it, and then the symbol's
+/// value is the text that `decode_string` gives, or else the initializer as written.
 ///
-/// A name is unreadable, with a reason that shows where the problem is, when:
+/// A path is unreadable, with a reason that shows where the problem is, when:
 /// - its definition holds a syntax error, such as a span the parser skipped or a token it
 ///   assumed was missing;
-/// - it appears as a whole word in a span the parser skipped anywhere in the file;
+/// - one of its segments appears as a whole word in a span the parser skipped anywhere in the
+///   file;
 /// - the walk or `decode_string` can't read its value.
 ///
-/// A definition with a problem of its own gives no symbol. Another definition of the same name
+/// A definition with a problem of its own gives no symbol. Another definition at the same path
 /// keeps its symbol, and so does a clean definition whose name a skipped span holds.
 // <block name="code-symbol-rules" affects="docs/symbols.md:code-files, src/skill.md#/blockwatch/Symbols/Code files">
 pub(crate) fn symbols(
@@ -111,28 +115,37 @@ pub(crate) fn symbols(
     let mut symbols = Vec::new();
     let mut unreadable = HashMap::new();
     for definition in definitions {
-        let names = definition.names.iter().map(|name| node_text(name, source));
+        let parents: Vec<String> = definition
+            .parents
+            .iter()
+            .map(|parent| node_text(parent, source).to_string())
+            .collect();
+        let paths = definition.names.iter().map(|name| {
+            let name = node_text(name, source);
+            let segments = [parents.as_slice(), &[name.to_string()]].concat();
+            (name, SymbolPath::from_segments(segments))
+        });
         match read_value(definition, source, &errors, decode_string) {
-            Ok(value) => symbols.extend(names.map(|name| Symbol {
-                path: SymbolPath::from_segments(vec![name.to_string()]),
+            Ok(value) => symbols.extend(paths.map(|(_, path)| Symbol {
+                path,
                 def_byte_ranges: vec![definition.range.clone()],
                 value: value.clone(),
             })),
             Err(problem) => {
-                for name in names {
+                for (name, path) in paths {
                     unreadable
-                        .entry(name.to_string())
+                        .entry(path)
                         .or_insert_with(|| problem.reason(name, source));
                 }
             }
         }
     }
     // A skipped span can hold a definition that the walk never saw, so every name in it is
-    // unreadable, defined or not. A problem in a name's own definition is reported first, as it
-    // is the closer one.
+    // unreadable, defined or not.
+    let mut skipped = HashMap::new();
     for error in errors.iter().filter(|error| error.is_error()) {
         for name in names_in(node_text(error, source)) {
-            unreadable
+            skipped
                 .entry(name.to_string())
                 .or_insert_with(|| Problem::SyntaxError(*error).reason(name, source));
         }
@@ -140,6 +153,7 @@ pub(crate) fn symbols(
     Symbols {
         symbols,
         unreadable,
+        skipped,
     }
 }
 
@@ -477,33 +491,61 @@ mod tests {
         Ok(symbols(&tree, source, &definitions, &decode_plain_string))
     }
 
-    /// The top-level definitions of a Python file that the tests use: assignments to names,
-    /// chained ones included, functions and classes.
+    /// The definitions of a Python file that the tests use: assignments to names, chained ones
+    /// included, functions and classes, at the top level and in class bodies.
     fn python_definitions(tree: &Tree) -> Vec<Definition<'_>> {
-        let root = tree.root_node();
-        let mut cursor = root.walk();
-        root.named_children(&mut cursor)
-            .filter_map(|statement| match statement.kind() {
-                "expression_statement" => assignment(statement),
-                "function_definition" | "class_definition" => Some(Definition {
-                    names: vec![statement.child_by_field_name("name")?],
-                    range: statement.byte_range(),
-                    value: None,
-                }),
-                _ => None,
-            })
-            .collect()
+        let mut definitions = Vec::new();
+        push_definitions(tree.root_node(), &[], &mut definitions);
+        definitions
+    }
+
+    /// Adds the definitions in `block`, a module or a class body, to `definitions`. `parents` are
+    /// the names of the classes that `block` sits in.
+    fn push_definitions<'tree>(
+        block: Node<'tree>,
+        parents: &[Node<'tree>],
+        definitions: &mut Vec<Definition<'tree>>,
+    ) {
+        let mut cursor = block.walk();
+        for statement in block.named_children(&mut cursor) {
+            match statement.kind() {
+                "expression_statement" => definitions.extend(assignment(statement, parents)),
+                "function_definition" | "class_definition" => {
+                    let Some(name) = statement.child_by_field_name("name") else {
+                        continue;
+                    };
+                    definitions.push(Definition {
+                        parents: parents.to_vec(),
+                        names: vec![name],
+                        range: statement.byte_range(),
+                        value: None,
+                    });
+                    if let Some(body) = statement
+                        .child_by_field_name("body")
+                        .filter(|_| statement.kind() == "class_definition")
+                    {
+                        push_definitions(body, &[parents, &[name]].concat(), definitions);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     /// The definition that `statement` makes when it assigns to names, such as `A = B = 5`.
-    fn assignment(statement: Node<'_>) -> Option<Definition<'_>> {
+    /// `parents` are the names of the classes it sits in.
+    fn assignment<'tree>(
+        statement: Node<'tree>,
+        parents: &[Node<'tree>],
+    ) -> Option<Definition<'tree>> {
         let mut names = Vec::new();
         let mut value = statement.named_child(0);
         while let Some(assignment) = value.filter(|node| node.kind() == "assignment") {
             names.push(assignment.child_by_field_name("left")?);
             value = assignment.child_by_field_name("right");
         }
-        (!names.is_empty()).then_some(Definition {
+        (!names.is_empty()).then(|| Definition {
+            parents: parents.to_vec(),
             names,
             range: statement.byte_range(),
             value: value.map(Value::Initializer),
@@ -523,11 +565,19 @@ mod tests {
         Ok(Some(text[1..text.len() - 1].to_string()))
     }
 
-    /// The unreadable names, with their reasons.
-    fn unreadable(entries: &[(&str, String)]) -> HashMap<String, String> {
+    /// The unreadable paths, with their reasons.
+    fn unreadable(entries: &[(&str, String)]) -> anyhow::Result<HashMap<SymbolPath, String>> {
         entries
             .iter()
-            .map(|(name, reason)| (name.to_string(), reason.clone()))
+            .map(|(path, reason)| Ok((SymbolPath::parse(path)?, reason.clone())))
+            .collect()
+    }
+
+    /// The words the parser skipped, with their reasons.
+    fn skipped(entries: &[(&str, String)]) -> HashMap<String, String> {
+        entries
+            .iter()
+            .map(|(word, reason)| (word.to_string(), reason.clone()))
             .collect()
     }
 
@@ -618,11 +668,9 @@ C = 3
         );
         assert_eq!(
             symbols.unreadable,
-            unreadable(&[
-                ("X", syntax_error(2, 3, "X")),
-                ("B", syntax_error(2, 3, "B")),
-            ])
+            unreadable(&[("/X", syntax_error(2, 3, "X"))])?
         );
+        assert_eq!(symbols.skipped, skipped(&[("B", syntax_error(2, 3, "B"))]));
         Ok(())
     }
 
@@ -642,8 +690,9 @@ Y = 2
         );
         assert_eq!(
             symbols.unreadable,
-            unreadable(&[("f", syntax_error(1, 7, "f"))])
+            unreadable(&[("/f", syntax_error(1, 7, "f"))])?
         );
+        assert_eq!(symbols.skipped, skipped(&[]));
         Ok(())
     }
 
@@ -657,7 +706,10 @@ N = [1, for, 2, for]
 
         let symbols = symbols_of(source)?;
 
-        assert_eq!(symbols.unreadable["N"], syntax_error(2, 9, "N"));
+        assert_eq!(
+            test_utils::unresolved(&symbols, source, "/N")?,
+            syntax_error(2, 9, "N")
+        );
         Ok(())
     }
 
@@ -674,9 +726,10 @@ print(AB A_1 Aé A1 1A x)
             test_utils::symbols(&symbols, source),
             vec![symbol("/A", "A = 1", Some("1"))]
         );
-        let mut names: Vec<&str> = symbols.unreadable.keys().map(String::as_str).collect();
+        let mut names: Vec<&str> = symbols.skipped.keys().map(String::as_str).collect();
         names.sort();
         assert_eq!(names, vec!["A1", "AB", "A_1", "Aé"]);
+        assert_eq!(symbols.unreadable, unreadable(&[])?);
         Ok(())
     }
 
@@ -695,9 +748,63 @@ B = "plain"
         assert_eq!(
             symbols.unreadable,
             unreadable(&[(
-                "A",
+                "/A",
                 decode_error(1, 5, r"`\N{...}` needs the Unicode name table")
-            )])
+            )])?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn nested_definitions_symbols_returns_each_path_under_its_parents() -> anyhow::Result<()> {
+        let source = r#"class Outer:
+    class Inner:
+        X = 1
+    Y = 2
+"#;
+
+        let symbols = symbols_of(source)?;
+
+        assert_eq!(
+            test_utils::symbols(&symbols, source),
+            vec![
+                symbol("/Outer", source.trim_end(), None),
+                symbol("/Outer/Inner", "class Inner:\n        X = 1", None),
+                symbol("/Outer/Inner/X", "X = 1", Some("1")),
+                symbol("/Outer/Y", "Y = 2", Some("2")),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn syntax_error_in_a_member_symbols_makes_only_the_definitions_that_hold_it_unreadable()
+    -> anyhow::Result<()> {
+        // The parser skips the `for`. `A` holds it too, but not `Y` next to it, nor the `X` of
+        // `B`.
+        let source = r#"class A:
+    X = [1, for]
+    Y = 2
+class B:
+    X = 3
+"#;
+
+        let symbols = symbols_of(source)?;
+
+        assert_eq!(
+            test_utils::symbols(&symbols, source),
+            vec![
+                symbol("/A/Y", "Y = 2", Some("2")),
+                symbol("/B", "class B:\n    X = 3", None),
+                symbol("/B/X", "X = 3", Some("3")),
+            ]
+        );
+        assert_eq!(
+            symbols.unreadable,
+            unreadable(&[
+                ("/A", syntax_error(2, 13, "A")),
+                ("/A/X", syntax_error(2, 13, "X")),
+            ])?
         );
         Ok(())
     }

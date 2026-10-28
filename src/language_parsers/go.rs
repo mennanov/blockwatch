@@ -134,6 +134,7 @@ fn spec_definitions<'tree>(
         // `_` declares nothing that code can refer to.
         .filter(|(_, name)| node_text(name, source) != "_")
         .map(|(index, name)| Definition {
+            parents: Vec::new(),
             names: vec![*name],
             range: range.clone(),
             value: paired.then(|| Value::Initializer(values[index])),
@@ -147,6 +148,7 @@ fn function_definition<'tree>(function: Node<'tree>, source: &str) -> Option<Def
     match node_text(&name, source) {
         "init" | "_" => None,
         _ => Some(Definition {
+            parents: Vec::new(),
             names: vec![name],
             range: function.byte_range(),
             value: None,
