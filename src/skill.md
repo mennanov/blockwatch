@@ -263,8 +263,8 @@ as `consts.go#/MaxPorts`. In Java, the members of a type are symbols too: `Confi
 - `A = B = 5` gives both names the whole statement. `X: int` has no value. A decorator is part of the definition.
 - Imports, `as` targets, `a, b = 1, 2`, `obj.x = 1` and `_` are not symbols. A type alias is one, without a value:
   `type Pair[T] = tuple[T, T]` is `#/Pair`.
-- Strings follow Python's escapes. An f-string with a field and bytes stay as written. A `\N{...}` escape fails the
-  run for its name.
+- Strings follow Python's escapes. An f-string with a field and bytes stay as written. A path to a string with a
+  `\N{...}` escape fails the run.
 - Starlark files, such as `BUILD` and `.bzl`, follow the same rules. A rule call is not a symbol.
 
 ### Rust
@@ -285,8 +285,8 @@ as `consts.go#/MaxPorts`. In Java, the members of a type are symbols too: `Confi
   `dev`.
 - A function with overloads is its implementation. `declare const`, `declare function`, imports, `export { ... }`,
   `const { a } = b` and `module.exports` are not symbols.
-- Strings follow JavaScript's escapes. A template with a field stays as written. A legacy escape, such as `\07`, fails
-  the run for its name.
+- Strings follow JavaScript's escapes. A template with a field stays as written. A path to a string with a legacy
+  escape, such as `\07`, fails the run.
 
 ### Java
 
@@ -297,6 +297,8 @@ as `consts.go#/MaxPorts`. In Java, the members of a type are symbols too: `Confi
 - An annotation element's value is its `default`. Constructors, initializer blocks, record components, and local and
   anonymous classes are not symbols.
 - Strings follow Java's escapes. A text block counts as the text Java reads, without the indentation its lines share.
+  A path to a string with `\u005c` fails the run. Java turns `\u005c` into a backslash before it reads the other
+  escapes, so `"\u005cn"` is `"\n"`.
 
 ## The config file (`blockwatch.toml`)
 

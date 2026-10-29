@@ -262,7 +262,7 @@ symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`.
 - **A syntax error stops the run only for the names near it**: a name whose definition holds the error, and every path
   with a name from the text that the parser had to skip. Other names in the file still resolve. The message shows
   where the error is.
-- **A string that blockwatch can't decode stops the run** for its name only.
+- **A path to a string that blockwatch can't decode stops the run.** Other paths in the file still resolve.
 - **Members are not symbols yet**, such as a method or a field, except in Java.
 
 <!-- </block> -->
@@ -301,7 +301,7 @@ func Helper() {}
 - **Names get their values by position.** In `var x, y = f()`, one call gives both names, so neither has a value.
 - **A type is not part of a value.** `const X Mode = 3` is `3`.
 - **Strings follow Go's escapes.** `"\xc3\xa9"` is `é`. A raw string loses its carriage returns. A rune, such as `'r'`,
-  stays as written. A string whose bytes are not UTF-8 text stops the run for its name.
+  stays as written. A path to a string whose bytes are not UTF-8 text stops the run.
 - **Methods, `func init` and `_` are not symbols.**
 - **`go.mod`, `go.sum` and `go.work` have no symbols.**
 
@@ -389,7 +389,7 @@ def load(path):
   value: `type Pair[T] = tuple[T, T]` is `#/Pair`.
 - **Strings follow Python's escapes.** `"\xe9"` is `é`. An escape Python doesn't know, such as `\d`, stays as written.
   A raw string is its text. An f-string without a field is its text, with `{{` as `{`. An f-string with a field and
-  bytes stay as written. A `\N{...}` escape stops the run for its name.
+  bytes stay as written. A path to a string with a `\N{...}` escape stops the run.
 - **Starlark files, such as `BUILD` and `.bzl`, follow the same rules.** A rule call, such as
   `cc_library(name = "lib")`, is not a symbol.
 - **Class members are not symbols yet.**
@@ -474,8 +474,8 @@ function normalize(text: string): string {
 - **Imports, `export { ... }`, `const { a } = b`, `module.exports`, an anonymous `export default` and `_` are not
   symbols.**
 - **Strings follow JavaScript's escapes.** `"\uD83D\uDE00"` is `😀`. A template without `${...}` is its text. A template
-  with a field and a tagged template, such as ``String.raw`a` ``, stay as written. A legacy escape, such as `\07`,
-  stops the run for its name.
+  with a field and a tagged template, such as ``String.raw`a` ``, stay as written. A path to a string with a legacy
+  escape, such as `\07`, stops the run.
 - **Enum members, class members and the contents of a namespace are not symbols yet.**
 
 <!-- </block> -->
@@ -525,7 +525,8 @@ public class Config {
 - **A file with methods and fields at its top level, as Java 25 allows, gives them paths such as `#/main`.**
 - **Strings follow Java's escapes.** `"caf\u00e9"` is `café`. A text block counts as the text Java reads, without the
   indentation its lines share and the white space at the ends of its lines. A character, such as `'a'`, and a string
-  template stay as written.
+  template stay as written. A path to a string with `\u005c` stops the run. Java turns `\u005c` into a backslash
+  before it reads the other escapes, so `"\u005cn"` is `"\n"`.
 - **A syntax error stops the run for the member that holds it, and for each type around that member.** The other
   members still resolve.
 
