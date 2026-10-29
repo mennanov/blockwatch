@@ -126,69 +126,103 @@ fn members(node: Node) -> Vec<Node> {
         .collect()
 }
 
-/// The state of a walk over a YAML document.
-struct Walk<'s> {
-    source: &'s str,
-    /// The path to the node being walked.
-    path: Vec<String>,
-    symbols: Vec<Symbol>,
+/// A member of a mapping or a list, whose symbols the walk still has to add.
+enum Member<'tree> {
+    /// An entry of a mapping, such as `a: 1`.
+    Entry(Node<'tree>),
+    /// An item of a list, with its index.
+    Item(Node<'tree>, usize),
 }
 
-impl<'s> Walk<'s> {
+/// The state of a walk over a YAML document.
+struct Walk<'s, 'tree> {
+    source: &'s str,
+    /// The path to the last member walked. Before each member, the walk cuts it back to the path
+    /// to the value that holds the member.
+    path: Vec<String>,
+    symbols: Vec<Symbol>,
+    /// The members that still need symbols, the next one last. Each comes with the length of the
+    /// path to the value that holds it.
+    pending: Vec<(usize, Member<'tree>)>,
+}
+
+impl<'s, 'tree> Walk<'s, 'tree> {
     /// The symbols of everything inside `content`, a document's value in `source`, in document
     /// order.
     ///
     /// # Errors
-    /// Returns an error if a string can't be decoded.
-    fn symbols_in(source: &'s str, content: Node) -> anyhow::Result<Vec<Symbol>> {
+    /// Returns an error if a string can't be decoded. The error is about the first such string.
+    fn symbols_in(source: &'s str, content: Node<'tree>) -> anyhow::Result<Vec<Symbol>> {
         let mut walk = Walk {
             source,
             path: Vec::new(),
             symbols: Vec::new(),
+            pending: Vec::new(),
         };
-        walk.add_member_symbols(Content::of(content)?)?;
+        walk.push_members(Content::of(content)?);
+        // The walk keeps its own stack, as deeply nested values could overflow the call stack.
+        while let Some((depth, member)) = walk.pending.pop() {
+            // Members come off the stack in document order. So every member walked since the
+            // value that holds `member` is inside that value, and the path still starts with the
+            // path to that value.
+            walk.path.truncate(depth);
+            walk.add_member_symbols(member)?;
+        }
         Ok(walk.symbols)
     }
 
-    /// Adds a symbol for everything inside `content`.
-    fn add_member_symbols(&mut self, content: Content) -> anyhow::Result<()> {
+    /// Puts the members of `content`, the value at the current path, on `pending`.
+    fn push_members(&mut self, content: Content<'tree>) {
+        let depth = self.path.len();
+        let first = self.pending.len();
         match content {
             Content::Mapping(mapping) => {
                 for entry in members(mapping) {
-                    match entry.kind() {
-                        "block_mapping_pair" | "flow_pair" => self.add_pair_symbol(entry)?,
-                        // A key without a value, such as `a` in `{a, b}`.
-                        "flow_node" => self.add_key_symbol(entry, Some(entry), None)?,
-                        other => bail!("unexpected {other} in a YAML {}", mapping.kind()),
-                    }
+                    self.pending.push((depth, Member::Entry(entry)));
                 }
             }
             Content::Sequence(sequence) => {
                 for (index, item) in members(sequence).into_iter().enumerate() {
-                    self.path.push(index.to_string());
-                    match item.kind() {
-                        "block_sequence_item" => {
-                            self.add_value_symbol(item, members(item).first().copied())?;
-                        }
-                        "flow_node" => self.add_value_symbol(item, Some(item))?,
-                        // `[a: 1]` holds a mapping with one pair.
-                        "flow_pair" => {
-                            let range = self.written_range(item);
-                            self.add_symbol(range, None);
-                            self.add_pair_symbol(item)?;
-                        }
-                        other => bail!("unexpected {other} in a YAML {}", sequence.kind()),
-                    }
-                    self.path.pop();
+                    self.pending.push((depth, Member::Item(item, index)));
                 }
             }
             Content::Scalar(..) | Content::Alias | Content::Empty => {}
         }
-        Ok(())
+        // The stack takes the last member first, so the members go on it in reverse.
+        self.pending[first..].reverse();
     }
 
-    /// Adds symbols for `pair` and everything inside it.
-    fn add_pair_symbol(&mut self, pair: Node) -> anyhow::Result<()> {
+    /// Adds the symbols of `member`. The current path is the path to the value that holds it.
+    /// The members of its value go to `pending`.
+    fn add_member_symbols(&mut self, member: Member<'tree>) -> anyhow::Result<()> {
+        match member {
+            Member::Entry(entry) => match entry.kind() {
+                "block_mapping_pair" | "flow_pair" => self.add_pair_symbol(entry),
+                // A key without a value, such as `a` in `{a, b}`.
+                "flow_node" => self.add_key_symbol(entry, Some(entry), None),
+                other => bail!("unexpected {other} in a YAML mapping"),
+            },
+            Member::Item(item, index) => {
+                self.path.push(index.to_string());
+                match item.kind() {
+                    "block_sequence_item" => {
+                        self.add_value_symbol(item, members(item).first().copied())
+                    }
+                    "flow_node" => self.add_value_symbol(item, Some(item)),
+                    // `[a: 1]` holds a mapping with one pair.
+                    "flow_pair" => {
+                        let range = self.written_range(item);
+                        self.add_symbol(range, None);
+                        self.add_pair_symbol(item)
+                    }
+                    other => bail!("unexpected {other} in a YAML list"),
+                }
+            }
+        }
+    }
+
+    /// Adds a symbol for `pair`. Its value's members go to `pending`.
+    fn add_pair_symbol(&mut self, pair: Node<'tree>) -> anyhow::Result<()> {
         self.add_key_symbol(
             pair,
             pair.child_by_field_name("key"),
@@ -196,12 +230,12 @@ impl<'s> Walk<'s> {
         )
     }
 
-    /// Adds symbols for the entry `entry` and everything inside its value.
+    /// Adds a symbol for the entry `entry`. Its value's members go to `pending`.
     fn add_key_symbol(
         &mut self,
-        entry: Node,
-        key: Option<Node>,
-        value: Option<Node>,
+        entry: Node<'tree>,
+        key: Option<Node<'tree>>,
+        value: Option<Node<'tree>>,
     ) -> anyhow::Result<()> {
         let key = match key {
             Some(key) => Content::of(key)?,
@@ -216,14 +250,16 @@ impl<'s> Walk<'s> {
             }
         };
         self.path.push(name);
-        self.add_value_symbol(entry, value)?;
-        self.path.pop();
-        Ok(())
+        self.add_value_symbol(entry, value)
     }
 
-    /// Adds a symbol for `written` at the current path, and symbols for everything inside `value`.
+    /// Adds a symbol for `written` at the current path. The members of `value` go to `pending`.
     /// `value` is `None` when nothing follows the key or `-`.
-    fn add_value_symbol(&mut self, written: Node, value: Option<Node>) -> anyhow::Result<()> {
+    fn add_value_symbol(
+        &mut self,
+        written: Node<'tree>,
+        value: Option<Node<'tree>>,
+    ) -> anyhow::Result<()> {
         let content = match value {
             Some(value) => Content::of(value)?,
             None => Content::Empty,
@@ -248,7 +284,8 @@ impl<'s> Walk<'s> {
         };
         let range = self.written_range(written);
         self.add_symbol(range, scalar_value);
-        self.add_member_symbols(content)
+        self.push_members(content);
+        Ok(())
     }
 
     fn add_symbol(&mut self, def_byte_range: Range<usize>, value: Option<ScalarValue>) {
@@ -992,6 +1029,20 @@ list:
     }
 
     #[test]
+    fn deeply_nested_flow_collections_parse_symbols_does_not_overflow_stack() -> anyhow::Result<()>
+    {
+        // Each level is a mapping and a list, so the paths grow with the square of the depth. This
+        // depth is enough to overflow a recursive walk.
+        let depth = 1_000;
+        let source = format!("{}1{}", "{a: [".repeat(depth), "]}".repeat(depth));
+
+        let symbols = parser()?.parse_symbols(&source)?;
+
+        assert_eq!(symbols.symbols.len(), 2 * depth);
+        Ok(())
+    }
+
+    #[test]
     fn several_documents_parse_symbols_returns_error() -> anyhow::Result<()> {
         let err = parser()?.parse_symbols("v: 1\n---\nv: 2\n").unwrap_err();
 
@@ -1022,6 +1073,22 @@ list:
         assert_eq!(
             format!("{err:#}"),
             "the string at line 1, column 4 is not valid YAML: `d800` stands for no character"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn several_invalid_strings_parse_symbols_returns_error_for_the_first() -> anyhow::Result<()> {
+        let source = r#"a:
+  b: "\U00110000"
+c: "\U00110000"
+"#;
+
+        let err = parser()?.parse_symbols(source).unwrap_err();
+
+        assert_eq!(
+            format!("{err:#}"),
+            "the string at line 2, column 6 is not valid YAML: `00110000` stands for no character"
         );
         Ok(())
     }

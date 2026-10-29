@@ -19,6 +19,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   nested type in it. A text block counts as the text Java reads, without the indentation its lines share. See
   [Java](docs/symbols.md#java).
 
+### Fixed
+
+- A path into a YAML file with lists or mappings nested hundreds of levels deep, such as `a: [[[...]]]`, no longer
+  crashes blockwatch with a stack overflow.
+
 ## [0.16.1] - 2026-10-28
 
 ### Added
