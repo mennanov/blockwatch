@@ -12,6 +12,13 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- Symbols in Java files. `Config.java#/Config/MAX_RETRIES` points at a field of the class `Config`, and
+  `#/Config/Mode/RED` at an enum constant. Each type is a symbol, and so is each field, method, enum constant and
+  nested type in it. A text block counts as the text Java reads, without the indentation its lines share. See
+  [Java](docs/symbols.md#java).
+
 ## [0.16.1] - 2026-10-28
 
 ### Added

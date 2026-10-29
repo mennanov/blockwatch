@@ -1043,6 +1043,7 @@ mod tests {
             "hh",
             "hpp",
             "hxx",
+            "java",
             "js",
             "json",
             "jsonc",

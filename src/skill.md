@@ -156,8 +156,8 @@ the file cannot hold a comment. To put rules on the value itself, wrap it in a `
 Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`.toml`, `Pipfile`), YAML (`.yaml`,
 `.yml`, `.cff`), Markdown (`.md`, `.markdown`, `.mdx`), Go (`.go`), C and C++ (`.c`, `.h`, `.cc`, `.cpp`, `.cxx`,
 `.hh`, `.hpp`, `.hxx`), Python (`.py`, `.pyi`, `.pyw`), Starlark (`.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`,
-`BUCK`, `WORKSPACE`, `Tiltfile`), Rust (`.rs`), TypeScript (`.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`), and JavaScript
-(`.js`, `.mjs`, `.cjs`, `.jsx`). A path into any other file fails the run.
+`BUCK`, `WORKSPACE`, `Tiltfile`), Rust (`.rs`), TypeScript (`.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`), JavaScript
+(`.js`, `.mjs`, `.cjs`, `.jsx`), and Java (`.java`). A path into any other file fails the run.
 
 ### Writing a path
 
@@ -221,16 +221,16 @@ level. Its path is the text of each heading it is under, then its own, the top `
 ### Code files
 
 Each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is `#/NAME`, such
-as `consts.go#/MaxPorts`.
+as `consts.go#/MaxPorts`. In Java, the members of a type are symbols too: `Config.java#/Config/MAX_PORTS`.
 
 - A value is the initializer as written, never worked out: `20 * 1024 * 1024` stays as it is. Use `same-as-pattern`
   to take the part you need. A string counts as the text it holds. Parentheses around the whole value are removed.
 - A name without a value, such as a function or a type, gives the text of its whole definition.
 - A symbol covers its own definition, but not the comments above it.
 - A name defined twice is a violation.
-- A syntax error fails the run only for a name whose definition holds it, or a name in the text the parser skipped.
-  So does a string blockwatch can't decode.
-- Members, such as a method or a field, are not symbols yet.
+- A syntax error fails the run only for a name whose definition holds it, or a path with a name from the text the
+  parser skipped. So does a string blockwatch can't decode.
+- Members, such as a method or a field, are not symbols yet, except in Java.
 
 ### Go
 
@@ -287,6 +287,17 @@ as `consts.go#/MaxPorts`.
   `const { a } = b` and `module.exports` are not symbols.
 - Strings follow JavaScript's escapes. A template with a field stays as written. A legacy escape, such as `\07`, fails
   the run for its name.
+
+### Java
+
+- Each type is a symbol, and so is each member in it: a field, a method, an enum constant, an annotation element or a
+  nested type. A path goes from the top-level type down: `#/Config/Limits/ID`.
+- Overloads are defined twice, and so are a field and a method with one name, such as `name` and `name()`.
+- Annotations are part of a definition. Javadoc is not. In `int a = 1, b = 2;`, a name covers only its own part.
+- An annotation element's value is its `default`. Constructors, initializer blocks, record components, and local and
+  anonymous classes are not symbols.
+- Strings follow Java's escapes. A text block counts as the text Java reads, without the indentation its lines share.
+  A `\u` escape that gives a backslash fails the run for its name.
 
 ## The config file (`blockwatch.toml`)
 

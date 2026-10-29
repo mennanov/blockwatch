@@ -380,6 +380,22 @@ pub(crate) fn char_from_digits(escape: &str, digits: &str, radix: u32) -> anyhow
         .ok_or_else(|| anyhow!("`{escape}` stands for no character"))
 }
 
+/// The text of `units`, the UTF-16 code units of a string. Two units can make one character
+/// together.
+///
+/// # Errors
+/// Returns an error that shows the unit if a unit is half of a character without its other half.
+pub(crate) fn string_from_utf16(units: Vec<u16>) -> anyhow::Result<String> {
+    char::decode_utf16(units)
+        .collect::<Result<String, _>>()
+        .map_err(|error| {
+            anyhow!(
+                "the string holds U+{:04X}, which is only half of a character",
+                error.unpaired_surrogate()
+            )
+        })
+}
+
 /// Helpers for the tests of each language's symbols, which check the same things: the symbols a
 /// file gives, and why a path does not resolve.
 #[cfg(test)]

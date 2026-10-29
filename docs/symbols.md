@@ -37,6 +37,7 @@ declares, instead of tags in a comment.
 | Rust       | `.rs`                                                                          | [Rust](#rust)                                           |
 | TypeScript | `.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`                                         | [TypeScript and JavaScript](#typescript-and-javascript) |
 | JavaScript | `.js`, `.mjs`, `.cjs`, `.jsx`                                                  | [TypeScript and JavaScript](#typescript-and-javascript) |
+| Java       | `.java`                                                                        | [Java](#java)                                           |
 
 <!-- </block> -->
 
@@ -247,7 +248,8 @@ Clone the repository.
 
 In a code file, each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is
 `#/NAME`.
-With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`.
+With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`. In Java, the members of a type are
+symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`.
 
 - **A value is the initializer as written.** blockwatch never works it out: `20 * 1024 * 1024` stays as it is, and so
   does `0x10`. Use `same-as-pattern` to take the part you need.
@@ -257,10 +259,11 @@ With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`.
 - **A symbol covers its own definition**, keywords included, but not the comments above it. `affects` counts a change
   to that text only.
 - **A name defined twice is a violation**, because blockwatch can't tell which copy you mean.
-- **A syntax error stops the run only for the names near it**: a name whose definition holds the error, and any name in
-  the text that the parser had to skip. Other names in the file still resolve. The message shows where the error is.
+- **A syntax error stops the run only for the names near it**: a name whose definition holds the error, and every path
+  with a name from the text that the parser had to skip. Other names in the file still resolve. The message shows
+  where the error is.
 - **A string that blockwatch can't decode stops the run** for its name only.
-- **Members are not symbols yet**, such as a method or a field.
+- **Members are not symbols yet**, such as a method or a field, except in Java.
 
 <!-- </block> -->
 
@@ -474,6 +477,57 @@ function normalize(text: string): string {
   with a field and a tagged template, such as ``String.raw`a` ``, stay as written. A legacy escape, such as `\07`,
   stops the run for its name.
 - **Enum members, class members and the contents of a namespace are not symbols yet.**
+
+<!-- </block> -->
+
+## Java
+
+<!-- <block name="java-paths"> -->
+
+```java
+public class Config {
+    @Native
+    public static final int MAX_RETRIES = 20 * 1024;
+    static final String QUERY = """
+        SELECT *
+        FROM t
+        """;
+
+    void run() {}
+    void run(int times) {}
+
+    enum Mode { RED, GREEN }
+
+    static class Limits {
+        static final long ID = 0x10L;
+    }
+}
+```
+
+| Path                   | Points at                                     |
+|------------------------|-----------------------------------------------|
+| `#/Config`             | the whole class                               |
+| `#/Config/MAX_RETRIES` | `20 * 1024`                                   |
+| `#/Config/QUERY`       | `SELECT *` and `FROM t`, on two lines         |
+| `#/Config/run`         | a violation, as `run` is defined twice        |
+| `#/Config/Mode/GREEN`  | `GREEN`, as it has no value                   |
+| `#/Config/Limits/ID`   | `0x10L`                                       |
+
+- **Each type is a symbol, and so is each member in it**: a field, a method, an enum constant, an annotation element
+  or a nested type. A path goes from the top-level type down, as code refers to it: `#/Config/Limits/ID`.
+- **Overloads are defined twice, and so are a field and a method with one name**, such as `name` and `name()`. Wrap the
+  one you mean in a block instead.
+- **Annotations are part of a definition. Javadoc is not.** In `int a = 1, b = 2;`, a name covers only its own part.
+- **An annotation element's value is its `default`.** `String value() default "x";` is `x`.
+- **A method without a body, such as one in an interface, is a symbol.**
+- **Constructors, initializer blocks, record components, local and anonymous classes, and the members in the body of an
+  enum constant are not symbols.** An accessor you write in a record, such as `int x()`, is a method.
+- **A file with methods and fields at its top level, as Java 25 allows, gives them paths such as `#/main`.**
+- **Strings follow Java's escapes.** `"caf\u00e9"` is `café`. A text block counts as the text Java reads, without the
+  indentation its lines share and the white space at the ends of its lines. A character, such as `'a'`, and a string
+  template stay as written. A `\u` escape that gives a backslash stops the run for its name.
+- **A syntax error stops the run for the member that holds it, and for each type around that member.** The other
+  members still resolve.
 
 <!-- </block> -->
 

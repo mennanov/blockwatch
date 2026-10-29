@@ -1,6 +1,6 @@
 use crate::language_parsers;
 use crate::language_parsers::{CommentsParser, LanguageParser, LanguageParserImpl, node_text};
-use crate::symbols::code::{CodeLanguage, CodeSymbolsParser, Definition, Value};
+use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, Value};
 use anyhow::{anyhow, bail};
 use std::ops::Range;
 use tree_sitter::Node;
@@ -101,15 +101,7 @@ impl CodeLanguage for EcmaScript {
                 _ => units.extend(written.replace("\r\n", "\n").encode_utf16()),
             }
         }
-        char::decode_utf16(units)
-            .collect::<Result<String, _>>()
-            .map(Some)
-            .map_err(|error| {
-                anyhow!(
-                    "the string holds U+{:04X}, which is only half of a character",
-                    error.unpaired_surrogate()
-                )
-            })
+        code::string_from_utf16(units).map(Some)
     }
 }
 
