@@ -297,7 +297,6 @@ as `consts.go#/MaxPorts`. In Java, the members of a type are symbols too: `Confi
 - An annotation element's value is its `default`. Constructors, initializer blocks, record components, and local and
   anonymous classes are not symbols.
 - Strings follow Java's escapes. A text block counts as the text Java reads, without the indentation its lines share.
-  A `\u` escape that gives a backslash fails the run for its name.
 
 ## The config file (`blockwatch.toml`)
 

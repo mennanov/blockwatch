@@ -39,22 +39,26 @@ impl CodeLanguage for Java {
     /// Decodes a Java string or text block. Returns `None` for any other node.
     ///
     /// # Errors
-    /// Returns an error if an escape is not one of Java's, if a `\u` escape gives a backslash, or
-    /// if the string holds half of a character.
+    /// Returns an error if an escape is not one of Java's, if a backslash ends the string, if the
+    /// string holds half of a character, or if a text block holds text on the line of its opening
+    /// quotes.
     fn decode_string(&self, node: &Node, source: &str) -> anyhow::Result<Option<String>> {
         if node.kind() != "string_literal" {
             return Ok(None);
         }
         let literal = node_text(node, source);
+        // Java reads `\u` escapes before anything else in a file. So the character from one can be
+        // a line end or white space in a text block, or start another escape.
         let content = match literal.strip_prefix(TEXT_BLOCK_QUOTES) {
-            Some(block) => {
-                text_block_content(block.strip_suffix(TEXT_BLOCK_QUOTES).unwrap_or(block))
-            }
-            None => literal
-                .strip_prefix('"')
-                .and_then(|content| content.strip_suffix('"'))
-                .unwrap_or(literal)
-                .to_string(),
+            Some(block) => text_block_content(&unicode_unescaped(
+                block.strip_suffix(TEXT_BLOCK_QUOTES).unwrap_or(block),
+            )?)?,
+            None => unicode_unescaped(
+                literal
+                    .strip_prefix('"')
+                    .and_then(|content| content.strip_suffix('"'))
+                    .unwrap_or(literal),
+            )?,
         };
         unescaped(&content).map(Some)
     }
@@ -63,15 +67,21 @@ impl CodeLanguage for Java {
 /// The quotes that open and close a text block.
 const TEXT_BLOCK_QUOTES: &str = "\"\"\"";
 
-/// The text of a text block whose content between its quotes is `block`, with its escapes still
-/// as written. Each line end becomes a line feed. The first line, which holds only white space
-/// after the opening quotes, is left out. The other lines lose the indentation they share, and the
-/// white space at their ends.
-fn text_block_content(block: &str) -> String {
+/// The text of a text block whose content between its quotes is `block`, with its escapes other
+/// than `\u` still as written. Each line end becomes a line feed. The first line, which holds only
+/// white space after the opening quotes, is left out. The other lines lose the indentation they
+/// share, and the white space at their ends.
+///
+/// # Errors
+/// Returns an error if `block` has no line end, or if its first line holds anything other than
+/// spaces, tabs and form feeds.
+fn text_block_content(block: &str) -> anyhow::Result<String> {
     let block = block.replace("\r\n", "\n").replace('\r', "\n");
     let content = block
         .split_once('\n')
-        .map_or(block.as_str(), |(_, content)| content);
+        .filter(|(first, _)| first.chars().all(|c| matches!(c, ' ' | '\t' | '\u{c}')))
+        .map(|(_, content)| content)
+        .ok_or_else(|| anyhow!("a text block must start on the line after its opening quotes"))?;
     let lines: Vec<&str> = content.split('\n').collect();
     // The line of the closing quotes counts even when it holds only white space, so the closing
     // quotes can set the indentation.
@@ -89,7 +99,7 @@ fn text_block_content(block: &str) -> String {
             line.trim_end_matches(is_white_space).to_string()
         })
         .collect();
-    lines.join("\n")
+    Ok(lines.join("\n"))
 }
 
 /// Whether Java counts `character` as white space, as it does when it removes the indentation of
@@ -103,24 +113,54 @@ fn is_white_space(character: char) -> bool {
     }
 }
 
-/// `content`, the text of a Java string between its quotes, with each escape read as what it
-/// stands for.
+/// `content`, the text of a Java string between its quotes, with each `\u` escape read as the
+/// character it stands for. The other escapes stay as written.
 ///
 /// # Errors
-/// Returns an error if an escape is not one of Java's, if a `\u` escape gives a backslash, or if
-/// the string holds half of a character.
-fn unescaped(content: &str) -> anyhow::Result<String> {
+/// Returns an error if a `\u` escape doesn't end in 4 hex digits, or if the string holds half of
+/// a character.
+fn unicode_unescaped(content: &str) -> anyhow::Result<String> {
     // A Java string is UTF-16, so it is built from code units: a `\u` escape can give half of a
     // character, which the next one completes.
     let mut units = Vec::new();
     let mut characters = content.chars().peekable();
+    // A backslash after an odd number of backslashes is escaped, so it can't start a `\u` escape.
+    let mut odd_backslashes = false;
     while let Some(character) = characters.next() {
-        if character != '\\' {
-            units.extend(character.encode_utf16(&mut [0; 2]).iter());
+        if character == '\\' && !odd_backslashes && characters.next_if_eq(&'u').is_some() {
+            while characters.next_if_eq(&'u').is_some() {}
+            let digits: String = characters.by_ref().take(4).collect();
+            // `from_str_radix` alone would also read `+041`, and fewer digits at the end.
+            if digits.len() != 4 || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                bail!("a `\\u` escape needs 4 hex digits, not `{digits}`");
+            }
+            units.push(u16::from_str_radix(&digits, 16)?);
             continue;
         }
-        // The grammar puts a character after every backslash in a string.
-        let escaped = characters.next().unwrap_or_default();
+        odd_backslashes = character == '\\' && !odd_backslashes;
+        units.extend(character.encode_utf16(&mut [0; 2]).iter());
+    }
+    code::string_from_utf16(units)
+}
+
+/// `content`, the text of a Java string between its quotes with its `\u` escapes already read,
+/// with each other escape read as what it stands for.
+///
+/// # Errors
+/// Returns an error if an escape is not one of Java's, or if a backslash ends `content`.
+fn unescaped(content: &str) -> anyhow::Result<String> {
+    let mut text = String::new();
+    let mut characters = content.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character != '\\' {
+            text.push(character);
+            continue;
+        }
+        // The grammar puts a character after every backslash written as is. One from a `\u`
+        // escape can come last.
+        let Some(escaped) = characters.next() else {
+            bail!("the string ends in a backslash, which escapes its closing quote");
+        };
         let character = match escaped {
             'b' => '\u{8}',
             's' => ' ',
@@ -142,23 +182,11 @@ fn unescaped(content: &str) -> anyhow::Result<String> {
                 }
                 char::from(u8::from_str_radix(&digits, 8)?)
             }
-            'u' => {
-                let digits: String = characters.by_ref().take(4).collect();
-                let unit = u16::from_str_radix(&digits, 16)
-                    .map_err(|_| anyhow!("`\\u{digits}` is not an escape in a Java string"))?;
-                // Java reads `\u` escapes before the others, so a backslash from one can start
-                // another escape.
-                if unit == u16::from(b'\\') {
-                    bail!("`\\u{digits}` gives a backslash, which can start another escape");
-                }
-                units.push(unit);
-                continue;
-            }
             _ => bail!("`\\{escaped}` is not an escape in a Java string"),
         };
-        units.extend(character.encode_utf16(&mut [0; 2]).iter());
+        text.push(character);
     }
-    code::string_from_utf16(units)
+    Ok(text)
 }
 
 /// Adds the definitions of the members of `body`, the root of a file or the body of a type, to
@@ -530,6 +558,8 @@ class Helper {}
     static final String OCTAL = "\0\7\77\377\400";
     static final String UNICODE = "caf\u00e9 \uD83D\uDE00";
     static final String NOT_UNICODE = "\\u0041";
+    static final String UNICODE_BACKSLASH = "\u005cn";
+    static final String UNICODE_AFTER_BACKSLASHES = "\\\u0041";
     static final String TEMPLATE = STR."Hi \{name}";
     static final char CHAR = 'a';
     static final String JOINED = "a" + "b";
@@ -545,6 +575,11 @@ class Helper {}
                 value("/Strings/UNICODE", "café 😀"),
                 // The first backslash escapes the second, so no `\u` escape starts.
                 value("/Strings/NOT_UNICODE", r"\u0041"),
+                // Java reads `\u` escapes before the others, so the backslash from the first one
+                // starts `\n`.
+                value("/Strings/UNICODE_BACKSLASH", "\n"),
+                // The third backslash comes after two, so it starts a `\u` escape.
+                value("/Strings/UNICODE_AFTER_BACKSLASHES", r"\A"),
                 value("/Strings/TEMPLATE", r#"STR."Hi \{name}""#),
                 value("/Strings/CHAR", "'a'"),
                 value("/Strings/JOINED", r#""a" + "b""#),
@@ -580,6 +615,12 @@ class Helper {}
         \ta
         caf\u00e9
         """;
+    static final String SEVERAL_US = """
+        \uu0041
+        """;
+    static final String UNICODE_SPACE_AT_END = """
+        a\u0020
+        """;
 }
 "#;
 
@@ -593,8 +634,12 @@ class Helper {}
                 value("/Blocks/CLOSING_LEFT", "    a\n"),
                 value("/Blocks/BLANK_LINE", "a\n\nb\n"),
                 value("/Blocks/JOINED", "one two\n"),
-                // Escapes are read after the indentation is removed.
+                // Escapes other than `\u` are read after the indentation is removed.
                 value("/Blocks/ESCAPED_INDENT", "\ta\ncafé\n"),
+                // Java allows any number of `u`s in a `\u` escape.
+                value("/Blocks/SEVERAL_US", "A\n"),
+                // Java reads `\u` escapes before it removes the white space at line ends.
+                value("/Blocks/UNICODE_SPACE_AT_END", "a\n"),
             ]
         );
         Ok(())
@@ -634,7 +679,12 @@ class Helper {}
         let source = r#"class Broken {
     static final String HEX = "\x41";
     static final String HALF = "\uD800";
-    static final String BACKSLASH = "\u005cn";
+    static final String BACKSLASH = "\u005c";
+    static final String PLUS = """
+        \u+041
+        """;
+    static final String SHORT = """
+        \u41""";
     static final String FINE = "ok";
 }
 "#;
@@ -655,14 +705,64 @@ class Helper {}
                 "the string holds U+D800, which is only half of a character"
             )
         );
-        // Java reads a `\u` escape before the others, so `\u005cn` is a line feed.
+        // Java reads a `\u` escape before the others, so the backslash from `\u005c` escapes the
+        // closing quote.
         assert_eq!(
             unresolved(&java(source)?, source, "/Broken/BACKSLASH")?,
             decode_error(
                 4,
                 37,
-                r"`\u005c` gives a backslash, which can start another escape"
+                "the string ends in a backslash, which escapes its closing quote"
             )
+        );
+        assert_eq!(
+            unresolved(&java(source)?, source, "/Broken/PLUS")?,
+            decode_error(5, 32, r"a `\u` escape needs 4 hex digits, not `+041`")
+        );
+        assert_eq!(
+            unresolved(&java(source)?, source, "/Broken/SHORT")?,
+            decode_error(8, 33, r"a `\u` escape needs 4 hex digits, not `41`")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn text_on_line_of_opening_quotes_parse_symbols_makes_the_name_unreadable() -> anyhow::Result<()>
+    {
+        // Only spaces, tabs and form feeds can follow the opening quotes on their line. Java counts
+        // U+001C as white space only when it removes white space from the other lines.
+        let source = r#"class Opening {
+    static final String SPACES = """WHITE_SPACE
+        a
+        """;
+    static final String OTHER_SPACE = """SEPARATOR
+        a
+        """;
+    static final String TEXT = """ a
+        b
+        """;
+    static final String SAME_LINE = """a""";
+}
+"#
+        .replace("WHITE_SPACE", " \t\u{c}")
+        .replace("SEPARATOR", "\u{1c}");
+
+        assert_eq!(
+            values(&java(&source)?, &source)[1..],
+            [value("/Opening/SPACES", "a\n")]
+        );
+        let problem = "a text block must start on the line after its opening quotes";
+        assert_eq!(
+            unresolved(&java(&source)?, &source, "/Opening/OTHER_SPACE")?,
+            decode_error(5, 39, problem)
+        );
+        assert_eq!(
+            unresolved(&java(&source)?, &source, "/Opening/TEXT")?,
+            decode_error(8, 32, problem)
+        );
+        assert_eq!(
+            unresolved(&java(&source)?, &source, "/Opening/SAME_LINE")?,
+            decode_error(11, 37, problem)
         );
         Ok(())
     }

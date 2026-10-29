@@ -525,7 +525,7 @@ public class Config {
 - **A file with methods and fields at its top level, as Java 25 allows, gives them paths such as `#/main`.**
 - **Strings follow Java's escapes.** `"caf\u00e9"` is `café`. A text block counts as the text Java reads, without the
   indentation its lines share and the white space at the ends of its lines. A character, such as `'a'`, and a string
-  template stay as written. A `\u` escape that gives a backslash stops the run for its name.
+  template stay as written.
 - **A syntax error stops the run for the member that holds it, and for each type around that member.** The other
   members still resolve.
 
