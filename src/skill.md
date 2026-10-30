@@ -157,7 +157,7 @@ Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`
 `.yml`, `.cff`), Markdown (`.md`, `.markdown`, `.mdx`), Go (`.go`), C and C++ (`.c`, `.h`, `.cc`, `.cpp`, `.cxx`,
 `.hh`, `.hpp`, `.hxx`), Python (`.py`, `.pyi`, `.pyw`), Starlark (`.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`,
 `BUCK`, `WORKSPACE`, `Tiltfile`), Rust (`.rs`), TypeScript (`.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`), JavaScript
-(`.js`, `.mjs`, `.cjs`, `.jsx`), and Java (`.java`). A path into any other file fails the run.
+(`.js`, `.mjs`, `.cjs`, `.jsx`), Java (`.java`), and C# (`.cs`). A path into any other file fails the run.
 
 ### Writing a path
 
@@ -221,7 +221,7 @@ level. Its path is the text of each heading it is under, then its own, the top `
 ### Code files
 
 Each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is `#/NAME`, such
-as `consts.go#/MaxPorts`. In Java, the members of a type are symbols too: `Config.java#/Config/MAX_PORTS`.
+as `consts.go#/MaxPorts`. In Java and C#, the members of a type are symbols too: `Config.java#/Config/MAX_PORTS`.
 
 - A value is the initializer as written, never worked out: `20 * 1024 * 1024` stays as it is. Use `same-as-pattern`
   to take the part you need. A string counts as the text it holds. Parentheses around the whole value are removed.
@@ -230,7 +230,7 @@ as `consts.go#/MaxPorts`. In Java, the members of a type are symbols too: `Confi
 - A name defined twice is a violation.
 - A syntax error fails the run only for a name whose definition holds it, or a path with a name from the text the
   parser skipped. So does a string blockwatch can't decode.
-- Members, such as a method or a field, are not symbols yet, except in Java.
+- Members, such as a method or a field, are not symbols yet, except in Java and C#.
 
 ### Go
 
@@ -299,6 +299,22 @@ as `consts.go#/MaxPorts`. In Java, the members of a type are symbols too: `Confi
 - Strings follow Java's escapes. A text block counts as the text Java reads, without the indentation its lines share.
   A path to a string with `\u005c` fails the run. Java turns `\u005c` into a backslash before it reads the other
   escapes, so `"\u005cn"` is `"\n"`.
+
+### C\#
+
+- A namespace is part of the path, not a symbol: in `namespace Acme.Billing;`, a constant is
+  `#/Acme/Billing/Config/MaxRetries`. A type outside any namespace starts at the top: `#/Config/MaxRetries`.
+- Each type is a symbol, and so is each member in it: a field, a constant, a property, a method, an event, an enum
+  member or a nested type.
+- Overloads are defined twice. So are the copies of a name in `#if` and `#else`, and `Cache` next to `Cache<T>`.
+- A property's value is the one it starts with: `v` in `X { get; } = v;` and in `X => v;`. A method has no value.
+- Attributes are part of a definition. `///` comments are not. In `int a = 1, b = 2;`, a name covers only its own part.
+  A name written with `@` keeps it: `#/Config/@switch`.
+- Constructors, indexers, operators, explicit interface members, record parameters and top-level statements are not
+  symbols.
+- Strings follow C#'s escapes. A raw string counts as the text C# reads, without the white space before its closing
+  quotes. A string with a hole, such as `$"v{Major}"`, and `"abc"u8` stay as written. A path to a string that C#
+  rejects fails the run.
 
 ## The config file (`blockwatch.toml`)
 

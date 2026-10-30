@@ -38,6 +38,7 @@ declares, instead of tags in a comment.
 | TypeScript | `.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`                                         | [TypeScript and JavaScript](#typescript-and-javascript) |
 | JavaScript | `.js`, `.mjs`, `.cjs`, `.jsx`                                                  | [TypeScript and JavaScript](#typescript-and-javascript) |
 | Java       | `.java`                                                                        | [Java](#java)                                           |
+| C#         | `.cs`                                                                          | [C#](#c)                                                |
 
 <!-- </block> -->
 
@@ -248,8 +249,8 @@ Clone the repository.
 
 In a code file, each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is
 `#/NAME`.
-With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`. In Java, the members of a type are
-symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`.
+With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`. In Java and C#, the members of a type
+are symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`.
 
 - **A value is the initializer as written.** blockwatch never works it out: `20 * 1024 * 1024` stays as it is, and so
   does `0x10`. Use `same-as-pattern` to take the part you need.
@@ -263,7 +264,7 @@ symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`.
   with a name from the text that the parser had to skip. Other names in the file still resolve. The message shows
   where the error is.
 - **A path to a string that blockwatch can't decode stops the run.** Other paths in the file still resolve.
-- **Members are not symbols yet**, such as a method or a field, except in Java.
+- **Members are not symbols yet**, such as a method or a field, except in Java and C#.
 
 <!-- </block> -->
 
@@ -527,6 +528,68 @@ public class Config {
   indentation its lines share and the white space at the ends of its lines. A character, such as `'a'`, and a string
   template stay as written. A path to a string with `\u005c` stops the run. Java turns `\u005c` into a backslash
   before it reads the other escapes, so `"\u005cn"` is `"\n"`.
+- **A syntax error stops the run for the member that holds it, and for each type around that member.** The other
+  members still resolve.
+
+<!-- </block> -->
+
+## C\#
+
+<!-- <block name="c-sharp-paths"> -->
+
+```csharp
+namespace Acme.Billing;
+
+public class Config
+{
+    [Obsolete]
+    public const int MaxRetries = 20 * 1024;
+    public static readonly string Query = """
+        SELECT *
+        FROM t
+        """;
+    public string Name { get; set; } = "default";
+    public static string Url => $"https://{Host}/x";
+
+    void Run() {}
+    void Run(int times) {}
+
+    public enum Mode { Red = 1, Green }
+
+    class Limits { const long Id = 0x10L; }
+}
+```
+
+| Path                               | Points at                              |
+|------------------------------------|----------------------------------------|
+| `#/Acme/Billing/Config`            | the whole class                        |
+| `#/Acme/Billing/Config/MaxRetries` | `20 * 1024`                            |
+| `#/Acme/Billing/Config/Query`      | `SELECT *` and `FROM t`, on two lines  |
+| `#/Acme/Billing/Config/Name`       | `default`                              |
+| `#/Acme/Billing/Config/Url`        | `$"https://{Host}/x"`, as written      |
+| `#/Acme/Billing/Config/Run`        | a violation, as `Run` is defined twice |
+| `#/Acme/Billing/Config/Mode/Green` | `Green`, as it has no value            |
+| `#/Acme/Billing/Config/Limits/Id`  | `0x10L`                                |
+
+- **A namespace is part of the path, but not a symbol.** `namespace Acme.Billing { }` and
+  `namespace Acme { namespace Billing { } }` give the same paths as `namespace Acme.Billing;`. `#/Acme/Billing` alone
+  is not found. A type outside any namespace starts at the top: `#/Config/MaxRetries`.
+- **Each type is a symbol, and so is each member in it**: a field, a constant, a property, a method, an event, an enum
+  member or a nested type. Classes, structs, interfaces, enums, records and delegates are types.
+- **Overloads are defined twice.** So are the copies of a name in `#if` and `#else`, and `Cache` next to `Cache<T>`,
+  as a path has no place for `<T>`. A member that only one of them has still resolves. Wrap the one you mean in a
+  block instead.
+- **A property's value is the one it starts with**: `v` in `X { get; set; } = v;` and in `X => v;`. A method has no
+  value, even with `=> v`.
+- **Attributes are part of a definition. `///` comments are not.** In `int a = 1, b = 2;`, a name covers only its own
+  part. The code in `#if`, `#elif` and `#else` counts as if the directives were not there.
+- **A name written with `@` keeps it**: `#/Config/@switch`.
+- **Constructors, finalizers, indexers, operators, explicit interface members such as `void IDisposable.Dispose()`,
+  record parameters and top-level statements are not symbols.** A property you write in a record's body is a symbol.
+- **Strings follow C#'s escapes.** A verbatim string, such as `@"C:\temp"`, has none. A raw string counts as the text
+  C# reads, without the white space before its closing quotes. `$"v1"` is `v1`. A string with a hole, such as
+  `$"v{Major}"`, stays as written, and so do `"abc"u8` and a character such as `'a'`. A path to a string that C#
+  rejects stops the run, such as `"\?"` or a raw string with a line less indented than its closing quotes.
 - **A syntax error stops the run for the member that holds it, and for each type around that member.** The other
   members still resolve.
 

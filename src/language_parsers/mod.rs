@@ -1035,6 +1035,7 @@ mod tests {
             "cff",
             "cjs",
             "cpp",
+            "cs",
             "cts",
             "cxx",
             "d.ts",

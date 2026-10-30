@@ -18,6 +18,10 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   `#/Config/Mode/RED` at an enum constant. Each type is a symbol, and so is each field, method, enum constant and
   nested type in it. A text block counts as the text Java reads, without the indentation its lines share. See
   [Java](docs/symbols.md#java).
+- Symbols in C# files. `Config.cs#/Acme/Billing/Config/MaxRetries` points at a constant of the class `Config` in the
+  namespace `Acme.Billing`. Each type is a symbol, and so is each field, property, method, event, enum member and
+  nested type in it. A raw string counts as the text C# reads, without the white space before its closing quotes. See
+  [C#](docs/symbols.md#c).
 
 ### Fixed
 

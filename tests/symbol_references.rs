@@ -112,6 +112,13 @@ fn java_target_resolves() {
 }
 
 #[test]
+fn cs_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/cs_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
 fn json_target_resolves() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/symbol_references/json_source.rs");
