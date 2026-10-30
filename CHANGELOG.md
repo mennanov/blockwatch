@@ -23,6 +23,16 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   nested type in it. A raw string counts as the text C# reads, without the white space before its closing quotes. See
   [C#](docs/symbols.md#c).
 
+### Changed
+
+- Projects now install the agent skill as a short stub that runs `blockwatch skill` each time an agent loads it. So the
+  skill always matches the installed version. Before, projects saved the whole skill, which went stale until an agent
+  saved it again after an upgrade. A saved copy now tells the agent to replace it with the stub. See
+  [Annotating Codebases with AI Agents](docs/agents.md).
+- The agent skill now loads when a change touches something that another place must match, such as an enum and its
+  docs, or a list that must stay sorted. It also loads for files with block tags, or that `blockwatch.toml` points at.
+  Before, it loaded for every code change. This applies to the Claude Code plugin too.
+
 ### Fixed
 
 - A path into a YAML file with lists or mappings nested hundreds of levels deep, such as `a: [[[...]]]`, no longer

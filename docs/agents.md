@@ -20,16 +20,16 @@ Paste this prompt into your agent. The agent installs the skill in your project 
 <!-- <block same-as="README.md:agent-prompt"> -->
 
 ```text
-Run `blockwatch skill` and save its output as `blockwatch/SKILL.md` in this project's skills directory. Then use the
+Run `blockwatch skill` and install the skill in this project as its "Installing this skill" section says. Then use the
 skill to annotate the project and add `blockwatch.toml` if needed. List each block you added and the mistake it
 catches.
 ```
 
 <!-- </block> -->
 
-The skill stays in the project, so agents that work on it later know the rules too. It records the version of
-blockwatch that wrote it. When `blockwatch --version` prints a newer one, the skill tells the agent to save it again.
-Always inspect the generated diff before committing to ensure the added blocks are necessary and accurate.
+The agent saves a short stub, not the whole skill. The stub runs `blockwatch skill` each time it loads, so it always
+matches the installed version. It stays in the project, so agents that work on it later know the rules too. Always
+inspect the generated diff before committing to ensure the added blocks are necessary and accurate.
 
 ## 3. Enable Automated Checks
 
@@ -52,21 +52,20 @@ The plugin's skill runs `blockwatch skill` each time it loads, so it always matc
 
 ### Other AI Tools
 
-For other environments or project-local setups, save the output of `blockwatch skill` to the expected skill location:
+To set up a project by hand, save the stub from
+[Installing this skill](../src/skill.md#installing-this-skill) where your agent reads it:
 
 | Agent               | Location                                               |
 |---------------------|--------------------------------------------------------|
 | **Claude Code**     | Plugin (above) or `.claude/skills/blockwatch/SKILL.md` |
 | **Cursor**          | `.cursor/rules/blockwatch.mdc`                         |
-| **GitHub Copilot**  | Append to `.github/copilot-instructions.md`            |
-| **Codex / generic** | Append to `AGENTS.md`                                  |
+| **GitHub Copilot**  | `.github/copilot-instructions.md`                      |
+| **Codex / generic** | `AGENTS.md`                                            |
 
-For example, for Claude Code:
+`.github/copilot-instructions.md` and `AGENTS.md` hold other instructions too. Add only the stub's description there,
+and the sentence "Then run `blockwatch skill` and follow what it prints."
 
-```shell
-mkdir -p .claude/skills/blockwatch
-blockwatch skill > .claude/skills/blockwatch/SKILL.md
-```
+Don't save the output of `blockwatch skill` itself. A saved copy goes stale when blockwatch is upgraded.
 
 ---
 

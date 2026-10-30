@@ -29,7 +29,7 @@ Then paste this prompt into your AI coding agent:
 <!-- <block name="agent-prompt"> -->
 
 ```text
-Run `blockwatch skill` and save its output as `blockwatch/SKILL.md` in this project's skills directory. Then use the
+Run `blockwatch skill` and install the skill in this project as its "Installing this skill" section says. Then use the
 skill to annotate the project and add `blockwatch.toml` if needed. List each block you added and the mistake it
 catches.
 ```
@@ -37,8 +37,8 @@ catches.
 <!-- </block> -->
 
 Review the suggested blocks and commit them. The skill stays in the project, so agents working on it later know
-the rules too. When you upgrade blockwatch, the skill tells the agent to save it again. To check every future change,
-add blockwatch to your [pre-commit hook or CI](#ci-integration).
+the rules too. It runs `blockwatch skill` each time it loads, so it always matches the installed version. To check every
+future change, add blockwatch to your [pre-commit hook or CI](#ci-integration).
 
 ## How it works
 

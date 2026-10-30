@@ -980,14 +980,9 @@ stay on stderr, under the same file paths and line numbers.
 add value, how to write them, and how to check its work. The text is built into the binary, so it always matches the
 installed version. The command works in any directory, even outside a repository.
 
-Save it into your agent's skills directory:
-
-```shell
-blockwatch skill > .claude/skills/blockwatch/SKILL.md
-```
-
-The saved skill records the version that wrote it. When `blockwatch --version` prints a newer one, the skill tells the
-agent to save it again. See [Annotating Codebases with AI Agents](agents.md).
+Don't save the output itself, because a saved copy goes stale when blockwatch is upgraded. Save the stub from the
+[Installing this skill](../src/skill.md#installing-this-skill) section instead. The stub runs `blockwatch skill` each
+time an agent loads it. See [Annotating Codebases with AI Agents](agents.md).
 
 ## Exit Codes
 

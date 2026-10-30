@@ -279,10 +279,11 @@ default), `safe` or `unsafe`.
 `src/skill.md`, `.agents/skills/blockwatch/SKILL.md` and `.claude-plugin/` are part of the *product*. They make up the
 skill this project ships, so that agents can add blocks to **other** repositories:
 
-- `src/skill.md` is the skill. `blockwatch skill` prints it with the version filled in, and users save that output in
-  their projects.
-- `.agents/skills/blockwatch/SKILL.md` is a stub for the plugin in `.claude-plugin/`. It runs `blockwatch skill` each
-  time it loads. It has its own copy of the description, and `tests/skill.rs` checks that the two copies match.
+- `src/skill.md` is the skill. `blockwatch skill` prints it with the version filled in. Its section "Installing this
+  skill" holds the stub that users save in their projects. The stub runs `blockwatch skill` each time an agent loads
+  it.
+- `.agents/skills/blockwatch/SKILL.md` is that stub, for the plugin in `.claude-plugin/`. `tests/skill.rs` checks that
+  it is the stub in `src/skill.md`, and that its description matches the one at the top of `src/skill.md`.
 
 They are not instructions for working on blockwatch, and changing them changes what users get. This file is the
 guidance for working on blockwatch.

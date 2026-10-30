@@ -39,8 +39,8 @@ same-as = '''.github/workflows/codeql.yml,
     .github/workflows/rust.yml'''
 same-as-pattern = '(?:actions/checkout@|^)(?P<value>v\d+)$'
 
-# `blockwatch skill` prints src/skill.md, and projects save that output. A tag in that file would become a block in
-# every one of those projects. So blocks point at its sections by their headings, and these entries hold the pattern
+# `blockwatch skill` prints src/skill.md, and some projects hold a saved copy of that output. A tag in that file would
+# become a block in every one of those projects. So blocks point at its sections by their headings, and these entries hold the pattern
 # that reads a section, which the section can't hold itself.
 [[block]]
 target = 'src/skill.md#/blockwatch/Validator reference'

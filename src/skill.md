@@ -1,12 +1,12 @@
 ---
 name: blockwatch
-description: Use whenever you write or change code. As you write it, add blockwatch `<block>` tags in comments, so that `blockwatch` fails when related code falls out of sync. Use `affects` for code that must change together (an enum and its docs, a constant and its config), `same-as` for two places that must hold the same value, `keep-sorted` and `keep-unique` for lists, and `line-pattern` or `line-count` for strict formats and sizes. Also use it for rules on one key of a JSON, TOML or YAML file (such as `version` in `package.json`), or on a file that must not hold tags, through `[[block]]` entries in `blockwatch.toml`, and when you edit files that hold `<block ...>` tags or that `blockwatch.toml` points at.
+description: Use when a change touches something that another place must match, such as an enum and its docs, a constant and its config, a version written in two files, or a list that must stay sorted or unique. Also use it when a file you edit holds `<block ...>` tags, or `blockwatch.toml` points at it.
 ---
 
 # blockwatch
 
-`blockwatch skill` wrote this text for blockwatch {{version}}. Before you follow it, run `blockwatch --version`. If that
-prints a newer version, save the output of `blockwatch skill` over this file, and read the file again.
+This text is the output of `blockwatch skill`. If you read it from a saved copy instead, replace the copy with the stub
+in [Installing this skill](#installing-this-skill). A saved copy goes stale when blockwatch is upgraded.
 
 blockwatch is a language-agnostic linter that enforces rules declared inside HTML-like `<block ...>` tags placed in
 source-file comments. It works across Rust, Python, JS/TS, Go, Java, Markdown, YAML, TOML, HTML, and more. By default it
@@ -534,3 +534,29 @@ jobs:
 Validating the PR diff is enough for `affects`/drift checks. A periodic bare `blockwatch` run over the whole tree on
 `main` is a good extra safety net for the deterministic validators — but note it cannot check `affects`, which needs a
 diff to compare against.
+
+## Installing this skill
+
+Install the skill as a short stub, not as a copy of this text. The stub runs `blockwatch skill` each time an agent
+loads it, so the skill always matches the installed version. Save the stub as `blockwatch/SKILL.md` in the project's
+skills directory, such as `.claude/skills/` for Claude Code:
+
+```markdown
+---
+name: blockwatch
+description: Use when a change touches something that another place must match, such as an enum and its docs, a constant and its config, a version written in two files, or a list that must stay sorted or unique. Also use it when a file you edit holds `<block ...>` tags, or `blockwatch.toml` points at it.
+allowed-tools: Bash(blockwatch skill)
+---
+
+# blockwatch skill
+
+`blockwatch skill` prints the skill for the installed version:
+
+!`blockwatch skill`
+
+If its output is not shown above, run `blockwatch skill` and follow what it prints. If `blockwatch` is not installed,
+run `uvx --from blockwatch-cli blockwatch skill` instead.
+```
+
+Some agents read their instructions from one file instead, such as `AGENTS.md`. There, add the description from the
+stub and the sentence "Then run `blockwatch skill` and follow what it prints."

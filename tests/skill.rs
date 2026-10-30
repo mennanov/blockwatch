@@ -53,6 +53,16 @@ fn plugin_stub_has_the_description_of_the_skill() {
 }
 
 #[test]
+fn plugin_stub_is_the_stub_the_skill_installs() {
+    let stub = include_str!("../.agents/skills/blockwatch/SKILL.md");
+
+    assert!(
+        include_str!("../src/skill.md").contains(&format!("```markdown\n{stub}```\n")),
+        "src/skill.md must hold the plugin stub as it is, in a code block"
+    );
+}
+
+#[test]
 fn validation_flag_before_skill_fails() -> anyhow::Result<()> {
     let mut cmd = cargo_bin_cmd!();
     cmd.args(["--verbosity", "full", "skill"]);
