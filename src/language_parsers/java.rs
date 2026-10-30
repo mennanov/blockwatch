@@ -2,10 +2,9 @@ use crate::language_parsers::{
     Comment, CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser, Visit,
     c_style_and_doc_line_and_block_comment_text, node_text,
 };
-use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, Value};
+use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition};
 use anyhow::{anyhow, bail};
 use std::iter::Peekable;
-use std::ops::Range;
 use std::str::Chars;
 use tree_sitter::Node;
 
@@ -58,7 +57,7 @@ impl CodeLanguage for Java {
                 .unwrap_or(literal)
                 .to_string(),
         };
-        unescaped(&content).map(Some)
+        code::decode_utf16(&content, push_escape).map(Some)
     }
 }
 
@@ -99,27 +98,6 @@ fn text_block_content(block: &str) -> String {
 /// a line with them.
 fn is_white_space(character: char) -> bool {
     matches!(character, ' ' | '\t' | '\u{c}')
-}
-
-/// `content`, the text of a Java string between its quotes, with each escape read as what it
-/// stands for.
-///
-/// # Errors
-/// Returns an error if an escape is not one of Java's, if `content` holds `\u005c`, or if
-/// `content` holds half of a character.
-fn unescaped(content: &str) -> anyhow::Result<String> {
-    // A Java string is UTF-16, so it is built from code units: a `\u` escape can give half of a
-    // character, which the next one completes.
-    let mut units = Vec::new();
-    let mut characters = content.chars().peekable();
-    while let Some(character) = characters.next() {
-        if character == '\\' {
-            push_escape(&mut characters, &mut units)?;
-        } else {
-            units.extend(character.encode_utf16(&mut [0; 2]).iter());
-        }
-    }
-    code::string_from_utf16(units)
 }
 
 /// Reads one escape from `characters`, which start right after its backslash, and adds the UTF-16
@@ -211,19 +189,27 @@ fn push_members<'tree>(
                 let Some(name) = name else {
                     continue;
                 };
-                definitions.push(definition(parents, name, member.byte_range(), None));
+                definitions.push(Definition::new(
+                    parents.to_vec(),
+                    name,
+                    member.byte_range(),
+                    None,
+                ));
                 if let Some(body) = member.child_by_field_name("body") {
                     bodies.push((body, [parents, &[name]].concat()));
                 }
             }
             // The body of an enum constant is a class without a name, so its members are not
             // members of the enum.
-            "method_declaration" | "enum_constant" => definitions
-                .extend(name.map(|name| definition(parents, name, member.byte_range(), None))),
+            "method_declaration" | "enum_constant" => {
+                definitions.extend(name.map(|name| {
+                    Definition::new(parents.to_vec(), name, member.byte_range(), None)
+                }));
+            }
             "annotation_type_element_declaration" => {
                 definitions.extend(name.map(|name| {
                     let default = member.child_by_field_name("value");
-                    definition(parents, name, member.byte_range(), default)
+                    Definition::new(parents.to_vec(), name, member.byte_range(), default)
                 }));
             }
             // Code never refers to a constructor or an initializer block by name.
@@ -256,23 +242,7 @@ fn push_fields<'tree>(
             declarator.byte_range()
         };
         let value = declarator.child_by_field_name("value");
-        definitions.push(definition(parents, name, range, value));
-    }
-}
-
-/// The definition of `name` in the type at `parents`, which covers `range` and has the
-/// initializer `value`, if any.
-fn definition<'tree>(
-    parents: &[Node<'tree>],
-    name: Node<'tree>,
-    range: Range<usize>,
-    value: Option<Node<'tree>>,
-) -> Definition<'tree> {
-    Definition {
-        parents: parents.to_vec(),
-        names: vec![name],
-        range,
-        value: value.map(Value::Initializer),
+        definitions.push(Definition::new(parents.to_vec(), name, range, value));
     }
 }
 

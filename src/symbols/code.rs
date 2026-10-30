@@ -7,7 +7,9 @@ use crate::symbol_path::SymbolPath;
 use crate::{Position, character_column_at};
 use anyhow::{Context, anyhow};
 use std::collections::HashMap;
+use std::iter::Peekable;
 use std::ops::Range;
+use std::str::Chars;
 use tree_sitter::{Language, Node, Tree};
 
 /// A definition that a language's walk found in a syntax tree.
@@ -22,6 +24,24 @@ pub(crate) struct Definition<'tree> {
     pub(crate) range: Range<usize>,
     /// The value, or `None` when the definition has none, such as a function or a class.
     pub(crate) value: Option<Value<'tree>>,
+}
+
+impl<'tree> Definition<'tree> {
+    /// The definition of `name` inside the definitions whose names are `parents`. It covers
+    /// `range` and has the initializer `value`, if any.
+    pub(crate) fn new(
+        parents: Vec<Node<'tree>>,
+        name: Node<'tree>,
+        range: Range<usize>,
+        value: Option<Node<'tree>>,
+    ) -> Self {
+        Self {
+            parents,
+            names: vec![name],
+            range,
+            value: value.map(Value::Initializer),
+        }
+    }
 }
 
 /// The value of a [`Definition`].
@@ -365,6 +385,30 @@ pub(crate) fn decode_bytes(
         }
     }
     String::from_utf8(bytes).map_err(|_| anyhow!("its bytes are not UTF-8 text"))
+}
+
+/// Decodes `content`, the text between the quotes of a UTF-16 string, where an escape can give a
+/// code unit that is only half of a character. `push_escape` reads one escape from the characters
+/// right after its backslash, and adds its code units.
+///
+/// # Errors
+/// Returns the error of `push_escape`, or an error if the text holds half of a character.
+pub(crate) fn decode_utf16(
+    content: &str,
+    push_escape: fn(&mut Peekable<Chars>, &mut Vec<u16>) -> anyhow::Result<()>,
+) -> anyhow::Result<String> {
+    // Two `\u` escapes can make one character together, such as the two halves of `😀`. So the
+    // text is built as code units.
+    let mut units = Vec::with_capacity(content.len());
+    let mut characters = content.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '\\' {
+            push_escape(&mut characters, &mut units)?;
+        } else {
+            units.extend(character.encode_utf16(&mut [0; 2]).iter());
+        }
+    }
+    string_from_utf16(units)
 }
 
 /// The character whose code is `digits`, a number in `radix`, which `escape` writes. For
