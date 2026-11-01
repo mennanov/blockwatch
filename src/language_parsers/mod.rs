@@ -734,15 +734,16 @@ fn c_style_line_and_block_comments_parser(
 }
 
 /// C-style comments parser that additionally blanks the full `///` doc-comment marker, for
-/// languages where `///` is the primary documentation style (e.g. Dart, C#).
+/// languages where `///` is the primary documentation style (e.g. Dart, C#). A node is a comment
+/// when its kind is in `comment_node_kinds`.
 fn c_style_and_doc_comments_parser(
     language: &Language,
-    comment_node_kind: &'static str,
+    comment_node_kinds: &'static [&'static str],
 ) -> anyhow::Result<TreeSitterCommentsParser> {
     TreeSitterCommentsParser::new(
         language,
         comment_visitor(move |node, source_code| {
-            if node.kind() != comment_node_kind {
+            if !comment_node_kinds.contains(&node.kind()) {
                 return None;
             }
             let comment = node_text(node, source_code);

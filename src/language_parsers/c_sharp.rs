@@ -367,7 +367,7 @@ fn member_definition<'tree>(
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let c_sharp = tree_sitter_c_sharp::LANGUAGE.into();
-    let parser = language_parsers::c_style_and_doc_comments_parser(&c_sharp, "comment")?;
+    let parser = language_parsers::c_style_and_doc_comments_parser(&c_sharp, &["comment"])?;
     Ok(parser)
 }
 

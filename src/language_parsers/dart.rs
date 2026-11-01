@@ -8,7 +8,11 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let dart_language = tree_sitter_dart::LANGUAGE.into();
-    let parser = language_parsers::c_style_and_doc_comments_parser(&dart_language, "comment")?;
+    // The grammar gives `///` and `/** */` comments a node kind of their own.
+    let parser = language_parsers::c_style_and_doc_comments_parser(
+        &dart_language,
+        &["comment", "documentation_comment"],
+    )?;
     Ok(parser)
 }
 
@@ -33,6 +37,7 @@ int add(int a, int b) {
 /* This is a block comment
 spanning multiple lines
 */
+/** Documentation block */
 "#,
             )
             .collect();
@@ -60,6 +65,11 @@ spanning multiple lines
                     source_range: 104..157,
                     comment_text: "   This is a block comment\nspanning multiple lines\n  "
                         .to_string()
+                },
+                Comment {
+                    position_range: Position::new(11, 1)..Position::new(11, 27),
+                    source_range: 158..184,
+                    comment_text: "    Documentation block   ".to_string()
                 },
             ]
         );
