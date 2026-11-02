@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.16.3] - 2026-11-02
+
 ## [0.16.2] - 2026-10-30
 
 ### Added
