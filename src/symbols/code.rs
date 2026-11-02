@@ -388,6 +388,13 @@ pub(crate) fn nested_definitions<'tree>(
     definitions
 }
 
+/// The first named child of `node` of the `kind`, for the nodes the grammar gives no field name.
+pub(crate) fn child<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
+        .find(|child| child.kind() == kind)
+}
+
 /// The value that follows the `token` in `node`, such as the `5` after the `=` in `x = 5`.
 /// Returns `None` when `node` has no `token`.
 pub(crate) fn value_after<'tree>(node: Node<'tree>, token: &str) -> Option<Node<'tree>> {

@@ -2,7 +2,7 @@ use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, c_style_line_and_block_comments_parser,
     node_text,
 };
-use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition};
+use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, child};
 use anyhow::{Context, anyhow, bail};
 use std::iter::Peekable;
 use std::str::Chars;
@@ -231,13 +231,6 @@ fn property<'tree>(declaration: Node<'tree>, parents: &[Node<'tree>]) -> Option<
         declaration.byte_range(),
         value,
     ))
-}
-
-/// The first named child of `node` of the `kind`, for the nodes the grammar gives no field name.
-fn child<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
-    let mut cursor = node.walk();
-    node.named_children(&mut cursor)
-        .find(|child| child.kind() == kind)
 }
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
