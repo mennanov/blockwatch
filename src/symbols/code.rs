@@ -73,6 +73,11 @@ pub(crate) trait CodeLanguage: Send + Sync {
     /// Returns an error if the string uses an escape that blockwatch can't decode. The error
     /// shows the escape.
     fn decode_string(&self, node: &Node, source: &str) -> anyhow::Result<Option<String>>;
+
+    /// The character that the language can put around a name, such as the backticks of Kotlin's
+    /// `` `is` ``. The name is the same without them. `None` when the language has no such
+    /// character.
+    const NAME_QUOTE: Option<char> = None;
 }
 
 /// Finds the symbols of a file in `language`.
@@ -101,9 +106,13 @@ impl<L: CodeLanguage> SymbolsParser for CodeSymbolsParser<L> {
             .parse(source, None)
             .context("failed to parse syntax tree")?;
         let definitions = self.language.definitions(tree.root_node(), source);
-        Ok(symbols(&tree, source, &definitions, &|node, source| {
-            self.language.decode_string(node, source)
-        }))
+        Ok(symbols(
+            &tree,
+            source,
+            &definitions,
+            &|node, source| self.language.decode_string(node, source),
+            L::NAME_QUOTE,
+        ))
     }
 }
 
@@ -111,15 +120,16 @@ impl<L: CodeLanguage> SymbolsParser for CodeSymbolsParser<L> {
 /// language's walk found in it.
 ///
 /// Each name of a definition gives a symbol, in the order of `definitions`. Its path is the
-/// definition's parents and then the name, such as `/Outer/Inner/name`. A value read by the walk
+/// definition's parents and then the name, such as `/Outer/Inner/name`. A segment of the path
+/// loses the `name_quote` around it, if any. A value read by the walk
 /// is the symbol's value. An initializer loses the parentheses around it, and then the symbol's
 /// value is the text that `decode_string` gives, or else the initializer as written.
 ///
 /// A path is unreadable, with a reason that shows where the problem is, when:
 /// - its definition holds a syntax error, such as a span the parser skipped or a token it
 ///   assumed was missing;
-/// - one of its segments appears as a whole word in a span the parser skipped anywhere in the
-///   file;
+/// - one of its segments appears as a whole word, or between two `name_quote`s, in a span the
+///   parser skipped anywhere in the file;
 /// - the walk or `decode_string` can't read its value.
 ///
 /// A definition with a problem of its own gives no symbol. Another definition at the same path
@@ -130,6 +140,7 @@ pub(crate) fn symbols(
     source: &str,
     definitions: &[Definition],
     decode_string: StringDecoder<'_>,
+    name_quote: Option<char>,
 ) -> Symbols {
     let errors = syntax_errors(tree);
     let mut symbols = Vec::new();
@@ -138,10 +149,10 @@ pub(crate) fn symbols(
         let parents: Vec<String> = definition
             .parents
             .iter()
-            .map(|parent| segment(node_text(parent, source)).to_string())
+            .map(|parent| segment(node_text(parent, source), name_quote).to_string())
             .collect();
         let paths = definition.names.iter().map(|name| {
-            let name = segment(node_text(name, source));
+            let name = segment(node_text(name, source), name_quote);
             let segments = [parents.as_slice(), &[name.to_string()]].concat();
             (name, SymbolPath::from_segments(segments))
         });
@@ -164,7 +175,7 @@ pub(crate) fn symbols(
     // unreadable, defined or not.
     let mut skipped = HashMap::new();
     for error in errors.iter().filter(|error| error.is_error()) {
-        for name in names_in(node_text(error, source)) {
+        for name in names_in(node_text(error, source), name_quote) {
             skipped
                 .entry(name.to_string())
                 .or_insert_with(|| Problem::SyntaxError(*error).reason(name, source));
@@ -177,11 +188,10 @@ pub(crate) fn symbols(
     }
 }
 
-/// The path segment of `name`, a name as the file writes it. Kotlin code can write any name in
-/// backticks, such as `` `is` ``, and it is the same name as without them.
-fn segment(name: &str) -> &str {
-    name.strip_prefix('`')
-        .and_then(|name| name.strip_suffix('`'))
+/// The path segment of `name`, a name as the file writes it, without the `quote` around it.
+fn segment(name: &str, quote: Option<char>) -> &str {
+    quote
+        .and_then(|quote| name.strip_prefix(quote)?.strip_suffix(quote))
         .unwrap_or(name)
 }
 
@@ -339,10 +349,18 @@ fn without_parentheses(mut node: Node<'_>) -> Node<'_> {
 }
 
 /// The words in `text` that could be names: runs of letters, digits and `_` that don't start
-/// with a digit.
-fn names_in(text: &str) -> impl Iterator<Item = &str> {
-    text.split(|c: char| !(c.is_alphanumeric() || c == '_'))
-        .filter(|word| word.chars().next().is_some_and(|first| !first.is_numeric()))
+/// with a digit, and the text after each `quote`, up to the next one.
+fn names_in(text: &str, quote: Option<char>) -> impl Iterator<Item = &str> {
+    let words = text
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .filter(|word| word.chars().next().is_some_and(|first| !first.is_numeric()));
+    // A quoted name can hold spaces, so its words alone don't make it unreadable. A quote inside a
+    // string in `text` would pair the quotes wrongly, so every text between two quotes counts, and
+    // the words stay too.
+    let quoted = quote
+        .into_iter()
+        .flat_map(|quote| text.split(quote).skip(1));
+    words.chain(quoted)
 }
 // </block>
 
@@ -464,6 +482,16 @@ pub(crate) fn char_from_digits(escape: &str, digits: &str, radix: u32) -> anyhow
         .ok()
         .and_then(char::from_u32)
         .ok_or_else(|| anyhow!("`{escape}` stands for no character"))
+}
+
+/// The UTF-16 code unit that `digits` write in base 16, such as the `00e9` of `\u00e9`. Returns
+/// `None` unless `digits` are exactly 4 hex digits.
+pub(crate) fn utf16_unit(digits: &str) -> Option<u16> {
+    // `u16::from_str_radix` also takes a sign, as in `+041`.
+    if digits.len() != 4 || !digits.bytes().all(|digit| digit.is_ascii_hexdigit()) {
+        return None;
+    }
+    u16::from_str_radix(digits, 16).ok()
 }
 
 /// The text of `units`, the UTF-16 code units of a string. Two units can make one character
@@ -590,7 +618,13 @@ mod tests {
             .parse(source, None)
             .context("failed to parse syntax tree")?;
         let definitions = python_definitions(&tree);
-        Ok(symbols(&tree, source, &definitions, &decode_plain_string))
+        Ok(symbols(
+            &tree,
+            source,
+            &definitions,
+            &decode_plain_string,
+            None,
+        ))
     }
 
     /// The definitions of a Python file that the tests use: assignments to names, chained ones
@@ -921,5 +955,13 @@ class B:
         assert!(!error_in(&definition, &(5..10)), "skipped up to the start");
         assert!(!error_in(&definition, &(20..25)), "skipped from the end");
         assert!(!error_in(&definition, &(21..21)), "missing after the end");
+    }
+
+    #[test]
+    fn digits_other_than_4_hex_utf16_unit_returns_none() {
+        assert_eq!(utf16_unit("00e9"), Some(0xe9));
+        assert_eq!(utf16_unit("0e9"), None, "3 digits");
+        assert_eq!(utf16_unit("000e9"), None, "5 digits");
+        assert_eq!(utf16_unit("+0e9"), None, "a sign");
     }
 }

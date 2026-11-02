@@ -634,8 +634,8 @@ data class Config(val timeout: Int = 30, val name: String) {
   `#/Config/Mode/GREEN`.
 - **A constructor parameter with `val` or `var` is a symbol.** Its value is its default. A parameter without `val` or
   `var` is not a symbol.
-- **A companion object's members sit under the class**, as code reads them: `#/Config/ORIGIN`. This holds for a
-  companion with a name too.
+- **A companion object's members sit under the class**, as code reads them: `#/Config/ORIGIN`. A companion with a
+  name works the same way: `companion object Builder` still gives `#/Config/ORIGIN`.
 - **Overloads are defined twice.** So are a property and a function with one name, and two extension functions with
   one name, such as `fun Foo.toDto()` and `fun Bar.toDto()`. Wrap the one you mean in a block instead.
 - **A property's value is its initializer, or the `v` of `get() = v`.** A property with `by`, such as

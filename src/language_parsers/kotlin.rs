@@ -3,7 +3,7 @@ use crate::language_parsers::{
     node_text,
 };
 use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition};
-use anyhow::bail;
+use anyhow::{Context, anyhow, bail};
 use std::iter::Peekable;
 use std::str::Chars;
 use tree_sitter::Node;
@@ -45,7 +45,7 @@ impl CodeLanguage for Kotlin {
         let content = literal
             .strip_prefix(quotes)
             .and_then(|content| content.strip_suffix(quotes))
-            .unwrap_or(literal);
+            .context("a string is between its quotes")?;
         if holds_template(content, escapes) {
             return Ok(None);
         }
@@ -56,6 +56,8 @@ impl CodeLanguage for Kotlin {
             Ok(Some(content.replace("\r\n", "\n").replace('\r', "\n")))
         }
     }
+
+    const NAME_QUOTE: Option<char> = Some('`');
 }
 
 /// The quotes that open and close a raw string.
@@ -102,11 +104,9 @@ fn push_escape(characters: &mut Peekable<Chars>, units: &mut Vec<u16>) -> anyhow
         '\'' | '"' | '\\' | '$' => escaped,
         'u' => {
             let digits: String = characters.by_ref().take(4).collect();
-            // `u16::from_str_radix` also takes a sign, as in `+041`.
-            if digits.len() != 4 || !digits.chars().all(|digit| digit.is_ascii_hexdigit()) {
-                bail!("`\\u{digits}` is not an escape in a Kotlin string");
-            }
-            units.push(u16::from_str_radix(&digits, 16)?);
+            let unit = code::utf16_unit(&digits)
+                .ok_or_else(|| anyhow!("`\\u{digits}` is not an escape in a Kotlin string"))?;
+            units.push(unit);
             return Ok(());
         }
         _ => bail!("`\\{escaped}` is not an escape in a Kotlin string"),
@@ -126,37 +126,34 @@ fn push_members<'tree>(
 ) {
     let mut cursor = body.walk();
     for member in body.named_children(&mut cursor) {
-        match member.kind() {
+        let name = match member.kind() {
             "class_declaration" | "object_declaration" => {
                 push_type(member, &parents, definitions, bodies);
+                continue;
             }
             // Code reads a companion's members through the type, as `Config.MAX`, even when the
             // companion has a name.
             "companion_object" => {
                 bodies.extend(child(member, "class_body").map(|body| (body, parents.to_vec())));
+                continue;
             }
-            "property_declaration" => definitions.extend(property(member, &parents)),
-            "function_declaration" => {
-                definitions.extend(member.child_by_field_name("name").map(|name| {
-                    Definition::new(parents.to_vec(), name, member.byte_range(), None)
-                }));
+            "property_declaration" => {
+                definitions.extend(property(member, &parents));
+                continue;
             }
-            "type_alias" => {
-                definitions.extend(member.child_by_field_name("type").map(|name| {
-                    Definition::new(parents.to_vec(), name, member.byte_range(), None)
-                }));
-            }
+            "function_declaration" => member.child_by_field_name("name"),
+            // The grammar calls the name of a type alias its type.
+            "type_alias" => member.child_by_field_name("type"),
             // The body of an enum entry is a class without a name, so its members are not
             // members of the enum.
-            "enum_entry" => {
-                definitions.extend(child(member, "identifier").map(|name| {
-                    Definition::new(parents.to_vec(), name, member.byte_range(), None)
-                }));
-            }
+            "enum_entry" => child(member, "identifier"),
             // Code never refers to a constructor or an `init` block by name, and a script's
             // top-level calls only hold local definitions.
-            _ => {}
-        }
+            _ => continue,
+        };
+        definitions.extend(
+            name.map(|name| Definition::new(parents.to_vec(), name, member.byte_range(), None)),
+        );
     }
 }
 
@@ -213,7 +210,8 @@ fn push_type<'tree>(
 /// `val x = v` or of `val x get() = v`. Returns `None` for a declaration with several names, such
 /// as `val (a, b) = pair`.
 fn property<'tree>(declaration: Node<'tree>, parents: &[Node<'tree>]) -> Option<Definition<'tree>> {
-    let name = child(declaration, "variable_declaration")?.named_child(0)?;
+    // Annotations can come before the name, as in `val @Suppress("x") a = 1`.
+    let name = child(child(declaration, "variable_declaration")?, "identifier")?;
     // Code reads a property with a getter as it reads one with a value. A getter with a block
     // body computes its value, so it has none.
     let value = code::value_after(declaration, "=").or_else(|| {
@@ -674,6 +672,39 @@ val after = 5
         assert_eq!(
             unresolved(&kotlin(source)?, source, "/B/w")?,
             syntax_error(2, 11, "w")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn name_in_backticks_in_a_skipped_span_parse_symbols_makes_it_unreadable() -> anyhow::Result<()>
+    {
+        // The unclosed `(` makes the parser skip the function.
+        let source = r#"class B {
+    val z = (3
+    fun `has spaces`() = 1
+}
+"#;
+
+        assert_eq!(
+            unresolved(&kotlin(source)?, source, "/B/has spaces")?,
+            syntax_error(2, 11, "has spaces")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn annotation_before_property_name_parse_symbols_returns_the_name() -> anyhow::Result<()> {
+        let source = r#"val @Suppress("x") annotated = 1
+"#;
+
+        assert_eq!(
+            symbols(&kotlin(source)?, source),
+            vec![symbol(
+                "/annotated",
+                r#"val @Suppress("x") annotated = 1"#,
+                Some("1")
+            )]
         );
         Ok(())
     }

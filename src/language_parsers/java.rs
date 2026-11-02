@@ -139,12 +139,11 @@ fn octal_digits(first: char, characters: &mut Peekable<Chars>) -> String {
 /// `u`. For `\u00e9`, it is the unit of `é`.
 ///
 /// # Errors
-/// Returns an error if the next 4 characters don't read as a hex number, or if the escape is
-/// `\u005c`.
+/// Returns an error if the next 4 characters are not hex digits, or if the escape is `\u005c`.
 fn unicode_unit(characters: &mut Peekable<Chars>) -> anyhow::Result<u16> {
     let digits: String = characters.by_ref().take(4).collect();
-    let unit = u16::from_str_radix(&digits, 16)
-        .map_err(|_| anyhow!("`\\u{digits}` is not an escape in a Java string"))?;
+    let unit = code::utf16_unit(&digits)
+        .ok_or_else(|| anyhow!("`\\u{digits}` is not an escape in a Java string"))?;
     // Java turns `\u005c` into a backslash before it reads the other escapes, so `\u005cn` is
     // a line feed, which one pass over the escapes can't give.
     if unit == u16::from(b'\\') {
@@ -614,6 +613,8 @@ class Helper {}
     static final String HEX = "\x41";
     static final String HALF = "\uD800";
     static final String BACKSLASH = "\u005cn";
+    static final String SIGN = """
+        \u+041""";
     static final String FINE = "ok";
 }
 "#;
@@ -641,6 +642,11 @@ class Helper {}
                 37,
                 r"Java turns `\u005c` into a backslash before it reads the other escapes"
             )
+        );
+        // The grammar rejects this escape in a string, but not in a text block.
+        assert_eq!(
+            unresolved(&java(source)?, source, "/Broken/SIGN")?,
+            decode_error(5, 32, r"`\u+041` is not an escape in a Java string")
         );
         Ok(())
     }

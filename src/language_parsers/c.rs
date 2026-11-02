@@ -39,7 +39,13 @@ impl SymbolsParser for CSymbolsParser {
             .parse(fixed_directive_line_ends(source).as_ref(), None)
             .context("failed to parse syntax tree")?;
         let definitions = definitions(tree.root_node(), source, &mut self.parser)?;
-        Ok(code::symbols(&tree, source, &definitions, &decode_string))
+        Ok(code::symbols(
+            &tree,
+            source,
+            &definitions,
+            &decode_string,
+            None,
+        ))
     }
 }
 

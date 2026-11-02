@@ -19,6 +19,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   constructor property, function, enum entry and nested type in it. A companion object's members sit under the class.
   See [Kotlin](docs/symbols.md#kotlin).
 
+### Fixed
+
+- A Java text block with `\u` and a sign, such as `\u+041`, counted as the character, here `A`. Java rejects this
+  escape, so a path to the text block now stops the run.
+
 ## [0.16.3] - 2026-11-02
 
 ## [0.16.2] - 2026-10-30
