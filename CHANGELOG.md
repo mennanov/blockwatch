@@ -12,6 +12,13 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- Symbols in Kotlin files (`.kt` and `.kts`). `Config.kt#/Config/MAX_RETRIES` points at a property of the class
+  `Config`, and `#/MAX_RETRIES` at one at the top of the file. Each type is a symbol, and so is each property,
+  constructor property, function, enum entry and nested type in it. A companion object's members sit under the class.
+  See [Kotlin](docs/symbols.md#kotlin).
+
 ## [0.16.3] - 2026-11-02
 
 ## [0.16.2] - 2026-10-30

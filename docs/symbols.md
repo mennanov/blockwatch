@@ -39,6 +39,7 @@ declares, instead of tags in a comment.
 | JavaScript | `.js`, `.mjs`, `.cjs`, `.jsx`                                                  | [TypeScript and JavaScript](#typescript-and-javascript) |
 | Java       | `.java`                                                                        | [Java](#java)                                           |
 | C#         | `.cs`                                                                          | [C#](#c)                                                |
+| Kotlin     | `.kt`, `.kts`                                                                  | [Kotlin](#kotlin)                                       |
 
 <!-- </block> -->
 
@@ -249,8 +250,8 @@ Clone the repository.
 
 In a code file, each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is
 `#/NAME`.
-With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`. In Java and C#, the members of a type
-are symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`.
+With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`. In Java, C# and Kotlin, the members of
+a type are symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`.
 
 - **A value is the initializer as written.** blockwatch never works it out: `20 * 1024 * 1024` stays as it is, and so
   does `0x10`. Use `same-as-pattern` to take the part you need.
@@ -264,7 +265,7 @@ are symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`.
   with a name from the text that the parser had to skip. Other names in the file still resolve. The message shows
   where the error is.
 - **A path to a string that blockwatch can't decode stops the run.** Other paths in the file still resolve.
-- **Members are not symbols yet**, such as a method or a field, except in Java and C#.
+- **Members are not symbols yet**, such as a method or a field, except in Java, C# and Kotlin.
 
 <!-- </block> -->
 
@@ -592,6 +593,67 @@ public class Config
   rejects stops the run, such as `"\?"` or a raw string with a line less indented than its closing quotes.
 - **A syntax error stops the run for the member that holds it, and for each type around that member.** The other
   members still resolve.
+
+<!-- </block> -->
+
+## Kotlin
+
+<!-- <block name="kotlin-paths"> -->
+
+```kotlin
+const val MAX_RETRIES = 20 * 1024
+
+data class Config(val timeout: Int = 30, val name: String) {
+    @JvmField
+    val url = "https://example.com"
+
+    fun run() {}
+    fun run(times: Int) {}
+
+    companion object {
+        const val ORIGIN = 0
+    }
+
+    enum class Mode { RED, GREEN }
+}
+```
+
+| Path                  | Points at                                  |
+|-----------------------|--------------------------------------------|
+| `#/MAX_RETRIES`       | `20 * 1024`                                |
+| `#/Config`            | the whole class                            |
+| `#/Config/timeout`    | `30`                                       |
+| `#/Config/name`       | `val name: String`, as it has no default   |
+| `#/Config/url`        | `https://example.com`                      |
+| `#/Config/run`        | a violation, as `run` is defined twice     |
+| `#/Config/ORIGIN`     | `0`                                        |
+| `#/Config/Mode/GREEN` | `GREEN`, as it has no value                |
+
+- **Each top-level property, function, type and type alias is a symbol, and so is each member of a type**: a property,
+  a function, an enum entry, or a nested class, interface or object. A path goes from the top-level type down:
+  `#/Config/Mode/GREEN`.
+- **A constructor parameter with `val` or `var` is a symbol.** Its value is its default. A parameter without `val` or
+  `var` is not a symbol.
+- **A companion object's members sit under the class**, as code reads them: `#/Config/ORIGIN`. This holds for a
+  companion with a name too.
+- **Overloads are defined twice.** So are a property and a function with one name, and two extension functions with
+  one name, such as `fun Foo.toDto()` and `fun Bar.toDto()`. Wrap the one you mean in a block instead.
+- **A property's value is its initializer, or the `v` of `get() = v`.** A property with `by`, such as
+  `by lazy { 3 }`, has no value, and neither has one whose getter has a block body.
+- **A name in backticks loses them.** `` fun `parses empty input`() `` in `Config` is
+  `#/Config/parses empty input`.
+- **Annotations are part of a definition. KDoc is not.** One case is left out: at the top of a file, an annotation with
+  arguments on its own line, before a `fun` or `val` with no other modifier. The parser reads it as a separate
+  expression.
+- **Constructors, `init` blocks, the companion object itself, local declarations, and the members in the body of an
+  enum entry are not symbols.** In a `.kts` script, the top-level properties, functions and types are symbols. Calls
+  such as `plugins { ... }` and everything inside them are not.
+- **Strings follow Kotlin's escapes.** `"caf\u00e9"` is `café`. A raw string (`"""..."""`) has no escapes, and each line
+  end in it is a line feed. A string with a template, such as `"v$major"` or `"${a + b}"`, stays as written, and so
+  does a character such as `'a'`. A path to a string that Kotlin rejects stops the run, such as `"\q"`.
+- **A syntax error stops the run for the member that holds it, and for each type around that member.** The other
+  members still resolve. The parser doesn't read some newer syntax, such as context parameters and `$$"..."` strings.
+  It also fails on a class body on one line with a property in it, such as `class A { val x = 1 }`.
 
 <!-- </block> -->
 

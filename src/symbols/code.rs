@@ -138,10 +138,10 @@ pub(crate) fn symbols(
         let parents: Vec<String> = definition
             .parents
             .iter()
-            .map(|parent| node_text(parent, source).to_string())
+            .map(|parent| segment(node_text(parent, source)).to_string())
             .collect();
         let paths = definition.names.iter().map(|name| {
-            let name = node_text(name, source);
+            let name = segment(node_text(name, source));
             let segments = [parents.as_slice(), &[name.to_string()]].concat();
             (name, SymbolPath::from_segments(segments))
         });
@@ -175,6 +175,14 @@ pub(crate) fn symbols(
         unreadable,
         skipped,
     }
+}
+
+/// The path segment of `name`, a name as the file writes it. Kotlin code can write any name in
+/// backticks, such as `` `is` ``, and it is the same name as without them.
+fn segment(name: &str) -> &str {
+    name.strip_prefix('`')
+        .and_then(|name| name.strip_suffix('`'))
+        .unwrap_or(name)
 }
 
 /// Why the names of a definition are unreadable.

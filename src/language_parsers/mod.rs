@@ -1050,6 +1050,8 @@ mod tests {
             "json",
             "jsonc",
             "jsx",
+            "kt",
+            "kts",
             "markdown",
             "md",
             "mdx",

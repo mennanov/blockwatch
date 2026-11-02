@@ -119,6 +119,20 @@ fn cs_target_resolves() {
 }
 
 #[test]
+fn kt_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/kt_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
+fn kts_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/kts_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
 fn json_target_resolves() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/symbol_references/json_source.rs");
