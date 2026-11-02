@@ -331,10 +331,16 @@ fn error_in(definition: &Range<usize>, error: &Range<usize>) -> bool {
 /// parentheses are not around the whole value, so they stay.
 fn without_parentheses(mut node: Node<'_>) -> Node<'_> {
     let mut cursor = node.walk();
-    // Every grammar with code symbols gives parentheses this node kind.
-    while node.kind() == "parenthesized_expression" {
+    // Every grammar with code symbols gives parentheses one of these node kinds. Swift's grammar
+    // reads `(1)` as a tuple with one value. A real tuple with one value, Rust's `(1,)`, has a
+    // comma.
+    while matches!(node.kind(), "parenthesized_expression" | "tuple_expression") {
+        if node.children(&mut cursor).any(|child| child.kind() == ",") {
+            break;
+        }
         let only = {
-            // A comment inside the parentheses is a child too, but not part of the value.
+            // A comment inside the parentheses is a child too, but not part of the value. So is
+            // the label of a tuple, such as Swift's `(a: 1)`.
             let mut inner = node
                 .named_children(&mut cursor)
                 .filter(|child| !child.is_extra());

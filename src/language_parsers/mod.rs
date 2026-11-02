@@ -1062,6 +1062,7 @@ mod tests {
             "pyw",
             "rs",
             "star",
+            "swift",
             "toml",
             "ts",
             "tsx",

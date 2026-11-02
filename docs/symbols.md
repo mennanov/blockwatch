@@ -40,6 +40,7 @@ declares, instead of tags in a comment.
 | Java       | `.java`                                                                        | [Java](#java)                                           |
 | C#         | `.cs`                                                                          | [C#](#c)                                                |
 | Kotlin     | `.kt`, `.kts`                                                                  | [Kotlin](#kotlin)                                       |
+| Swift      | `.swift`                                                                       | [Swift](#swift)                                         |
 
 <!-- </block> -->
 
@@ -250,8 +251,8 @@ Clone the repository.
 
 In a code file, each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is
 `#/NAME`.
-With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`. In Java, C# and Kotlin, the members of
-a type are symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`.
+With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`. In Java, C#, Kotlin and Swift, the
+members of a type are symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`.
 
 - **A value is the initializer as written.** blockwatch never works it out: `20 * 1024 * 1024` stays as it is, and so
   does `0x10`. Use `same-as-pattern` to take the part you need.
@@ -265,7 +266,7 @@ a type are symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`.
   with a name from the text that the parser had to skip. Other names in the file still resolve. The message shows
   where the error is.
 - **A path to a string that blockwatch can't decode stops the run.** Other paths in the file still resolve.
-- **Members are not symbols yet**, such as a method or a field, except in Java, C# and Kotlin.
+- **Members are not symbols yet**, such as a method or a field, except in Java, C#, Kotlin and Swift.
 
 <!-- </block> -->
 
@@ -654,6 +655,68 @@ data class Config(val timeout: Int = 30, val name: String) {
 - **A syntax error stops the run for the member that holds it, and for each type around that member.** The other
   members still resolve. The parser doesn't read some newer syntax, such as context parameters and `$$"..."` strings.
   It also fails on a class body on one line with a property in it, such as `class A { val x = 1 }`.
+
+<!-- </block> -->
+
+## Swift
+
+<!-- <block name="swift-paths"> -->
+
+```swift
+public let maxRetries = 20 * 1024
+
+struct Config {
+    static let timeout = 30
+    var name: String
+    var ready: Bool { timeout > 0 }
+
+    func run() {}
+    func run(times: Int) {}
+
+    enum Mode: String {
+        case red = "r", green
+    }
+}
+
+extension Config {
+    static let url = "https://example.com"
+}
+```
+
+| Path                  | Points at                                  |
+|-----------------------|--------------------------------------------|
+| `#/maxRetries`        | `20 * 1024`                                |
+| `#/Config`            | the whole struct, without its extension    |
+| `#/Config/timeout`    | `30`                                       |
+| `#/Config/name`       | `var name: String`, as it has no value     |
+| `#/Config/ready`      | `timeout > 0`                              |
+| `#/Config/run`        | a violation, as `run` is defined twice     |
+| `#/Config/Mode/red`   | `r`                                        |
+| `#/Config/Mode/green` | `green`, as its raw value is implicit      |
+| `#/Config/url`        | `https://example.com`                      |
+
+- **Each top-level property, function, type, type alias and macro is a symbol, and so is each member of a type**: a
+  property, a function, an enum case, an associated type or a nested type. A protocol is a type, and its requirements
+  are members. A path goes from the top-level type down: `#/Config/Mode/red`.
+- **An extension's members sit under the type it extends**, as code reads them: `#/Config/url`. This holds for a type
+  from another file too, so `String+Format.swift` can have `#/String/trimmed`. `extension Outer.Inner` gives
+  `#/Outer/Inner/...`. An extension of a type without a name, such as `extension [Int]`, has no symbols.
+- **Overloads are defined twice.** So are a property and a function with one name, copies of a name in `#if` and
+  `#else`, and a protocol requirement and its default in an extension. Wrap the one you mean in a block instead.
+- **A property's value is its initializer, or the `v` of `{ v }` or `{ return v }`.** A computed property with `get`
+  or `set`, or with several statements, has no value. An enum case's value is its raw value, the `v` of `= v`. A case
+  without one has no value, even when Swift gives it one.
+- **In `let a = 1, b = 2` and `case a = 1, b`, each name covers only its own part.**
+- **A name in backticks loses them.** Attributes are part of a definition. Doc comments are not.
+- **`init`, `deinit`, `subscript`, operators, precedence groups, extensions themselves, local declarations and
+  top-level statements are not symbols.**
+- **Strings follow Swift's escapes.** `"caf\u{e9}"` is `café`. A raw string, such as `#"C:\new"#`, reads only the
+  escapes with as many `#` as its quotes, such as `\#n`. A multi-line string loses the white space before its closing
+  quotes on each line, and each line end in it is a line feed. A string with an interpolation, such as `"v\(major)"`,
+  stays as written, and so does a regex. A path to a string that Swift rejects stops the run, such as `"\u{D800}"`.
+- **A syntax error stops the run for the member that holds it, and for each type around that member.** The other
+  members still resolve. The parser fails on an empty tuple passed to a function, as in `f(())`, so a function with
+  one in its body stops the run too.
 
 <!-- </block> -->
 

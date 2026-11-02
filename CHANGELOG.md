@@ -18,6 +18,10 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   `Config`, and `#/MAX_RETRIES` at one at the top of the file. Each type is a symbol, and so is each property,
   constructor property, function, enum entry and nested type in it. A companion object's members sit under the class.
   See [Kotlin](docs/symbols.md#kotlin).
+- Symbols in Swift files. `Config.swift#/Config/maxRetries` points at a property of the type `Config`, and
+  `#/maxRetries` at one at the top of the file. Each type is a symbol, and so is each property, function, enum case and
+  nested type in it. An extension's members sit under the type it extends, and an enum case's value is its raw value.
+  See [Swift](docs/symbols.md#swift).
 
 ### Fixed
 

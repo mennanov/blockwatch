@@ -287,6 +287,15 @@ lazy_static! {
     }
 
     #[test]
+    fn tuple_with_one_value_parse_symbols_keeps_its_parentheses() -> anyhow::Result<()> {
+        // The comma makes `(32,)` a tuple, not a value in parentheses.
+        let source = "const SINGLE: (u8,) = (32,);\n";
+
+        assert_eq!(values(&rust(source)?, source), [value("/SINGLE", "(32,)")]);
+        Ok(())
+    }
+
+    #[test]
     fn string_kinds_parse_symbols_returns_decoded_values() -> anyhow::Result<()> {
         let source = r##"const ESCAPES: &str = "a\n\r\t\\\0\'\"\x41\u{e9}\u{1F600}";
 const SPLIT: &str = "a\

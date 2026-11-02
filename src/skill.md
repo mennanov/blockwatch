@@ -157,8 +157,8 @@ Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`
 `.yml`, `.cff`), Markdown (`.md`, `.markdown`, `.mdx`), Go (`.go`), C and C++ (`.c`, `.h`, `.cc`, `.cpp`, `.cxx`,
 `.hh`, `.hpp`, `.hxx`), Python (`.py`, `.pyi`, `.pyw`), Starlark (`.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`,
 `BUCK`, `WORKSPACE`, `Tiltfile`), Rust (`.rs`), TypeScript (`.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`), JavaScript
-(`.js`, `.mjs`, `.cjs`, `.jsx`), Java (`.java`), C# (`.cs`), and Kotlin (`.kt`, `.kts`). A path into any other file
-fails the run.
+(`.js`, `.mjs`, `.cjs`, `.jsx`), Java (`.java`), C# (`.cs`), Kotlin (`.kt`, `.kts`), and Swift (`.swift`). A path into
+any other file fails the run.
 
 ### Writing a path
 
@@ -222,8 +222,8 @@ level. Its path is the text of each heading it is under, then its own, the top `
 ### Code files
 
 Each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is `#/NAME`, such
-as `consts.go#/MaxPorts`. In Java, C# and Kotlin, the members of a type are symbols too:
-`Config.java#/Config/MAX_PORTS`.
+as `consts.go#/MaxPorts`. In Java, C#, Kotlin and Swift, the members of a type are symbols
+too: `Config.java#/Config/MAX_PORTS`.
 
 - A value is the initializer as written, never worked out: `20 * 1024 * 1024` stays as it is. Use `same-as-pattern`
   to take the part you need. A string counts as the text it holds. Parentheses around the whole value are removed.
@@ -232,7 +232,7 @@ as `consts.go#/MaxPorts`. In Java, C# and Kotlin, the members of a type are symb
 - A name defined twice is a violation.
 - A syntax error fails the run only for a name whose definition holds it, or a path with a name from the text the
   parser skipped. So does a string blockwatch can't decode.
-- Members, such as a method or a field, are not symbols yet, except in Java, C# and Kotlin.
+- Members, such as a method or a field, are not symbols yet, except in Java, C#, Kotlin and Swift.
 
 ### Go
 
@@ -332,6 +332,23 @@ as `consts.go#/MaxPorts`. In Java, C# and Kotlin, the members of a type are symb
   not symbols.
 - Strings follow Kotlin's escapes. A raw string has none. A string with a template, such as `"v$major"`, stays as
   written. A path to a string that Kotlin rejects fails the run.
+
+### Swift
+
+- Each top-level property, function, type, type alias and macro is a symbol, and so is each member of a type: a
+  property, a function, an enum case, an associated type or a nested type. A path goes from the top-level type down:
+  `#/Config/Mode/red`.
+- An extension's members sit under the type it extends: `#/Config/url`, or `#/String/trimmed` for a type from another
+  file.
+- Overloads are defined twice, and so are a property and a function with one name, copies in `#if` and `#else`, and a
+  protocol requirement and its default.
+- A property's value is its initializer, or the `v` of `{ v }` or `{ return v }`. An enum case's value is its raw
+  value.
+- A name in backticks loses them. Attributes are part of a definition. Doc comments are not.
+- `init`, `deinit`, `subscript`, operators, local declarations and top-level statements are not symbols.
+- Strings follow Swift's escapes, in raw strings too. A multi-line string loses the white space before its closing
+  quotes. A string with an interpolation, such as `"v\(major)"`, stays as written. A path to a string that Swift
+  rejects fails the run.
 
 ## The config file (`blockwatch.toml`)
 
