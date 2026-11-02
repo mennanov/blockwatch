@@ -25,16 +25,8 @@ impl CodeLanguage for Java {
     /// The types under `root`, the root of a Java file's syntax tree, and their members, in
     /// document order. A type comes before its members.
     fn definitions<'tree>(&self, root: Node<'tree>, _source: &str) -> Vec<Definition<'tree>> {
-        let mut definitions = Vec::new();
-        // The walk keeps its own stack, as deeply nested types could overflow the call stack.
         // A compact source file holds methods and fields at its top level, as a class body does.
-        let mut bodies = vec![(root, Vec::new())];
-        while let Some((body, parents)) = bodies.pop() {
-            push_members(body, &parents, &mut definitions, &mut bodies);
-        }
-        // The walk reads all of a body before the bodies of the types in it.
-        definitions.sort_by_key(|definition| definition.range.start);
-        definitions
+        code::nested_definitions(root, push_members)
     }
 
     /// Decodes a Java string or text block. Returns `None` for any other node.
@@ -166,7 +158,7 @@ fn unicode_unit(characters: &mut Peekable<Chars>) -> anyhow::Result<u16> {
 /// each type in `body` to `bodies`, with its own parents.
 fn push_members<'tree>(
     body: Node<'tree>,
-    parents: &[Node<'tree>],
+    parents: Vec<Node<'tree>>,
     definitions: &mut Vec<Definition<'tree>>,
     bodies: &mut Vec<(Node<'tree>, Vec<Node<'tree>>)>,
 ) {
@@ -177,10 +169,10 @@ fn push_members<'tree>(
             // A compact source file declares its fields as local variables, and an interface its
             // constants as constants.
             "field_declaration" | "local_variable_declaration" | "constant_declaration" => {
-                push_fields(member, parents, definitions);
+                push_fields(member, &parents, definitions);
             }
             // The members of an enum that come after its constants.
-            "enum_body_declarations" => bodies.push((member, parents.to_vec())),
+            "enum_body_declarations" => bodies.push((member, parents.clone())),
             "class_declaration"
             | "interface_declaration"
             | "enum_declaration"
@@ -196,7 +188,7 @@ fn push_members<'tree>(
                     None,
                 ));
                 if let Some(body) = member.child_by_field_name("body") {
-                    bodies.push((body, [parents, &[name]].concat()));
+                    bodies.push((body, [&parents[..], &[name]].concat()));
                 }
             }
             // The body of an enum constant is a class without a name, so its members are not

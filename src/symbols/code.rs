@@ -338,6 +338,40 @@ fn names_in(text: &str) -> impl Iterator<Item = &str> {
 }
 // </block>
 
+/// The definitions under `root`, the root of a file's syntax tree, in document order, for a
+/// language whose types hold other definitions. `push_members` takes a body, the names of the
+/// types it sits in, and the lists to add to: the definitions in the body, and each body in it
+/// with its own parents. It gets `root` first, with no parents.
+pub(crate) fn nested_definitions<'tree>(
+    root: Node<'tree>,
+    mut push_members: impl FnMut(
+        Node<'tree>,
+        Vec<Node<'tree>>,
+        &mut Vec<Definition<'tree>>,
+        &mut Vec<(Node<'tree>, Vec<Node<'tree>>)>,
+    ),
+) -> Vec<Definition<'tree>> {
+    let mut definitions = Vec::new();
+    // The walk keeps its own stack, as deeply nested types could overflow the call stack.
+    let mut bodies = vec![(root, Vec::new())];
+    while let Some((body, parents)) = bodies.pop() {
+        push_members(body, parents, &mut definitions, &mut bodies);
+    }
+    // The walk reads all of a body before the bodies in it.
+    definitions.sort_by_key(|definition| definition.range.start);
+    definitions
+}
+
+/// The value that follows the `token` in `node`, such as the `5` after the `=` in `x = 5`.
+/// Returns `None` when `node` has no `token`.
+pub(crate) fn value_after<'tree>(node: Node<'tree>, token: &str) -> Option<Node<'tree>> {
+    // Grammars often give the value no field name. A comment after the token is not the value.
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .skip_while(|child| child.kind() != token)
+        .find(|child| child.is_named() && !child.is_extra())
+}
+
 /// Joins the text of the parts of `node`, several strings written one after the other.
 /// `decode_string` decodes each part, and a comment between the parts is not a part. Returns
 /// `None` if `decode_string` gives `None` for a part, such as the macro in C's `"%" PRIu64`.

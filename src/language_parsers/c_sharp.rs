@@ -26,15 +26,7 @@ impl CodeLanguage for CSharp {
     /// document order. A type comes before its members. The names of the namespaces a type sits
     /// in are its first parents.
     fn definitions<'tree>(&self, root: Node<'tree>, _source: &str) -> Vec<Definition<'tree>> {
-        let mut definitions = Vec::new();
-        // The walk keeps its own stack, as deeply nested types could overflow the call stack.
-        let mut bodies = vec![(root, Vec::new())];
-        while let Some((body, parents)) = bodies.pop() {
-            push_members(body, parents, &mut definitions, &mut bodies);
-        }
-        // The walk reads all of a body before the bodies in it.
-        definitions.sort_by_key(|definition| definition.range.start);
-        definitions
+        code::nested_definitions(root, push_members)
     }
 
     /// Decodes a C# string, or an interpolated string without a hole. Returns `None` for any other
@@ -293,7 +285,7 @@ fn property_value(property: Node) -> Option<Node> {
     let value = property.child_by_field_name("value")?;
     // Code reads a property as it reads a field, so `X => v` has the value `v`.
     if value.kind() == "arrow_expression_clause" {
-        value_after(value, "=>")
+        code::value_after(value, "=>")
     } else {
         Some(value)
     }
@@ -333,19 +325,9 @@ fn push_fields<'tree>(
             parents.to_vec(),
             name,
             range,
-            value_after(declarator, "="),
+            code::value_after(declarator, "="),
         ));
     }
-}
-
-/// The value that follows the `token` in `node`, such as the `5` after the `=` in `x = 5`.
-/// Returns `None` when `node` has no `token`.
-fn value_after<'tree>(node: Node<'tree>, token: &str) -> Option<Node<'tree>> {
-    // The grammar gives the value no field name. A comment after the token is not the value.
-    let mut cursor = node.walk();
-    node.children(&mut cursor)
-        .skip_while(|child| child.kind() != token)
-        .find(|child| child.is_named() && !child.is_extra())
 }
 
 /// The definition of `member`, a declaration with one name, in the namespace or type at
