@@ -18,7 +18,7 @@ default-members = ["."]
 
 [dependencies]
 anyhow = "1.0"
-async-openai = { version = "0.42.0", features = [
+async-openai = { version = "0.43.0", features = [
     "completion-types",
     "chat-completion",
 ] }
