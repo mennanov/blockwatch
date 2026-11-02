@@ -32,8 +32,9 @@ impl CodeLanguage for Java {
     /// Decodes a Java string or text block. Returns `None` for any other node.
     ///
     /// # Errors
-    /// Returns an error if an escape is not one of Java's, if the string holds `\u005c`, or if the
-    /// string holds half of a character.
+    /// Returns an error if an escape is not one of Java's, if the string holds `\u005c`, if a
+    /// string that is not a text block holds a line break, or if the string holds half of a
+    /// character.
     fn decode_string(&self, node: &Node, source: &str) -> anyhow::Result<Option<String>> {
         if node.kind() != "string_literal" {
             return Ok(None);
@@ -43,11 +44,18 @@ impl CodeLanguage for Java {
             Some(block) => {
                 text_block_content(block.strip_suffix(TEXT_BLOCK_QUOTES).unwrap_or(block))
             }
-            None => literal
-                .strip_prefix('"')
-                .and_then(|content| content.strip_suffix('"'))
-                .unwrap_or(literal)
-                .to_string(),
+            None => {
+                let content = literal
+                    .strip_prefix('"')
+                    .and_then(|content| content.strip_suffix('"'))
+                    .unwrap_or(literal);
+                // The grammar lets a string run on to the next line, so a string missing its
+                // closing quote takes in the next line too.
+                if content.contains(['\r', '\n']) {
+                    bail!("Java allows a line break only in a text block");
+                }
+                content.to_string()
+            }
         };
         code::decode_utf16(&content, push_escape).map(Some)
     }
@@ -647,6 +655,23 @@ class Helper {}
         assert_eq!(
             unresolved(&java(source)?, source, "/Broken/SIGN")?,
             decode_error(5, 32, r"`\u+041` is not an escape in a Java string")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn line_break_in_a_string_parse_symbols_makes_the_name_unreadable() -> anyhow::Result<()> {
+        // Java reads a carriage return alone as a line end too.
+        let source = "class A {\n    static final String LF = \"a\nb\";\n    static final String CR = \"a\rb\";\n}\n";
+
+        assert_eq!(values(&java(source)?, source).len(), 1, "only the class");
+        assert_eq!(
+            unresolved(&java(source)?, source, "/A/LF")?,
+            decode_error(2, 30, "Java allows a line break only in a text block")
+        );
+        assert_eq!(
+            unresolved(&java(source)?, source, "/A/CR")?,
+            decode_error(4, 30, "Java allows a line break only in a text block")
         );
         Ok(())
     }

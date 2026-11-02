@@ -23,6 +23,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 - A Java text block with `\u` and a sign, such as `\u+041`, counted as the character, here `A`. Java rejects this
   escape, so a path to the text block now stops the run.
+- A Java string in `"` quotes with a line break in it counted as text. Java rejects it, so a path to it now stops the
+  run. Before, a string missing its closing quote took in the next line as its value.
 
 ## [0.16.3] - 2026-11-02
 

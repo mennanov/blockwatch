@@ -33,8 +33,8 @@ impl CodeLanguage for Kotlin {
     /// with a template, such as `"hi $name"`.
     ///
     /// # Errors
-    /// Returns an error if an escape is not one of Kotlin's, or if the string holds half of a
-    /// character.
+    /// Returns an error if an escape is not one of Kotlin's, if a string that is not raw holds a
+    /// line break, or if the string holds half of a character.
     fn decode_string(&self, node: &Node, source: &str) -> anyhow::Result<Option<String>> {
         let literal = node_text(node, source);
         let (quotes, escapes) = match node.kind() {
@@ -50,6 +50,11 @@ impl CodeLanguage for Kotlin {
             return Ok(None);
         }
         if escapes {
+            // The grammar lets a string run on to the next line, so a string missing its closing
+            // quote takes in the next line too.
+            if content.contains(['\r', '\n']) {
+                bail!("Kotlin allows a line break only in a raw string");
+            }
             code::decode_utf16(content, push_escape).map(Some)
         } else {
             // The compiler reads every line end of a file as a line feed.
@@ -67,6 +72,8 @@ const RAW_QUOTES: &str = "\"\"\"";
 /// or `${a + b}`. `escapes` tells whether a backslash starts an escape in it, as it does in a
 /// string but not in a raw string.
 fn holds_template(content: &str, escapes: bool) -> bool {
+    // The grammar misses some templates, such as the `$_id` in `"""$_id"""`, so the text is read
+    // instead of the syntax tree.
     let mut characters = content.chars();
     while let Some(character) = characters.next() {
         match character {
@@ -600,6 +607,26 @@ val FINE = "ok"
         assert_eq!(
             unresolved(&kotlin(source)?, source, "/SIGN")?,
             decode_error(5, 12, r"`\u+041` is not an escape in a Kotlin string")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn line_break_in_a_string_parse_symbols_makes_the_name_unreadable() -> anyhow::Result<()> {
+        // Kotlin reads a carriage return alone as a line end too.
+        let source = "val LF = \"a\nb\"\nval CR = \"a\rb\"\nval TEMPLATE = \"${\n1}\"\n";
+
+        assert_eq!(
+            values(&kotlin(source)?, source),
+            [value("/TEMPLATE", "\"${\n1}\"")]
+        );
+        assert_eq!(
+            unresolved(&kotlin(source)?, source, "/LF")?,
+            decode_error(1, 10, "Kotlin allows a line break only in a raw string")
+        );
+        assert_eq!(
+            unresolved(&kotlin(source)?, source, "/CR")?,
+            decode_error(3, 10, "Kotlin allows a line break only in a raw string")
         );
         Ok(())
     }
