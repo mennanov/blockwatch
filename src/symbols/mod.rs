@@ -148,7 +148,7 @@ impl Symbols {
     /// A filter in `path`, such as `~[name=blue]`, stands for the one child of the path before it
     /// whose `name` key holds the value `blue`. A child is a list item or a map entry. A string
     /// value matches without its quotes, and any other value as written. When several children
-    /// share a path, such as XML elements with one name, the rest of the path looks only inside
+    /// share a path, such as two HCL blocks with one type, the rest of the path looks only inside
     /// the one that the filter picked.
     ///
     /// When no symbol has `path`, the hints are the paths that resemble it: those at least 60%
@@ -277,8 +277,8 @@ const MIN_HINT_SIMILARITY: f64 = 0.6;
 /// `/items/1` for `/items/~[name=blue]`, and the symbols that the rest of the path can resolve
 /// to, in document order. A path without filters comes back unchanged, with every symbol.
 ///
-/// When several children share the path of the one a filter matches, such as XML elements with
-/// one name, the symbols are only those inside the child that holds the matched key.
+/// When several children share the path of the one a filter matches, such as two HCL blocks with
+/// one type, the symbols are only those inside the child that holds the matched key, if one does.
 ///
 /// # Errors
 /// Returns [`ResolveError::NotFound`] when a filter matches no child, and
@@ -327,11 +327,10 @@ fn resolve_filters<'a>(
                 // A child alone at its path keeps every symbol under that path, even one written
                 // outside it, such as a member that a Swift extension adds to a type.
                 if siblings.len() > 1 {
-                    scope.retain(|symbol| {
-                        siblings
-                            .iter()
-                            .any(|sibling| is_inside(key, sibling) && is_inside(symbol, sibling))
-                    });
+                    // A key written outside every child, such as in a Swift extension, picks none
+                    // of them, so the path stays ambiguous.
+                    let picked = siblings.iter().find(|sibling| is_inside(key, sibling));
+                    scope.retain(|symbol| picked.is_none_or(|picked| is_inside(symbol, picked)));
                 }
             }
             _ => {
@@ -1080,6 +1079,17 @@ mod resolve_tests {
     }
 
     #[test]
+    fn filter_under_a_parent_at_one_path_picks_among_the_items_of_every_copy() {
+        // The groups have no key that tells them apart, so the filter can't pick a group first.
+        let symbols = groups_at_one_path(&[("first", "red"), ("second", "blue")]);
+
+        assert_eq!(
+            symbols.resolve(&path("/groups/group/items/~[name=blue]/content")),
+            Ok(&symbols.symbols[11])
+        );
+    }
+
+    #[test]
     fn second_filter_matching_no_child_returns_hints_only_from_the_first_pick() {
         let symbols = groups_at_one_path(&[("first", "blue"), ("second", "red")]);
 
@@ -1104,6 +1114,24 @@ mod resolve_tests {
         assert_eq!(
             symbols.resolve(&path("/~[name=blue]/extra")),
             Ok(&symbols.symbols[2])
+        );
+    }
+
+    #[test]
+    fn filter_over_items_at_one_path_with_the_key_outside_them_returns_them_as_ambiguous() {
+        // A type defined twice, such as in two branches of an `#if`, and a Swift extension of it
+        // outside both copies.
+        let symbols = Symbols::from(vec![
+            element("/Config", 0..10),
+            element("/Config", 10..20),
+            scalar("/Config/name", 30, "blue"),
+        ]);
+
+        assert_eq!(
+            symbols.resolve(&path("/~[name=blue]")),
+            Err(ResolveError::AmbiguousSymbol {
+                candidates: vec![&symbols.symbols[0], &symbols.symbols[1]]
+            })
         );
     }
 

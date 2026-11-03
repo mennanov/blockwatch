@@ -369,8 +369,9 @@ type are symbols too: `Config.java#/Config/MAX_PORTS`. In HCL, each block, attri
   then each of its labels: `#/resource/aws_instance/web/ami`, `#/variable/region/default`,
   `#/terraform/required_providers/aws/version`. In a `.tfvars` file, each attribute sits at the top: `#/region`.
 - A path with only some of a block's labels, such as `#/resource/aws_instance`, points at nothing.
-- A block written twice in one body, such as two `ingress` blocks, makes its path a violation. `#/locals/name` still
-  resolves when only one of several `locals` blocks sets `name`.
+- A block written twice in one body, such as two `ingress` blocks, makes its path a violation. A filter picks one of
+  them: `#/resource/aws_security_group/web/~[from_port=443]/to_port`. `#/locals/name` still resolves when only one of
+  several `locals` blocks sets `name`.
 - A key written as a number or an expression, such as `(var.k)`, is not a segment. List items are not symbols. A
   label or key with an escape gives no symbol.
 - Strings follow HCL's escapes, and a `<<-` heredoc loses its indent. A string or heredoc with `${...}` or `%{...}`
