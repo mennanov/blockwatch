@@ -140,6 +140,13 @@ fn swift_target_resolves() {
 }
 
 #[test]
+fn proto_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/proto_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
 fn json_target_resolves() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/symbol_references/json_source.rs");

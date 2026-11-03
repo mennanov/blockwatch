@@ -41,6 +41,7 @@ declares, instead of tags in a comment.
 | C#         | `.cs`                                                                          | [C#](#c)                                                |
 | Kotlin     | `.kt`, `.kts`                                                                  | [Kotlin](#kotlin)                                       |
 | Swift      | `.swift`                                                                       | [Swift](#swift)                                         |
+| Protobuf   | `.proto`                                                                       | [Protocol Buffers](#protocol-buffers)                   |
 
 <!-- </block> -->
 
@@ -251,8 +252,8 @@ Clone the repository.
 
 In a code file, each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is
 `#/NAME`.
-With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`. In Java, C#, Kotlin and Swift, the
-members of a type are symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`.
+With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`. In Java, C#, Kotlin, Swift and Protocol
+Buffers, the members of a type are symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`.
 
 - **A value is the initializer as written.** blockwatch never works it out: `20 * 1024 * 1024` stays as it is, and so
   does `0x10`. Use `same-as-pattern` to take the part you need.
@@ -266,7 +267,8 @@ members of a type are symbols too, under the type's name: `Config.java#/Config/M
   with a name from the text that the parser had to skip. Other names in the file still resolve. The message shows
   where the error is.
 - **A path to a string that blockwatch can't decode stops the run.** Other paths in the file still resolve.
-- **Members are not symbols yet**, such as a method or a field, except in Java, C#, Kotlin and Swift.
+- **Members are not symbols yet**, such as a method or a field, except in Java, C#, Kotlin, Swift and Protocol
+  Buffers.
 
 <!-- </block> -->
 
@@ -721,6 +723,64 @@ extension Config {
   members still resolve. An extension is not part of the type it extends, so an error in an extension's member leaves
   the type readable. The parser fails on an empty tuple passed to a function, as in `f(())`, so a function with one in
   its body stops the run too.
+
+<!-- </block> -->
+
+## Protocol Buffers
+
+<!-- <block name="proto-paths"> -->
+
+```protobuf
+syntax = "proto3";
+
+package shop.v1;
+
+option go_package = "shop/v1";
+
+message Item {
+  string name = 1;
+  map<string, int32> counts = 2;
+  enum Color {
+    COLOR_UNSPECIFIED = 0;
+    RED = 1;
+    BLUE = -2;
+  }
+  oneof price {
+    int64 cents = 3;
+  }
+}
+
+service Items {
+  rpc Get(Item) returns (Item);
+}
+```
+
+| Path                 | Points at                    |
+|----------------------|------------------------------|
+| `#/Item`             | the whole message            |
+| `#/Item/name`        | `1`                          |
+| `#/Item/counts`      | `2`                          |
+| `#/Item/Color`       | the whole enum               |
+| `#/Item/Color/RED`   | `1`                          |
+| `#/Item/Color/BLUE`  | `-2`                         |
+| `#/Item/price`       | the whole oneof              |
+| `#/Item/cents`       | `3`                          |
+| `#/Items/Get`        | the whole rpc                |
+
+- **Each message, enum and service is a symbol, at any depth, and so is each field, map field, oneof, enum value and
+  rpc in it.** A proto2 group is a symbol too, with its fields under it: `#/Item/Result/code`.
+- **The package is not part of a path.** A file has only one, so `#/Item` is enough.
+- **An enum value sits under its enum:** `#/Item/Color/RED`.
+- **A field's value is its number, and an enum value's value is its number.** Both stay as written: `0x3` stays `0x3`,
+  and `- 2` stays `- 2`. Options after the number don't change it: `BLUE = -2 [deprecated = true]` is `-2`.
+- **A oneof's fields sit in its message**, as protoc reads them: `#/Item/cents`, not `#/Item/price/cents`.
+- **An extension field sits where its `extend` is written**, not in the message it extends. An `extend` at the top of
+  the file gives `#/name`, and one inside `Item` gives `#/Item/name`.
+- **A definition covers its whole statement**, with its label, its options and its `;`, but not the comments above it.
+- **Options are not symbols**, and neither are `syntax`, `package`, `import`, `extend` blocks, `reserved` and
+  `extensions`. To check an option such as `go_package`, wrap it in a `[[block]]` entry with a `target-pattern`.
+- **A syntax error stops the run for the definition that holds it, and for each message around it.** The other
+  definitions still resolve.
 
 <!-- </block> -->
 

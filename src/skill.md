@@ -157,8 +157,8 @@ Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`
 `.yml`, `.cff`), Markdown (`.md`, `.markdown`, `.mdx`), Go (`.go`), C and C++ (`.c`, `.h`, `.cc`, `.cpp`, `.cxx`,
 `.hh`, `.hpp`, `.hxx`), Python (`.py`, `.pyi`, `.pyw`), Starlark (`.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`,
 `BUCK`, `WORKSPACE`, `Tiltfile`), Rust (`.rs`), TypeScript (`.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`), JavaScript
-(`.js`, `.mjs`, `.cjs`, `.jsx`), Java (`.java`), C# (`.cs`), Kotlin (`.kt`, `.kts`), and Swift (`.swift`). A path into
-any other file fails the run.
+(`.js`, `.mjs`, `.cjs`, `.jsx`), Java (`.java`), C# (`.cs`), Kotlin (`.kt`, `.kts`), Swift (`.swift`), and Protocol
+Buffers (`.proto`). A path into any other file fails the run.
 
 ### Writing a path
 
@@ -222,8 +222,8 @@ level. Its path is the text of each heading it is under, then its own, the top `
 ### Code files
 
 Each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is `#/NAME`, such
-as `consts.go#/MaxPorts`. In Java, C#, Kotlin and Swift, the members of a type are symbols
-too: `Config.java#/Config/MAX_PORTS`.
+as `consts.go#/MaxPorts`. In Java, C#, Kotlin, Swift and Protocol Buffers, the members of a
+type are symbols too: `Config.java#/Config/MAX_PORTS`.
 
 - A value is the initializer as written, never worked out: `20 * 1024 * 1024` stays as it is. Use `same-as-pattern`
   to take the part you need. A string counts as the text it holds. Parentheses around the whole value are removed.
@@ -232,7 +232,8 @@ too: `Config.java#/Config/MAX_PORTS`.
 - A name defined twice is a violation.
 - A syntax error fails the run only for a name whose definition holds it, or a path with a name from the text the
   parser skipped. So does a string blockwatch can't decode.
-- Members, such as a method or a field, are not symbols yet, except in Java, C#, Kotlin and Swift.
+- Members, such as a method or a field, are not symbols yet, except in Java, C#, Kotlin, Swift and Protocol
+  Buffers.
 
 ### Go
 
@@ -350,6 +351,14 @@ too: `Config.java#/Config/MAX_PORTS`.
 - Strings follow Swift's escapes, in raw strings too. A multi-line string loses the white space before its closing
   quotes. A string with an interpolation, such as `"v\(major)"`, stays as written. A path to a string that Swift
   rejects fails the run.
+
+### Protocol Buffers
+
+- Each message, enum and service is a symbol, at any depth, and so is each field, map field, oneof, enum value, rpc and
+  proto2 group in it. The package is not part of a path: `#/Item/Color/RED`.
+- A field's value is its number, and so is an enum value's, as written: `-2` or `0x3`.
+- A oneof's fields sit in its message: `#/Item/cents`. An extension field sits where its `extend` is written.
+- Options are not symbols. To check one, such as `go_package`, use a `[[block]]` entry with a `target-pattern`.
 
 ## The config file (`blockwatch.toml`)
 

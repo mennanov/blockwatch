@@ -1,0 +1,8 @@
+syntax = "proto3";
+
+message Item {
+  enum Color {
+    COLOR_UNSPECIFIED = 0;
+    RED = 1;
+  }
+}

@@ -12,6 +12,13 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- Symbols in Protocol Buffers files (`.proto`). `item.proto#/Item/Color/RED` points at the number of an enum value,
+  and `#/Item/name` at the number of a field. Each message, enum and service is a symbol, and so is each field, oneof,
+  enum value and rpc in it. The package is not part of a path, and options are not symbols. See
+  [Protocol Buffers](docs/symbols.md#protocol-buffers).
+
 ## [0.16.4] - 2026-11-03
 
 ### Added

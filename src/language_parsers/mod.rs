@@ -1057,6 +1057,7 @@ mod tests {
             "mdx",
             "mjs",
             "mts",
+            "proto",
             "py",
             "pyi",
             "pyw",
