@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.16.5] - 2026-11-03
+
 ### Added
 
 - Symbols in Protocol Buffers files (`.proto`). `item.proto#/Item/Color/RED` points at the number of an enum value,
