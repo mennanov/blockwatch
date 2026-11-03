@@ -12,6 +12,12 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Changed
+
+- A filter now picks one of several items that share a path, such as two `ingress` blocks in HCL.
+  `#/resource/aws_security_group/web/~[from_port=443]/to_port` resolves. Before, it was ambiguous, or it read the
+  other block's `to_port` when only that block set one. See [Picking an item by a key's value](docs/symbols.md#picking-an-item-by-a-keys-value).
+
 ## [0.16.5] - 2026-11-03
 
 ### Added

@@ -97,6 +97,10 @@ services:
 - **A filter picks a map entry too.** In `{"a": {"name": "x"}}`, `#/~[name=x]` is `#/a`.
 - **A path can hold several filters**, such as `#/groups/~[name=api]/services/~[name=web]/port`. A filter can come
   first, in a file that is a list: `#/~[name=web]`.
+- **When several items share a path, the rest of the path looks only inside the item the filter picked.** For
+  example, two `ingress` blocks in an HCL resource share a path.
+  `#/resource/aws_security_group/web/~[from_port=443]/to_port` is the `to_port` of the block whose `from_port` is
+  `443`.
 - **The value starts after the first `=` and ends at the last `]`,** so it can hold both. The key can't hold `=`.
   Inside a filter, escape the key and the value like any key: `/` as `~1`, `,` as `%2C`, and so on.
 
@@ -840,6 +844,7 @@ resource "aws_instance" "web" {
 - **A path with only some of a block's labels points at nothing.** `#/resource/aws_instance` is no symbol.
 - **A block written twice in one body makes its path a violation**, such as two `ingress` blocks in a resource. Two
   `locals` blocks make `#/locals` a violation, but `#/locals/name` still resolves when only one of them sets `name`.
+  A filter picks one of the blocks: `#/resource/aws_security_group/web/~[from_port=443]/to_port`.
 - **A key of an object is a segment when it is a name, a plain string, `true` or `false`**, such as `Team` or
   `"cost center"`. A key written as a number or an expression, such as `3` or `(var.k)`, is not. The items of a list
   are not symbols.

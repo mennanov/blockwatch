@@ -147,7 +147,9 @@ impl Symbols {
     ///
     /// A filter in `path`, such as `~[name=blue]`, stands for the one child of the path before it
     /// whose `name` key holds the value `blue`. A child is a list item or a map entry. A string
-    /// value matches without its quotes, and any other value as written.
+    /// value matches without its quotes, and any other value as written. When several children
+    /// share a path, such as XML elements with one name, the rest of the path looks only inside
+    /// the one that the filter picked.
     ///
     /// When no symbol has `path`, the hints are the paths that resemble it: those at least 60%
     /// alike by edit distance, and those that end in the same segment. When `path` has a filter,
@@ -174,15 +176,15 @@ impl Symbols {
         if let Some(reason) = unreadable {
             return Err(ResolveError::Unreadable { reason });
         }
-        let resolved = resolve_filters(&self.symbols, path)?;
-        let candidates: Vec<&Symbol> = self
-            .symbols
+        let (resolved, scope) = resolve_filters(&self.symbols, path)?;
+        let candidates: Vec<&Symbol> = scope
             .iter()
+            .copied()
             .filter(|symbol| symbol.path == resolved)
             .collect();
         match candidates.len() {
             0 => Err(ResolveError::NotFound {
-                hints: path_hints(&self.symbols, path, &resolved),
+                hints: path_hints(&scope, path, &resolved),
             }),
             1 => Ok(candidates[0]),
             _ => Err(ResolveError::AmbiguousSymbol { candidates }),
@@ -272,7 +274,11 @@ const MAX_HINTS: usize = 3;
 const MIN_HINT_SIMILARITY: f64 = 0.6;
 
 /// Returns `path` with each filter swapped for the child it matches among `symbols`, such as
-/// `/items/1` for `/items/~[name=blue]`. A path without filters comes back unchanged.
+/// `/items/1` for `/items/~[name=blue]`, and the symbols that the rest of the path can resolve
+/// to, in document order. A path without filters comes back unchanged, with every symbol.
+///
+/// When several children share the path of the one a filter matches, such as XML elements with
+/// one name, the symbols are only those inside the child that holds the matched key.
 ///
 /// # Errors
 /// Returns [`ResolveError::NotFound`] when a filter matches no child, and
@@ -281,17 +287,18 @@ const MIN_HINT_SIMILARITY: f64 = 0.6;
 fn resolve_filters<'a>(
     symbols: &'a [Symbol],
     path: &SymbolPath,
-) -> Result<SymbolPath, ResolveError<'a>> {
+) -> Result<(SymbolPath, Vec<&'a Symbol>), ResolveError<'a>> {
     // Filters are swapped one at a time, from the left. So a filter looks only under the children
     // that the filters before it matched.
     let mut resolved = path.clone();
+    let mut scope: Vec<&Symbol> = symbols.iter().collect();
     for (index, segment) in path.segments().iter().enumerate() {
         let (key, value) = match segment {
             Segment::Key(_) => continue,
             Segment::Filter { key, value } => (key, value),
         };
         let parent = &resolved.segments()[..index];
-        let matches: Vec<&Symbol> = child_keys(symbols, parent, key)
+        let matches: Vec<&Symbol> = child_keys(&scope, parent, key)
             .filter(|symbol| {
                 symbol
                     .value
@@ -301,16 +308,31 @@ fn resolve_filters<'a>(
             .collect();
         match matches.len() {
             0 => {
-                // The second call to `child_keys` walks `symbols` again. It happens only when no
+                // The second call to `child_keys` walks `scope` again. It happens only when no
                 // child matches, so a filter that matches doesn't keep every key it looked at.
-                let keys = child_keys(symbols, parent, key);
+                let keys = child_keys(&scope, parent, key);
                 return Err(ResolveError::NotFound {
                     hints: filter_hints(path, index, key, keys),
                 });
             }
             1 => {
-                let child = matches[0].path.segments()[index].clone();
-                resolved = resolved.with_segment(index, child);
+                let key = matches[0];
+                resolved = resolved.with_segment(index, key.path.segments()[index].clone());
+                let child = &resolved.segments()[..=index];
+                let siblings: Vec<&Symbol> = scope
+                    .iter()
+                    .copied()
+                    .filter(|symbol| symbol.path.segments() == child)
+                    .collect();
+                // A child alone at its path keeps every symbol under that path, even one written
+                // outside it, such as a member that a Swift extension adds to a type.
+                if siblings.len() > 1 {
+                    scope.retain(|symbol| {
+                        siblings
+                            .iter()
+                            .any(|sibling| is_inside(key, sibling) && is_inside(symbol, sibling))
+                    });
+                }
             }
             _ => {
                 return Err(ResolveError::AmbiguousFilter {
@@ -320,21 +342,31 @@ fn resolve_filters<'a>(
             }
         }
     }
-    Ok(resolved)
+    Ok((resolved, scope))
+}
+
+/// Whether `symbol` is written inside `item`: whether it starts where `item` is written.
+fn is_inside(symbol: &Symbol, item: &Symbol) -> bool {
+    // A file's symbols nest without overlapping, so a symbol that starts inside the item ends
+    // inside it too.
+    let start = symbol.def_byte_ranges[0].start;
+    item.def_byte_ranges
+        .iter()
+        .any(|range| range.contains(&start))
 }
 
 /// The `key` keys of the children of `parent` among `symbols`, in document order. For `parent`
 /// `/items` and `key` `name`, they are the symbols at `/items/0/name`, `/items/1/name` and so on.
 /// A child is a list item or a map entry.
 fn child_keys<'s>(
-    symbols: &'s [Symbol],
+    symbols: &[&'s Symbol],
     parent: &[Segment],
     key: &str,
 ) -> impl Iterator<Item = &'s Symbol> {
     let key = Segment::Key(key.to_string());
     // A key deeper inside a child, such as `/items/0/content/name`, describes something inside the
     // child, not the child itself.
-    symbols.iter().filter(move |symbol| {
+    symbols.iter().copied().filter(move |symbol| {
         let segments = symbol.path.segments();
         segments.len() == parent.len() + 2
             && segments.starts_with(parent)
@@ -347,7 +379,7 @@ fn child_keys<'s>(
 ///
 /// When `path` has a filter, the hints are only paths under the child that the last filter
 /// matched, written with every filter of `path`. Otherwise they come from all of `symbols`.
-fn path_hints(symbols: &[Symbol], path: &SymbolPath, resolved: &SymbolPath) -> Vec<SymbolPath> {
+fn path_hints(symbols: &[&Symbol], path: &SymbolPath, resolved: &SymbolPath) -> Vec<SymbolPath> {
     let last_filter = path.segments().iter().rposition(|segment| match segment {
         Segment::Key(_) => false,
         Segment::Filter { .. } => true,
@@ -511,6 +543,15 @@ mod resolve_tests {
         Symbol {
             path: path(path_text),
             def_byte_ranges: vec![start..start + 1],
+            value: None,
+        }
+    }
+
+    /// A symbol at `path` written at `range`, so that it holds the symbols written inside `range`.
+    fn element(path_text: &str, range: Range<usize>) -> Symbol {
+        Symbol {
+            path: path(path_text),
+            def_byte_ranges: vec![range],
             value: None,
         }
     }
@@ -927,6 +968,142 @@ mod resolve_tests {
                     path("/groups/~[name=first]/items/~[name=blue]/name"),
                 ]
             })
+        );
+    }
+
+    /// The symbols of `/items`, with one item for each of `names`, all at the path `/items/item`,
+    /// as XML gives sibling elements with one name. Each item holds two keys: `name`, which holds
+    /// one of `names`, and `content`.
+    fn items_at_one_path(names: &[&str]) -> Symbols {
+        names
+            .iter()
+            .enumerate()
+            .flat_map(|(index, name)| {
+                let start = 10 * index;
+                [
+                    element("/items/item", start..start + 10),
+                    scalar("/items/item/name", start + 1, name),
+                    symbol("/items/item/content", start + 2),
+                ]
+            })
+            .collect::<Vec<Symbol>>()
+            .into()
+    }
+
+    #[test]
+    fn filter_over_items_at_one_path_returns_the_symbol_under_the_picked_item() {
+        let symbols = items_at_one_path(&["red", "blue"]);
+
+        assert_eq!(
+            symbols.resolve(&path("/items/~[name=blue]/content")),
+            Ok(&symbols.symbols[5])
+        );
+    }
+
+    #[test]
+    fn filter_at_the_end_over_items_at_one_path_returns_the_picked_item() {
+        // `blue` starts right where `red` ends.
+        let symbols = items_at_one_path(&["red", "blue"]);
+
+        assert_eq!(
+            symbols.resolve(&path("/items/~[name=red]")),
+            Ok(&symbols.symbols[0])
+        );
+    }
+
+    #[test]
+    fn filter_over_items_at_one_path_then_key_of_another_item_returns_not_found() {
+        // Only `red` has `content`, and the hints come only from `blue`.
+        let symbols = Symbols::from(vec![
+            element("/items/item", 0..10),
+            scalar("/items/item/name", 1, "red"),
+            symbol("/items/item/content", 2),
+            element("/items/item", 10..20),
+            scalar("/items/item/name", 11, "blue"),
+        ]);
+
+        assert_eq!(
+            symbols.resolve(&path("/items/~[name=blue]/content")),
+            Err(ResolveError::NotFound {
+                hints: vec![
+                    path("/items/~[name=blue]/name"),
+                    path("/items/~[name=blue]")
+                ]
+            })
+        );
+    }
+
+    /// The symbols of `/groups`, with one group for each of `groups`, all at the path
+    /// `/groups/group`. Each group holds a `name`, which holds the first value of its pair, and a
+    /// list `items` with one item. That item holds a `name`, which holds the second value, and
+    /// `content`.
+    fn groups_at_one_path(groups: &[(&str, &str)]) -> Symbols {
+        groups
+            .iter()
+            .enumerate()
+            .flat_map(|(index, (group_name, item_name))| {
+                let start = 10 * index;
+                [
+                    element("/groups/group", start..start + 10),
+                    scalar("/groups/group/name", start + 1, group_name),
+                    element("/groups/group/items", start + 2..start + 10),
+                    element("/groups/group/items/item", start + 3..start + 10),
+                    scalar("/groups/group/items/item/name", start + 4, item_name),
+                    symbol("/groups/group/items/item/content", start + 5),
+                ]
+            })
+            .collect::<Vec<Symbol>>()
+            .into()
+    }
+
+    #[test]
+    fn second_filter_over_groups_at_one_path_looks_only_inside_the_first_pick() {
+        let symbols = groups_at_one_path(&[("first", "blue"), ("second", "blue")]);
+
+        assert_eq!(
+            symbols.resolve(&path("/groups/~[name=second]/items/~[name=blue]/content")),
+            Ok(&symbols.symbols[11])
+        );
+    }
+
+    #[test]
+    fn filter_matching_under_two_groups_at_one_path_returns_their_keys_as_ambiguous() {
+        let symbols = groups_at_one_path(&[("first", "blue"), ("second", "blue")]);
+
+        assert_eq!(
+            symbols.resolve(&path("/groups/group/items/~[name=blue]/content")),
+            Err(ResolveError::AmbiguousFilter {
+                filter: path("/~[name=blue]").segments()[0].clone(),
+                keys: vec![&symbols.symbols[4], &symbols.symbols[10]]
+            })
+        );
+    }
+
+    #[test]
+    fn second_filter_matching_no_child_returns_hints_only_from_the_first_pick() {
+        let symbols = groups_at_one_path(&[("first", "blue"), ("second", "red")]);
+
+        assert_eq!(
+            symbols.resolve(&path("/groups/~[name=second]/items/~[name=green]/content")),
+            Err(ResolveError::NotFound {
+                hints: vec![path("/groups/~[name=second]/items/~[name=red]/content")]
+            })
+        );
+    }
+
+    #[test]
+    fn filter_over_an_item_with_its_own_path_returns_a_symbol_written_outside_it() {
+        // A Swift extension adds members to a type outside the type's text. The type is the only
+        // item at its path, so the filter has no other item to tell it apart from.
+        let symbols = Symbols::from(vec![
+            element("/Config", 0..10),
+            scalar("/Config/name", 1, "blue"),
+            symbol("/Config/extra", 20),
+        ]);
+
+        assert_eq!(
+            symbols.resolve(&path("/~[name=blue]/extra")),
+            Ok(&symbols.symbols[2])
         );
     }
 
