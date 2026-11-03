@@ -4,6 +4,7 @@ use crate::language_parsers::{
 };
 use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, child};
 use anyhow::{Context, anyhow, bail};
+use std::ops::Range;
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Swift, with its symbols.
@@ -49,9 +50,16 @@ impl CodeLanguage for Swift {
         let hashes = literal.len() - literal.trim_start_matches('#').len();
         let escape = format!("\\{}", "#".repeat(hashes));
         let quoted = literal.trim_matches('#');
-        let multi_line = quoted
-            .strip_prefix(MULTI_LINE_QUOTES)
-            .and_then(|content| content.strip_suffix(MULTI_LINE_QUOTES));
+        // A raw string in `"""` quotes is multi-line only when it holds a line break. Without one,
+        // `#"""a"""#` holds `""a""`.
+        let multi_line = (node.kind() == "multi_line_string_literal"
+            || quoted.contains(['\r', '\n']))
+        .then(|| {
+            quoted
+                .strip_prefix(MULTI_LINE_QUOTES)
+                .and_then(|content| content.strip_suffix(MULTI_LINE_QUOTES))
+        })
+        .flatten();
         let text = match multi_line {
             Some(content) => multi_line_text(content)?,
             None => {
@@ -140,9 +148,11 @@ fn push_escape<'text>(
     decoded: &mut String,
 ) -> anyhow::Result<&'text str> {
     let mut characters = text.chars();
-    // The text of a multi-line string ends with the line before the closing quotes.
+    // In a string on one line, the escape takes in the closing quote, so the string has no end.
+    // In a multi-line string, the text ends with the line before the closing quotes. Swift
+    // rejects a `\` there, but allows one with `#` in a raw string. Rejecting both keeps one rule.
     let Some(escaped) = characters.next() else {
-        bail!("Swift allows no `\\` at the end of the line before the closing quotes");
+        bail!("Swift allows no `{escape}` at the end of a string");
     };
     let character = match escaped {
         '0' => '\0',
@@ -176,19 +186,16 @@ fn push_unicode<'text>(
     escape: &str,
     decoded: &mut String,
 ) -> anyhow::Result<&'text str> {
-    let Some(braced) = text.strip_prefix('{') else {
-        bail!("`{escape}u` is not an escape in a Swift string");
+    let Some((digits, rest)) = text
+        .strip_prefix('{')
+        .and_then(|braced| braced.split_once('}'))
+        .filter(|(digits, _)| {
+            (1..=8).contains(&digits.len()) && digits.bytes().all(|digit| digit.is_ascii_hexdigit())
+        })
+    else {
+        bail!("`{escape}u` needs 1 to 8 hex digits in braces in a Swift string");
     };
-    let end = braced
-        .find(|character: char| !character.is_ascii_hexdigit())
-        .unwrap_or(braced.len());
-    let (digits, rest) = braced.split_at(end);
-    let rest = rest.strip_prefix('}');
-    let closing = if rest.is_some() { "}" } else { "" };
-    let written = format!("{escape}u{{{digits}{closing}");
-    let Some(rest) = rest.filter(|_| (1..=8).contains(&digits.len())) else {
-        bail!("`{written}` is not an escape in a Swift string");
-    };
+    let written = [escape, "u{", digits, "}"].concat();
     decoded.push(code::char_from_digits(&written, digits, 16)?);
     Ok(rest)
 }
@@ -295,44 +302,66 @@ fn push_parts<'tree>(
     identifier: impl Fn(Node<'tree>) -> Option<Node<'tree>>,
 ) {
     // In `let a = 1, b = 2` and `case a = 1, b`, each name has its own part, so a change to one
-    // does not touch the other. A part runs from its name to the next comma.
-    let mut parts: Vec<Vec<(Option<&str>, Node)>> = Vec::new();
+    // does not touch the other. A part runs from its name to the next comma. The attributes,
+    // modifiers and keyword before the first name can only go to one part, so they go to the
+    // first.
+    let mut parts: Vec<Part> = Vec::new();
     let mut cursor = declaration.walk();
-    for (index, node) in declaration.children(&mut cursor).enumerate() {
-        let field = u32::try_from(index)
-            .ok()
-            .and_then(|index| declaration.field_name_for_child(index));
+    let mut more = cursor.goto_first_child();
+    while more {
+        let node = cursor.node();
+        let field = cursor.field_name();
+        more = cursor.goto_next_sibling();
         if field == Some("name") {
-            parts.push(Vec::new());
+            let start = if parts.is_empty() {
+                declaration.start_byte()
+            } else {
+                node.start_byte()
+            };
+            parts.push(Part {
+                name: node,
+                range: start..node.end_byte(),
+                value: None,
+            });
+            continue;
         }
-        match parts.last_mut() {
-            Some(part) if node.kind() != "," && !node.is_extra() => part.push((field, node)),
+        // The grammar puts the `;` after a case in the case.
+        let Some(part) = parts
+            .last_mut()
+            .filter(|_| !matches!(node.kind(), "," | ";") && !node.is_extra())
+        else {
+            continue;
+        };
+        part.range.end = node.end_byte();
+        match field {
+            Some("value" | "raw_value") => part.value = Some(node),
+            Some("computed_value") => part.value = computed_value(node),
             _ => {}
         }
     }
-    let alone = parts.len() == 1;
     for part in parts {
-        let field = |name: &str| {
-            part.iter()
-                .find(|(field, _)| *field == Some(name))
-                .map(|&(_, node)| node)
-        };
-        let Some(name) = field("name").and_then(&identifier) else {
-            continue;
-        };
-        let range = match (alone, part.first(), part.last()) {
-            (false, Some((_, first)), Some((_, last))) => first.start_byte()..last.end_byte(),
-            _ => declaration.byte_range(),
-        };
-        let value = field("value")
-            .or_else(|| field("raw_value"))
-            .or_else(|| field("computed_value").and_then(computed_value));
-        definitions.push(Definition::new(parents.to_vec(), name, range, value));
+        if let Some(name) = identifier(part.name) {
+            definitions.push(Definition::new(
+                parents.to_vec(),
+                name,
+                part.range,
+                part.value,
+            ));
+        }
     }
 }
 
+/// One name of a property declaration or an enum case, with the byte range of its part of the
+/// declaration and its value, if it has one.
+struct Part<'tree> {
+    name: Node<'tree>,
+    range: Range<usize>,
+    value: Option<Node<'tree>>,
+}
+
 /// The value of `property`, the body of a computed property: the `v` of `{ v }` or of
-/// `{ return v }`. Returns `None` for a body with several statements, or with `get` or `set`.
+/// `{ return v }`. Returns `None` for a body with several statements, with `get` or `set`, or with
+/// one statement that is not an expression, such as a `for` loop.
 fn computed_value(property: Node<'_>) -> Option<Node<'_>> {
     // Swift reads a body with one expression as a body that returns it.
     let statements = child(property, "statements")?;
@@ -343,10 +372,21 @@ fn computed_value(property: Node<'_>) -> Option<Node<'_>> {
     let (Some(statement), None) = (inner.next(), inner.next()) else {
         return None;
     };
-    if statement.kind() == "control_transfer_statement" {
-        statement.child_by_field_name("result")
-    } else {
-        Some(statement)
+    match statement.kind() {
+        "control_transfer_statement" => statement.child_by_field_name("result"),
+        // The grammar's statements that are not expressions, so they return nothing. An `if` and
+        // a `switch` are expressions, so they stay.
+        "do_statement"
+        | "for_statement"
+        | "guard_statement"
+        | "repeat_while_statement"
+        | "while_statement"
+        | "assignment"
+        | "class_declaration"
+        | "function_declaration"
+        | "property_declaration"
+        | "typealias_declaration" => None,
+        _ => Some(statement),
     }
 }
 
@@ -427,7 +467,7 @@ final class Store<T> {
 
 enum Mode: Int {
     case red = 1, // Comes first.
-        green
+        green;
     case custom(String)
     static let all = [red]
 }
@@ -459,8 +499,9 @@ actor Counter {
                     Some("20 * 1024")
                 ),
                 symbol("/counter", "var counter: Int = (0)", Some("0")),
-                // Each name of a declaration with several names covers only its own part.
-                symbol("/first", "first = 1", Some("1")),
+                // Each name of a declaration with several names covers only its own part. The
+                // first part also covers the keyword, and any attributes and modifiers.
+                symbol("/first", "let first = 1", Some("1")),
                 symbol("/second", "second: Int = 2", Some("2")),
                 symbol(
                     "/ready",
@@ -492,9 +533,9 @@ actor Counter {
                 symbol("/Store", text_of("final class", "\n\nenum")?, None),
                 symbol("/Store/shared", "class var shared: Int { 1 }", Some("1")),
                 symbol("/Mode", text_of("enum Mode", "\n\nprotocol")?, None),
-                // Each name of a case covers only its own part. An implicit raw value is no
-                // value.
-                symbol("/Mode/red", "red = 1", Some("1")),
+                // Each name of a case covers only its own part, without the `;` after it. An
+                // implicit raw value is no value.
+                symbol("/Mode/red", "case red = 1", Some("1")),
                 symbol("/Mode/green", "green", None),
                 symbol("/Mode/custom", "case custom(String)", None),
                 symbol("/Mode/all", "static let all = [red]", Some("[red]")),
@@ -620,6 +661,42 @@ struct Config {
     }
 
     #[test]
+    fn computed_property_with_one_statement_parse_symbols_returns_a_value_only_for_an_expression()
+    -> anyhow::Result<()> {
+        let source = r#"var chosen: Int { if ok { 1 } else { 2 } }
+var token: String? { do { return try read() } catch { return nil } }
+var guarded: Void { guard ok else { return } }
+var looped: Void { for _ in 0..<3 { step() } }
+var waited: Void { while ok { step() } }
+var repeated: Void { repeat { step() } while ok }
+var reset: Void { count = 0 }
+var local: Void { let y = 1 }
+var localFunction: Void { func f() {} }
+var localType: Void { struct S {} }
+var localAlias: Void { typealias T = Int }
+"#;
+
+        assert_eq!(
+            values(&swift(source)?, source),
+            [
+                // An `if` or a `switch` is an expression in Swift.
+                value("/chosen", "if ok { 1 } else { 2 }"),
+                ("/token".to_string(), None),
+                ("/guarded".to_string(), None),
+                ("/looped".to_string(), None),
+                ("/waited".to_string(), None),
+                ("/repeated".to_string(), None),
+                ("/reset".to_string(), None),
+                ("/local".to_string(), None),
+                ("/localFunction".to_string(), None),
+                ("/localType".to_string(), None),
+                ("/localAlias".to_string(), None),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn values_in_parentheses_parse_symbols_returns_them_without_the_parentheses()
     -> anyhow::Result<()> {
         // The grammar parses parentheses as a tuple. A tuple with a label or two values is a
@@ -684,6 +761,7 @@ let lines = """
 let rawLines = #"""
     a\n\#tb
     """#
+let rawQuotes = #"""a"""#
 let linesInterpolated = """
     \(x)
     """
@@ -710,6 +788,8 @@ let joined = "a" + "b"
                 // end of a line joins it to the next.
                 value("/lines", "a\n  b \"quoted\" \"\"\"\nc d\tz\n"),
                 value("/rawLines", "a\\n\tb"),
+                // Without a line break, a raw string's `"""` are a `"` and two quotes it holds.
+                value("/rawQuotes", r#"""a"""#),
                 value("/linesInterpolated", "\"\"\"\n    \\(x)\n    \"\"\""),
                 value("/emptyLines", ""),
                 value("/regex", "/a+b/"),
@@ -774,6 +854,8 @@ let surrogate = "\u{D800}"
 let tooBig = "\u{110000}"
 let interpolated = "\u{D800} \(x)"
 let fine = "ok"
+let rawUnclosedString = #"a\#"#
+let rawSign = #"\#u{+41}"#
 "###;
 
         assert_eq!(
@@ -790,19 +872,35 @@ let fine = "ok"
         );
         assert_eq!(
             unresolved(&swift(source)?, source, "/rawNoBrace")?,
-            decode_error(2, 18, r"`\#u` is not an escape in a Swift string")
+            decode_error(
+                2,
+                18,
+                r"`\#u` needs 1 to 8 hex digits in braces in a Swift string"
+            )
         );
         assert_eq!(
             unresolved(&swift(source)?, source, "/rawUnclosed")?,
-            decode_error(3, 19, r"`\#u{41` is not an escape in a Swift string")
+            decode_error(
+                3,
+                19,
+                r"`\#u` needs 1 to 8 hex digits in braces in a Swift string"
+            )
         );
         assert_eq!(
             unresolved(&swift(source)?, source, "/rawEmpty")?,
-            decode_error(4, 16, r"`\#u{}` is not an escape in a Swift string")
+            decode_error(
+                4,
+                16,
+                r"`\#u` needs 1 to 8 hex digits in braces in a Swift string"
+            )
         );
         assert_eq!(
             unresolved(&swift(source)?, source, "/nineDigits")?,
-            decode_error(5, 18, r"`\u{000000041}` is not an escape in a Swift string")
+            decode_error(
+                5,
+                18,
+                r"`\u` needs 1 to 8 hex digits in braces in a Swift string"
+            )
         );
         assert_eq!(
             unresolved(&swift(source)?, source, "/surrogate")?,
@@ -811,6 +909,19 @@ let fine = "ok"
         assert_eq!(
             unresolved(&swift(source)?, source, "/tooBig")?,
             decode_error(7, 14, r"`\u{110000}` stands for no character")
+        );
+        // Swift reads `\#"` as an escaped quote, so the string has no end.
+        assert_eq!(
+            unresolved(&swift(source)?, source, "/rawUnclosedString")?,
+            decode_error(10, 25, r"Swift allows no `\#` at the end of a string")
+        );
+        assert_eq!(
+            unresolved(&swift(source)?, source, "/rawSign")?,
+            decode_error(
+                11,
+                15,
+                r"`\#u` needs 1 to 8 hex digits in braces in a Swift string"
+            )
         );
         Ok(())
     }
@@ -869,6 +980,8 @@ let fine = "ok"
             "let fine = \"\"\"\n",
             "    ok\n",
             "    \"\"\"\n",
+            // Unlike a raw string, a string in `"""` quotes is multi-line even on one line.
+            "let oneLine = \"\"\"a\"\"\"\n",
         );
 
         assert_eq!(values(&swift(source)?, source), [value("/fine", "ok")]);
@@ -922,10 +1035,14 @@ let fine = "ok"
         );
         assert_eq!(
             unresolved(&swift(source)?, source, "/last")?,
+            decode_error(18, 12, r"Swift allows no `\` at the end of a string")
+        );
+        assert_eq!(
+            unresolved(&swift(source)?, source, "/oneLine")?,
             decode_error(
-                18,
-                12,
-                r"Swift allows no `\` at the end of the line before the closing quotes"
+                24,
+                15,
+                "Swift allows no text after the opening quotes of a multi-line string"
             )
         );
         Ok(())

@@ -344,7 +344,8 @@ too: `Config.java#/Config/MAX_PORTS`.
   protocol requirement and its default.
 - A property's value is its initializer, or the `v` of `{ v }` or `{ return v }`. An enum case's value is its raw
   value.
-- A name in backticks loses them. Attributes are part of a definition. Doc comments are not.
+- A name in backticks loses them. Attributes are part of a definition. Doc comments are not. In `let a = 1, b = 2`,
+  each name covers only its own part, and the attributes go to the first.
 - `init`, `deinit`, `subscript`, operators, local declarations and top-level statements are not symbols.
 - Strings follow Swift's escapes, in raw strings too. A multi-line string loses the white space before its closing
   quotes. A string with an interpolation, such as `"v\(major)"`, stays as written. A path to a string that Swift

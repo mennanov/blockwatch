@@ -698,15 +698,18 @@ extension Config {
 - **Each top-level property, function, type, type alias and macro is a symbol, and so is each member of a type**: a
   property, a function, an enum case, an associated type or a nested type. A protocol is a type, and its requirements
   are members. A path goes from the top-level type down: `#/Config/Mode/red`.
-- **An extension's members sit under the type it extends**, as code reads them: `#/Config/url`. This holds for a type
-  from another file too, so `String+Format.swift` can have `#/String/trimmed`. `extension Outer.Inner` gives
-  `#/Outer/Inner/...`. An extension of a type without a name, such as `extension [Int]`, has no symbols.
+- **An extension's members sit under the type it extends**, as code reads them: `#/Config/url`. The type can come from
+  another file too, so `String+Format.swift` can have `#/String/trimmed`. The path follows the type's name as written:
+  `extension Outer.Inner` gives `#/Outer/Inner/...`, and `extension Swift.String` gives `#/Swift/String/...`. An
+  extension of a type without a name, such as `extension [Int]`, has no symbols.
 - **Overloads are defined twice.** So are a property and a function with one name, copies of a name in `#if` and
   `#else`, and a protocol requirement and its default in an extension. Wrap the one you mean in a block instead.
 - **A property's value is its initializer, or the `v` of `{ v }` or `{ return v }`.** A computed property with `get`
-  or `set`, or with several statements, has no value. An enum case's value is its raw value, the `v` of `= v`. A case
+  or `set`, with several statements, or with one statement that is not an expression, such as a `for` loop, has no
+  value. An enum case's value is its raw value, the `v` of `= v`. A case
   without one has no value, even when Swift gives it one.
-- **In `let a = 1, b = 2` and `case a = 1, b`, each name covers only its own part.**
+- **In `let a = 1, b = 2` and `case a = 1, b`, each name covers only its own part.** The first part also covers the
+  attributes, the modifiers and `let`, `var` or `case`: `#/a` is `let a = 1`, and `#/b` is `b = 2`.
 - **A name in backticks loses them.** Attributes are part of a definition. Doc comments are not.
 - **`init`, `deinit`, `subscript`, operators, precedence groups, extensions themselves, local declarations and
   top-level statements are not symbols.**
@@ -715,8 +718,9 @@ extension Config {
   quotes on each line, and each line end in it is a line feed. A string with an interpolation, such as `"v\(major)"`,
   stays as written, and so does a regex. A path to a string that Swift rejects stops the run, such as `"\u{D800}"`.
 - **A syntax error stops the run for the member that holds it, and for each type around that member.** The other
-  members still resolve. The parser fails on an empty tuple passed to a function, as in `f(())`, so a function with
-  one in its body stops the run too.
+  members still resolve. An extension is not part of the type it extends, so an error in an extension's member leaves
+  the type readable. The parser fails on an empty tuple passed to a function, as in `f(())`, so a function with one in
+  its body stops the run too.
 
 <!-- </block> -->
 

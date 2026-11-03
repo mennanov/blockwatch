@@ -339,8 +339,8 @@ fn without_parentheses(mut node: Node<'_>) -> Node<'_> {
             break;
         }
         let only = {
-            // A comment inside the parentheses is a child too, but not part of the value. So is
-            // the label of a tuple, such as Swift's `(a: 1)`.
+            // A comment inside the parentheses is a child too, but not part of the value. The
+            // label of a tuple, such as Swift's `(a: 1)`, is a second child, so the tuple stays.
             let mut inner = node
                 .named_children(&mut cursor)
                 .filter(|child| !child.is_extra());
