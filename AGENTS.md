@@ -235,22 +235,18 @@ The main modules:
   Some languages also have symbols. Such a language has a `SymbolsParser`, which its `parser()` passes to
   `.with_symbols(...)`:
 
-  - JSON uses a `QuerySymbolsParser`, built from a tree-sitter query (`.scm`) and a `NodeDecoder`.
+  - JSON and YAML walk their syntax trees themselves, and refuse a file with a syntax error.
   - TOML finds its symbols with `toml_edit`. What a TOML key means depends on the order of the headers, not on how the
     syntax tree is nested.
-  - YAML walks its syntax tree itself. An alias has a position in a sequence but can't be addressed, and a query can't
-    express that.
   - Markdown finds its sections with the `markdown` crate, the same parser that finds its comments.
 
   Each language's tests list every symbol it finds. When you give a language symbols, also document its paths in
   `docs/symbols.md` and in the "Symbols" section of the skill, `src/skill.md`. A test in `language_parsers/mod.rs` and the
   repository's own blocks keep the list of file types with symbols, and each language's section, in sync with the
   code.
-- `src/symbols.rs` — `Symbol`, the `SymbolsParser` trait, and `resolve`, which finds the symbol a path refers to.
-  `QuerySymbolsParser` runs a language's query and finds every addressable `Symbol` in one walk of the tree, with its
-  path, its definition range and its decoded value. It suits a language whose structure is its syntax tree. It rejects
-  a file with a syntax error, instead of resolving a path through tree-sitter's error recovery. It doesn't check the
-  query itself.
+- `src/symbols/mod.rs` — `Symbol`, the `SymbolsParser` trait, and `resolve`, which finds the symbol a path refers to.
+  `ensure_no_syntax_error` refuses a file with a syntax error, instead of resolving a path through tree-sitter's error
+  recovery.
 - `src/validators/` — one file for each validator (`affects`, `check_ai`, `check_lua`, `keep_sorted`, `keep_unique`,
   `line_count`, `line_pattern`, `same_as`). Each file exports a `detect` function. `Validator::detect` in
   `validators/mod.rs` calls them from one `match`.

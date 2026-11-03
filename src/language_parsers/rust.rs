@@ -2,7 +2,7 @@ use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
     c_style_multiline_comment_processor, comment_visitor, node_text,
 };
-use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, Value};
+use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition};
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Rust, with its symbols.
@@ -45,12 +45,12 @@ impl CodeLanguage for Rust {
                     .last()
                     .unwrap_or(item)
                     .start_byte();
-                Some(Definition {
-                    parents: Vec::new(),
-                    names: vec![name],
-                    range: start..item.end_byte(),
-                    value: value.map(Value::Initializer),
-                })
+                Some(Definition::new(
+                    Vec::new(),
+                    name,
+                    start..item.end_byte(),
+                    value,
+                ))
             })
             .collect()
     }

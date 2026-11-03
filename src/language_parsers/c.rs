@@ -164,12 +164,7 @@ fn top_level_definitions<'tree>(
         }
         "alias_declaration" => node
             .child_by_field_name("name")
-            .map(|name| Definition {
-                parents: Vec::new(),
-                names: vec![name],
-                range: start..node.end_byte(),
-                value: None,
-            })
+            .map(|name| Definition::new(Vec::new(), name, start..node.end_byte(), None))
             .into_iter()
             .collect(),
         _ => Vec::new(),
@@ -209,16 +204,12 @@ fn declaration_definitions(declaration: Node<'_>, start: usize) -> Vec<Definitio
         if value.is_none() && (is_function || is_extern) {
             continue;
         }
-        definitions.push(Definition {
-            parents: Vec::new(),
-            names: vec![name],
-            range: if alone {
-                start..declaration.end_byte()
-            } else {
-                declarator.byte_range()
-            },
-            value: value.map(Value::Initializer),
-        });
+        let range = if alone {
+            start..declaration.end_byte()
+        } else {
+            declarator.byte_range()
+        };
+        definitions.push(Definition::new(Vec::new(), name, range, value));
     }
     definitions
 }
@@ -265,24 +256,19 @@ fn typedef_definitions<'tree>(
 /// identifier, such as `Foo::bar` or `operator==`.
 fn function_definition(function: Node<'_>, start: usize) -> Option<Definition<'_>> {
     let (name, _) = declared_name(function.child_by_field_name("declarator")?)?;
-    Some(Definition {
-        parents: Vec::new(),
-        names: vec![name],
-        range: start..function.end_byte(),
-        value: None,
-    })
+    Some(Definition::new(
+        Vec::new(),
+        name,
+        start..function.end_byte(),
+        None,
+    ))
 }
 
 /// The definitions of `specifier`, a struct, union, class or enum type that starts at `start`:
 /// the type's name when it has a body, and the enumerators of a plain `enum`.
 fn type_definitions(specifier: Node<'_>, start: usize) -> Vec<Definition<'_>> {
     let mut definitions: Vec<Definition> = defined_type_name(specifier)
-        .map(|name| Definition {
-            parents: Vec::new(),
-            names: vec![name],
-            range: start..specifier.end_byte(),
-            value: None,
-        })
+        .map(|name| Definition::new(Vec::new(), name, start..specifier.end_byte(), None))
         .into_iter()
         .collect();
     definitions.extend(enumerators(specifier));
@@ -313,14 +299,12 @@ fn enumerators(specifier: Node<'_>) -> Vec<Definition<'_>> {
     body.named_children(&mut cursor)
         .filter(|child| child.kind() == "enumerator")
         .filter_map(|enumerator| {
-            Some(Definition {
-                parents: Vec::new(),
-                names: vec![enumerator.child_by_field_name("name")?],
-                range: enumerator.byte_range(),
-                value: enumerator
-                    .child_by_field_name("value")
-                    .map(Value::Initializer),
-            })
+            Some(Definition::new(
+                Vec::new(),
+                enumerator.child_by_field_name("name")?,
+                enumerator.byte_range(),
+                enumerator.child_by_field_name("value"),
+            ))
         })
         .collect()
 }
@@ -465,7 +449,6 @@ fn macro_value<'tree>(
 /// Returns an error if an escape is not one C has, stands for no character, doesn't fit in a
 /// byte, or makes bytes that are not UTF-8 text.
 fn decode_string(node: &Node, source: &str) -> anyhow::Result<Option<String>> {
-    let mut cursor = node.walk();
     match node.kind() {
         "concatenated_string" => code::decode_concatenated(node, source, &decode_string),
         // The prefix and the opening quote make one token, such as `u8"`.
@@ -474,9 +457,7 @@ fn decode_string(node: &Node, source: &str) -> anyhow::Result<Option<String>> {
             _ => Ok(None),
         },
         "raw_string_literal" => match node.child(0).map(|open| open.kind()) {
-            Some("R\"" | "u8R\"") => Ok(node
-                .children(&mut cursor)
-                .find(|child| child.kind() == "raw_string_content")
+            Some("R\"" | "u8R\"") => Ok(code::child(*node, "raw_string_content")
                 .map(|content| node_text(&content, source).to_string())),
             _ => Ok(None),
         },

@@ -1,7 +1,7 @@
 use crate::language_parsers;
 use crate::language_parsers::{CommentsParser, LanguageParser, LanguageParserImpl, node_text};
-use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, Value};
-use anyhow::{Context, anyhow};
+use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition};
+use anyhow::anyhow;
 use std::ops::Range;
 use tree_sitter::Node;
 
@@ -51,11 +51,7 @@ impl CodeLanguage for Go {
         match node.kind() {
             "interpreted_string_literal" => code::decode_bytes(node, source, push_escape).map(Some),
             "raw_string_literal" => {
-                let text = node_text(node, source);
-                let content = text
-                    .strip_prefix('`')
-                    .and_then(|text| text.strip_suffix('`'))
-                    .context("a raw string is between backquotes")?;
+                let content = code::between_quotes(node_text(node, source), "`")?;
                 // Go drops each carriage return in a raw string, so a file saved with CRLF line
                 // endings gives the same value.
                 Ok(Some(content.replace('\r', "")))
@@ -133,11 +129,13 @@ fn spec_definitions<'tree>(
         .enumerate()
         // `_` declares nothing that code can refer to.
         .filter(|(_, name)| node_text(name, source) != "_")
-        .map(|(index, name)| Definition {
-            parents: Vec::new(),
-            names: vec![*name],
-            range: range.clone(),
-            value: paired.then(|| Value::Initializer(values[index])),
+        .map(|(index, name)| {
+            Definition::new(
+                Vec::new(),
+                *name,
+                range.clone(),
+                paired.then(|| values[index]),
+            )
         })
         .collect()
 }
@@ -147,12 +145,12 @@ fn function_definition<'tree>(function: Node<'tree>, source: &str) -> Option<Def
     let name = function.child_by_field_name("name")?;
     match node_text(&name, source) {
         "init" | "_" => None,
-        _ => Some(Definition {
-            parents: Vec::new(),
-            names: vec![name],
-            range: function.byte_range(),
-            value: None,
-        }),
+        _ => Some(Definition::new(
+            Vec::new(),
+            name,
+            function.byte_range(),
+            None,
+        )),
     }
 }
 

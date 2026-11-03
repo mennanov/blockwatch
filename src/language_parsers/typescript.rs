@@ -1,6 +1,6 @@
 use crate::language_parsers;
 use crate::language_parsers::{CommentsParser, LanguageParser, LanguageParserImpl, node_text};
-use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, Value};
+use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition};
 use anyhow::{anyhow, bail};
 use std::ops::Range;
 use tree_sitter::Node;
@@ -52,7 +52,7 @@ impl CodeLanguage for EcmaScript {
                         };
                         let value = declarator
                             .child_by_field_name("value")
-                            .map(|value| Value::Initializer(without_type_syntax(value)));
+                            .map(without_type_syntax);
                         definitions.extend(definition(declarator, range, value, source));
                     }
                 }
@@ -128,24 +128,19 @@ fn declaration(statement: Node<'_>) -> Option<Node<'_>> {
     }
 }
 
-/// The definition of the name that `node` holds in its `name` field, covering `range`. Returns
-/// `None` when the name is not one code can refer to, such as a pattern in `const { a } = b`,
-/// the quoted name in `declare module "x"`, or `_`.
+/// The definition of the name that `node` holds in its `name` field, covering `range`, with the
+/// initializer `value`, if any. Returns `None` when the name is not one code can refer to, such as
+/// a pattern in `const { a } = b`, the quoted name in `declare module "x"`, or `_`.
 fn definition<'tree>(
     node: Node<'tree>,
     range: Range<usize>,
-    value: Option<Value<'tree>>,
+    value: Option<Node<'tree>>,
     source: &str,
 ) -> Option<Definition<'tree>> {
     let name = node.child_by_field_name("name").filter(|name| {
         matches!(name.kind(), "identifier" | "type_identifier") && node_text(name, source) != "_"
     })?;
-    Some(Definition {
-        parents: Vec::new(),
-        names: vec![name],
-        range,
-        value,
-    })
+    Some(Definition::new(Vec::new(), name, range, value))
 }
 
 /// `value` without the type syntax that TypeScript removes when it compiles, such as `as const`,

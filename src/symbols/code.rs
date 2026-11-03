@@ -392,28 +392,71 @@ fn names_in<'a>(
 }
 // </block>
 
+/// What a walk of nested bodies has found so far, and the bodies it has yet to read.
+pub(crate) struct NestedWalk<'tree> {
+    /// The definitions found so far, in any order.
+    pub(crate) definitions: Vec<Definition<'tree>>,
+    /// The bodies to read, each with the names of the definitions it sits in, outermost first.
+    /// The walk reads the last one first.
+    bodies: Vec<(Node<'tree>, Vec<Node<'tree>>)>,
+}
+
+impl<'tree> NestedWalk<'tree> {
+    /// Adds the definition of `name` inside the definitions whose names are `parents`. It covers
+    /// `range` and has the initializer `value`, if any.
+    pub(crate) fn add_definition(
+        &mut self,
+        parents: &[Node<'tree>],
+        name: Node<'tree>,
+        range: Range<usize>,
+        value: Option<Node<'tree>>,
+    ) {
+        self.definitions
+            .push(Definition::new(parents.to_vec(), name, range, value));
+    }
+
+    /// Adds the definition of `name`, as [`Self::add_definition`] does, and reads `body`, if any,
+    /// later, as a body inside `name`.
+    pub(crate) fn add_definition_with_body(
+        &mut self,
+        parents: &[Node<'tree>],
+        name: Node<'tree>,
+        range: Range<usize>,
+        value: Option<Node<'tree>>,
+        body: Option<Node<'tree>>,
+    ) {
+        self.add_definition(parents, name, range, value);
+        if let Some(body) = body {
+            self.add_body(body, [parents, &[name]].concat());
+        }
+    }
+
+    /// Reads `body` later, as a body inside the definitions whose names are `parents`.
+    pub(crate) fn add_body(&mut self, body: Node<'tree>, parents: Vec<Node<'tree>>) {
+        self.bodies.push((body, parents));
+    }
+}
+
 /// The definitions under `root`, the root of a file's syntax tree, in document order, for a
-/// language whose types hold other definitions. `push_members` takes a body, the names of the
-/// types it sits in, and the lists to add to: the definitions in the body, and each body in it
-/// with its own parents. It gets `root` first, with no parents.
+/// language whose types hold other definitions. `push_members` takes a body and the names of the
+/// types it sits in. It adds to the walk the definitions in the body, and each body in it with its
+/// own parents. It gets `root` first, with no parents.
 pub(crate) fn nested_definitions<'tree>(
     root: Node<'tree>,
-    mut push_members: impl FnMut(
-        Node<'tree>,
-        Vec<Node<'tree>>,
-        &mut Vec<Definition<'tree>>,
-        &mut Vec<(Node<'tree>, Vec<Node<'tree>>)>,
-    ),
+    mut push_members: impl FnMut(Node<'tree>, Vec<Node<'tree>>, &mut NestedWalk<'tree>),
 ) -> Vec<Definition<'tree>> {
-    let mut definitions = Vec::new();
     // The walk keeps its own stack, as deeply nested types could overflow the call stack.
-    let mut bodies = vec![(root, Vec::new())];
-    while let Some((body, parents)) = bodies.pop() {
-        push_members(body, parents, &mut definitions, &mut bodies);
+    let mut walk = NestedWalk {
+        definitions: Vec::new(),
+        bodies: vec![(root, Vec::new())],
+    };
+    while let Some((body, parents)) = walk.bodies.pop() {
+        push_members(body, parents, &mut walk);
     }
     // The walk reads all of a body before the bodies in it.
-    definitions.sort_by_key(|definition| definition.range.start);
-    definitions
+    walk.definitions
+        .sort_by_key(|definition| definition.range.start);
+    walk.definitions
 }
 
 /// The first named child of `node` of the `kind`, for the nodes the grammar gives no field name.
@@ -431,6 +474,17 @@ pub(crate) fn value_after<'tree>(node: Node<'tree>, token: &str) -> Option<Node<
     node.children(&mut cursor)
         .skip_while(|child| child.kind() != token)
         .find(|child| child.is_named() && !child.is_extra())
+}
+
+/// The text of `literal` between its opening and its closing `quotes`, such as `abc` for `"abc"`.
+///
+/// # Errors
+/// Returns an error if `literal` doesn't start and end with `quotes`.
+pub(crate) fn between_quotes<'a>(literal: &'a str, quotes: &str) -> anyhow::Result<&'a str> {
+    literal
+        .strip_prefix(quotes)
+        .and_then(|content| content.strip_suffix(quotes))
+        .ok_or_else(|| anyhow!("the string doesn't start and end with `{quotes}`"))
 }
 
 /// Joins the text of the parts of `node`, several strings written one after the other.

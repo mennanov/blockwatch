@@ -2,8 +2,8 @@ use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl,
     c_style_and_doc_line_and_block_comments_parser, node_text,
 };
-use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, child};
-use anyhow::{Context, anyhow, bail};
+use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, NestedWalk, child};
+use anyhow::{anyhow, bail};
 use std::ops::Range;
 use tree_sitter::Node;
 
@@ -63,10 +63,7 @@ impl CodeLanguage for Swift {
         let text = match multi_line {
             Some(content) => multi_line_text(content)?,
             None => {
-                let content = quoted
-                    .strip_prefix('"')
-                    .and_then(|content| content.strip_suffix('"'))
-                    .context("a string is between its quotes")?;
+                let content = code::between_quotes(quoted, "\"")?;
                 // The grammar lets a string run on to the next line, so a string missing its
                 // closing quote takes in the next line too.
                 if content.contains(['\r', '\n']) {
@@ -201,30 +198,25 @@ fn push_unicode<'text>(
 }
 
 /// Adds the definitions of the members of `body`, the root of a file or the body of a type or
-/// extension, to `definitions`. `parents` are the names of the types that `body` belongs to. Adds
-/// the body of each type and extension in `body` to `bodies`, with its own parents.
-fn push_members<'tree>(
-    body: Node<'tree>,
-    parents: Vec<Node<'tree>>,
-    definitions: &mut Vec<Definition<'tree>>,
-    bodies: &mut Vec<(Node<'tree>, Vec<Node<'tree>>)>,
-) {
+/// extension, to `walk`. `parents` are the names of the types that `body` belongs to. Adds the
+/// body of each type and extension in `body` to `walk`, with its own parents.
+fn push_members<'tree>(body: Node<'tree>, parents: Vec<Node<'tree>>, walk: &mut NestedWalk<'tree>) {
     let mut cursor = body.walk();
     for member in body.named_children(&mut cursor) {
         let name = match member.kind() {
             // The grammar calls a struct, an enum, an actor and an extension a class too.
             "class_declaration" | "protocol_declaration" => {
-                push_type(member, &parents, definitions, bodies);
+                push_type(member, &parents, walk);
                 continue;
             }
             "property_declaration" => {
-                push_parts(member, &parents, definitions, |pattern| {
+                push_parts(member, &parents, walk, |pattern| {
                     pattern.child_by_field_name("bound_identifier")
                 });
                 continue;
             }
             "enum_entry" => {
-                push_parts(member, &parents, definitions, Some);
+                push_parts(member, &parents, walk, Some);
                 continue;
             }
             "protocol_property_declaration" => member
@@ -243,62 +235,49 @@ fn push_members<'tree>(
             // local definitions.
             _ => continue,
         };
-        definitions.extend(
-            name.map(|name| Definition::new(parents.to_vec(), name, member.byte_range(), None)),
-        );
+        if let Some(name) = name {
+            walk.add_definition(&parents, name, member.byte_range(), None);
+        }
     }
 }
 
-/// Adds the definition of `declaration`, a type in the type at `parents`, to `definitions`, and
-/// adds its body to `bodies`. An extension adds no definition, and its body gets the names of the
-/// type it extends as parents. An extension of a type without a name, such as `[Int]`, adds
-/// nothing.
+/// Adds the definition of `declaration`, a type in the type at `parents`, and its body to `walk`.
+/// An extension adds no definition, and its body gets the names of the type it extends as
+/// parents. An extension of a type without a name, such as `[Int]`, adds nothing.
 fn push_type<'tree>(
     declaration: Node<'tree>,
     parents: &[Node<'tree>],
-    definitions: &mut Vec<Definition<'tree>>,
-    bodies: &mut Vec<(Node<'tree>, Vec<Node<'tree>>)>,
+    walk: &mut NestedWalk<'tree>,
 ) {
     let Some(name) = declaration.child_by_field_name("name") else {
         return;
     };
+    let body = declaration.child_by_field_name("body");
     let is_extension = declaration
         .child_by_field_name("declaration_kind")
         .is_some_and(|kind| kind.kind() == "extension");
-    let names = if is_extension {
-        // Code reads an extension's members through the type, as `Config.extra`. A dotted type,
-        // `Outer.Inner`, gives one segment for each part.
-        if name.kind() != "user_type" {
-            return;
-        }
+    if !is_extension {
+        walk.add_definition_with_body(parents, name, declaration.byte_range(), None, body);
+        return;
+    }
+    // Code reads an extension's members through the type, as `Config.extra`. A dotted type,
+    // `Outer.Inner`, gives one segment for each part.
+    if let (Some(body), "user_type") = (body, name.kind()) {
         let mut cursor = name.walk();
-        name.named_children(&mut cursor)
-            .filter(|part| part.kind() == "type_identifier")
-            .collect()
-    } else {
-        definitions.push(Definition::new(
-            parents.to_vec(),
-            name,
-            declaration.byte_range(),
-            None,
-        ));
-        vec![name]
-    };
-    let parents = [parents, &names].concat();
-    bodies.extend(
-        declaration
-            .child_by_field_name("body")
-            .map(|body| (body, parents)),
-    );
+        let parts = name
+            .named_children(&mut cursor)
+            .filter(|part| part.kind() == "type_identifier");
+        walk.add_body(body, parents.iter().copied().chain(parts).collect());
+    }
 }
 
-/// Adds a definition to `definitions` for each name that `declaration`, a property declaration or
-/// an enum case in the type at `parents`, declares. `identifier` gives the identifier of the node
-/// in the `name` field, or `None` when it has none, as a tuple pattern doesn't.
+/// Adds a definition to `walk` for each name that `declaration`, a property declaration or an enum
+/// case in the type at `parents`, declares. `identifier` gives the identifier of the node in the
+/// `name` field, or `None` when it has none, as a tuple pattern doesn't.
 fn push_parts<'tree>(
     declaration: Node<'tree>,
     parents: &[Node<'tree>],
-    definitions: &mut Vec<Definition<'tree>>,
+    walk: &mut NestedWalk<'tree>,
     identifier: impl Fn(Node<'tree>) -> Option<Node<'tree>>,
 ) {
     // In `let a = 1, b = 2` and `case a = 1, b`, each name has its own part, so a change to one
@@ -341,12 +320,7 @@ fn push_parts<'tree>(
     }
     for part in parts {
         if let Some(name) = identifier(part.name) {
-            definitions.push(Definition::new(
-                parents.to_vec(),
-                name,
-                part.range,
-                part.value,
-            ));
+            walk.add_definition(parents, name, part.range, part.value);
         }
     }
 }
@@ -403,7 +377,6 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod symbols_tests {
     use super::*;
-    use crate::symbols::code::CodeSymbolsParser;
     use crate::symbols::code::test_utils::{
         decode_error, symbol, symbols, syntax_error, text_of, unresolved, value, values,
     };

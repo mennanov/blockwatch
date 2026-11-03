@@ -1,23 +1,166 @@
 use crate::language_parsers::{
-    LanguageParser, LanguageParserImpl, c_style_comments_parser, node_text,
+    LanguageParser, LanguageParserImpl, c_style_comments_parser, members, node_text,
+    tree_sitter_parser,
 };
-use crate::symbols::QuerySymbolsParser;
-use anyhow::Context;
+use crate::symbol_path::SymbolPath;
+use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser, ensure_no_syntax_error};
+use anyhow::{Context, bail};
+use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for JSON.
 pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    let language = tree_sitter_json::LANGUAGE.into();
-    let comments_parser = c_style_comments_parser(&language, "comment")?;
-    let symbols_parser = QuerySymbolsParser::new(&language, include_str!("json.scm"), decode_node)?;
-    Ok(LanguageParserImpl::new(comments_parser).with_symbols(symbols_parser))
+    let comments_parser = c_style_comments_parser(&tree_sitter_json::LANGUAGE.into(), "comment")?;
+    Ok(LanguageParserImpl::new(comments_parser).with_symbols(JsonSymbolsParser::new()?))
 }
 
-/// The text a captured JSON node denotes: a string literal unquoted and unescaped, and any other
-/// node its source text.
+/// Finds the symbols of a JSON file by walking its syntax tree.
+///
+/// Every key and every array item is a symbol. A string is decoded, and any other scalar is kept
+/// as written. An object or an array has no value.
+struct JsonSymbolsParser {
+    parser: tree_sitter::Parser,
+}
+
+impl JsonSymbolsParser {
+    /// # Errors
+    /// Returns an error if the JSON grammar cannot be loaded.
+    fn new() -> anyhow::Result<Self> {
+        let parser = tree_sitter_parser(&tree_sitter_json::LANGUAGE.into())?;
+        Ok(Self { parser })
+    }
+}
+
+impl SymbolsParser for JsonSymbolsParser {
+    /// # Errors
+    /// Returns an error if the file has a syntax error, or a string that is not valid JSON.
+    fn parse(&mut self, source: &str) -> anyhow::Result<Symbols> {
+        let tree = self
+            .parser
+            .parse(source, None)
+            .context("failed to parse syntax tree")?;
+        ensure_no_syntax_error(&tree, source)?;
+        Ok(Walk::symbols_in(source, tree.root_node())?.into())
+    }
+}
+
+/// A member of an object or an array, whose symbol the walk still has to add.
+enum Member<'tree> {
+    /// A pair of an object, such as `"a": 1`.
+    Pair(Node<'tree>),
+    /// An item of an array, with its index.
+    Item(Node<'tree>, usize),
+}
+
+/// The state of a walk over a JSON document.
+struct Walk<'s, 'tree> {
+    source: &'s str,
+    /// The path to the last member walked. Before each member, the walk cuts it back to the path
+    /// to the value that holds the member.
+    path: Vec<String>,
+    symbols: Vec<Symbol>,
+    /// The members that still need symbols, the next one last. Each comes with the length of the
+    /// path to the value that holds it.
+    pending: Vec<(usize, Member<'tree>)>,
+}
+
+impl<'s, 'tree> Walk<'s, 'tree> {
+    /// The symbols of everything inside `document`, the root of the syntax tree of `source`, in
+    /// document order.
+    ///
+    /// # Errors
+    /// Returns an error if a string is not valid JSON. The error is about the first such string.
+    fn symbols_in(source: &'s str, document: Node<'tree>) -> anyhow::Result<Vec<Symbol>> {
+        let mut walk = Walk {
+            source,
+            path: Vec::new(),
+            symbols: Vec::new(),
+            pending: Vec::new(),
+        };
+        // The grammar reads several values one after the other, and a path can't say which one it
+        // means, so their members all start at the root. The stack takes the last member first,
+        // so the values go on it in reverse.
+        for value in members(document).into_iter().rev() {
+            walk.push_members(value);
+        }
+        // The walk keeps its own stack, as deeply nested values could overflow the call stack.
+        while let Some((depth, member)) = walk.pending.pop() {
+            // Members come off the stack in document order. So every member walked since the
+            // value that holds `member` is inside that value, and the path still starts with the
+            // path to that value.
+            walk.path.truncate(depth);
+            walk.add_member_symbol(member)?;
+        }
+        Ok(walk.symbols)
+    }
+
+    /// Puts the members of `value`, the value at the current path, on `pending`. A scalar has
+    /// none.
+    fn push_members(&mut self, value: Node<'tree>) {
+        let depth = self.path.len();
+        let first = self.pending.len();
+        let members = members(value).into_iter();
+        match value.kind() {
+            "object" => {
+                self.pending
+                    .extend(members.map(|pair| (depth, Member::Pair(pair))));
+            }
+            "array" => {
+                let items = members.enumerate();
+                self.pending
+                    .extend(items.map(|(index, item)| (depth, Member::Item(item, index))));
+            }
+            _ => {}
+        }
+        // The stack takes the last member first, so the members go on it in reverse.
+        self.pending[first..].reverse();
+    }
+
+    /// Adds the symbol of `member`. The current path is the path to the value that holds it.
+    /// The members of its value go to `pending`.
+    ///
+    /// # Errors
+    /// Returns an error if its key or its value is a string that is not valid JSON.
+    fn add_member_symbol(&mut self, member: Member<'tree>) -> anyhow::Result<()> {
+        let (written, value) = match member {
+            Member::Pair(pair) => {
+                let key = pair
+                    .child_by_field_name("key")
+                    .context("unexpected JSON pair without a key")?;
+                let value = pair
+                    .child_by_field_name("value")
+                    .context("unexpected JSON pair without a value")?;
+                self.path.push(decode_node(&key, self.source)?);
+                (pair, value)
+            }
+            Member::Item(item, index) => {
+                self.path.push(index.to_string());
+                (item, item)
+            }
+        };
+        let scalar = match value.kind() {
+            "object" | "array" => None,
+            "string" | "number" | "true" | "false" | "null" => Some(ScalarValue {
+                text: decode_node(&value, self.source)?,
+                byte_range: value.byte_range(),
+            }),
+            other => bail!("unexpected {other} in a JSON value"),
+        };
+        self.symbols.push(Symbol {
+            path: SymbolPath::from_segments(self.path.clone()),
+            def_byte_ranges: vec![written.byte_range()],
+            value: scalar,
+        });
+        self.push_members(value);
+        Ok(())
+    }
+}
+
+/// The text that `node`, a key or a scalar, stands for: a string without its quotes and with its
+/// escapes decoded, and any other scalar as written.
 ///
 /// # Errors
-/// Returns an error if a string literal is not valid JSON, e.g. because it holds a raw tab.
-fn decode_node(node: &tree_sitter::Node, source: &str) -> anyhow::Result<String> {
+/// Returns an error if a string is not valid JSON, e.g. because it holds a raw tab.
+fn decode_node(node: &Node, source: &str) -> anyhow::Result<String> {
     let raw = node_text(node, source);
     match node.kind() {
         "string" => serde_json::from_str::<String>(raw)
@@ -29,8 +172,10 @@ fn decode_node(node: &tree_sitter::Node, source: &str) -> anyhow::Result<String>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Position;
     use crate::blocks::Block;
     use std::collections::HashMap;
+    use std::ops::Range;
 
     /// The symbols `source` derives, as `(path, value)` pairs in the order they were derived.
     fn derived_symbols(source: &str) -> anyhow::Result<Vec<(String, Option<String>)>> {
@@ -180,6 +325,75 @@ mod tests {
                 ("/array/0".to_string(), Some(r#""item""#)),
             ]
         );
+        Ok(())
+    }
+
+    #[test]
+    #[allow(clippy::single_range_in_vec_init)]
+    fn multibyte_source_parse_symbols_returns_byte_ranges_and_character_columns()
+    -> anyhow::Result<()> {
+        // A key covers its whole pair, and an item only itself.
+        let source = r#"{
+  "é": [1, 22]
+}"#;
+
+        type PathAndRanges = (String, Vec<Range<usize>>, Vec<Range<Position>>);
+        let ranges: Vec<PathAndRanges> = parser()?
+            .parse_symbols(source)?
+            .symbols
+            .iter()
+            .map(|symbol| {
+                (
+                    symbol.path.to_string(),
+                    symbol.def_byte_ranges.clone(),
+                    symbol.position_ranges(source),
+                )
+            })
+            .collect();
+
+        assert_eq!(
+            ranges,
+            vec![
+                (
+                    "/é".to_string(),
+                    vec![4..17],
+                    vec![Position::new(2, 3)..Position::new(2, 15)]
+                ),
+                (
+                    "/é/0".to_string(),
+                    vec![11..12],
+                    vec![Position::new(2, 9)..Position::new(2, 10)]
+                ),
+                (
+                    "/é/1".to_string(),
+                    vec![14..16],
+                    vec![Position::new(2, 12)..Position::new(2, 14)]
+                ),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn several_top_level_values_parse_symbols_returns_their_members_in_order() -> anyhow::Result<()>
+    {
+        assert_eq!(
+            derived_symbols(r#"{"a": 1} [2] {"a": 3}"#)?,
+            expected_symbols([("/a", Some("1")), ("/0", Some("2")), ("/a", Some("3"))])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn deeply_nested_arrays_parse_symbols_does_not_overflow_stack() -> anyhow::Result<()> {
+        // Each level is an object and an array, so the paths grow with the square of the depth.
+        // This depth is enough to overflow a recursive walk.
+        let depth = 1_000;
+        let source = format!("{}1{}", r#"{"a": ["#.repeat(depth), "]}".repeat(depth));
+
+        let symbols = parser()?.parse_symbols(&source)?;
+
+        assert_eq!(symbols.symbols.len(), 2 * depth);
         Ok(())
     }
 

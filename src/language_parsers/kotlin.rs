@@ -2,8 +2,8 @@ use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, c_style_line_and_block_comments_parser,
     node_text,
 };
-use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, child};
-use anyhow::{Context, anyhow, bail};
+use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, NestedWalk, child};
+use anyhow::{anyhow, bail};
 use std::iter::Peekable;
 use std::str::Chars;
 use tree_sitter::Node;
@@ -42,10 +42,7 @@ impl CodeLanguage for Kotlin {
             "multiline_string_literal" => (RAW_QUOTES, false),
             _ => return Ok(None),
         };
-        let content = literal
-            .strip_prefix(quotes)
-            .and_then(|content| content.strip_suffix(quotes))
-            .context("a string is between its quotes")?;
+        let content = code::between_quotes(literal, quotes)?;
         if holds_template(content, escapes) {
             return Ok(None);
         }
@@ -123,29 +120,26 @@ fn push_escape(characters: &mut Peekable<Chars>, units: &mut Vec<u16>) -> anyhow
 }
 
 /// Adds the definitions of the members of `body`, the root of a file or the body of a type, to
-/// `definitions`. `parents` are the names of the types that `body` belongs to. Adds the body of
-/// each type in `body` to `bodies`, with its own parents.
-fn push_members<'tree>(
-    body: Node<'tree>,
-    parents: Vec<Node<'tree>>,
-    definitions: &mut Vec<Definition<'tree>>,
-    bodies: &mut Vec<(Node<'tree>, Vec<Node<'tree>>)>,
-) {
+/// `walk`. `parents` are the names of the types that `body` belongs to. Adds the body of each type
+/// in `body` to `walk`, with its own parents.
+fn push_members<'tree>(body: Node<'tree>, parents: Vec<Node<'tree>>, walk: &mut NestedWalk<'tree>) {
     let mut cursor = body.walk();
     for member in body.named_children(&mut cursor) {
         let name = match member.kind() {
             "class_declaration" | "object_declaration" => {
-                push_type(member, &parents, definitions, bodies);
+                push_type(member, &parents, walk);
                 continue;
             }
             // Code reads a companion's members through the type, as `Config.MAX`, even when the
             // companion has a name.
             "companion_object" => {
-                bodies.extend(child(member, "class_body").map(|body| (body, parents.to_vec())));
+                if let Some(body) = child(member, "class_body") {
+                    walk.add_body(body, parents.clone());
+                }
                 continue;
             }
             "property_declaration" => {
-                definitions.extend(property(member, &parents));
+                push_property(member, &parents, walk);
                 continue;
             }
             "function_declaration" => member.child_by_field_name("name"),
@@ -158,29 +152,28 @@ fn push_members<'tree>(
             // top-level calls only hold local definitions.
             _ => continue,
         };
-        definitions.extend(
-            name.map(|name| Definition::new(parents.to_vec(), name, member.byte_range(), None)),
-        );
+        if let Some(name) = name {
+            walk.add_definition(&parents, name, member.byte_range(), None);
+        }
     }
 }
 
 /// Adds the definition of `declaration`, a class, interface or object in the type at `parents`,
-/// and of its constructor properties, to `definitions`. Adds its body to `bodies`.
+/// the definitions of its constructor properties, and its body to `walk`.
 fn push_type<'tree>(
     declaration: Node<'tree>,
     parents: &[Node<'tree>],
-    definitions: &mut Vec<Definition<'tree>>,
-    bodies: &mut Vec<(Node<'tree>, Vec<Node<'tree>>)>,
+    walk: &mut NestedWalk<'tree>,
 ) {
     let Some(name) = declaration.child_by_field_name("name") else {
         return;
     };
-    definitions.push(Definition::new(
-        parents.to_vec(),
-        name,
-        declaration.byte_range(),
-        None,
-    ));
+    // An enum keeps its members in an `enum_class_body`.
+    let mut cursor = declaration.walk();
+    let body = declaration
+        .named_children(&mut cursor)
+        .find(|child| matches!(child.kind(), "class_body" | "enum_class_body"));
+    walk.add_definition_with_body(parents, name, declaration.byte_range(), None, body);
     let parents = [parents, &[name]].concat();
     let parameters = child(declaration, "primary_constructor")
         .and_then(|constructor| child(constructor, "class_parameters"));
@@ -195,42 +188,35 @@ fn push_type<'tree>(
                 .any(|token| matches!(token.kind(), "val" | "var"))
         });
         for property in properties {
-            definitions.extend(child(property, "identifier").map(|name| {
-                Definition::new(
-                    parents.clone(),
-                    name,
-                    property.byte_range(),
-                    code::value_after(property, "="),
-                )
-            }));
+            if let Some(name) = child(property, "identifier") {
+                let value = code::value_after(property, "=");
+                walk.add_definition(&parents, name, property.byte_range(), value);
+            }
         }
     }
-    // An enum keeps its members in an `enum_class_body`.
-    let mut cursor = declaration.walk();
-    let body = declaration
-        .named_children(&mut cursor)
-        .find(|child| matches!(child.kind(), "class_body" | "enum_class_body"));
-    bodies.extend(body.map(|body| (body, parents)));
 }
 
-/// The definition of `declaration`, a property in the type at `parents`. Its value is the `v` of
-/// `val x = v` or of `val x get() = v`. Returns `None` for a declaration with several names, such
-/// as `val (a, b) = pair`.
-fn property<'tree>(declaration: Node<'tree>, parents: &[Node<'tree>]) -> Option<Definition<'tree>> {
+/// Adds the definition of `declaration`, a property in the type at `parents`, to `walk`. Its value
+/// is the `v` of `val x = v` or of `val x get() = v`. A declaration with several names, such as
+/// `val (a, b) = pair`, adds nothing.
+fn push_property<'tree>(
+    declaration: Node<'tree>,
+    parents: &[Node<'tree>],
+    walk: &mut NestedWalk<'tree>,
+) {
     // Annotations can come before the name, as in `val @Suppress("x") a = 1`.
-    let name = child(child(declaration, "variable_declaration")?, "identifier")?;
+    let Some(name) = child(declaration, "variable_declaration")
+        .and_then(|variable| child(variable, "identifier"))
+    else {
+        return;
+    };
     // Code reads a property with a getter as it reads one with a value. A getter with a block
     // body computes its value, so it has none.
     let value = code::value_after(declaration, "=").or_else(|| {
         let body = child(child(declaration, "getter")?, "function_body")?;
         code::value_after(body, "=")
     });
-    Some(Definition::new(
-        parents.to_vec(),
-        name,
-        declaration.byte_range(),
-        value,
-    ))
+    walk.add_definition(parents, name, declaration.byte_range(), value);
 }
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
@@ -243,7 +229,6 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod symbols_tests {
     use super::*;
-    use crate::symbols::code::CodeSymbolsParser;
     use crate::symbols::code::test_utils::{
         decode_error, symbol, symbols, syntax_error, text_of, unresolved, value, values,
     };

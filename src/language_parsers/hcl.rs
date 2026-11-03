@@ -1,6 +1,6 @@
 use crate::language_parsers;
 use crate::language_parsers::{CommentsParser, LanguageParser, LanguageParserImpl, node_text};
-use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, child};
+use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, NestedWalk, child};
 use anyhow::bail;
 use std::str::Chars;
 use tree_sitter::Node;
@@ -27,8 +27,8 @@ impl CodeLanguage for Hcl {
         let Some(body) = child(root, "body") else {
             return Vec::new();
         };
-        code::nested_definitions(body, |body, parents, definitions, bodies| {
-            push_members(body, parents, source, definitions, bodies);
+        code::nested_definitions(body, |body, parents, walk| {
+            push_members(body, parents, source, walk);
         })
     }
 
@@ -41,12 +41,10 @@ impl CodeLanguage for Hcl {
     fn decode_string(&self, node: &Node, source: &str) -> anyhow::Result<Option<String>> {
         match node.kind() {
             "literal_value" => child(*node, "string_lit")
-                .and_then(|string| {
-                    node_text(&string, source)
-                        .strip_prefix('"')?
-                        .strip_suffix('"')
+                .map(|string| {
+                    let content = code::between_quotes(node_text(&string, source), "\"")?;
+                    decode(content, true)
                 })
-                .map(|content| decode(content, true))
                 .transpose(),
             // A quoted string with `${...}` or `%{...}` is a `quoted_template`, which stays as
             // written.
@@ -63,15 +61,14 @@ impl CodeLanguage for Hcl {
     const NAME_PUNCTUATION: &'static [char] = &['-', ':'];
 }
 
-/// Adds the definitions of the members of `body` to `definitions`. `body` is the body of a file
-/// or a block, or an object. `parents` are the segments of the path it sits at, and `source` is
-/// the text of the file. Adds each body and object in `body` to `bodies`, with its own parents.
+/// Adds the definitions of the members of `body` to `walk`. `body` is the body of a file or a
+/// block, or an object. `parents` are the segments of the path it sits at, and `source` is the
+/// text of the file. Adds each body and object in `body` to `walk`, with its own parents.
 fn push_members<'tree>(
     body: Node<'tree>,
     parents: Vec<Node<'tree>>,
     source: &str,
-    definitions: &mut Vec<Definition<'tree>>,
-    bodies: &mut Vec<(Node<'tree>, Vec<Node<'tree>>)>,
+    walk: &mut NestedWalk<'tree>,
 ) {
     let mut cursor = body.walk();
     let members: Vec<Node> = body.children(&mut cursor).collect();
@@ -90,7 +87,7 @@ fn push_members<'tree>(
                     .map(code::without_parentheses),
             ),
             "block" => {
-                push_block(member, &parents, source, definitions, bodies);
+                push_block(member, &parents, source, walk);
                 continue;
             }
             // Comments, the braces of an object, and the text the parser skipped define no name.
@@ -99,30 +96,21 @@ fn push_members<'tree>(
         let Some(name) = name else {
             continue;
         };
-        definitions.push(Definition::new(
-            parents.clone(),
-            name,
-            range(member, &members[index + 1..], body),
-            value,
-        ));
-        if let Some(object) = value
+        let object = value
             .filter(|value| value.kind() == "collection_value")
-            .and_then(|value| child(value, "object"))
-        {
-            bodies.push((object, [parents.as_slice(), &[name]].concat()));
-        }
+            .and_then(|value| child(value, "object"));
+        let range = range(member, &members[index + 1..], body);
+        walk.add_definition_with_body(&parents, name, range, value, object);
     }
 }
 
-/// Adds the definition of `block`, a block in the body at `parents`, to `definitions`, and its
-/// body to `bodies`. A block with a label that holds an escape gives no definition, and neither
-/// does anything in it.
+/// Adds the definition of `block`, a block in the body at `parents`, and its body to `walk`. A
+/// block with a label that holds an escape gives no definition, and neither does anything in it.
 fn push_block<'tree>(
     block: Node<'tree>,
     parents: &[Node<'tree>],
     source: &str,
-    definitions: &mut Vec<Definition<'tree>>,
-    bodies: &mut Vec<(Node<'tree>, Vec<Node<'tree>>)>,
+    walk: &mut NestedWalk<'tree>,
 ) {
     let mut cursor = block.walk();
     // The type comes first, then the labels, up to the `{`.
@@ -139,15 +127,13 @@ fn push_block<'tree>(
     let Some((&name, labels)) = names.split_last() else {
         return;
     };
-    definitions.push(Definition::new(
-        [parents, labels].concat(),
+    walk.add_definition_with_body(
+        &[parents, labels].concat(),
         name,
         block.byte_range(),
         None,
-    ));
-    if let Some(body) = child(block, "body") {
-        bodies.push((body, [parents, &names].concat()));
-    }
+        child(block, "body"),
+    );
 }
 
 /// The name that `key`, the key of an object's item, gives the item: a name such as `Team`, a
@@ -316,14 +302,12 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 }
 
 #[cfg(test)]
-mod tests {
+mod symbols_tests {
     use super::*;
-    use crate::symbols::code::CodeSymbolsParser;
     use crate::symbols::code::test_utils::{
         decode_error, symbol, symbols, syntax_error, text_of, unresolved, value, values,
     };
     use crate::symbols::{Symbols, SymbolsParser};
-    use crate::{Position, language_parsers::Comment};
 
     /// The symbols of `source`, an HCL file.
     fn hcl(source: &str) -> anyhow::Result<Symbols> {
@@ -865,6 +849,12 @@ d::e = 3
         );
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Position, language_parsers::Comment};
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {

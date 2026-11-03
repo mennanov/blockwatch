@@ -5,11 +5,10 @@ pub(crate) mod code;
 use crate::blocks::Content;
 use crate::symbol_path::{Segment, SymbolPath};
 use crate::{LineIndex, Position};
-use anyhow::{Context, bail};
+use anyhow::bail;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
-use tree_sitter::StreamingIterator;
 
 /// An addressable element of a source file, such as a JSON key, an array item or a Markdown
 /// section.
@@ -29,16 +28,6 @@ pub(crate) struct Symbol {
 }
 
 impl Symbol {
-    fn new(node: &tree_sitter::Node, path: &[String], value: Option<ScalarValue>) -> Self {
-        // A path is empty only when the query gives a `@def` no `@name`, and `from_segments`
-        // panics on that. An `@item` always gets its index, so it cannot be the cause.
-        Self {
-            path: SymbolPath::from_segments(path.to_vec()),
-            def_byte_ranges: vec![node.byte_range()],
-            value,
-        }
-    }
-
     /// The 1-based line and character range of each of the symbol's byte ranges in `source`,
     /// which must be the text the symbol was derived from.
     ///
@@ -108,6 +97,25 @@ impl Symbol {
             }
         }
     }
+}
+
+/// `range` extended to just after the line break that ends its last line in `source`, or to the
+/// end of `source` when no line break follows.
+///
+/// # Panics
+/// Panics if `range` does not end on a character of `source`.
+pub(crate) fn extended_past_line_break(source: &str, range: Range<usize>) -> Range<usize> {
+    // `LineChanges::touches` places a deleted line at the start of the line after it. Ending
+    // after the line break puts that point inside the range, so deleting the last line of a
+    // symbol counts as touching it.
+    #[expect(
+        clippy::string_slice,
+        reason = "parsers give symbol ranges of whole characters"
+    )]
+    let end = source[range.end..]
+        .find('\n')
+        .map_or(source.len(), |offset| range.end + offset + 1);
+    range.start..end
 }
 
 /// The symbols of one file, and the names a reference must not resolve in it.
@@ -445,125 +453,6 @@ pub(crate) trait SymbolsParser: Send + Sync {
     fn parse(&mut self, source: &str) -> anyhow::Result<Symbols>;
 }
 
-/// The semantic role a query capture plays in deriving a symbol path or value.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CaptureRole {
-    /// An addressable definition node contributing a region.
-    Def,
-    /// An addressable sequence member contributing an index.
-    Item,
-    /// A non-addressable scope contributing path segments to descendants.
-    Container,
-    /// A name fragment contributing one or more path segments.
-    Name,
-    /// A scalar node contributing a value. Its range is where the value is written.
-    Value,
-}
-
-/// Turns a captured `@name` or `@value` node into the text it denotes in `source`, following the
-/// language's own quoting and escaping rules.
-///
-/// # Errors
-/// Returns an error if the node's text is not a valid spelling in the language.
-type NodeDecoder = fn(&tree_sitter::Node, &str) -> anyhow::Result<String>;
-
-/// A [`SymbolsParser`] driven by a tree-sitter query that declares what is addressable in one
-/// language.
-///
-/// A symbol's path is made of the names along its node's ancestors in the syntax tree, so it suits
-/// a language whose structure is its syntax tree.
-pub(crate) struct QuerySymbolsParser {
-    parser: tree_sitter::Parser,
-    query: tree_sitter::Query,
-    capture_roles: Vec<CaptureRole>,
-    node_decoder: NodeDecoder,
-}
-
-impl QuerySymbolsParser {
-    /// Compiles `query_source` for `language` and maps its capture names to semantic roles. Each
-    /// `@name` and `@value` a match captures is turned into text by `node_decoder`.
-    ///
-    /// # Errors
-    /// Returns an error if the query syntax is invalid or uses unrecognized capture names.
-    pub(crate) fn new(
-        language: &tree_sitter::Language,
-        query_source: &str,
-        node_decoder: NodeDecoder,
-    ) -> anyhow::Result<Self> {
-        let parser = crate::language_parsers::tree_sitter_parser(language)?;
-        let query = tree_sitter::Query::new(language, query_source)
-            .context("failed to compile tree-sitter symbol query")?;
-        let capture_roles = query
-            .capture_names()
-            .iter()
-            .map(|&name| match name {
-                "def" => Ok(CaptureRole::Def),
-                "item" => Ok(CaptureRole::Item),
-                "container" => Ok(CaptureRole::Container),
-                "name" => Ok(CaptureRole::Name),
-                "value" => Ok(CaptureRole::Value),
-                other => bail!("unrecognized query capture '@{other}'"),
-            })
-            .collect::<anyhow::Result<Vec<_>>>()?;
-
-        Ok(Self {
-            parser,
-            query,
-            capture_roles,
-            node_decoder,
-        })
-    }
-
-    /// Runs the query and returns what each match contributes, keyed by the id of the node the
-    /// match attaches it to. A match with no `@def`, `@item` or `@container` contributes nothing.
-    ///
-    /// # Errors
-    /// Returns an error if the decoder rejects a captured name or value.
-    fn collect_contributions(
-        &self,
-        tree: &tree_sitter::Tree,
-        source: &str,
-    ) -> anyhow::Result<HashMap<usize, Contribution>> {
-        let mut cursor = tree_sitter::QueryCursor::new();
-        let mut matches = cursor.matches(&self.query, tree.root_node(), source.as_bytes());
-
-        let mut contributions = HashMap::new();
-        while let Some(query_match) = matches.next() {
-            let match_captures = MatchCaptures::new(query_match.captures(), &self.capture_roles);
-            if let Some((node, contribution)) =
-                match_captures.try_into_contribution(self.node_decoder, source)?
-            {
-                contributions.insert(node.id(), contribution);
-            }
-        }
-
-        Ok(contributions)
-    }
-}
-
-impl SymbolsParser for QuerySymbolsParser {
-    /// Parses `source` and derives all its addressable symbols, in document order. Two symbols can
-    /// share a path, when the source defines the same name twice.
-    ///
-    /// # Errors
-    /// Returns an error if:
-    /// - The source has a syntax error. The error mentions the position of the first one.
-    /// - The decoder rejects a captured name or value.
-    ///
-    /// # Panics
-    /// Panics if the query gives a `@def` no `@name`, which leaves its node without a path. Each
-    /// language's own tests cover the query it ships.
-    fn parse(&mut self, source: &str) -> anyhow::Result<Symbols> {
-        let tree = self
-            .parser
-            .parse(source, None)
-            .context("failed to parse syntax tree")?;
-        ensure_no_syntax_error(&tree, source)?;
-        let contributions = self.collect_contributions(&tree, source)?;
-        Ok(symbols_from_contributions(&tree, &contributions).into())
-    }
-}
-
 /// Refuses `tree`, parsed from `source`, if it has a syntax error.
 ///
 /// # Errors
@@ -605,423 +494,6 @@ fn first_syntax_error(tree: &tree_sitter::Tree) -> Option<tree_sitter::Node<'_>>
         node = child;
     }
     Some(node)
-}
-
-/// The captures of one query match, grouped by role.
-#[derive(Default)]
-struct MatchCaptures<'tree> {
-    def: Option<tree_sitter::Node<'tree>>,
-    item: Option<tree_sitter::Node<'tree>>,
-    container: Option<tree_sitter::Node<'tree>>,
-    /// The `@name` captures, in source order.
-    names: Vec<tree_sitter::Node<'tree>>,
-    value: Option<tree_sitter::Node<'tree>>,
-}
-
-impl<'tree> MatchCaptures<'tree> {
-    /// Groups the captures of one query match by role. `captures` are that match's captures, and
-    /// `capture_roles` holds the role of every capture its query declares, indexed by the capture
-    /// index each [`tree_sitter::QueryCapture`] carries.
-    ///
-    /// The `@name` captures are kept in source order. For every other role, the last capture of that
-    /// role in the match wins.
-    ///
-    /// # Panics
-    /// Panics if a capture index falls outside `capture_roles`, which may happen when the captures
-    /// and the roles come from different queries.
-    fn new(
-        captures: &[tree_sitter::QueryCapture<'tree>],
-        capture_roles: &[CaptureRole],
-    ) -> MatchCaptures<'tree> {
-        let mut by_role = Self::default();
-        for capture in captures {
-            match capture_roles[capture.index as usize] {
-                CaptureRole::Def => by_role.def = Some(capture.node),
-                CaptureRole::Item => by_role.item = Some(capture.node),
-                CaptureRole::Container => by_role.container = Some(capture.node),
-                CaptureRole::Name => by_role.names.push(capture.node),
-                CaptureRole::Value => by_role.value = Some(capture.node),
-            }
-        }
-        by_role
-    }
-
-    /// The node the match attaches its contribution to, and the contribution itself. Returns
-    /// `None` when the match has no `@def`, `@item` or `@container`.
-    ///
-    /// # Errors
-    /// Returns an error if `node_decoder` rejects a captured name or value.
-    fn try_into_contribution(
-        self,
-        node_decoder: NodeDecoder,
-        source: &str,
-    ) -> anyhow::Result<Option<(tree_sitter::Node<'tree>, Contribution)>> {
-        // Decoding comes first because it costs nothing when the match contributes nothing: the
-        // query rules give such a match no `@name` and no `@value` either.
-        let names: Vec<String> = self
-            .names
-            .iter()
-            .map(|name| node_decoder(name, source))
-            .collect::<anyhow::Result<_>>()?;
-        let value = match self.value {
-            Some(value) => Some(ScalarValue {
-                text: node_decoder(&value, source)?,
-                byte_range: value.byte_range(),
-            }),
-            None => None,
-        };
-        match (self.def, self.item, self.container) {
-            (Some(node), _, _) => Ok(Some((node, Contribution::Def { names, value }))),
-            (None, Some(node), _) => Ok(Some((node, Contribution::Item { names, value }))),
-            // A container is not addressable, so a `@value` captured next to one has nothing to
-            // belong to.
-            (None, None, Some(node)) => Ok(Some((node, Contribution::Container { names }))),
-            (None, None, None) => Ok(None),
-        }
-    }
-}
-
-/// What one query match contributes to the path of the node it is attached to, and to the paths of
-/// that node's descendants.
-enum Contribution {
-    /// `@def`: addressable by its names.
-    Def {
-        names: Vec<String>,
-        value: Option<ScalarValue>,
-    },
-    /// `@item`: addressable by its names followed by its index among its parent's items.
-    Item {
-        names: Vec<String>,
-        value: Option<ScalarValue>,
-    },
-    /// `@container`: not addressable, but its names prefix the paths of its descendants.
-    Container { names: Vec<String> },
-}
-
-impl Contribution {
-    /// The decoded text of the match's `@name` captures, one segment each, in source order.
-    fn names(&self) -> &[String] {
-        match self {
-            Self::Def { names, .. } | Self::Item { names, .. } | Self::Container { names } => names,
-        }
-    }
-}
-
-/// Builds a [`Symbol`] for every `@def` and `@item` contribution in `tree`, in document order.
-fn symbols_from_contributions(
-    tree: &tree_sitter::Tree,
-    contributions: &HashMap<usize, Contribution>,
-) -> Vec<Symbol> {
-    let mut walk = Walk::new();
-    let mut cursor = tree.walk();
-    loop {
-        let node = cursor.node();
-        walk.enter(&node, contributions.get(&node.id()));
-
-        if cursor.goto_first_child() {
-            continue;
-        }
-        // Leave nodes until one has a next sibling to enter.
-        loop {
-            walk.leave();
-            if cursor.goto_next_sibling() {
-                break;
-            }
-            if !cursor.goto_parent() {
-                return walk.symbols;
-            }
-        }
-    }
-}
-
-/// What a pre-order walk of a tree has derived so far, and the state it needs to carry on.
-struct Walk {
-    /// The symbols of the nodes the walk has entered, in the order it entered them.
-    symbols: Vec<Symbol>,
-    /// The segments contributed by the nodes between the root and the node last entered.
-    path: Vec<String>,
-    /// One frame per node on that route, plus a bottom frame that counts the root's own index.
-    frames: Vec<Frame>,
-}
-
-impl Walk {
-    fn new() -> Self {
-        Self {
-            symbols: Vec::new(),
-            path: Vec::new(),
-            frames: vec![Frame {
-                path_len: 0,
-                items: 0,
-            }],
-        }
-    }
-
-    /// Enters `node`, adding what it contributes to the path and deriving its symbol, if it has
-    /// one. `contribution` is what the query attached to `node`, if anything.
-    fn enter(&mut self, node: &tree_sitter::Node, contribution: Option<&Contribution>) {
-        let path_len = self.path.len();
-        if let Some(contribution) = contribution {
-            self.path.extend(contribution.names().iter().cloned());
-            self.add_symbol_from_contribution(node, contribution);
-        }
-        self.frames.push(Frame { path_len, items: 0 });
-    }
-
-    /// Leaves the node entered last, cutting the path back to what its ancestors contributed.
-    fn leave(&mut self) {
-        let frame = self.frames.pop().expect("every entered node has a frame");
-        self.path.truncate(frame.path_len);
-    }
-
-    /// Derives the symbol `contribution` makes `node` addressable by, if it makes it addressable
-    /// at all. An `@item` takes the next index among its parent's items as its last segment.
-    fn add_symbol_from_contribution(
-        &mut self,
-        node: &tree_sitter::Node,
-        contribution: &Contribution,
-    ) {
-        match contribution {
-            Contribution::Container { .. } => {}
-            Contribution::Def { value, .. } => {
-                self.symbols
-                    .push(Symbol::new(node, &self.path, value.clone()));
-            }
-            Contribution::Item { value, .. } => {
-                let parent = self
-                    .frames
-                    .last_mut()
-                    .expect("the bottom frame is never popped");
-                self.path.push(parent.items.to_string());
-                parent.items += 1;
-                self.symbols
-                    .push(Symbol::new(node, &self.path, value.clone()));
-            }
-        }
-    }
-}
-
-/// The walk state of one node on the route from the root to the node last entered.
-struct Frame {
-    /// The length of the path before the node added its own segments.
-    path_len: usize,
-    /// How many of the node's children have been captured as `@item` so far.
-    items: usize,
-}
-
-#[cfg(test)]
-#[allow(clippy::single_range_in_vec_init)]
-mod tests {
-    use super::*;
-
-    /// A parser for JSON that takes a captured node's text as it stands. Unescaping is each
-    /// language's own concern, so the queries here capture the `string_content` inside a string
-    /// to get its text without the quotes.
-    fn json_symbols_parser(query_source: &str) -> anyhow::Result<QuerySymbolsParser> {
-        QuerySymbolsParser::new(
-            &tree_sitter_json::LANGUAGE.into(),
-            query_source,
-            |node, source| Ok(source[node.byte_range()].to_string()),
-        )
-    }
-
-    /// A parser for the tests whose subject is not the query: `parse` refuses a source with a
-    /// syntax error before it runs the query at all.
-    fn parser_with_any_query() -> QuerySymbolsParser {
-        json_symbols_parser("(pair key: (string) @name) @def").expect("the query compiles")
-    }
-
-    #[test]
-    fn sequence_with_uncaptured_members_parse_indexes_only_the_captured_ones() -> anyhow::Result<()>
-    {
-        // The query captures only the strings, so the numbers between them are members the index
-        // has to skip.
-        let item_query = r#"(array (string (string_content) @value) @item)"#;
-        let source = r#"[1, "first", 2, "second"]"#;
-
-        let symbols = json_symbols_parser(item_query)?.parse(source)?.symbols;
-
-        let derived: Vec<(String, Option<String>)> = symbols
-            .into_iter()
-            .map(|symbol| {
-                let value = symbol.value.map(|value| value.text);
-                (symbol.path.to_string(), value)
-            })
-            .collect();
-        assert_eq!(
-            derived,
-            vec![
-                ("/0".to_string(), Some("first".to_string())),
-                ("/1".to_string(), Some("second".to_string())),
-            ]
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn container_query_parse_prepends_container_segments() -> anyhow::Result<()> {
-        let source = r#"{
-            "outer": {
-                "inner": 42
-            }
-        }"#;
-        let container_query = r#"
-            (pair key: (string (string_content) @name) value: (object)) @container
-            (pair key: (string (string_content) @name) value: (number) @value) @def
-        "#;
-        let symbols = json_symbols_parser(container_query)?.parse(source)?.symbols;
-        assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].path.to_string(), "/outer/inner");
-        let value = symbols[0].value.as_ref().map(|value| value.text.as_str());
-        assert_eq!(value, Some("42"));
-        Ok(())
-    }
-
-    #[test]
-    fn language_decoder_parse_decodes_names_and_values_with_it() -> anyhow::Result<()> {
-        let mut parser = QuerySymbolsParser::new(
-            &tree_sitter_json::LANGUAGE.into(),
-            r#"(pair key: (string) @name value: (string) @value) @def"#,
-            |node, source| Ok(source[node.byte_range()].to_uppercase()),
-        )?;
-
-        let symbols = parser.parse(r#"{"k": "v"}"#)?.symbols;
-
-        assert_eq!(
-            symbols,
-            vec![Symbol {
-                path: SymbolPath::from_segments(vec![r#""K""#.to_string()]),
-                def_byte_ranges: vec![1..9],
-                value: Some(ScalarValue {
-                    text: r#""V""#.to_string(),
-                    byte_range: 6..9,
-                }),
-            }]
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn multibyte_source_parse_returns_byte_ranges_and_character_columns() -> anyhow::Result<()> {
-        let range_query = r#"
-            (pair key: (string (string_content) @name) value: (array)) @def
-            (array (number) @value @item)
-        "#;
-        let source = r#"{
-  "é": [1, 22]
-}"#;
-
-        let symbols = json_symbols_parser(range_query)?.parse(source)?.symbols;
-
-        type PathAndRanges = (String, Vec<Range<usize>>, Vec<Range<Position>>);
-        let ranges: Vec<PathAndRanges> = symbols
-            .iter()
-            .map(|symbol| {
-                (
-                    symbol.path.to_string(),
-                    symbol.def_byte_ranges.clone(),
-                    symbol.position_ranges(source),
-                )
-            })
-            .collect();
-        assert_eq!(
-            ranges,
-            vec![
-                (
-                    "/é".to_string(),
-                    vec![4..17],
-                    vec![Position::new(2, 3)..Position::new(2, 15)]
-                ),
-                (
-                    "/é/0".to_string(),
-                    vec![11..12],
-                    vec![Position::new(2, 9)..Position::new(2, 10)]
-                ),
-                (
-                    "/é/1".to_string(),
-                    vec![14..16],
-                    vec![Position::new(2, 12)..Position::new(2, 14)]
-                ),
-            ]
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn missing_token_parse_returns_syntax_error_where_it_belongs() {
-        // The value of "b" is missing, so error recovery assumes one right after the colon.
-        let err = parser_with_any_query()
-            .parse(r#"{"a": 1, "b": , "c": 3}"#)
-            .unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("syntax error at line 1, column 14,"),
-            "unexpected error message: {err}"
-        );
-    }
-
-    #[test]
-    fn unexpected_token_parse_returns_syntax_error_at_the_token() {
-        // The value of "a" lacks its closing quote. It ends at the quote that should open the next
-        // key, which leaves the `b` after it unexpected.
-        let err = parser_with_any_query()
-            .parse(r#"{"a": "1, "b": "2"}"#)
-            .unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("syntax error at line 1, column 12,"),
-            "unexpected error message: {err}"
-        );
-    }
-
-    #[test]
-    fn unparsable_span_parse_returns_syntax_error_at_its_start() {
-        // A trailing comma, which JSONC allows and JSON does not, is left over as a span that does
-        // not parse.
-        let err = parser_with_any_query().parse(r#"{"a": 1,}"#).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("syntax error at line 1, column 8,"),
-            "unexpected error message: {err}"
-        );
-    }
-
-    #[test]
-    fn source_with_several_syntax_errors_parse_reports_the_first() {
-        let source = r#"{
-  "a": 1 "b": 2,
-  "c": ,
-}"#;
-        let err = parser_with_any_query().parse(source).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("syntax error at line 2, column 3,"),
-            "unexpected error message: {err}"
-        );
-    }
-
-    #[test]
-    fn unknown_capture_name_new_returns_error() {
-        let err = json_symbols_parser("(pair) @unknown_role")
-            .err()
-            .expect("an unknown capture name is rejected");
-        assert!(
-            err.to_string()
-                .contains("unrecognized query capture '@unknown_role'"),
-            "unexpected error message: {err}"
-        );
-    }
-
-    #[test]
-    fn malformed_query_syntax_new_returns_error() {
-        let err = json_symbols_parser("invalid (((( syntax")
-            .err()
-            .expect("a malformed query is rejected");
-        assert!(
-            err.to_string()
-                .contains("failed to compile tree-sitter symbol query"),
-            "unexpected error message: {err}"
-        );
-    }
 }
 
 #[cfg(test)]
@@ -1553,6 +1025,71 @@ mod symbol_tests {
                 Position::new(1, 1)..Position::new(2, 1),
                 Position::new(3, 1)..Position::new(4, 1),
             ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod syntax_error_tests {
+    // Any grammar shows how error recovery shapes a tree. JSON's has the shortest sources.
+    use super::*;
+    use crate::language_parsers::tree_sitter_parser;
+    use anyhow::Context;
+
+    /// What [`ensure_no_syntax_error`] gives for `source`, a JSON file.
+    fn ensure_no_syntax_error_in_json(source: &str) -> anyhow::Result<()> {
+        let tree = tree_sitter_parser(&tree_sitter_json::LANGUAGE.into())?
+            .parse(source, None)
+            .context("failed to parse syntax tree")?;
+        ensure_no_syntax_error(&tree, source)
+    }
+
+    #[test]
+    fn missing_token_returns_syntax_error_where_it_belongs() {
+        // The value of "b" is missing, so error recovery assumes one right after the colon.
+        let err = ensure_no_syntax_error_in_json(r#"{"a": 1, "b": , "c": 3}"#).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("syntax error at line 1, column 14,"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    fn unexpected_token_returns_syntax_error_at_the_token() {
+        // The value of "a" lacks its closing quote. It ends at the quote that should open the next
+        // key, which leaves the `b` after it unexpected.
+        let err = ensure_no_syntax_error_in_json(r#"{"a": "1, "b": "2"}"#).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("syntax error at line 1, column 12,"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    fn unparsable_span_returns_syntax_error_at_its_start() {
+        // A trailing comma, which JSONC allows and JSON does not, is left over as a span that does
+        // not parse.
+        let err = ensure_no_syntax_error_in_json(r#"{"a": 1,}"#).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("syntax error at line 1, column 8,"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    fn source_with_several_syntax_errors_returns_the_first() {
+        let source = r#"{
+  "a": 1 "b": 2,
+  "c": ,
+}"#;
+        let err = ensure_no_syntax_error_in_json(source).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("syntax error at line 2, column 3,"),
+            "unexpected error message: {err}"
         );
     }
 }

@@ -3,7 +3,7 @@ use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, python_style_comments_parser,
 };
 use crate::symbol_path::SymbolPath;
-use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser};
+use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser, extended_past_line_break};
 use anyhow::{Context, anyhow};
 use std::ops::Range;
 use toml_edit::{InlineTable, Item, Key, Table, Value};
@@ -43,7 +43,7 @@ impl SymbolsParser for TomlSymbolsParser {
     fn parse(&mut self, source: &str) -> anyhow::Result<Symbols> {
         // What a key means depends on the headers above it, not on how the syntax tree nests:
         // `[fruits.physical]` belongs to the last `[[fruits]]` before it. So the symbols come from
-        // the document `toml_edit` builds, not from a tree-sitter query.
+        // the document `toml_edit` builds, not from a syntax tree.
         let document =
             toml_edit::Document::parse(source).map_err(|error| toml_error(source, &error))?;
         Ok(Walk::symbols_in(source, document.as_table())?.into())
@@ -139,7 +139,7 @@ impl<'s> Walk<'s> {
                     for range in self.add_value_symbol(start, value)? {
                         placement
                             .in_section
-                            .push(self.extended_past_line_break(range));
+                            .push(extended_past_line_break(self.source, range));
                     }
                 }
                 Item::Table(inner) => {
@@ -176,7 +176,7 @@ impl<'s> Walk<'s> {
         } else {
             let header = require_span(table.span())?;
             let end = contents.in_section.iter().map(|range| range.end).fold(
-                self.extended_past_line_break(header.clone()).end,
+                extended_past_line_break(self.source, header.clone()).end,
                 usize::max,
             );
             let section = header.start..end;
@@ -268,22 +268,6 @@ impl<'s> Walk<'s> {
             self.path.pop();
         }
         Ok(ranges)
-    }
-
-    /// `range` extended to just after the line break that ends its last line, or to the end of
-    /// the source when no line break follows.
-    fn extended_past_line_break(&self, range: Range<usize>) -> Range<usize> {
-        // `LineChanges::touches` places a deleted line at the start of the line after it. Ending
-        // after the line break puts that point inside the range, so deleting a table's last pair
-        // counts as touching the table.
-        #[expect(
-            clippy::string_slice,
-            reason = "`range` ends where a `toml_edit` span does"
-        )]
-        let end = self.source[range.end..]
-            .find('\n')
-            .map_or(self.source.len(), |offset| range.end + offset + 1);
-        range.start..end
     }
 }
 

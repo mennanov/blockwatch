@@ -1,7 +1,9 @@
 use crate::language_parsers;
 use crate::language_parsers::{CommentsParser, LanguageParser, LanguageParserImpl};
 use crate::symbols::ScalarValue;
-use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, Value, child};
+use crate::symbols::code::{
+    self, CodeLanguage, CodeSymbolsParser, Definition, NestedWalk, Value, child,
+};
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Protocol Buffers, with its symbols.
@@ -23,8 +25,8 @@ impl CodeLanguage for Proto {
     /// members of its messages, enums and services, in document order. A definition comes before
     /// its members. The package is not part of any path.
     fn definitions<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Definition<'tree>> {
-        code::nested_definitions(root, |body, parents, definitions, bodies| {
-            push_members(body, parents, source, definitions, bodies);
+        code::nested_definitions(root, |body, parents, walk| {
+            push_members(body, parents, source, walk);
         })
     }
 
@@ -35,16 +37,15 @@ impl CodeLanguage for Proto {
     }
 }
 
-/// Adds the definitions of the members of `body` to `definitions`. `body` is the root of a file,
-/// the body of a message, enum or `extend`, a oneof, or a service. `parents` are the names of the
+/// Adds the definitions of the members of `body` to `walk`. `body` is the root of a file, the body
+/// of a message, enum or `extend`, a oneof, or a service. `parents` are the names of the
 /// definitions it belongs to, and `source` is the text of the file. Adds each body in `body` to
-/// `bodies`, with its own parents.
+/// `walk`, with its own parents.
 fn push_members<'tree>(
     body: Node<'tree>,
     parents: Vec<Node<'tree>>,
     source: &str,
-    definitions: &mut Vec<Definition<'tree>>,
-    bodies: &mut Vec<(Node<'tree>, Vec<Node<'tree>>)>,
+    walk: &mut NestedWalk<'tree>,
 ) {
     let mut cursor = body.walk();
     for member in body.named_children(&mut cursor) {
@@ -64,41 +65,33 @@ fn push_members<'tree>(
                 None,
             ),
             "enum_field" => {
-                definitions.extend(enum_value(member, &parents, source));
+                walk.definitions
+                    .extend(enum_value(member, &parents, source));
                 continue;
             }
             // protoc puts the fields of a oneof in its message, so they share the oneof's
             // parents.
             "oneof" => {
-                definitions.extend(
-                    child(member, "identifier").map(|name| {
-                        Definition::new(parents.clone(), name, member.byte_range(), None)
-                    }),
-                );
-                bodies.push((member, parents.clone()));
+                if let Some(name) = child(member, "identifier") {
+                    walk.add_definition(&parents, name, member.byte_range(), None);
+                }
+                walk.add_body(member, parents.clone());
                 continue;
             }
             // protoc puts an extension field where its `extend` is written, not in the message
             // it extends.
             "extend" => {
-                bodies.extend(child(member, "message_body").map(|body| (body, parents.clone())));
+                if let Some(body) = child(member, "message_body") {
+                    walk.add_body(body, parents.clone());
+                }
                 continue;
             }
             // Options, `reserved` and `extensions` ranges, and the lines at the top of a file,
             // such as `package`, define no name that code refers to.
             _ => continue,
         };
-        let Some(name) = name else {
-            continue;
-        };
-        definitions.push(Definition::new(
-            parents.clone(),
-            name,
-            member.byte_range(),
-            value,
-        ));
-        if let Some(member_body) = member_body {
-            bodies.push((member_body, [parents.as_slice(), &[name]].concat()));
+        if let Some(name) = name {
+            walk.add_definition_with_body(&parents, name, member.byte_range(), value, member_body);
         }
     }
 }
@@ -140,14 +133,12 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 }
 
 #[cfg(test)]
-mod tests {
+mod symbols_tests {
     use super::*;
-    use crate::symbols::code::CodeSymbolsParser;
     use crate::symbols::code::test_utils::{
         symbol, symbols, syntax_error, text_of, unresolved, values,
     };
     use crate::symbols::{Symbols, SymbolsParser};
-    use crate::{Position, language_parsers::Comment};
 
     /// The symbols of `source`, a Protocol Buffers file.
     fn proto(source: &str) -> anyhow::Result<Symbols> {
@@ -345,6 +336,12 @@ message After {}
         );
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Position, language_parsers::Comment};
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {

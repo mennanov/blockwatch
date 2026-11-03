@@ -1,6 +1,6 @@
 use crate::language_parsers;
 use crate::language_parsers::{CommentsParser, LanguageParser, LanguageParserImpl, node_text};
-use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition};
+use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, NestedWalk};
 use anyhow::bail;
 use std::borrow::Cow;
 use std::iter::{self, Peekable};
@@ -56,10 +56,7 @@ impl CodeLanguage for CSharp {
         if !verbatim && quoted.starts_with(RAW_QUOTES) {
             return raw_text(quoted).map(Some);
         }
-        let content = quoted
-            .strip_prefix('"')
-            .and_then(|content| content.strip_suffix('"'))
-            .unwrap_or(quoted);
+        let content = code::between_quotes(quoted, "\"")?;
         // No escape holds a brace, so the braces can be read before the escapes.
         let content = if prefix.contains('$') {
             Cow::Owned(content.replace("{{", "{").replace("}}", "}"))
@@ -168,67 +165,69 @@ fn hex_digits(characters: &mut Peekable<Chars>, count: usize) -> String {
         .collect()
 }
 
-/// Adds the definitions in `body` to `definitions`. `body` is the root of a file, the body of a
-/// namespace or a type, or a branch of `#if`. `parents` are the names of the namespaces and types
-/// that `body` sits in. Adds each body in `body` to `bodies`, with its own parents.
+/// Adds the definitions in `body` to `walk`. `body` is the root of a file, the body of a namespace
+/// or a type, or a branch of `#if`. `parents` are the names of the namespaces and types that
+/// `body` sits in. Adds each body in `body` to `walk`, with its own parents.
 fn push_members<'tree>(
     body: Node<'tree>,
     mut parents: Vec<Node<'tree>>,
-    definitions: &mut Vec<Definition<'tree>>,
-    bodies: &mut Vec<(Node<'tree>, Vec<Node<'tree>>)>,
+    walk: &mut NestedWalk<'tree>,
 ) {
     let mut cursor = body.walk();
     for member in body.named_children(&mut cursor) {
-        match member.kind() {
+        let name = member.child_by_field_name("name");
+        let value = match member.kind() {
             // `namespace Acme;` has no body. The declarations after it are in the namespace.
             "file_scoped_namespace_declaration" => {
-                if let Some(name) = member.child_by_field_name("name") {
+                if let Some(name) = name {
                     parents.extend(namespace_segments(name));
                 }
+                continue;
             }
-            "namespace_declaration" => bodies.extend(namespace_body(member, &parents)),
+            "namespace_declaration" => {
+                if let (Some(name), Some(body)) = (name, member.child_by_field_name("body")) {
+                    walk.add_body(
+                        body,
+                        [parents.as_slice(), &namespace_segments(name)].concat(),
+                    );
+                }
+                continue;
+            }
             // A branch holds its definitions and the next branch, as if the directives were not
             // there.
             "preproc_if" | "preproc_elif" | "preproc_else" => {
-                bodies.push((member, parents.clone()));
+                walk.add_body(member, parents.clone());
+                continue;
             }
             "class_declaration"
             | "struct_declaration"
             | "interface_declaration"
             | "enum_declaration"
             | "record_declaration"
-            | "delegate_declaration" => push_type(member, &parents, definitions, bodies),
+            | "delegate_declaration" => {
+                if let Some(name) = name {
+                    let body = member.child_by_field_name("body");
+                    walk.add_definition_with_body(&parents, name, member.byte_range(), None, body);
+                }
+                continue;
+            }
             "field_declaration" | "event_field_declaration" => {
-                push_fields(member, &parents, definitions);
+                push_fields(member, &parents, walk);
+                continue;
             }
-            "property_declaration" if !is_explicit(member) => {
-                definitions.extend(member_definition(member, &parents, property_value(member)));
-            }
+            "property_declaration" if !is_explicit(member) => property_value(member),
             // A method is a function, so `=> v` is not its value.
-            "method_declaration" | "event_declaration" if !is_explicit(member) => {
-                definitions.extend(member_definition(member, &parents, None));
-            }
-            "enum_member_declaration" => {
-                let value = member.child_by_field_name("value");
-                definitions.extend(member_definition(member, &parents, value));
-            }
+            "method_declaration" | "event_declaration" if !is_explicit(member) => None,
+            "enum_member_declaration" => member.child_by_field_name("value"),
             // Code never refers to a constructor, a finalizer or an explicit interface member by
             // name, and indexers and operators have none. Top-level statements are the body of
             // the program's `Main` method, so what they define is local to it.
-            _ => {}
+            _ => continue,
+        };
+        if let Some(name) = name {
+            walk.add_definition(&parents, name, member.byte_range(), value);
         }
     }
-}
-
-/// The body of `declaration`, a namespace with braces in the namespace at `parents`, with the
-/// names of the namespaces it sits in. Returns `None` if the parser found no name or no body.
-fn namespace_body<'tree>(
-    declaration: Node<'tree>,
-    parents: &[Node<'tree>],
-) -> Option<(Node<'tree>, Vec<Node<'tree>>)> {
-    let name = declaration.child_by_field_name("name")?;
-    let body = declaration.child_by_field_name("body")?;
-    Some((body, [parents, &namespace_segments(name)].concat()))
 }
 
 /// The parts of `name`, the name of a namespace such as `Acme.Billing`, outermost first.
@@ -246,28 +245,6 @@ fn namespace_segments(name: Node<'_>) -> Vec<Node<'_>> {
     }
     segments.reverse();
     segments
-}
-
-/// Adds the definition of `declaration`, a type in the namespace or type at `parents`, to
-/// `definitions`, and its body to `bodies`.
-fn push_type<'tree>(
-    declaration: Node<'tree>,
-    parents: &[Node<'tree>],
-    definitions: &mut Vec<Definition<'tree>>,
-    bodies: &mut Vec<(Node<'tree>, Vec<Node<'tree>>)>,
-) {
-    let Some(name) = declaration.child_by_field_name("name") else {
-        return;
-    };
-    definitions.push(Definition::new(
-        parents.to_vec(),
-        name,
-        declaration.byte_range(),
-        None,
-    ));
-    if let Some(body) = declaration.child_by_field_name("body") {
-        bodies.push((body, [parents, &[name]].concat()));
-    }
 }
 
 /// Whether `member` implements a member of an interface explicitly, as
@@ -291,20 +268,17 @@ fn property_value(property: Node) -> Option<Node> {
     }
 }
 
-/// Adds a definition to `definitions` for each name that `declaration`, a field or event
-/// declaration in the type at `parents`, declares.
+/// Adds a definition to `walk` for each name that `declaration`, a field or event declaration in
+/// the type at `parents`, declares.
 fn push_fields<'tree>(
     declaration: Node<'tree>,
     parents: &[Node<'tree>],
-    definitions: &mut Vec<Definition<'tree>>,
+    walk: &mut NestedWalk<'tree>,
 ) {
-    let mut cursor = declaration.walk();
-    let Some(variables) = declaration
-        .named_children(&mut cursor)
-        .find(|child| child.kind() == "variable_declaration")
-    else {
+    let Some(variables) = code::child(declaration, "variable_declaration") else {
         return;
     };
+    let mut cursor = variables.walk();
     let declarators: Vec<Node> = variables
         .named_children(&mut cursor)
         .filter(|child| child.kind() == "variable_declarator")
@@ -321,30 +295,8 @@ fn push_fields<'tree>(
         } else {
             declarator.byte_range()
         };
-        definitions.push(Definition::new(
-            parents.to_vec(),
-            name,
-            range,
-            code::value_after(declarator, "="),
-        ));
+        walk.add_definition(parents, name, range, code::value_after(declarator, "="));
     }
-}
-
-/// The definition of `member`, a declaration with one name, in the namespace or type at
-/// `parents`. It covers the whole declaration and has the initializer `value`, if any. Returns
-/// `None` if the parser found no name.
-fn member_definition<'tree>(
-    member: Node<'tree>,
-    parents: &[Node<'tree>],
-    value: Option<Node<'tree>>,
-) -> Option<Definition<'tree>> {
-    let name = member.child_by_field_name("name")?;
-    Some(Definition::new(
-        parents.to_vec(),
-        name,
-        member.byte_range(),
-        value,
-    ))
 }
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
@@ -356,7 +308,6 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 #[cfg(test)]
 mod symbols_tests {
     use super::*;
-    use crate::symbols::code::CodeSymbolsParser;
     use crate::symbols::code::test_utils::{
         decode_error, symbol, symbols, syntax_error, text_of, unresolved, value, values,
     };

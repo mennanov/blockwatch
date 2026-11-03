@@ -1,10 +1,12 @@
 use crate::LineIndex;
 use crate::language_parsers::{
-    CommentsParser, LanguageParser, LanguageParserImpl, node_text, python_style_comments_parser,
-    tree_sitter_parser,
+    CommentsParser, LanguageParser, LanguageParserImpl, members, node_text,
+    python_style_comments_parser, tree_sitter_parser,
 };
 use crate::symbol_path::SymbolPath;
-use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser, ensure_no_syntax_error};
+use crate::symbols::{
+    ScalarValue, Symbol, Symbols, SymbolsParser, ensure_no_syntax_error, extended_past_line_break,
+};
 use anyhow::{Context, bail};
 use std::ops::Range;
 use tree_sitter::Node;
@@ -42,8 +44,6 @@ impl SymbolsParser for YamlSymbolsParser {
     /// Returns an error if the file has a syntax error, holds several documents, or has a string
     /// YAML can't decode.
     fn parse(&mut self, source: &str) -> anyhow::Result<Symbols> {
-        // A query can't give an alias a list position without making it a symbol, so the tree is
-        // walked by hand.
         let tree = self
             .parser
             .parse(source, None)
@@ -116,14 +116,6 @@ enum ScalarStyle {
     DoubleQuoted,
     /// A `|` or `>` block.
     Block,
-}
-
-/// The children of `node`, without comments.
-fn members(node: Node) -> Vec<Node> {
-    let mut cursor = node.walk();
-    node.named_children(&mut cursor)
-        .filter(|child| !child.is_extra())
-        .collect()
 }
 
 /// A member of a mapping or a list, whose symbols the walk still has to add.
@@ -298,16 +290,11 @@ impl<'s, 'tree> Walk<'s, 'tree> {
 
     /// Where `node` is written. A node on several lines also covers its last line break.
     fn written_range(&self, node: Node) -> Range<usize> {
-        let range = node.byte_range();
-        if !node_text(&node, self.source).contains('\n') {
-            return range;
+        if node_text(&node, self.source).contains('\n') {
+            extended_past_line_break(self.source, node.byte_range())
+        } else {
+            node.byte_range()
         }
-        // Covering the line break makes deleting a mapping's last line count as a change to it.
-        #[expect(clippy::string_slice, reason = "`range` is a tree-sitter node's range")]
-        let end = self.source[range.end..]
-            .find('\n')
-            .map_or(self.source.len(), |offset| range.end + offset + 1);
-        range.start..end
     }
 
     /// The text that `scalar` stands for.

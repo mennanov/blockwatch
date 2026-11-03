@@ -2,7 +2,7 @@ use crate::language_parsers::{
     Comment, CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser, Visit,
     c_style_and_doc_line_and_block_comment_text, node_text,
 };
-use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition};
+use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, NestedWalk};
 use anyhow::{anyhow, bail};
 use std::iter::Peekable;
 use std::str::Chars;
@@ -40,22 +40,16 @@ impl CodeLanguage for Java {
             return Ok(None);
         }
         let literal = node_text(node, source);
-        let content = match literal.strip_prefix(TEXT_BLOCK_QUOTES) {
-            Some(block) => {
-                text_block_content(block.strip_suffix(TEXT_BLOCK_QUOTES).unwrap_or(block))
+        let content = if literal.starts_with(TEXT_BLOCK_QUOTES) {
+            text_block_content(code::between_quotes(literal, TEXT_BLOCK_QUOTES)?)
+        } else {
+            let content = code::between_quotes(literal, "\"")?;
+            // The grammar lets a string run on to the next line, so a string missing its closing
+            // quote takes in the next line too.
+            if content.contains(['\r', '\n']) {
+                bail!("Java allows a line break only in a text block");
             }
-            None => {
-                let content = literal
-                    .strip_prefix('"')
-                    .and_then(|content| content.strip_suffix('"'))
-                    .unwrap_or(literal);
-                // The grammar lets a string run on to the next line, so a string missing its
-                // closing quote takes in the next line too.
-                if content.contains(['\r', '\n']) {
-                    bail!("Java allows a line break only in a text block");
-                }
-                content.to_string()
-            }
+            content.to_string()
         };
         code::decode_utf16(&content, push_escape).map(Some)
     }
@@ -161,14 +155,9 @@ fn unicode_unit(characters: &mut Peekable<Chars>) -> anyhow::Result<u16> {
 }
 
 /// Adds the definitions of the members of `body`, the root of a file or the body of a type, to
-/// `definitions`. `parents` are the names of the types that `body` belongs to. Adds the body of
-/// each type in `body` to `bodies`, with its own parents.
-fn push_members<'tree>(
-    body: Node<'tree>,
-    parents: Vec<Node<'tree>>,
-    definitions: &mut Vec<Definition<'tree>>,
-    bodies: &mut Vec<(Node<'tree>, Vec<Node<'tree>>)>,
-) {
+/// `walk`. `parents` are the names of the types that `body` belongs to. Adds the body of each type
+/// in `body` to `walk`, with its own parents.
+fn push_members<'tree>(body: Node<'tree>, parents: Vec<Node<'tree>>, walk: &mut NestedWalk<'tree>) {
     let mut cursor = body.walk();
     for member in body.named_children(&mut cursor) {
         let name = member.child_by_field_name("name");
@@ -176,40 +165,32 @@ fn push_members<'tree>(
             // A compact source file declares its fields as local variables, and an interface its
             // constants as constants.
             "field_declaration" | "local_variable_declaration" | "constant_declaration" => {
-                push_fields(member, &parents, definitions);
+                push_fields(member, &parents, walk);
             }
             // The members of an enum that come after its constants.
-            "enum_body_declarations" => bodies.push((member, parents.clone())),
+            "enum_body_declarations" => walk.add_body(member, parents.clone()),
             "class_declaration"
             | "interface_declaration"
             | "enum_declaration"
             | "record_declaration"
             | "annotation_type_declaration" => {
-                let Some(name) = name else {
-                    continue;
-                };
-                definitions.push(Definition::new(
-                    parents.to_vec(),
-                    name,
-                    member.byte_range(),
-                    None,
-                ));
-                if let Some(body) = member.child_by_field_name("body") {
-                    bodies.push((body, [&parents[..], &[name]].concat()));
+                if let Some(name) = name {
+                    let body = member.child_by_field_name("body");
+                    walk.add_definition_with_body(&parents, name, member.byte_range(), None, body);
                 }
             }
             // The body of an enum constant is a class without a name, so its members are not
             // members of the enum.
             "method_declaration" | "enum_constant" => {
-                definitions.extend(name.map(|name| {
-                    Definition::new(parents.to_vec(), name, member.byte_range(), None)
-                }));
+                if let Some(name) = name {
+                    walk.add_definition(&parents, name, member.byte_range(), None);
+                }
             }
             "annotation_type_element_declaration" => {
-                definitions.extend(name.map(|name| {
+                if let Some(name) = name {
                     let default = member.child_by_field_name("value");
-                    Definition::new(parents.to_vec(), name, member.byte_range(), default)
-                }));
+                    walk.add_definition(&parents, name, member.byte_range(), default);
+                }
             }
             // Code never refers to a constructor or an initializer block by name.
             _ => {}
@@ -217,12 +198,12 @@ fn push_members<'tree>(
     }
 }
 
-/// Adds a definition to `definitions` for each name that `declaration`, a field declaration in
-/// the type at `parents`, declares.
+/// Adds a definition to `walk` for each name that `declaration`, a field declaration in the type
+/// at `parents`, declares.
 fn push_fields<'tree>(
     declaration: Node<'tree>,
     parents: &[Node<'tree>],
-    definitions: &mut Vec<Definition<'tree>>,
+    walk: &mut NestedWalk<'tree>,
 ) {
     let mut cursor = declaration.walk();
     let declarators: Vec<Node> = declaration
@@ -240,8 +221,12 @@ fn push_fields<'tree>(
         } else {
             declarator.byte_range()
         };
-        let value = declarator.child_by_field_name("value");
-        definitions.push(Definition::new(parents.to_vec(), name, range, value));
+        walk.add_definition(
+            parents,
+            name,
+            range,
+            declarator.child_by_field_name("value"),
+        );
     }
 }
 

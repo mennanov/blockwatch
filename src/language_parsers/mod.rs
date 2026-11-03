@@ -498,6 +498,14 @@ pub(crate) fn node_text<'source>(node: &Node, source: &'source str) -> &'source 
     &source[node.byte_range()]
 }
 
+/// The named children of `node`, without comments, in document order.
+fn members(node: Node) -> Vec<Node> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
+        .filter(|child| !child.is_extra())
+        .collect()
+}
+
 /// Calls `visit` on `root` and then on the nodes below it, in document order. `visit` returns
 /// whether to visit the children of the node it gets.
 pub(crate) fn walk_tree<'tree>(root: Node<'tree>, mut visit: impl FnMut(Node<'tree>) -> bool) {
