@@ -48,23 +48,21 @@ fn push_members<'tree>(
 ) {
     let mut cursor = body.walk();
     for member in body.named_children(&mut cursor) {
-        let (name, member_body) = match member.kind() {
-            "message" | "group" => (child(member, "message_name"), child(member, "message_body")),
-            "enum" => (child(member, "enum_name"), child(member, "enum_body")),
+        let (name, value, member_body) = match member.kind() {
+            "message" | "group" => (
+                child(member, "message_name"),
+                None,
+                child(member, "message_body"),
+            ),
+            "enum" => (child(member, "enum_name"), None, child(member, "enum_body")),
             // A service holds its rpcs without a body node around them.
-            "service" => (child(member, "service_name"), Some(member)),
-            "rpc" => (child(member, "rpc_name"), None),
-            "field" | "map_field" | "oneof_field" => {
-                definitions.extend(child(member, "identifier").map(|name| {
-                    Definition::new(
-                        parents.clone(),
-                        name,
-                        member.byte_range(),
-                        child(member, "field_number"),
-                    )
-                }));
-                continue;
-            }
+            "service" => (child(member, "service_name"), None, Some(member)),
+            "rpc" => (child(member, "rpc_name"), None, None),
+            "field" | "map_field" | "oneof_field" => (
+                child(member, "identifier"),
+                child(member, "field_number"),
+                None,
+            ),
             "enum_field" => {
                 definitions.extend(enum_value(member, &parents, source));
                 continue;
@@ -97,7 +95,7 @@ fn push_members<'tree>(
             parents.clone(),
             name,
             member.byte_range(),
-            None,
+            value,
         ));
         if let Some(member_body) = member_body {
             bodies.push((member_body, [parents.as_slice(), &[name]].concat()));
@@ -114,8 +112,8 @@ fn enum_value<'tree>(
 ) -> Option<Definition<'tree>> {
     let name = child(field, "identifier")?;
     let number = child(field, "int_lit")?;
-    // The grammar gives the `-` of a negative number no node of its own, and protoc allows a
-    // space after it.
+    // The number's node doesn't hold its sign, which is a token before it. protoc allows a space
+    // between them.
     let mut cursor = field.walk();
     let start = field
         .children(&mut cursor)

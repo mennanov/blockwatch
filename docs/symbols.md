@@ -24,24 +24,24 @@ declares, instead of tags in a comment.
 <!-- <block name="extensions-with-symbols" same-as="src/language_parsers/mod.rs:extensions-with-symbols"
      same-as-pattern="`\.?(?P<value>[A-Za-z.]+)`"> -->
 
-| Language   | Files                                                                          | Paths                                                   |
-|------------|--------------------------------------------------------------------------------|---------------------------------------------------------|
-| JSON       | `.json`, `.jsonc`, `.webmanifest`                                              | [JSON](#json)                                           |
-| TOML       | `.toml`, `Pipfile`                                                             | [TOML](#toml)                                           |
-| YAML       | `.yaml`, `.yml`, `.cff`                                                        | [YAML](#yaml)                                           |
-| Markdown   | `.md`, `.markdown`, `.mdx`                                                     | [Markdown](#markdown)                                   |
-| Go         | `.go`                                                                          | [Go](#go)                                               |
-| C, C++     | `.c`, `.h`, `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx`                       | [C and C++](#c-and-c)                                   |
-| Python     | `.py`, `.pyi`, `.pyw`                                                          | [Python and Starlark](#python-and-starlark)             |
-| Starlark   | `.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`, `BUCK`, `WORKSPACE`, `Tiltfile` | [Python and Starlark](#python-and-starlark)             |
-| Rust       | `.rs`                                                                          | [Rust](#rust)                                           |
-| TypeScript | `.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`                                         | [TypeScript and JavaScript](#typescript-and-javascript) |
-| JavaScript | `.js`, `.mjs`, `.cjs`, `.jsx`                                                  | [TypeScript and JavaScript](#typescript-and-javascript) |
-| Java       | `.java`                                                                        | [Java](#java)                                           |
-| C#         | `.cs`                                                                          | [C#](#c)                                                |
-| Kotlin     | `.kt`, `.kts`                                                                  | [Kotlin](#kotlin)                                       |
-| Swift      | `.swift`                                                                       | [Swift](#swift)                                         |
-| Protobuf   | `.proto`                                                                       | [Protocol Buffers](#protocol-buffers)                   |
+| Language         | Files                                                                          | Paths                                                   |
+|------------------|--------------------------------------------------------------------------------|---------------------------------------------------------|
+| JSON             | `.json`, `.jsonc`, `.webmanifest`                                              | [JSON](#json)                                           |
+| TOML             | `.toml`, `Pipfile`                                                             | [TOML](#toml)                                           |
+| YAML             | `.yaml`, `.yml`, `.cff`                                                        | [YAML](#yaml)                                           |
+| Markdown         | `.md`, `.markdown`, `.mdx`                                                     | [Markdown](#markdown)                                   |
+| Go               | `.go`                                                                          | [Go](#go)                                               |
+| C, C++           | `.c`, `.h`, `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx`                       | [C and C++](#c-and-c)                                   |
+| Python           | `.py`, `.pyi`, `.pyw`                                                          | [Python and Starlark](#python-and-starlark)             |
+| Starlark         | `.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`, `BUCK`, `WORKSPACE`, `Tiltfile` | [Python and Starlark](#python-and-starlark)             |
+| Rust             | `.rs`                                                                          | [Rust](#rust)                                           |
+| TypeScript       | `.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`                                         | [TypeScript and JavaScript](#typescript-and-javascript) |
+| JavaScript       | `.js`, `.mjs`, `.cjs`, `.jsx`                                                  | [TypeScript and JavaScript](#typescript-and-javascript) |
+| Java             | `.java`                                                                        | [Java](#java)                                           |
+| C#               | `.cs`                                                                          | [C#](#c)                                                |
+| Kotlin           | `.kt`, `.kts`                                                                  | [Kotlin](#kotlin)                                       |
+| Swift            | `.swift`                                                                       | [Swift](#swift)                                         |
+| Protocol Buffers | `.proto`                                                                       | [Protocol Buffers](#protocol-buffers)                   |
 
 <!-- </block> -->
 
@@ -768,14 +768,15 @@ service Items {
 | `#/Items/Get`        | the whole rpc                |
 
 - **Each message, enum and service is a symbol, at any depth, and so is each field, map field, oneof, enum value and
-  rpc in it.** A proto2 group is a symbol too, with its fields under it: `#/Item/Result/code`.
+  rpc in it.** A proto2 group, such as `optional group Result = 4 { ... }` in `Item`, is a symbol too, with its
+  fields under it: `#/Item/Result/code`. It has no value, though it has a number.
 - **The package is not part of a path.** A file has only one, so `#/Item` is enough.
 - **An enum value sits under its enum:** `#/Item/Color/RED`.
 - **A field's value is its number, and an enum value's value is its number.** Both stay as written: `0x3` stays `0x3`,
   and `- 2` stays `- 2`. Options after the number don't change it: `BLUE = -2 [deprecated = true]` is `-2`.
-- **A oneof's fields sit in its message**, as protoc reads them: `#/Item/cents`, not `#/Item/price/cents`.
-- **An extension field sits where its `extend` is written**, not in the message it extends. An `extend` at the top of
-  the file gives `#/name`, and one inside `Item` gives `#/Item/name`.
+- **A oneof's fields sit in its message**, as code reads them: `#/Item/cents`, not `#/Item/price/cents`.
+- **An extension field sits where its `extend` is written**, not in the message it extends.
+  `extend Other { int32 tag = 100; }` at the top of the file gives `#/tag`, and inside `Item` it gives `#/Item/tag`.
 - **A definition covers its whole statement**, with its label, its options and its `;`, but not the comments above it.
 - **Options are not symbols**, and neither are `syntax`, `package`, `import`, `extend` blocks, `reserved` and
   `extensions`. To check an option such as `go_package`, wrap it in a `[[block]]` entry with a `target-pattern`.
