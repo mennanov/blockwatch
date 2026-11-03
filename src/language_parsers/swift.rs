@@ -405,10 +405,9 @@ mod symbols_tests {
     use super::*;
     use crate::symbols::code::CodeSymbolsParser;
     use crate::symbols::code::test_utils::{
-        decode_error, symbol, symbols, syntax_error, unresolved, value, values,
+        decode_error, symbol, symbols, syntax_error, text_of, unresolved, value, values,
     };
     use crate::symbols::{Symbols, SymbolsParser};
-    use anyhow::Context;
 
     /// The symbols of `source`, a Swift file.
     fn swift(source: &str) -> anyhow::Result<Symbols> {
@@ -482,12 +481,6 @@ actor Counter {
     let id = 1
 }
 "#;
-        // The text from the first `start` up to the first `end` after it.
-        let text_of = |start: &str, end: &str| -> anyhow::Result<&str> {
-            let start = source.find(start).context("no start")?;
-            let end = start + source[start..].find(end).context("no end")?;
-            Ok(&source[start..end])
-        };
 
         // <block affects="docs/symbols.md:swift-paths, src/skill.md#/blockwatch/Symbols/Swift">
         assert_eq!(
@@ -513,12 +506,16 @@ actor Counter {
                     "var legacy: Bool {\n    return counter > 0 // Positive.\n}",
                     Some("counter > 0")
                 ),
-                symbol("/total", text_of("var total", "\nvar steps")?, None),
-                symbol("/steps", text_of("var steps", "\nfunc top")?, None),
+                symbol("/total", text_of(source, "var total", "\n}")?, None),
+                symbol("/steps", text_of(source, "var steps", "\n}")?, None),
                 symbol("/top", "func top(a: Int) -> Int { a + 1 }", None),
                 symbol("/Handler", "typealias Handler = (Int) -> Void", None),
-                symbol("/stringify", text_of("macro", "\ninfix")?, None),
-                symbol("/Config", text_of("@MainActor", "\n\nfinal class")?, None),
+                symbol(
+                    "/stringify",
+                    text_of(source, "macro", r#"type: "S")"#)?,
+                    None
+                ),
+                symbol("/Config", text_of(source, "@MainActor", "\n}")?, None),
                 symbol("/Config/origin", "static let origin = 0", Some("0")),
                 symbol("/Config/flag", "@Published var flag = false", Some("false")),
                 symbol("/Config/name", "var name: String", None),
@@ -530,16 +527,16 @@ actor Counter {
                     None
                 ),
                 symbol("/Config/Limits/id", "let id = 0x10", Some("0x10")),
-                symbol("/Store", text_of("final class", "\n\nenum")?, None),
+                symbol("/Store", text_of(source, "final class", "\n}")?, None),
                 symbol("/Store/shared", "class var shared: Int { 1 }", Some("1")),
-                symbol("/Mode", text_of("enum Mode", "\n\nprotocol")?, None),
+                symbol("/Mode", text_of(source, "enum Mode", "\n}")?, None),
                 // Each name of a case covers only its own part, without the `;` after it. An
                 // implicit raw value is no value.
                 symbol("/Mode/red", "case red = 1", Some("1")),
                 symbol("/Mode/green", "green", None),
                 symbol("/Mode/custom", "case custom(String)", None),
                 symbol("/Mode/all", "static let all = [red]", Some("[red]")),
-                symbol("/Named", text_of("protocol Named", "\n\nactor")?, None),
+                symbol("/Named", text_of(source, "protocol Named", "\n}")?, None),
                 symbol("/Named/Item", "associatedtype Item", None),
                 symbol("/Named/label", "var label: String { get }", None),
                 symbol("/Named/name", "func name() -> String", None),

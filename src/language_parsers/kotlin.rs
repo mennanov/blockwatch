@@ -245,10 +245,9 @@ mod symbols_tests {
     use super::*;
     use crate::symbols::code::CodeSymbolsParser;
     use crate::symbols::code::test_utils::{
-        decode_error, symbol, symbols, syntax_error, unresolved, value, values,
+        decode_error, symbol, symbols, syntax_error, text_of, unresolved, value, values,
     };
     use crate::symbols::{Symbols, SymbolsParser};
-    use anyhow::Context;
 
     /// The symbols of `source`, a Kotlin file.
     fn kotlin(source: &str) -> anyhow::Result<Symbols> {
@@ -348,12 +347,6 @@ object Registry {
     const val SIZE = 8
 }
 "#;
-        // The text from the first `start` up to the first `end` after it.
-        let text_of = |start: &str, end: &str| -> anyhow::Result<&str> {
-            let start = source.find(start).context("no start")?;
-            let end = start + source[start..].find(end).context("no end")?;
-            Ok(&source[start..end])
-        };
 
         // <block affects="docs/symbols.md:kotlin-paths, src/skill.md#/blockwatch/Symbols/Kotlin">
         assert_eq!(
@@ -384,7 +377,7 @@ object Registry {
                 symbol("/top", "fun top(a: Int): Int = a + 1", None),
                 symbol("/twice", "fun Int.twice() = this * 2", None),
                 symbol("/Handler", "typealias Handler = (Int) -> Unit", None),
-                symbol("/Config", text_of("@Deprecated", "\n\nenum")?, None),
+                symbol("/Config", text_of(source, "@Deprecated", "\n}")?, None),
                 symbol(
                     "/Config/retries",
                     "@JvmField val retries: Int = 3",
@@ -417,7 +410,7 @@ object Registry {
                 ),
                 symbol("/Config/Named/label", "val label: Int", None),
                 symbol("/Config/Named/name", "fun name(): Int", None),
-                symbol("/Mode", text_of("enum class", "\n\nclass Factory")?, None),
+                symbol("/Mode", text_of(source, "enum class", "\n}")?, None),
                 symbol("/Mode/level", "val level: Int", None),
                 symbol("/Mode/RED", "RED(1)", None),
                 symbol(

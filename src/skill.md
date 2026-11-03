@@ -157,8 +157,8 @@ Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`
 `.yml`, `.cff`), Markdown (`.md`, `.markdown`, `.mdx`), Go (`.go`), C and C++ (`.c`, `.h`, `.cc`, `.cpp`, `.cxx`,
 `.hh`, `.hpp`, `.hxx`), Python (`.py`, `.pyi`, `.pyw`), Starlark (`.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`,
 `BUCK`, `WORKSPACE`, `Tiltfile`), Rust (`.rs`), TypeScript (`.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`), JavaScript
-(`.js`, `.mjs`, `.cjs`, `.jsx`), Java (`.java`), C# (`.cs`), Kotlin (`.kt`, `.kts`), Swift (`.swift`), and Protocol
-Buffers (`.proto`). A path into any other file fails the run.
+(`.js`, `.mjs`, `.cjs`, `.jsx`), Java (`.java`), C# (`.cs`), Kotlin (`.kt`, `.kts`), Swift (`.swift`), Protocol
+Buffers (`.proto`), and HCL (`.tf`, `.tofu`, `.tfvars`, `.hcl`). A path into any other file fails the run.
 
 ### Writing a path
 
@@ -223,7 +223,8 @@ level. Its path is the text of each heading it is under, then its own, the top `
 
 Each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is `#/NAME`, such
 as `consts.go#/MaxPorts`. In Java, C#, Kotlin, Swift and Protocol Buffers, the members of a
-type are symbols too: `Config.java#/Config/MAX_PORTS`.
+type are symbols too: `Config.java#/Config/MAX_PORTS`. In HCL, each block, attribute and object key is a symbol:
+`main.tf#/variable/region/default`.
 
 - A value is the initializer as written, never worked out: `20 * 1024 * 1024` stays as it is. Use `same-as-pattern`
   to take the part you need. A string counts as the text it holds. Parentheses around the whole value are removed.
@@ -232,8 +233,8 @@ type are symbols too: `Config.java#/Config/MAX_PORTS`.
 - A name defined twice is a violation.
 - A syntax error fails the run only for a name whose definition holds it, or a path with a name from the text the
   parser skipped. So does a string blockwatch can't decode.
-- Members, such as a method or a field, are not symbols yet, except in Java, C#, Kotlin, Swift and Protocol
-  Buffers.
+- Members, such as a method or a field, are not symbols yet, except in Java, C#, Kotlin, Swift, Protocol Buffers
+  and HCL.
 
 ### Go
 
@@ -359,6 +360,20 @@ type are symbols too: `Config.java#/Config/MAX_PORTS`.
 - A field's value is its number, and so is an enum value's, as written: `-2` or `0x3`.
 - A oneof's fields sit in its message: `#/Item/cents`. An extension field sits where its `extend` is written.
 - Options are not symbols. To check one, such as `go_package`, use a `[[block]]` entry with a `target-pattern`.
+
+### HCL
+
+- Terraform, OpenTofu, Terragrunt, Nomad and Packer files are HCL.
+- Each block is a symbol, at any depth, and so is each attribute and each key of an object. A block's path is its type,
+  then each of its labels: `#/resource/aws_instance/web/ami`, `#/variable/region/default`,
+  `#/terraform/required_providers/aws/version`. In a `.tfvars` file, each attribute sits at the top: `#/region`.
+- A path with only some of a block's labels, such as `#/resource/aws_instance`, points at nothing.
+- A block written twice in one body, such as two `ingress` blocks, makes its path a violation. `#/locals/name` still
+  resolves when only one of several `locals` blocks sets `name`.
+- A key written as a number or an expression, such as `(var.k)`, is not a segment. List items are not symbols. A
+  label or key with an escape gives no symbol.
+- Strings follow HCL's escapes, and a `<<-` heredoc loses its indent. A string or heredoc with `${...}` or `%{...}`
+  stays as written.
 
 ## The config file (`blockwatch.toml`)
 

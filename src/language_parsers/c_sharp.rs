@@ -358,10 +358,9 @@ mod symbols_tests {
     use super::*;
     use crate::symbols::code::CodeSymbolsParser;
     use crate::symbols::code::test_utils::{
-        decode_error, symbol, symbols, syntax_error, unresolved, value, values,
+        decode_error, symbol, symbols, syntax_error, text_of, unresolved, value, values,
     };
     use crate::symbols::{Symbols, SymbolsParser};
-    use anyhow::Context;
 
     /// The symbols of `source`, a C# file.
     fn c_sharp(source: &str) -> anyhow::Result<Symbols> {
@@ -452,8 +451,7 @@ public class Config
     class Cache<T> { T Last; }
 }
 "#;
-        // The class `Config` runs from its attribute to the end of the file.
-        let config = source[source.find("[Serializable]").context("no class")?..].trim_end();
+        let config = text_of(source, "[Serializable]", "\n}")?;
 
         // <block affects="docs/symbols.md:c-sharp-paths, src/skill.md#/blockwatch/Symbols/C#">
         assert_eq!(
@@ -684,10 +682,8 @@ class Probe { }
     }
 }
 "#;
-        let config = &source[source.find("class Config").context("no class")?
-            ..source.find("\n\n    enum").context("no enum")?];
-        let mode = source[source.find("enum Mode").context("no enum")?..].trim_end();
-        let mode = mode.strip_suffix("\n}").context("no namespace end")?;
+        let config = text_of(source, "class Config", "\n    }")?;
+        let mode = text_of(source, "enum Mode", "\n    }")?;
 
         assert_eq!(
             symbols(&c_sharp(source)?, source),

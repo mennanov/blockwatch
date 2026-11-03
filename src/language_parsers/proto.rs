@@ -143,10 +143,11 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 mod tests {
     use super::*;
     use crate::symbols::code::CodeSymbolsParser;
-    use crate::symbols::code::test_utils::{symbol, symbols, syntax_error, unresolved, values};
+    use crate::symbols::code::test_utils::{
+        symbol, symbols, syntax_error, text_of, unresolved, values,
+    };
     use crate::symbols::{Symbols, SymbolsParser};
     use crate::{Position, language_parsers::Comment};
-    use anyhow::Context;
 
     /// The symbols of `source`, a Protocol Buffers file.
     fn proto(source: &str) -> anyhow::Result<Symbols> {
@@ -201,49 +202,55 @@ service Orders {
   }
 }
 "#;
-        // The text from the first `start` up to the first `end` after it, `end` included.
-        let text_of = |start: &str, end: &str| -> anyhow::Result<&str> {
-            let start = source.find(start).context("no start")?;
-            let end = start + source[start..].find(end).context("no end")? + end.len();
-            Ok(&source[start..end])
-        };
 
         // <block affects="docs/symbols.md:proto-paths, src/skill.md#/blockwatch/Symbols/Protocol Buffers">
         assert_eq!(
             symbols(&proto(source)?, source),
             vec![
-                symbol("/Order", text_of("message Order", "\n}")?, None),
+                symbol("/Order", text_of(source, "message Order", "\n}")?, None),
                 symbol(
                     "/Order/id",
                     "optional int32 id = 0x3 [default = 5];",
                     Some("0x3")
                 ),
                 symbol("/Order/counts", "map<string, int32> counts = 5;", Some("5")),
-                symbol("/Order/State", text_of("enum State", "\n  }")?, None),
+                symbol(
+                    "/Order/State",
+                    text_of(source, "enum State", "\n  }")?,
+                    None
+                ),
                 symbol("/Order/State/OPEN", "OPEN = 1;", Some("1")),
                 symbol(
                     "/Order/State/CLOSED",
                     "CLOSED = -2 [deprecated = true];",
                     Some("-2")
                 ),
-                symbol("/Order/kind", text_of("oneof kind", "\n  }")?, None),
+                symbol("/Order/kind", text_of(source, "oneof kind", "\n  }")?, None),
                 symbol("/Order/sku", "string sku = 4;", Some("4")),
-                symbol("/Order/Pick", text_of("group Pick", "\n    }")?, None),
+                symbol(
+                    "/Order/Pick",
+                    text_of(source, "group Pick", "\n    }")?,
+                    None
+                ),
                 symbol("/Order/Pick/size", "optional int32 size = 10;", Some("10")),
                 symbol(
                     "/Order/Result",
-                    text_of("optional group Result", "\n  }")?,
+                    text_of(source, "optional group Result", "\n  }")?,
                     None
                 ),
                 symbol("/Order/Result/code", "optional int32 code = 7;", Some("7")),
                 symbol("/Order/ext", "optional int32 ext = 100;", Some("100")),
-                symbol("/Order/Inner", text_of("message Inner", "\n  }")?, None),
+                symbol(
+                    "/Order/Inner",
+                    text_of(source, "message Inner", "\n  }")?,
+                    None
+                ),
                 symbol("/Order/Inner/tags", "repeated string tags = 1;", Some("1")),
-                symbol("/Top", text_of("enum Top", "\n}")?, None),
+                symbol("/Top", text_of(source, "enum Top", "\n}")?, None),
                 symbol("/Top/TOP_UNKNOWN", "TOP_UNKNOWN = 0;", Some("0")),
-                symbol("/Orders", text_of("service Orders", "\n}")?, None),
+                symbol("/Orders", text_of(source, "service Orders", "\n}")?, None),
                 symbol("/Orders/Get", "rpc Get(Order) returns (Order);", None),
-                symbol("/Orders/List", text_of("rpc List", "\n  }")?, None),
+                symbol("/Orders/List", text_of(source, "rpc List", "\n  }")?, None),
             ]
         );
         // </block>

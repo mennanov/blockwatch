@@ -42,6 +42,7 @@ declares, instead of tags in a comment.
 | Kotlin           | `.kt`, `.kts`                                                                  | [Kotlin](#kotlin)                                       |
 | Swift            | `.swift`                                                                       | [Swift](#swift)                                         |
 | Protocol Buffers | `.proto`                                                                       | [Protocol Buffers](#protocol-buffers)                   |
+| HCL (Terraform)  | `.tf`, `.tofu`, `.tfvars`, `.hcl`                                              | [HCL](#hcl)                                             |
 
 <!-- </block> -->
 
@@ -253,7 +254,8 @@ Clone the repository.
 In a code file, each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is
 `#/NAME`.
 With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`. In Java, C#, Kotlin, Swift and Protocol
-Buffers, the members of a type are symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`.
+Buffers, the members of a type are symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`. In HCL, each
+block, attribute and object key is a symbol: `main.tf#/variable/region/default`.
 
 - **A value is the initializer as written.** blockwatch never works it out: `20 * 1024 * 1024` stays as it is, and so
   does `0x10`. Use `same-as-pattern` to take the part you need.
@@ -267,8 +269,8 @@ Buffers, the members of a type are symbols too, under the type's name: `Config.j
   with a name from the text that the parser had to skip. Other names in the file still resolve. The message shows
   where the error is.
 - **A path to a string that blockwatch can't decode stops the run.** Other paths in the file still resolve.
-- **Members are not symbols yet**, such as a method or a field, except in Java, C#, Kotlin, Swift and Protocol
-  Buffers.
+- **Members are not symbols yet**, such as a method or a field, except in Java, C#, Kotlin, Swift, Protocol Buffers
+  and HCL.
 
 <!-- </block> -->
 
@@ -782,6 +784,74 @@ service Items {
   `extensions`. To check an option such as `go_package`, wrap it in a `[[block]]` entry with a `target-pattern`.
 - **A syntax error stops the run for the definition that holds it, and for each message around it.** The other
   definitions still resolve.
+
+<!-- </block> -->
+
+## HCL
+
+Terraform, OpenTofu, Terragrunt, Nomad and Packer files are HCL.
+
+<!-- <block name="hcl-paths"> -->
+
+```hcl
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+variable "region" {
+  default = "us-east-1"
+}
+
+locals {
+  name = "app-${var.env}"
+  tags = { Team = "core", "cost center" = 42 }
+}
+
+resource "aws_instance" "web" {
+  ami       = data.aws_ami.ubuntu.id
+  count     = (3)
+  user_data = <<-EOT
+    #!/bin/sh
+    echo hi
+  EOT
+}
+```
+
+| Path                                         | Points at                                 |
+|----------------------------------------------|-------------------------------------------|
+| `#/terraform/required_providers/aws/version` | `~> 5.0`                                  |
+| `#/variable/region`                          | the whole block                           |
+| `#/variable/region/default`                  | `us-east-1`                               |
+| `#/locals/name`                              | `"app-${var.env}"`, as written            |
+| `#/locals/tags`                              | the whole object, as written              |
+| `#/locals/tags/cost center`                  | `42`                                      |
+| `#/resource/aws_instance/web/ami`            | `data.aws_ami.ubuntu.id`                  |
+| `#/resource/aws_instance/web/count`          | `3`                                       |
+| `#/resource/aws_instance/web/user_data`      | `#!/bin/sh` and `echo hi`, each on a line |
+
+- **Each block is a symbol, at any depth, and so is each attribute and each key of an object.** A block's path is its
+  type, then each of its labels: `#/resource/aws_instance/web`. In a `.tfvars` file, each attribute sits at the top:
+  `#/region`.
+- **A path with only some of a block's labels points at nothing.** `#/resource/aws_instance` is no symbol.
+- **A block written twice in one body makes its path a violation**, such as two `ingress` blocks in a resource. Two
+  `locals` blocks make `#/locals` a violation, but `#/locals/name` still resolves when only one of them sets `name`.
+- **A key of an object is a segment when it is a name or a plain string**, such as `Team` or `"cost center"`. A key
+  written as a number or an expression, such as `3` or `(var.k)`, is not. The items of a list are not symbols.
+- **A label or key with an escape, such as `"a\"b"`, gives no symbol**, and neither does anything under it.
+- **A value is the expression as written**, without parentheses around it: `count = (3)` is `3`.
+- **Strings follow HCL's escapes.** `"caf\u00e9"` is `café`, `$${` is `${`, and `%%{` is `%{`. A heredoc is its text,
+  with each line end. A `<<-` heredoc loses the indent that HCL removes. A string or heredoc with `${...}` or `%{...}`
+  stays as written. blockwatch doesn't turn text into Unicode NFC, as HCL does. A path to an escape that stands for no
+  character, such as `"\uD800"`, stops the run.
+- **A block covers its type, labels and body.** An attribute or a key covers its name and its value. Comments above
+  them are not part of them.
+- **A syntax error stops the run for the definition that holds it, and for each block around it.** After an error, the
+  parser can read the rest of the file wrongly, so a later path may not resolve.
 
 <!-- </block> -->
 

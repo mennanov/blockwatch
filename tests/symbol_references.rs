@@ -147,6 +147,34 @@ fn proto_target_resolves() {
 }
 
 #[test]
+fn tf_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/tf_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
+fn tofu_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/tofu_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
+fn tfvars_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/tfvars_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
+fn hcl_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/hcl_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
 fn json_target_resolves() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/symbol_references/json_source.rs");

@@ -273,10 +273,9 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
 mod symbols_tests {
     use super::*;
     use crate::symbols::code::test_utils::{
-        decode_error, symbol, symbols, syntax_error, unresolved, value, values,
+        decode_error, symbol, symbols, syntax_error, text_of, unresolved, value, values,
     };
     use crate::symbols::{Symbols, SymbolsParser};
-    use anyhow::Context;
 
     /// The symbols of `source`, a Java file.
     fn java(source: &str) -> anyhow::Result<Symbols> {
@@ -377,9 +376,7 @@ record Pair<A, B>(A first, B second) {}
 
 @interface Marker {}
 "#;
-        // The class `Config` runs from its annotation to the line before `interface Service`.
-        let config = &source[source.find("@Deprecated").context("no class")?
-            ..source.find("\n\ninterface").context("no interface")?];
+        let config = text_of(source, "@Deprecated", "\n}")?;
 
         // <block affects="docs/symbols.md:java-paths, src/skill.md#/blockwatch/Symbols/Java">
         assert_eq!(

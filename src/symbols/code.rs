@@ -529,6 +529,18 @@ pub(crate) fn string_from_utf16(units: Vec<u16>) -> anyhow::Result<String> {
 pub(crate) mod test_utils {
     use crate::symbol_path::SymbolPath;
     use crate::symbols::Symbols;
+    use anyhow::Context;
+
+    /// The text of `source` from the first `start` up to the first `end` after it, `end`
+    /// included. For example, the text of a class from its first line to its closing brace.
+    ///
+    /// # Errors
+    /// Returns an error if `source` holds no `start`, or no `end` after it.
+    pub(crate) fn text_of<'a>(source: &'a str, start: &str, end: &str) -> anyhow::Result<&'a str> {
+        let start = source.find(start).context("no start")?;
+        let end = start + source[start..].find(end).context("no end")? + end.len();
+        Ok(&source[start..end])
+    }
 
     /// Each of `symbols`, the symbols of `source`, as [`symbol`] writes it.
     ///
