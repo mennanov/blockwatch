@@ -74,7 +74,8 @@ fn push_members<'tree>(
     bodies: &mut Vec<(Node<'tree>, Vec<Node<'tree>>)>,
 ) {
     let mut cursor = body.walk();
-    for member in body.named_children(&mut cursor) {
+    let members: Vec<Node> = body.children(&mut cursor).collect();
+    for (index, &member) in members.iter().enumerate() {
         let (name, value) = match member.kind() {
             "attribute" => (
                 member.named_child(0),
@@ -98,7 +99,12 @@ fn push_members<'tree>(
         let Some(name) = name else {
             continue;
         };
-        definitions.push(Definition::new(parents.clone(), name, range(member), value));
+        definitions.push(Definition::new(
+            parents.clone(),
+            name,
+            range(member, &members[index + 1..], body),
+            value,
+        ));
         if let Some(object) = value
             .filter(|value| value.kind() == "collection_value")
             .and_then(|value| child(value, "object"))
@@ -169,16 +175,26 @@ fn key_name<'tree>(key: Node<'tree>, source: &str) -> Option<Node<'tree>> {
     }
 }
 
-/// The byte range of `member`, an attribute or an object's item. It also covers the text that
-/// the parser skipped right after it, on the same line.
-fn range(member: Node) -> std::ops::Range<usize> {
+/// The byte range of `member`, an attribute or an object's item in `body`. It also covers the
+/// text that the parser skipped right after it, on the same line. `after` are the nodes that come
+/// after `member` in `body`.
+fn range<'tree>(
+    member: Node<'tree>,
+    after: &[Node<'tree>],
+    body: Node<'tree>,
+) -> std::ops::Range<usize> {
     // In `x = 1 +`, the parser reads `x = 1` and skips the `+` after it. The `+` belongs to the
     // value, so it makes the value unreadable. When `x = 1` ends its body, the skipped text comes
     // after the body. A comment can sit in between. Unlike `is_extra`, the kind tells a comment
     // from the skipped text.
-    let next = std::iter::successors(Some(member), Node::parent).find_map(|node| {
-        std::iter::successors(node.next_sibling(), Node::next_sibling)
-            .find(|next| next.kind() != "comment")
+    let is_not_comment = |node: &Node| node.kind() != "comment";
+    // `next_sibling` and `parent` search the tree from its root, so each call is as slow as the
+    // tree is deep. `after` is checked first, so that deeply nested objects don't take quadratic
+    // time.
+    let next = after.iter().copied().find(is_not_comment).or_else(|| {
+        std::iter::successors(Some(body), Node::parent).find_map(|node| {
+            std::iter::successors(node.next_sibling(), Node::next_sibling).find(is_not_comment)
+        })
     });
     match next {
         Some(next) if next.is_error() && next.start_position().row == member.end_position().row => {
@@ -808,6 +824,21 @@ variable "after" {
             unresolved(&hcl(source)?, source, "/variable/broken/default")?,
             syntax_error(2, 23, "default")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn syntax_error_between_items_parse_symbols_makes_only_the_item_before_it_unreadable()
+    -> anyhow::Result<()> {
+        let source = "m = { a = 1 + , b = 2 }\n";
+
+        let symbols = hcl(source)?;
+
+        assert_eq!(
+            unresolved(&symbols, source, "/m/a")?,
+            syntax_error(1, 13, "a")
+        );
+        assert_eq!(values(&symbols, source), vec![value("/m/b", "2")]);
         Ok(())
     }
 
