@@ -148,7 +148,7 @@ impl Symbols {
     /// A filter in `path`, such as `~[name=blue]`, stands for the one child of the path before it
     /// whose `name` key holds the value `blue`. A child is a list item or a map entry. A string
     /// value matches without its quotes, and any other value as written. When several children
-    /// share a path, such as two HCL blocks with one type, the rest of the path looks only inside
+    /// share a path, such as two `ingress` blocks in HCL, the rest of the path looks only inside
     /// the one that the filter picked.
     ///
     /// When no symbol has `path`, the hints are the paths that resemble it: those at least 60%
@@ -277,8 +277,8 @@ const MIN_HINT_SIMILARITY: f64 = 0.6;
 /// `/items/1` for `/items/~[name=blue]`, and the symbols that the rest of the path can resolve
 /// to, in document order. A path without filters comes back unchanged, with every symbol.
 ///
-/// When several children share the path of the one a filter matches, such as two HCL blocks with
-/// one type, the symbols are only those inside the child that holds the matched key, if one does.
+/// When several children share the path of the one a filter matches, such as two `ingress` blocks
+/// in HCL, the symbols are only those inside the child that holds the matched key, if one does.
 ///
 /// # Errors
 /// Returns [`ResolveError::NotFound`] when a filter matches no child, and
@@ -566,60 +566,78 @@ mod resolve_tests {
         }
     }
 
-    /// The symbols of the list `/items`, with one item for each of `names`. Each item is a map
-    /// with two keys: `name`, which holds one of `names`, and `content`, which holds a list or a
-    /// map.
-    fn named_items(names: &[&str]) -> Symbols {
-        names
+    /// The filter `~[key=value]`.
+    fn filter(key: &str, value: &str) -> Segment {
+        Segment::Filter {
+            key: key.to_string(),
+            value: value.to_string(),
+        }
+    }
+
+    /// The symbols of one item of the list that `named_items` builds.
+    struct ListItem {
+        name: Symbol,
+        content: Symbol,
+    }
+
+    /// The symbols of the list `/items`, with one item for each of `names`, and the symbols of
+    /// each item in the same order. Each item is a map with two keys: `name`, which holds one of
+    /// `names`, and `content`, which holds a list or a map.
+    fn named_items<const N: usize>(names: [&str; N]) -> (Symbols, [ListItem; N]) {
+        let items: [ListItem; N] = std::array::from_fn(|index| ListItem {
+            name: scalar(&format!("/items/{index}/name"), 2 * index, names[index]),
+            content: symbol(&format!("/items/{index}/content"), 2 * index + 1),
+        });
+        let symbols = items
             .iter()
-            .enumerate()
-            .flat_map(|(index, name)| {
-                [
-                    scalar(&format!("/items/{index}/name"), 2 * index, name),
-                    symbol(&format!("/items/{index}/content"), 2 * index + 1),
-                ]
-            })
-            .collect::<Vec<Symbol>>()
-            .into()
+            .flat_map(|item| [item.name.clone(), item.content.clone()])
+            .collect::<Vec<Symbol>>();
+        (symbols.into(), items)
     }
 
     #[test]
     fn path_of_one_symbol_returns_that_symbol() {
-        let symbols = Symbols::from(vec![symbol("/a/b", 0), symbol("/b", 1)]);
+        let b = symbol("/b", 1);
+        let symbols = Symbols::from(vec![symbol("/a/b", 0), b.clone()]);
 
-        assert_eq!(symbols.resolve(&path("/b")), Ok(&symbols.symbols[1]));
+        assert_eq!(symbols.resolve(&path("/b")), Ok(&b));
     }
 
     #[test]
     fn path_of_several_symbols_returns_every_one_as_ambiguous() {
-        let symbols = Symbols::from(vec![symbol("/v", 0), symbol("/w", 1), symbol("/v", 2)]);
+        let first = symbol("/v", 0);
+        let second = symbol("/v", 2);
+        let symbols = Symbols::from(vec![first.clone(), symbol("/w", 1), second.clone()]);
 
         assert_eq!(
             symbols.resolve(&path("/v")),
             Err(ResolveError::AmbiguousSymbol {
-                candidates: vec![&symbols.symbols[0], &symbols.symbols[2]]
+                candidates: vec![&first, &second]
             })
         );
     }
 
-    /// The symbols `/a`, `/a/b`, `/a/c`, `/b` and `/bc`, with `/a/c` unreadable and `b` skipped.
-    fn symbols_with_unreadable_names() -> Symbols {
-        Symbols {
-            symbols: vec![
-                symbol("/a", 0),
-                symbol("/a/b", 1),
-                symbol("/a/c", 2),
-                symbol("/b", 3),
-                symbol("/bc", 4),
-            ],
+    /// The symbols `/a`, `/a/b`, `/a/c`, `/b` and `/bc`, with `/a/c` unreadable and `b` skipped,
+    /// and each of the symbols in that order.
+    fn symbols_with_unreadable_names() -> (Symbols, [Symbol; 5]) {
+        let named = [
+            symbol("/a", 0),
+            symbol("/a/b", 1),
+            symbol("/a/c", 2),
+            symbol("/b", 3),
+            symbol("/bc", 4),
+        ];
+        let symbols = Symbols {
+            symbols: named.to_vec(),
             unreadable: HashMap::from([(path("/a/c"), "syntax error in c".to_string())]),
             skipped: HashMap::from([("b".to_string(), "syntax error near b".to_string())]),
-        }
+        };
+        (symbols, named)
     }
 
     #[test]
     fn unreadable_path_returns_its_reason_even_when_a_symbol_has_it() {
-        let symbols = symbols_with_unreadable_names();
+        let (symbols, _) = symbols_with_unreadable_names();
 
         let error = symbols.resolve(&path("/a/c")).unwrap_err();
 
@@ -628,14 +646,14 @@ mod resolve_tests {
 
     #[test]
     fn path_around_an_unreadable_path_resolves() {
-        let symbols = symbols_with_unreadable_names();
+        let (symbols, [a, ..]) = symbols_with_unreadable_names();
 
-        assert_eq!(symbols.resolve(&path("/a")), Ok(&symbols.symbols[0]));
+        assert_eq!(symbols.resolve(&path("/a")), Ok(&a));
     }
 
     #[test]
     fn skipped_word_returns_its_reason_even_when_a_symbol_has_it() {
-        let symbols = symbols_with_unreadable_names();
+        let (symbols, _) = symbols_with_unreadable_names();
 
         let error = symbols.resolve(&path("/b")).unwrap_err();
 
@@ -644,7 +662,7 @@ mod resolve_tests {
 
     #[test]
     fn path_under_a_skipped_word_returns_its_reason() {
-        let symbols = symbols_with_unreadable_names();
+        let (symbols, _) = symbols_with_unreadable_names();
 
         assert_eq!(
             symbols.resolve(&path("/b/c")),
@@ -656,7 +674,7 @@ mod resolve_tests {
 
     #[test]
     fn path_that_ends_in_a_skipped_word_returns_its_reason() {
-        let symbols = symbols_with_unreadable_names();
+        let (symbols, _) = symbols_with_unreadable_names();
 
         assert_eq!(
             symbols.resolve(&path("/a/b")),
@@ -668,9 +686,9 @@ mod resolve_tests {
 
     #[test]
     fn name_that_starts_with_a_skipped_word_resolves() {
-        let symbols = symbols_with_unreadable_names();
+        let (symbols, [.., bc]) = symbols_with_unreadable_names();
 
-        assert_eq!(symbols.resolve(&path("/bc")), Ok(&symbols.symbols[4]));
+        assert_eq!(symbols.resolve(&path("/bc")), Ok(&bc));
     }
 
     #[test]
@@ -685,7 +703,7 @@ mod resolve_tests {
         assert_eq!(
             symbols.resolve(&path("/verison")),
             Err(ResolveError::NotFound {
-                hints: vec![symbols.symbols[1].path.clone()]
+                hints: vec![path("/version")]
             })
         );
     }
@@ -700,7 +718,7 @@ mod resolve_tests {
         assert_eq!(
             symbols.resolve(&path("/dependencies/@types/node")),
             Err(ResolveError::NotFound {
-                hints: vec![symbols.symbols[0].path.clone()]
+                hints: vec![path("/dependencies/@types~1node")]
             })
         );
     }
@@ -716,7 +734,7 @@ mod resolve_tests {
         assert_eq!(
             symbols.resolve(&path("/RetryConfig")),
             Err(ResolveError::NotFound {
-                hints: vec![symbols.symbols[0].path.clone()]
+                hints: vec![path("/network/services/RetryConfig")]
             })
         );
     }
@@ -734,11 +752,7 @@ mod resolve_tests {
         assert_eq!(
             symbols.resolve(&path("/timeout")),
             Err(ResolveError::NotFound {
-                hints: vec![
-                    symbols.symbols[2].path.clone(),
-                    symbols.symbols[3].path.clone(),
-                    symbols.symbols[1].path.clone(),
-                ]
+                hints: vec![path("/timeouts"), path("/timeout_s"), path("/timeout_ms")]
             })
         );
     }
@@ -751,30 +765,30 @@ mod resolve_tests {
         assert_eq!(
             symbols.resolve(&path("/abcd")),
             Err(ResolveError::NotFound {
-                hints: vec![symbols.symbols[0].path.clone()]
+                hints: vec![path("/abXY")]
             })
         );
     }
 
     #[test]
     fn filter_matching_one_child_returns_the_symbol_under_it() {
-        let symbols = named_items(&["red", "blue"]);
+        let (symbols, [_red, blue]) = named_items(["red", "blue"]);
 
         assert_eq!(
             symbols.resolve(&path("/items/~[name=blue]/content")),
-            Ok(&symbols.symbols[3])
+            Ok(&blue.content)
         );
     }
 
     #[test]
     fn filter_matching_several_children_returns_their_keys_as_ambiguous() {
-        let symbols = named_items(&["blue", "red", "blue"]);
+        let (symbols, [first_blue, _red, second_blue]) = named_items(["blue", "red", "blue"]);
 
         assert_eq!(
             symbols.resolve(&path("/items/~[name=blue]/content")),
             Err(ResolveError::AmbiguousFilter {
-                filter: path("/~[name=blue]").segments()[0].clone(),
-                keys: vec![&symbols.symbols[0], &symbols.symbols[4]]
+                filter: filter("name", "blue"),
+                keys: vec![&first_blue.name, &second_blue.name]
             })
         );
     }
@@ -782,7 +796,7 @@ mod resolve_tests {
     #[test]
     fn filter_matching_no_child_returns_the_other_values_as_hints() {
         // `blues` is more alike to `blue` than `red` is, so it comes first.
-        let symbols = named_items(&["red", "blues"]);
+        let (symbols, _) = named_items(["red", "blues"]);
 
         assert_eq!(
             symbols.resolve(&path("/items/~[name=blue]/content")),
@@ -799,7 +813,7 @@ mod resolve_tests {
     fn filter_matching_no_child_leaves_values_of_several_children_out_of_hints() {
         // `blues` is the most alike value, but two children hold it, so
         // `/items/~[name=blues]/content` would not resolve either.
-        let symbols = named_items(&["blues", "red", "blues"]);
+        let (symbols, _) = named_items(["blues", "red", "blues"]);
 
         assert_eq!(
             symbols.resolve(&path("/items/~[name=blue]/content")),
@@ -829,51 +843,48 @@ mod resolve_tests {
     fn filters_in_two_segments_resolve_one_after_the_other() {
         // Both groups have an item named `blue`, so the second filter has to look only under
         // `second`.
+        let second_content = symbol("/groups/1/items/0/content", 5);
         let symbols = Symbols::from(vec![
             scalar("/groups/0/name", 0, "first"),
             scalar("/groups/0/items/0/name", 1, "blue"),
             symbol("/groups/0/items/0/content", 2),
             scalar("/groups/1/name", 3, "second"),
             scalar("/groups/1/items/0/name", 4, "blue"),
-            symbol("/groups/1/items/0/content", 5),
+            second_content.clone(),
         ]);
 
         assert_eq!(
             symbols.resolve(&path("/groups/~[name=second]/items/~[name=blue]/content")),
-            Ok(&symbols.symbols[5])
+            Ok(&second_content)
         );
     }
 
     #[test]
     fn filter_at_the_root_selects_a_list_item() {
         // The file is a list, so no key comes before the filter.
+        let blue = symbol("/1", 2);
         let symbols = Symbols::from(vec![
             symbol("/0", 0),
             scalar("/0/name", 1, "red"),
-            symbol("/1", 2),
+            blue.clone(),
             scalar("/1/name", 3, "blue"),
         ]);
 
-        assert_eq!(
-            symbols.resolve(&path("/~[name=blue]")),
-            Ok(&symbols.symbols[2])
-        );
+        assert_eq!(symbols.resolve(&path("/~[name=blue]")), Ok(&blue));
     }
 
     #[test]
     fn filter_selects_an_entry_of_a_map() {
         // `b` is a key of a map, not a position in a list.
+        let blue = symbol("/items/b", 2);
         let symbols = Symbols::from(vec![
             symbol("/items/a", 0),
             scalar("/items/a/name", 1, "red"),
-            symbol("/items/b", 2),
+            blue.clone(),
             scalar("/items/b/name", 3, "blue"),
         ]);
 
-        assert_eq!(
-            symbols.resolve(&path("/items/~[name=blue]")),
-            Ok(&symbols.symbols[2])
-        );
+        assert_eq!(symbols.resolve(&path("/items/~[name=blue]")), Ok(&blue));
     }
 
     #[test]
@@ -938,7 +949,7 @@ mod resolve_tests {
     fn filter_then_missing_key_returns_hints_only_under_the_matched_child() {
         // `/items/1/content` is 88% alike to `/items/0/contents`, the path with the filter resolved,
         // but it belongs to `red`.
-        let symbols = named_items(&["blue", "red"]);
+        let (symbols, _) = named_items(["blue", "red"]);
 
         assert_eq!(
             symbols.resolve(&path("/items/~[name=blue]/contents")),
@@ -970,43 +981,68 @@ mod resolve_tests {
         );
     }
 
+    /// The symbols of one item that shares its path with other items.
+    struct ItemAtOnePath {
+        /// The item itself.
+        element: Symbol,
+        name: Symbol,
+        content: Symbol,
+    }
+
+    impl ItemAtOnePath {
+        /// The item at `path`, written at `range`, with its two keys: `name`, which holds `name`,
+        /// and `content`.
+        fn new(path_text: &str, range: Range<usize>, name: &str) -> Self {
+            Self {
+                element: element(path_text, range.clone()),
+                name: scalar(&format!("{path_text}/name"), range.start + 1, name),
+                content: symbol(&format!("{path_text}/content"), range.start + 2),
+            }
+        }
+
+        /// The item's symbols, in document order.
+        fn symbols(&self) -> [Symbol; 3] {
+            [
+                self.element.clone(),
+                self.name.clone(),
+                self.content.clone(),
+            ]
+        }
+    }
+
     /// The symbols of `/items`, with one item for each of `names`, all at the path `/items/item`,
-    /// as XML gives sibling elements with one name. Each item holds two keys: `name`, which holds
-    /// one of `names`, and `content`.
-    fn items_at_one_path(names: &[&str]) -> Symbols {
-        names
+    /// as two `ingress` blocks in HCL are, and the symbols of each item in the same order. Each
+    /// item starts right where the one before it ends.
+    fn items_at_one_path<const N: usize>(names: [&str; N]) -> (Symbols, [ItemAtOnePath; N]) {
+        let items: [ItemAtOnePath; N] = std::array::from_fn(|index| {
+            let start = 10 * index;
+            ItemAtOnePath::new("/items/item", start..start + 10, names[index])
+        });
+        let symbols = items
             .iter()
-            .enumerate()
-            .flat_map(|(index, name)| {
-                let start = 10 * index;
-                [
-                    element("/items/item", start..start + 10),
-                    scalar("/items/item/name", start + 1, name),
-                    symbol("/items/item/content", start + 2),
-                ]
-            })
-            .collect::<Vec<Symbol>>()
-            .into()
+            .flat_map(ItemAtOnePath::symbols)
+            .collect::<Vec<Symbol>>();
+        (symbols.into(), items)
     }
 
     #[test]
     fn filter_over_items_at_one_path_returns_the_symbol_under_the_picked_item() {
-        let symbols = items_at_one_path(&["red", "blue"]);
+        let (symbols, [_red, blue]) = items_at_one_path(["red", "blue"]);
 
         assert_eq!(
             symbols.resolve(&path("/items/~[name=blue]/content")),
-            Ok(&symbols.symbols[5])
+            Ok(&blue.content)
         );
     }
 
     #[test]
     fn filter_at_the_end_over_items_at_one_path_returns_the_picked_item() {
         // `blue` starts right where `red` ends.
-        let symbols = items_at_one_path(&["red", "blue"]);
+        let (symbols, [red, _blue]) = items_at_one_path(["red", "blue"]);
 
         assert_eq!(
             symbols.resolve(&path("/items/~[name=red]")),
-            Ok(&symbols.symbols[0])
+            Ok(&red.element)
         );
     }
 
@@ -1032,48 +1068,64 @@ mod resolve_tests {
         );
     }
 
+    /// The symbols of one group that `groups_at_one_path` builds.
+    struct GroupAtOnePath {
+        name: Symbol,
+        /// The one item in the group's list `items`.
+        item: ItemAtOnePath,
+    }
+
     /// The symbols of `/groups`, with one group for each of `groups`, all at the path
-    /// `/groups/group`. Each group holds a `name`, which holds the first value of its pair, and a
-    /// list `items` with one item. That item holds a `name`, which holds the second value, and
-    /// `content`.
-    fn groups_at_one_path(groups: &[(&str, &str)]) -> Symbols {
-        groups
-            .iter()
-            .enumerate()
-            .flat_map(|(index, (group_name, item_name))| {
-                let start = 10 * index;
-                [
-                    element("/groups/group", start..start + 10),
-                    scalar("/groups/group/name", start + 1, group_name),
-                    element("/groups/group/items", start + 2..start + 10),
-                    element("/groups/group/items/item", start + 3..start + 10),
-                    scalar("/groups/group/items/item/name", start + 4, item_name),
-                    symbol("/groups/group/items/item/content", start + 5),
-                ]
-            })
-            .collect::<Vec<Symbol>>()
-            .into()
+    /// `/groups/group`, and the symbols of each group in the same order. Each group holds a
+    /// `name`, which holds the first value of its pair, and a list `items` with one item, whose
+    /// `name` holds the second value.
+    fn groups_at_one_path<const N: usize>(
+        groups: [(&str, &str); N],
+    ) -> (Symbols, [GroupAtOnePath; N]) {
+        let mut symbols = Vec::new();
+        let groups: [GroupAtOnePath; N] = std::array::from_fn(|index| {
+            let (group_name, item_name) = groups[index];
+            let start = 10 * index;
+            let group = GroupAtOnePath {
+                name: scalar("/groups/group/name", start + 1, group_name),
+                item: ItemAtOnePath::new(
+                    "/groups/group/items/item",
+                    start + 3..start + 10,
+                    item_name,
+                ),
+            };
+            symbols.extend([
+                element("/groups/group", start..start + 10),
+                group.name.clone(),
+                element("/groups/group/items", start + 2..start + 10),
+            ]);
+            symbols.extend(group.item.symbols());
+            group
+        });
+        (symbols.into(), groups)
     }
 
     #[test]
     fn second_filter_over_groups_at_one_path_looks_only_inside_the_first_pick() {
-        let symbols = groups_at_one_path(&[("first", "blue"), ("second", "blue")]);
+        let (symbols, [_first, second]) =
+            groups_at_one_path([("first", "blue"), ("second", "blue")]);
 
         assert_eq!(
             symbols.resolve(&path("/groups/~[name=second]/items/~[name=blue]/content")),
-            Ok(&symbols.symbols[11])
+            Ok(&second.item.content)
         );
     }
 
     #[test]
     fn filter_matching_under_two_groups_at_one_path_returns_their_keys_as_ambiguous() {
-        let symbols = groups_at_one_path(&[("first", "blue"), ("second", "blue")]);
+        let (symbols, [first, second]) =
+            groups_at_one_path([("first", "blue"), ("second", "blue")]);
 
         assert_eq!(
             symbols.resolve(&path("/groups/group/items/~[name=blue]/content")),
             Err(ResolveError::AmbiguousFilter {
-                filter: path("/~[name=blue]").segments()[0].clone(),
-                keys: vec![&symbols.symbols[4], &symbols.symbols[10]]
+                filter: filter("name", "blue"),
+                keys: vec![&first.item.name, &second.item.name]
             })
         );
     }
@@ -1081,17 +1133,17 @@ mod resolve_tests {
     #[test]
     fn filter_under_a_parent_at_one_path_picks_among_the_items_of_every_copy() {
         // The groups have no key that tells them apart, so the filter can't pick a group first.
-        let symbols = groups_at_one_path(&[("first", "red"), ("second", "blue")]);
+        let (symbols, [_red, blue]) = groups_at_one_path([("same", "red"), ("same", "blue")]);
 
         assert_eq!(
             symbols.resolve(&path("/groups/group/items/~[name=blue]/content")),
-            Ok(&symbols.symbols[11])
+            Ok(&blue.item.content)
         );
     }
 
     #[test]
     fn second_filter_matching_no_child_returns_hints_only_from_the_first_pick() {
-        let symbols = groups_at_one_path(&[("first", "blue"), ("second", "red")]);
+        let (symbols, _) = groups_at_one_path([("first", "blue"), ("second", "red")]);
 
         assert_eq!(
             symbols.resolve(&path("/groups/~[name=second]/items/~[name=green]/content")),
@@ -1105,32 +1157,32 @@ mod resolve_tests {
     fn filter_over_an_item_with_its_own_path_returns_a_symbol_written_outside_it() {
         // A Swift extension adds members to a type outside the type's text. The type is the only
         // item at its path, so the filter has no other item to tell it apart from.
+        let extra = symbol("/Config/extra", 20);
         let symbols = Symbols::from(vec![
             element("/Config", 0..10),
             scalar("/Config/name", 1, "blue"),
-            symbol("/Config/extra", 20),
+            extra.clone(),
         ]);
 
-        assert_eq!(
-            symbols.resolve(&path("/~[name=blue]/extra")),
-            Ok(&symbols.symbols[2])
-        );
+        assert_eq!(symbols.resolve(&path("/~[name=blue]/extra")), Ok(&extra));
     }
 
     #[test]
     fn filter_over_items_at_one_path_with_the_key_outside_them_returns_them_as_ambiguous() {
         // A type defined twice, such as in two branches of an `#if`, and a Swift extension of it
         // outside both copies.
+        let first = element("/Config", 0..10);
+        let second = element("/Config", 10..20);
         let symbols = Symbols::from(vec![
-            element("/Config", 0..10),
-            element("/Config", 10..20),
+            first.clone(),
+            second.clone(),
             scalar("/Config/name", 30, "blue"),
         ]);
 
         assert_eq!(
             symbols.resolve(&path("/~[name=blue]")),
             Err(ResolveError::AmbiguousSymbol {
-                candidates: vec![&symbols.symbols[0], &symbols.symbols[1]]
+                candidates: vec![&first, &second]
             })
         );
     }
@@ -1138,9 +1190,10 @@ mod resolve_tests {
     #[test]
     fn duplicate_keys_on_one_line_reason_lists_each_line_and_column() {
         let source = r#"{"v": 1, "v": 2}"#;
-        let symbols = Symbols::from(vec![symbol("/v", 1), symbol("/v", 9)]);
+        let first = symbol("/v", 1);
+        let second = symbol("/v", 9);
         let error = ResolveError::AmbiguousSymbol {
-            candidates: vec![&symbols.symbols[0], &symbols.symbols[1]],
+            candidates: vec![&first, &second],
         };
 
         assert_eq!(
@@ -1152,10 +1205,11 @@ mod resolve_tests {
     #[test]
     fn ambiguous_filter_reason_counts_the_children_and_lists_where_each_key_is() {
         let source = "- name: blue\n- name: blue\n";
-        let keys = [symbol("/0/name", 2), symbol("/1/name", 15)];
+        let first = symbol("/0/name", 2);
+        let second = symbol("/1/name", 15);
         let error = ResolveError::AmbiguousFilter {
-            filter: path("/~[name=blue]").segments()[0].clone(),
-            keys: vec![&keys[0], &keys[1]],
+            filter: filter("name", "blue"),
+            keys: vec![&first, &second],
         };
 
         assert_eq!(
