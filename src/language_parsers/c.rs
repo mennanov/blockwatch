@@ -45,6 +45,7 @@ impl SymbolsParser for CSymbolsParser {
             &definitions,
             &decode_string,
             None,
+            &[],
         ))
     }
 }

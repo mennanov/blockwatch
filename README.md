@@ -258,7 +258,7 @@ For plain git hooks, local pre-commit setups, and sandboxing untrusted Lua scrip
 - Go (with `go.mod`, `go.sum` and `go.work` support)
 - GraphQL (`.graphql`, `.graphqls`, `.gql`)
 - Groovy (with `.gradle` and `Jenkinsfile` support)
-- HCL (Terraform and OpenTofu: `.tf`, `.tfvars`, `.tofu`, `.hcl`)
+- HCL (Terraform and OpenTofu: `.tf`, `.tfvars`, `.tofu`, `.hcl`; Nomad: `.nomad`)
 - HTML (with `.xhtml` support)
 - JSON (`.json`, `.jsonc`, `.webmanifest`)
 - Java

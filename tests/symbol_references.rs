@@ -161,6 +161,13 @@ fn tofu_target_resolves() {
 }
 
 #[test]
+fn nomad_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/nomad_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
 fn tfvars_target_resolves() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/symbol_references/tfvars_source.rs");

@@ -900,6 +900,10 @@ mod supported_languages_tests {
                 "# <block>\nregion = \"eu-central-1\"\n# </block>".to_string(),
             ),
             (
+                "nomad.nomad".to_string(),
+                "# <block>\ndatacenters = [\"dc1\"]\n# </block>".to_string(),
+            ),
+            (
                 "htm.htm".to_string(),
                 "<!-- <block> -->\n<div>Content</div>\n<!-- </block> -->".to_string(),
             ),

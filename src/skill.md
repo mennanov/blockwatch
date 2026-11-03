@@ -158,7 +158,8 @@ Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`
 `.hh`, `.hpp`, `.hxx`), Python (`.py`, `.pyi`, `.pyw`), Starlark (`.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`,
 `BUCK`, `WORKSPACE`, `Tiltfile`), Rust (`.rs`), TypeScript (`.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`), JavaScript
 (`.js`, `.mjs`, `.cjs`, `.jsx`), Java (`.java`), C# (`.cs`), Kotlin (`.kt`, `.kts`), Swift (`.swift`), Protocol
-Buffers (`.proto`), and HCL (`.tf`, `.tofu`, `.tfvars`, `.hcl`). A path into any other file fails the run.
+Buffers (`.proto`), and HCL (`.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`). A path into any other file fails the
+run.
 
 ### Writing a path
 

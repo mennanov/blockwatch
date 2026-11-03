@@ -78,6 +78,10 @@ pub(crate) trait CodeLanguage: Send + Sync {
     /// `` `is` ``. The name is the same without them. `None` when the language has no such
     /// character.
     const NAME_QUOTE: Option<char> = None;
+
+    /// The characters other than letters, digits and `_` that can be inside a name, such as the
+    /// `-` of HCL's `my-key`.
+    const NAME_PUNCTUATION: &'static [char] = &[];
 }
 
 /// Finds the symbols of a file in `language`.
@@ -112,6 +116,7 @@ impl<L: CodeLanguage> SymbolsParser for CodeSymbolsParser<L> {
             &definitions,
             &|node, source| self.language.decode_string(node, source),
             L::NAME_QUOTE,
+            L::NAME_PUNCTUATION,
         ))
     }
 }
@@ -129,7 +134,7 @@ impl<L: CodeLanguage> SymbolsParser for CodeSymbolsParser<L> {
 /// - its definition holds a syntax error, such as a span the parser skipped or a token it
 ///   assumed was missing;
 /// - one of its segments appears as a whole word, or between two `name_quote`s, in a span the
-///   parser skipped anywhere in the file;
+///   parser skipped anywhere in the file. A word can hold the `name_punctuation` too;
 /// - the walk or `decode_string` can't read its value.
 ///
 /// A definition with a problem of its own gives no symbol. Another definition at the same path
@@ -141,6 +146,7 @@ pub(crate) fn symbols(
     definitions: &[Definition],
     decode_string: StringDecoder<'_>,
     name_quote: Option<char>,
+    name_punctuation: &[char],
 ) -> Symbols {
     let errors = syntax_errors(tree);
     let mut symbols = Vec::new();
@@ -175,7 +181,7 @@ pub(crate) fn symbols(
     // unreadable, defined or not.
     let mut skipped = HashMap::new();
     for error in errors.iter().filter(|error| error.is_error()) {
-        for name in names_in(node_text(error, source), name_quote) {
+        for name in names_in(node_text(error, source), name_quote, name_punctuation) {
             skipped
                 .entry(name.to_string())
                 .or_insert_with(|| Problem::SyntaxError(*error).reason(name, source));
@@ -329,12 +335,16 @@ fn error_in(definition: &Range<usize>, error: &Range<usize>) -> bool {
 
 /// `node` without the parentheses around it, however many there are. In `(1) + (2)`, the
 /// parentheses are not around the whole value, so they stay.
-fn without_parentheses(mut node: Node<'_>) -> Node<'_> {
+pub(crate) fn without_parentheses(mut node: Node<'_>) -> Node<'_> {
     let mut cursor = node.walk();
     // Every grammar with code symbols gives parentheses one of these node kinds. Swift's grammar
     // reads `(1)` as a tuple with one value. A real tuple with one value, Rust's `(1,)`, has a
-    // comma.
-    while matches!(node.kind(), "parenthesized_expression" | "tuple_expression") {
+    // comma. HCL's grammar puts every value in an `expression`, and writes `(3)` as an
+    // `expression` that holds `(`, an `expression` and `)`.
+    while matches!(
+        node.kind(),
+        "parenthesized_expression" | "tuple_expression" | "expression"
+    ) {
         if node.children(&mut cursor).any(|child| child.kind() == ",") {
             break;
         }
@@ -355,11 +365,23 @@ fn without_parentheses(mut node: Node<'_>) -> Node<'_> {
 }
 
 /// The words in `text` that could be names: runs of letters, digits and `_` that don't start
-/// with a digit, and the text after each `quote`, up to the next one.
-fn names_in(text: &str, quote: Option<char>) -> impl Iterator<Item = &str> {
-    let words = text
-        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
-        .filter(|word| word.chars().next().is_some_and(|first| !first.is_numeric()));
+/// with a digit, the same runs with the `punctuation` in them too, and the text after each
+/// `quote`, up to the next one.
+fn names_in<'a>(
+    text: &'a str,
+    quote: Option<char>,
+    punctuation: &'a [char],
+) -> impl Iterator<Item = &'a str> {
+    // Punctuation is part of a name only in some places. HCL reads `a-b` as one name, but
+    // `1 -c` as a minus and the name `c`. So the runs without it count too.
+    let words = [&[][..], punctuation]
+        .into_iter()
+        .flat_map(move |punctuation| {
+            text.split(move |c: char| {
+                !(c.is_alphanumeric() || c == '_' || punctuation.contains(&c))
+            })
+            .filter(|word| word.chars().next().is_some_and(|first| !first.is_numeric()))
+        });
     // A quoted name can hold spaces, so its words alone don't make it unreadable. A quote inside a
     // string in `text` would pair the quotes wrongly, so every text between two quotes counts, and
     // the words stay too.
@@ -649,6 +671,7 @@ mod tests {
             &definitions,
             &decode_plain_string,
             None,
+            &[],
         ))
     }
 

@@ -59,6 +59,8 @@ impl CodeLanguage for Hcl {
     }
 
     const NAME_QUOTE: Option<char> = Some('"');
+
+    const NAME_PUNCTUATION: &'static [char] = &['-', ':'];
 }
 
 /// Adds the definitions of the members of `body` to `definitions`. `body` is the body of a file
@@ -76,13 +78,15 @@ fn push_members<'tree>(
         let (name, value) = match member.kind() {
             "attribute" => (
                 member.named_child(0),
-                child(member, "expression").map(value),
+                child(member, "expression").map(code::without_parentheses),
             ),
             "object_elem" => (
                 member
                     .child_by_field_name("key")
                     .and_then(|key| key_name(key, source)),
-                member.child_by_field_name("val").map(value),
+                member
+                    .child_by_field_name("val")
+                    .map(code::without_parentheses),
             ),
             "block" => {
                 push_block(member, &parents, source, definitions, bodies);
@@ -118,6 +122,7 @@ fn push_block<'tree>(
     // The type comes first, then the labels, up to the `{`.
     let names: Vec<Node> = block
         .named_children(&mut cursor)
+        .filter(|node| node.kind() != "comment")
         .take_while(|node| matches!(node.kind(), "identifier" | "string_lit"))
         .collect();
     // blockwatch doesn't decode a label. Kept as written, it would give a path that HCL reads
@@ -139,10 +144,10 @@ fn push_block<'tree>(
     }
 }
 
-/// The name that `key`, the key of an object's item, gives the item: a name such as `Team`, or a
-/// string such as `"cost center"`. Returns `None` for any other key. HCL works out the key from
-/// an expression such as `(var.k)` or `"${x}"`, and turns a number such as `3` into text, which
-/// blockwatch doesn't do.
+/// The name that `key`, the key of an object's item, gives the item: a name such as `Team`, a
+/// string such as `"cost center"`, or `true` or `false`. Returns `None` for any other key. HCL
+/// works out the key from an expression such as `(var.k)` or `"${x}"`, and turns a number such
+/// as `1e3` into text such as `1000`, which blockwatch doesn't do.
 fn key_name<'tree>(key: Node<'tree>, source: &str) -> Option<Node<'tree>> {
     // A key in parentheses is an expression, even when it is a name: `(k)` is the value of `k`.
     // So a key is a name only when it is the only thing in its `expression`.
@@ -153,29 +158,15 @@ fn key_name<'tree>(key: Node<'tree>, source: &str) -> Option<Node<'tree>> {
     };
     match only.kind() {
         "variable_expr" => child(only, "identifier"),
-        "literal_value" => {
-            child(only, "string_lit").filter(|name| !has_escape(node_text(name, source)))
-        }
+        "literal_value" => only.named_child(0).filter(|literal| match literal.kind() {
+            "string_lit" => !has_escape(node_text(literal, source)),
+            // HCL turns `true` and `false` into the text they are written as.
+            "bool_lit" => true,
+            // A number, or `null`, which HCL rejects as a key.
+            _ => false,
+        }),
         _ => None,
     }
-}
-
-/// `expression`, the value of an attribute or a key, without the `expression` nodes and the
-/// parentheses around it. The grammar puts every value in an `expression`, and writes `(3)` as
-/// an `expression` that holds `(`, an `expression` and `)`.
-fn value(mut expression: Node<'_>) -> Node<'_> {
-    while expression.kind() == "expression" {
-        let mut cursor = expression.walk();
-        // A comment inside the parentheses is a child too, but not part of the value.
-        let mut parts = expression
-            .children(&mut cursor)
-            .filter(|part| !part.is_extra() && !matches!(part.kind(), "(" | ")"));
-        match (parts.next(), parts.next()) {
-            (Some(only), None) => expression = only,
-            _ => break,
-        }
-    }
-    expression
 }
 
 /// The byte range of `member`, an attribute or an object's item. It also covers the text that
@@ -183,17 +174,12 @@ fn value(mut expression: Node<'_>) -> Node<'_> {
 fn range(member: Node) -> std::ops::Range<usize> {
     // In `x = 1 +`, the parser reads `x = 1` and skips the `+` after it. The `+` belongs to the
     // value, so it makes the value unreadable. When `x = 1` ends its body, the skipped text comes
-    // after the body.
-    let mut node = member;
-    let next = loop {
-        match node.next_sibling() {
-            Some(next) => break Some(next),
-            None => match node.parent() {
-                Some(parent) => node = parent,
-                None => break None,
-            },
-        }
-    };
+    // after the body. A comment can sit in between. Unlike `is_extra`, the kind tells a comment
+    // from the skipped text.
+    let next = std::iter::successors(Some(member), Node::parent).find_map(|node| {
+        std::iter::successors(node.next_sibling(), Node::next_sibling)
+            .find(|next| next.kind() != "comment")
+    });
     match next {
         Some(next) if next.is_error() && next.start_position().row == member.end_position().row => {
             member.start_byte()..next.end_byte()
@@ -506,13 +492,32 @@ resource "x" "y" {
     }
 
     #[test]
+    fn comments_between_labels_parse_symbols_leaves_them_out_of_the_path() -> anyhow::Result<()> {
+        let source = r#"resource /* a */ "x" /* b */ "y" {
+  c = 1
+}
+"#;
+
+        assert_eq!(
+            values(&hcl(source)?, source),
+            vec![
+                ("/resource/x/y".to_string(), None),
+                value("/resource/x/y/c", "1"),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn keys_that_are_not_names_parse_symbols_skips_them() -> anyhow::Result<()> {
         let source = r#"m = {
   (var.k) = 1
   "${x}" = 2
   3 = 4
   k.j = 5
-  ok = 6
+  null = 6
+  (true) = 7
+  ok = 8
 }
 "#;
 
@@ -520,7 +525,22 @@ resource "x" "y" {
             values(&hcl(source)?, source),
             vec![
                 value("/m", source.trim_start_matches("m = ").trim_end()),
-                value("/m/ok", "6"),
+                value("/m/ok", "8"),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn true_and_false_keys_parse_symbols_returns_them_as_names() -> anyhow::Result<()> {
+        let source = "m = { true = 1, false = 2 }\n";
+
+        assert_eq!(
+            values(&hcl(source)?, source),
+            vec![
+                value("/m", "{ true = 1, false = 2 }"),
+                value("/m/true", "1"),
+                value("/m/false", "2"),
             ]
         );
         Ok(())
@@ -772,6 +792,45 @@ variable "after" {
         assert_eq!(
             unresolved(&hcl(source)?, source, "/variable/broken/default")?,
             syntax_error(6, 15, "default")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn comment_before_syntax_error_parse_symbols_still_makes_the_definition_unreadable()
+    -> anyhow::Result<()> {
+        let source = r#"variable "broken" {
+  default = 1 /* c */ +
+}
+"#;
+
+        assert_eq!(
+            unresolved(&hcl(source)?, source, "/variable/broken/default")?,
+            syntax_error(2, 23, "default")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn syntax_error_parse_symbols_makes_names_with_dashes_and_colons_in_it_unreadable()
+    -> anyhow::Result<()> {
+        // In HCL, `a-b` is one name, and `-c` is a minus and a name.
+        let source = r#"a-b = 1
+c = 2
+d::e = 3
+) a-b -c d::e
+"#;
+
+        let symbols = hcl(source)?;
+
+        assert_eq!(
+            unresolved(&symbols, source, "/a-b")?,
+            syntax_error(4, 1, "a-b")
+        );
+        assert_eq!(unresolved(&symbols, source, "/c")?, syntax_error(4, 1, "c"));
+        assert_eq!(
+            unresolved(&symbols, source, "/d::e")?,
+            syntax_error(4, 1, "d::e")
         );
         Ok(())
     }

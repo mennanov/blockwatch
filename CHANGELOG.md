@@ -18,8 +18,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   and `#/Item/name` at the number of a field. Each message, enum and service is a symbol, and so is each field, oneof,
   enum value and rpc in it. The package is not part of a path, and options are not symbols. See
   [Protocol Buffers](docs/symbols.md#protocol-buffers).
-- Symbols in HCL files: Terraform and OpenTofu (`.tf`, `.tofu`, `.tfvars`), and `.hcl` files such as Terragrunt's.
-  See [HCL](docs/symbols.md#hcl).
+- Symbols in HCL files: Terraform and OpenTofu (`.tf`, `.tofu`, `.tfvars`), Nomad (`.nomad`), and `.hcl` files such
+  as Terragrunt's. See [HCL](docs/symbols.md#hcl).
+- blockwatch now checks the tags in Nomad job files (`.nomad`). Before, it skipped them.
 
 ## [0.16.4] - 2026-11-03
 

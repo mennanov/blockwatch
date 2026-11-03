@@ -42,7 +42,7 @@ declares, instead of tags in a comment.
 | Kotlin           | `.kt`, `.kts`                                                                  | [Kotlin](#kotlin)                                       |
 | Swift            | `.swift`                                                                       | [Swift](#swift)                                         |
 | Protocol Buffers | `.proto`                                                                       | [Protocol Buffers](#protocol-buffers)                   |
-| HCL (Terraform)  | `.tf`, `.tofu`, `.tfvars`, `.hcl`                                              | [HCL](#hcl)                                             |
+| HCL (Terraform)  | `.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`                                    | [HCL](#hcl)                                             |
 
 <!-- </block> -->
 
@@ -840,8 +840,9 @@ resource "aws_instance" "web" {
 - **A path with only some of a block's labels points at nothing.** `#/resource/aws_instance` is no symbol.
 - **A block written twice in one body makes its path a violation**, such as two `ingress` blocks in a resource. Two
   `locals` blocks make `#/locals` a violation, but `#/locals/name` still resolves when only one of them sets `name`.
-- **A key of an object is a segment when it is a name or a plain string**, such as `Team` or `"cost center"`. A key
-  written as a number or an expression, such as `3` or `(var.k)`, is not. The items of a list are not symbols.
+- **A key of an object is a segment when it is a name, a plain string, `true` or `false`**, such as `Team` or
+  `"cost center"`. A key written as a number or an expression, such as `3` or `(var.k)`, is not. The items of a list
+  are not symbols.
 - **A label or key with an escape, such as `"a\"b"`, gives no symbol**, and neither does anything under it.
 - **A value is the expression as written**, without parentheses around it: `count = (3)` is `3`.
 - **Strings follow HCL's escapes.** `"caf\u00e9"` is `café`, `$${` is `${`, and `%%{` is `%{`. A heredoc is its text,
