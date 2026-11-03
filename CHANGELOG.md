@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.16.4] - 2026-11-03
+
 ### Added
 
 - Symbols in Kotlin files (`.kt` and `.kts`). `Config.kt#/Config/MAX_RETRIES` points at a property of the class
