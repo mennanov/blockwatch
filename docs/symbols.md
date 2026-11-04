@@ -102,6 +102,8 @@ services:
   example, two `ingress` blocks in an HCL resource share a path.
   `#/resource/aws_security_group/web/~[from_port=443]/to_port` is the `to_port` of the block whose `from_port` is
   `443`.
+- **A filter that reaches an unreadable path stops the run**, as that path does. An item blockwatch can't read, such
+  as one with a syntax error, also stops a filter that compares its key, because that item could match too.
 - **The value starts after the first `=` and ends at the last `]`,** so it can hold both. The key can't hold `=`.
   Inside a filter, escape the key and the value like any key: `/` as `~1`, `,` as `%2C`, and so on.
 

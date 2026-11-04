@@ -172,7 +172,8 @@ impl Symbols {
     ///
     /// # Errors
     /// Returns [`ResolveError::Unreadable`] when `path` is an unreadable path, or one of its
-    /// segments is a word the parser skipped. Returns [`ResolveError::NotFound`] when no symbol
+    /// segments is a word the parser skipped. So does a filter that leads to an unreadable path,
+    /// or whose key is unreadable in one of the children. Returns [`ResolveError::NotFound`] when no symbol
     /// matches `path`, or a filter matches no child. Returns [`ResolveError::AmbiguousSymbol`]
     /// when several symbols match `path`, and [`ResolveError::AmbiguousFilter`] when a filter
     /// matches several children.
@@ -189,7 +190,7 @@ impl Symbols {
         if let Some(reason) = unreadable {
             return Err(ResolveError::Unreadable { reason });
         }
-        let (resolved, scope) = resolve_filters(&self.symbols, path)?;
+        let (resolved, scope) = resolve_filters(self, path)?;
         let candidates: Vec<&Symbol> = scope
             .iter()
             .copied()
@@ -298,19 +299,28 @@ const MIN_HINT_SIMILARITY: f64 = 0.6;
 /// [`ResolveError::AmbiguousFilter`] when it matches several. The error is about the first such
 /// filter.
 fn resolve_filters<'a>(
-    symbols: &'a [Symbol],
+    symbols: &'a Symbols,
     path: &SymbolPath,
 ) -> Result<(SymbolPath, Vec<&'a Symbol>), ResolveError<'a>> {
     // Filters are swapped one at a time, from the left. So a filter looks only under the children
     // that the filters before it matched.
     let mut resolved = path.clone();
-    let mut scope: Vec<&Symbol> = symbols.iter().collect();
+    let mut scope: Vec<&Symbol> = symbols.symbols.iter().collect();
     for (index, segment) in path.segments().iter().enumerate() {
         let (key, value) = match segment {
             Segment::Key(_) => continue,
             Segment::Filter { key, value } => (key, value),
         };
         let parent = &resolved.segments()[..index];
+        // An unreadable path has no symbol, so the child it belongs to can't be told apart. Its
+        // key could hold the filter's value too.
+        let unreadable_key = symbols
+            .unreadable
+            .iter()
+            .find(|(unreadable, _)| is_child_key(unreadable, parent, key));
+        if let Some((_, reason)) = unreadable_key {
+            return Err(ResolveError::Unreadable { reason });
+        }
         let matches: Vec<&Symbol> = child_keys(&scope, parent, key)
             .filter(|symbol| {
                 symbol
@@ -354,6 +364,10 @@ fn resolve_filters<'a>(
             }
         }
     }
+    // An unreadable item has no symbol, so the filter may have picked another item at its path.
+    if let Some(reason) = symbols.unreadable.get(&resolved) {
+        return Err(ResolveError::Unreadable { reason });
+    }
     Ok((resolved, scope))
 }
 
@@ -375,15 +389,24 @@ fn child_keys<'s>(
     parent: &[Segment],
     key: &str,
 ) -> impl Iterator<Item = &'s Symbol> {
-    let key = Segment::Key(key.to_string());
+    symbols
+        .iter()
+        .copied()
+        .filter(move |symbol| is_child_key(&symbol.path, parent, key))
+}
+
+/// Whether `path` is the path of the `key` key of a child of `parent`, such as `/items/0/name`
+/// for `parent` `/items` and `key` `name`.
+fn is_child_key(path: &SymbolPath, parent: &[Segment], key: &str) -> bool {
     // A key deeper inside a child, such as `/items/0/content/name`, describes something inside the
     // child, not the child itself.
-    symbols.iter().copied().filter(move |symbol| {
-        let segments = symbol.path.segments();
-        segments.len() == parent.len() + 2
-            && segments.starts_with(parent)
-            && segments[parent.len() + 1] == key
-    })
+    let segments = path.segments();
+    segments.len() == parent.len() + 2
+        && segments.starts_with(parent)
+        && match &segments[parent.len() + 1] {
+            Segment::Key(name) => name == key,
+            Segment::Filter { .. } => false,
+        }
 }
 
 /// The paths to suggest when no symbol has `resolved`, which is `path` with its filters swapped
@@ -1197,6 +1220,79 @@ mod resolve_tests {
             Err(ResolveError::AmbiguousSymbol {
                 candidates: vec![&first, &second]
             })
+        );
+    }
+
+    /// The symbols of `items`, except `unreadable`, whose path is unreadable instead, as the path
+    /// of a value that blockwatch can't decode is.
+    fn with_unreadable(items: &[ItemAtOnePath], unreadable: &Symbol) -> Symbols {
+        let symbols = items
+            .iter()
+            .flat_map(ItemAtOnePath::symbols)
+            .filter(|symbol| symbol != unreadable)
+            .collect();
+        let reason = "can't decode".to_string();
+        Symbols::with_unreadable(symbols, HashMap::from([(unreadable.path.clone(), reason)]))
+    }
+
+    #[test]
+    fn filter_that_picks_an_unreadable_item_returns_its_reason() {
+        // Only `blue` has a symbol at the path, so without the check the filter would read it.
+        let (_, items) = items_at_one_path(["red", "blue"]);
+        let [red, _blue] = &items;
+        let symbols = with_unreadable(&items, &red.element);
+
+        assert_eq!(
+            symbols.resolve(&path("/items/~[name=red]")),
+            Err(ResolveError::Unreadable {
+                reason: "can't decode"
+            })
+        );
+    }
+
+    #[test]
+    fn filter_then_an_unreadable_key_of_the_picked_item_returns_its_reason() {
+        let (_, items) = items_at_one_path(["red", "blue"]);
+        let [red, _blue] = &items;
+        let symbols = with_unreadable(&items, &red.content);
+
+        assert_eq!(
+            symbols.resolve(&path("/items/~[name=red]/content")),
+            Err(ResolveError::Unreadable {
+                reason: "can't decode"
+            })
+        );
+    }
+
+    #[test]
+    fn filter_over_items_with_an_unreadable_key_returns_its_reason() {
+        // The first item's `name` could be `red` too, so the filter can't tell which item it picks.
+        let (_, items) = items_at_one_path(["red", "red"]);
+        let [first, _second] = &items;
+        let symbols = with_unreadable(&items, &first.name);
+
+        assert_eq!(
+            symbols.resolve(&path("/items/~[name=red]/content")),
+            Err(ResolveError::Unreadable {
+                reason: "can't decode"
+            })
+        );
+    }
+
+    #[test]
+    fn filter_with_unreadable_keys_only_outside_its_children_resolves() {
+        let (symbols, [_red, blue]) = items_at_one_path(["red", "blue"]);
+        let unreadable = [
+            "/other/item/name",
+            "/items/item/content/name",
+            "/items/name",
+        ]
+        .map(|unreadable| (path(unreadable), "can't decode".to_string()));
+        let symbols = Symbols::with_unreadable(symbols.symbols, HashMap::from(unreadable));
+
+        assert_eq!(
+            symbols.resolve(&path("/items/~[name=blue]/content")),
+            Ok(&blue.content)
         );
     }
 

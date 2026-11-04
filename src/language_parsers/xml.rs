@@ -3,7 +3,7 @@ use crate::language_parsers::{
     xml_style_comments_parser,
 };
 use crate::symbol_path::SymbolPath;
-use crate::symbols::code::{position, undecodable_reason};
+use crate::symbols::code::{child, position, undecodable_reason};
 use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser, ensure_no_syntax_error};
 use anyhow::{Context, bail};
 use std::collections::HashMap;
@@ -91,7 +91,8 @@ impl<'s, 'tree> Walk<'s, 'tree> {
             unreadable: HashMap::new(),
             pending: vec![(0, root)],
         };
-        // The walk keeps its own stack, as deeply nested elements could overflow the call stack.
+        // The walk keeps its own stack, as the walks of other languages do. The grammar reads no
+        // file deep enough to overflow the call stack today, but a newer one may.
         while let Some((depth, element)) = walk.pending.pop() {
             // Elements come off the stack in document order. So every element walked since the
             // one that holds `element` is inside it, and the path still starts with the path to
@@ -109,7 +110,7 @@ impl<'s, 'tree> Walk<'s, 'tree> {
     /// Returns an error if the element has a shape the XML grammar doesn't give.
     fn add_element_symbols(&mut self, element: Node<'tree>) -> anyhow::Result<()> {
         let (tag, content) = tag_and_content(element)?;
-        let name = child_of_kind(tag, "Name").context("unexpected XML tag without a name")?;
+        let name = child(tag, "Name").context("unexpected XML tag without a name")?;
         self.path.push(node_text(&name, self.source).to_string());
         let children: Vec<Node> = content.map_or_else(Vec::new, |content| {
             let mut cursor = content.walk();
@@ -166,16 +167,15 @@ impl<'s, 'tree> Walk<'s, 'tree> {
     /// # Errors
     /// Returns an error if the attribute has a shape the XML grammar doesn't give.
     fn add_attribute_symbol(&mut self, attribute: Node<'tree>) -> anyhow::Result<()> {
-        let name =
-            child_of_kind(attribute, "Name").context("unexpected XML attribute without a name")?;
+        let name = child(attribute, "Name").context("unexpected XML attribute without a name")?;
         let name = node_text(&name, self.source);
         // A name keeps its prefix as written, and the namespace a prefix stands for plays no part
         // in a path. So the attributes that declare namespaces hold nothing a path needs.
         if name == "xmlns" || name.starts_with("xmlns:") {
             return Ok(());
         }
-        let value = child_of_kind(attribute, "AttValue")
-            .context("unexpected XML attribute without a value")?;
+        let value =
+            child(attribute, "AttValue").context("unexpected XML attribute without a value")?;
         let mut path = self.path.clone();
         path.push(format!("@{name}"));
         let text = attribute_text(node_text(&value, self.source));
@@ -211,6 +211,7 @@ impl<'s, 'tree> Walk<'s, 'tree> {
         }
     }
 
+    /// Adds the symbol at `path`, defined where `written` is, with `value`.
     fn add_symbol(&mut self, path: Vec<String>, written: Node, value: Option<ScalarValue>) {
         self.symbols.push(Symbol {
             path: SymbolPath::from_segments(path),
@@ -253,16 +254,14 @@ fn tag_and_content(element: Node) -> anyhow::Result<(Node, Option<Node>)> {
 fn element_text(content: Node, source: &str) -> anyhow::Result<String> {
     let mut text = String::new();
     let mut cursor = content.walk();
-    for child in content.named_children(&mut cursor) {
-        match child.kind() {
-            "CharData" => text.push_str(&with_line_feeds(node_text(&child, source))),
+    for part in content.named_children(&mut cursor) {
+        match part.kind() {
+            "CharData" => text.push_str(&with_line_feeds(node_text(&part, source))),
             // An empty CDATA section has no text node.
-            "CDSect" => text.push_str(
-                &child_of_kind(child, "CData").map_or_else(String::new, |cdata| {
-                    with_line_feeds(node_text(&cdata, source))
-                }),
-            ),
-            "EntityRef" | "CharRef" => text.push(decoded_reference(node_text(&child, source))?),
+            "CDSect" => text.push_str(&child(part, "CData").map_or_else(String::new, |cdata| {
+                with_line_feeds(node_text(&cdata, source))
+            })),
+            "EntityRef" | "CharRef" => text.push(decoded_reference(node_text(&part, source))?),
             "Comment" | "PI" => {}
             other => bail!("unexpected {other} in XML text"),
         }
@@ -328,13 +327,6 @@ fn decoded_reference(reference: &str) -> anyhow::Result<char> {
         // An entity that the DOCTYPE declares can stand for any text, even child elements.
         _ => bail!("blockwatch reads only the 5 entities that XML defines, not `{reference}`"),
     }
-}
-
-/// The first named child of `node` whose kind is `kind`, or `None` if it has none.
-fn child_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
-    let mut cursor = node.walk();
-    node.named_children(&mut cursor)
-        .find(|child| child.kind() == kind)
 }
 
 #[cfg(test)]

@@ -25,6 +25,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 ### Fixed
 
 - A filter over several items that share a path could read a key of another item, when only that item had the key.
+- A filter could pick the wrong item when an item had a syntax error or a string that blockwatch can't decode. Now
+  such a path stops the run, as a path to that item does.
 
 ## [0.16.5] - 2026-11-03
 
