@@ -219,15 +219,19 @@ impl Problem<'_> {
                     "file has a syntax error at line {line}, column {character} near {name}, and the path could resolve to the wrong value"
                 )
             }
-            Problem::Undecodable(Position { line, character }, why) => format!(
-                "blockwatch can't decode the string at line {line}, column {character}: {why}"
-            ),
+            Problem::Undecodable(position, why) => undecodable_reason(*position, why),
         }
     }
 }
 
+/// The reason to report for a path whose string at `position` blockwatch can't decode, because
+/// of `why`.
+pub(crate) fn undecodable_reason(Position { line, character }: Position, why: &str) -> String {
+    format!("blockwatch can't decode the string at line {line}, column {character}: {why}")
+}
+
 /// Where `node` starts in `source`.
-fn position(node: &Node, source: &str) -> Position {
+pub(crate) fn position(node: &Node, source: &str) -> Position {
     // tree-sitter counts the rows, so only the column needs the text, and only of one line.
     Position::new(
         node.start_position().row + 1,

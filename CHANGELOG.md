@@ -14,6 +14,10 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Added
 
+- Symbols in XML files: `.xml`, the MSBuild files (`.csproj`, `.fsproj`, `.vbproj`, `.vcxproj`, `.props`,
+  `.targets`), `.xaml`, `.xsd`, `.xsl` and `.xslt`. `pom.xml#/project/version` points at the text of an element, and
+  `#/Project/@Sdk` at the value of an attribute. A filter picks one of several elements with one name:
+  `#/project/dependencies/~[artifactId=guava]/version`. See [XML](docs/symbols.md#xml).
 - A filter picks one of several items that share a path, such as two `ingress` blocks in HCL:
   `#/resource/aws_security_group/web/~[from_port=443]/to_port`. Before, the path was ambiguous. See
   [Picking an item by a key's value](docs/symbols.md#picking-an-item-by-a-keys-value).

@@ -143,6 +143,19 @@ impl From<Vec<Symbol>> for Symbols {
 }
 
 impl Symbols {
+    /// The `symbols` of a file, in document order, and its `unreadable` paths, each with the
+    /// reason to report.
+    pub(crate) fn with_unreadable(
+        symbols: Vec<Symbol>,
+        unreadable: HashMap<SymbolPath, String>,
+    ) -> Self {
+        Self {
+            symbols,
+            unreadable,
+            skipped: HashMap::new(),
+        }
+    }
+
     /// Finds the one symbol at `path`.
     ///
     /// A filter in `path`, such as `~[name=blue]`, stands for the one child of the path before it

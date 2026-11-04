@@ -24,25 +24,26 @@ declares, instead of tags in a comment.
 <!-- <block name="extensions-with-symbols" same-as="src/language_parsers/mod.rs:extensions-with-symbols"
      same-as-pattern="`\.?(?P<value>[A-Za-z.]+)`"> -->
 
-| Language         | Files                                                                          | Paths                                                   |
-|------------------|--------------------------------------------------------------------------------|---------------------------------------------------------|
-| JSON             | `.json`, `.jsonc`, `.webmanifest`                                              | [JSON](#json)                                           |
-| TOML             | `.toml`, `Pipfile`                                                             | [TOML](#toml)                                           |
-| YAML             | `.yaml`, `.yml`, `.cff`                                                        | [YAML](#yaml)                                           |
-| Markdown         | `.md`, `.markdown`, `.mdx`                                                     | [Markdown](#markdown)                                   |
-| Go               | `.go`                                                                          | [Go](#go)                                               |
-| C, C++           | `.c`, `.h`, `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx`                       | [C and C++](#c-and-c)                                   |
-| Python           | `.py`, `.pyi`, `.pyw`                                                          | [Python and Starlark](#python-and-starlark)             |
-| Starlark         | `.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`, `BUCK`, `WORKSPACE`, `Tiltfile` | [Python and Starlark](#python-and-starlark)             |
-| Rust             | `.rs`                                                                          | [Rust](#rust)                                           |
-| TypeScript       | `.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`                                         | [TypeScript and JavaScript](#typescript-and-javascript) |
-| JavaScript       | `.js`, `.mjs`, `.cjs`, `.jsx`                                                  | [TypeScript and JavaScript](#typescript-and-javascript) |
-| Java             | `.java`                                                                        | [Java](#java)                                           |
-| C#               | `.cs`                                                                          | [C#](#c)                                                |
-| Kotlin           | `.kt`, `.kts`                                                                  | [Kotlin](#kotlin)                                       |
-| Swift            | `.swift`                                                                       | [Swift](#swift)                                         |
-| Protocol Buffers | `.proto`                                                                       | [Protocol Buffers](#protocol-buffers)                   |
-| HCL (Terraform)  | `.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`                                    | [HCL](#hcl)                                             |
+| Language         | Files                                                                                                       | Paths                                                   |
+|------------------|-------------------------------------------------------------------------------------------------------------|---------------------------------------------------------|
+| JSON             | `.json`, `.jsonc`, `.webmanifest`                                                                           | [JSON](#json)                                           |
+| TOML             | `.toml`, `Pipfile`                                                                                          | [TOML](#toml)                                           |
+| YAML             | `.yaml`, `.yml`, `.cff`                                                                                     | [YAML](#yaml)                                           |
+| Markdown         | `.md`, `.markdown`, `.mdx`                                                                                  | [Markdown](#markdown)                                   |
+| XML              | `.xml`, `.csproj`, `.fsproj`, `.vbproj`, `.vcxproj`, `.props`, `.targets`, `.xaml`, `.xsd`, `.xsl`, `.xslt` | [XML](#xml)                                             |
+| Go               | `.go`                                                                                                       | [Go](#go)                                               |
+| C, C++           | `.c`, `.h`, `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx`                                                    | [C and C++](#c-and-c)                                   |
+| Python           | `.py`, `.pyi`, `.pyw`                                                                                       | [Python and Starlark](#python-and-starlark)             |
+| Starlark         | `.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`, `BUCK`, `WORKSPACE`, `Tiltfile`                              | [Python and Starlark](#python-and-starlark)             |
+| Rust             | `.rs`                                                                                                       | [Rust](#rust)                                           |
+| TypeScript       | `.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`                                                                      | [TypeScript and JavaScript](#typescript-and-javascript) |
+| JavaScript       | `.js`, `.mjs`, `.cjs`, `.jsx`                                                                               | [TypeScript and JavaScript](#typescript-and-javascript) |
+| Java             | `.java`                                                                                                     | [Java](#java)                                           |
+| C#               | `.cs`                                                                                                       | [C#](#c)                                                |
+| Kotlin           | `.kt`, `.kts`                                                                                               | [Kotlin](#kotlin)                                       |
+| Swift            | `.swift`                                                                                                    | [Swift](#swift)                                         |
+| Protocol Buffers | `.proto`                                                                                                    | [Protocol Buffers](#protocol-buffers)                   |
+| HCL (Terraform)  | `.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`                                                                 | [HCL](#hcl)                                             |
 
 <!-- </block> -->
 
@@ -248,6 +249,69 @@ Clone the repository.
 - **An `.mdx` file gets the same paths.** The text of a JSX element in a heading counts, and so does the code in
   braces: `## Red <Badge>new</Badge> {version}` is `#/Red new version`. A heading inside a JSX element doesn't count.
   A file that isn't valid MDX stops the run.
+
+<!-- </block> -->
+
+## XML
+
+`.xml` files have symbols, and so do the MSBuild files (`.csproj`, `.fsproj`, `.vbproj`, `.vcxproj`, `.props`,
+`.targets`), `.xaml`, `.xsd`, `.xsl` and `.xslt`.
+
+<!-- <block name="xml-paths"> -->
+
+Every element and every attribute is a symbol. A path is each element's name, from the root element down. An attribute
+is `@` and its name, under its element:
+
+```xml
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <version>1.4.2</version>
+  <dependencies>
+    <dependency>
+      <artifactId>junit</artifactId>
+      <version>5.10.0</version>
+    </dependency>
+    <dependency scope="test">
+      <artifactId>guava</artifactId>
+      <version>33.0.0-jre</version>
+    </dependency>
+  </dependencies>
+  <description>
+    Tools &amp; helpers
+  </description>
+</project>
+```
+
+| Path                                                 | Points at                       |
+|------------------------------------------------------|---------------------------------|
+| `#/project/version`                                  | `1.4.2`                         |
+| `#/project/dependencies`                             | the whole element               |
+| `#/project/dependencies/dependency/version`          | a violation: two elements match |
+| `#/project/dependencies/~[artifactId=guava]/version` | `33.0.0-jre`                    |
+| `#/project/dependencies/~[artifactId=guava]/@scope`  | `test`                          |
+| `#/project/description`                              | `Tools & helpers`               |
+
+- **Elements with one name under one parent share a path**, such as the two `dependency` elements above. A path through
+  them is a violation, so pick one with a [filter](#picking-an-item-by-a-keys-value). Its key can be a child element,
+  such as `artifactId`, or an attribute. In a `.csproj` file, `#/Project/ItemGroup/~[@Include=Serilog]/@Version` is
+  the `Version` of the `PackageReference` whose `Include` is `Serilog`. A position, such as
+  `#/project/modules/module/1`, is not found.
+- **A prefix is part of the name, as written.** Escape its `:` as `%3A`: `#/manifest/application/@android%3Aname`.
+  Namespaces play no part, and `xmlns` attributes are not symbols. Names compare as written, case included.
+- **An element without child elements is its text.** Entities and character references are decoded, CDATA stays as
+  written, and comments are left out. The white space around the text is removed, but the line breaks and indents
+  inside it stay. `<a/>` and `<a></a>` are empty strings.
+- **An element with child elements has no value.** It gives its whole text, tags included, even when it also holds
+  text.
+- **An attribute is its decoded value.** Each tab and line break in it becomes a space, as XML requires. The white
+  space around it stays.
+- **An entity that the DOCTYPE declares stops the run for its path**, because it can stand for any text, even
+  elements. So does a reference to a character that XML forbids, such as `&#0;`.
+- **The XML declaration, the DOCTYPE, comments and processing instructions are not symbols.**
+- **An element covers its start tag, its content and its end tag.** An attribute covers `name="value"`. A comment
+  above an element is not part of it.
+- **A syntax error anywhere stops the run**, and so does an empty file. A few valid files stop it too, because of the
+  parser: a DOCTYPE without white space before its `]`, as in `[<!ENTITY e "x">]`, and a processing instruction with
+  data, such as `<?pi x?>`, inside an element.
 
 <!-- </block> -->
 

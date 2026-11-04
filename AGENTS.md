@@ -235,7 +235,7 @@ The main modules:
   Some languages also have symbols. Such a language has a `SymbolsParser`, which its `parser()` passes to
   `.with_symbols(...)`:
 
-  - JSON and YAML walk their syntax trees themselves, and refuse a file with a syntax error.
+  - JSON, YAML and XML walk their syntax trees themselves, and refuse a file with a syntax error.
   - TOML finds its symbols with `toml_edit`. What a TOML key means depends on the order of the headers, not on how the
     syntax tree is nested.
   - Markdown finds its sections with the `markdown` crate, the same parser that finds its comments.

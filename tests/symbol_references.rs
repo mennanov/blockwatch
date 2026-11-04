@@ -182,6 +182,20 @@ fn hcl_target_resolves() {
 }
 
 #[test]
+fn xml_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/xml_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
+fn csproj_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/csproj_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
 fn json_target_resolves() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/symbol_references/json_source.rs");

@@ -154,7 +154,8 @@ the file cannot hold a comment. To put rules on the value itself, wrap it in a `
 ### Files with symbols
 
 Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`.toml`, `Pipfile`), YAML (`.yaml`,
-`.yml`, `.cff`), Markdown (`.md`, `.markdown`, `.mdx`), Go (`.go`), C and C++ (`.c`, `.h`, `.cc`, `.cpp`, `.cxx`,
+`.yml`, `.cff`), Markdown (`.md`, `.markdown`, `.mdx`), XML (`.xml`, `.csproj`, `.fsproj`, `.vbproj`, `.vcxproj`,
+`.props`, `.targets`, `.xaml`, `.xsd`, `.xsl`, `.xslt`), Go (`.go`), C and C++ (`.c`, `.h`, `.cc`, `.cpp`, `.cxx`,
 `.hh`, `.hpp`, `.hxx`), Python (`.py`, `.pyi`, `.pyw`), Starlark (`.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`,
 `BUCK`, `WORKSPACE`, `Tiltfile`), Rust (`.rs`), TypeScript (`.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`), JavaScript
 (`.js`, `.mjs`, `.cjs`, `.jsx`), Java (`.java`), C# (`.cs`), Kotlin (`.kt`, `.kts`), Swift (`.swift`), Protocol
@@ -219,6 +220,23 @@ level. Its path is the text of each heading it is under, then its own, the top `
 - The same heading twice under one parent is a violation.
 - An `.mdx` file gets the same paths. JSX text and the code in braces count as heading text. A heading inside a JSX
   element doesn't count.
+
+### XML
+
+Every element and every attribute is a symbol, in `.xml` files and in `.csproj`, `.props`, `.xaml` and the other XML
+files. A path is each element's name from the root element down. An attribute is `@` and its name:
+`pom.xml#/project/version`, `#/Project/@Sdk`.
+
+- Elements with one name under one parent share a path, so a path through them is a violation. A filter picks one by
+  a child element or an attribute: `#/project/dependencies/~[artifactId=guava]/version`,
+  `#/Project/ItemGroup/~[@Include=Serilog]/@Version`. Positions such as `/module/1` are not found.
+- A prefix is part of the name. Escape its `:` as `%3A`: `#/manifest/application/@android%3Aname`. `xmlns`
+  attributes are not symbols.
+- An element without child elements is its decoded text, without the white space around it. CDATA stays as written,
+  and comments are left out. An element with child elements gives its whole text.
+- An attribute is its decoded value. The white space around it stays.
+- An entity that the DOCTYPE declares, or a reference to a character XML forbids, fails the run for its path.
+- A syntax error anywhere fails the run.
 
 ### Code files
 
