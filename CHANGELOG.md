@@ -18,6 +18,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   `#/Invoice/$perPage` at a property, and `version.php#/$wp_version` at a top-level variable. A
   `define('NAME', value)` call is a symbol too, at `#/NAME`. The namespace is not part of a path. See
   [PHP](docs/symbols.md#php).
+- Symbols in shell scripts (`.sh`, `.bash`, `.bashrc`, `.bash_profile` and `.envrc`). `install.sh#/GO_VERSION`
+  points at the value of a variable, and `#/log` at a function. A name counts when it is set outside functions, loops
+  and subshells. zsh files have no symbols. See [Shell](docs/symbols.md#shell).
 
 ### Fixed
 

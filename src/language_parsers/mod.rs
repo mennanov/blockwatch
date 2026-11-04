@@ -239,6 +239,7 @@ pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
     let typescript_tsx_parser = parser(tsx::parser()?);
     let xml_parser = parser(xml::parser()?);
     let yaml_parser = parser(yaml::parser()?);
+    let zsh_parser = parser(bash::zsh_parser()?);
 
     Ok(LanguageParsers::from(HashMap::from([
         /* <block name="language-extensions"
@@ -342,7 +343,7 @@ pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
         ("ru".into(), ruby_parser),
         ("sbt".into(), Arc::clone(&scala_parser)),
         ("scala".into(), scala_parser),
-        ("sh".into(), Arc::clone(&bash_parser)),
+        ("sh".into(), bash_parser),
         ("sql".into(), sql_parser),
         ("star".into(), starlark_parser),
         ("swift".into(), swift_parser),
@@ -364,8 +365,8 @@ pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
         ("xslt".into(), xml_parser),
         ("yaml".into(), Arc::clone(&yaml_parser)),
         ("yml".into(), yaml_parser),
-        ("zsh".into(), Arc::clone(&bash_parser)),
-        ("zshrc".into(), bash_parser),
+        ("zsh".into(), Arc::clone(&zsh_parser)),
+        ("zshrc".into(), zsh_parser),
         // </block>
     ])))
 }
@@ -1037,6 +1038,9 @@ mod tests {
             "Pipfile",
             "Tiltfile",
             "WORKSPACE",
+            "bash",
+            "bash_profile",
+            "bashrc",
             "bazel",
             "bzl",
             "bzlmod",
@@ -1050,6 +1054,7 @@ mod tests {
             "cts",
             "cxx",
             "d.ts",
+            "envrc",
             "fsproj",
             "go",
             "h",
@@ -1078,6 +1083,7 @@ mod tests {
             "pyi",
             "pyw",
             "rs",
+            "sh",
             "star",
             "swift",
             "targets",

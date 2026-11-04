@@ -22,7 +22,7 @@ declares, instead of tags in a comment.
 ## Files with symbols
 
 <!-- <block name="extensions-with-symbols" same-as="src/language_parsers/mod.rs:extensions-with-symbols"
-     same-as-pattern="`\.?(?P<value>[A-Za-z.]+)`"> -->
+     same-as-pattern="`\.?(?P<value>[A-Za-z._]+)`"> -->
 
 | Language         | Files                                                                                                       | Paths                                                   |
 |------------------|-------------------------------------------------------------------------------------------------------------|---------------------------------------------------------|
@@ -45,6 +45,7 @@ declares, instead of tags in a comment.
 | Protocol Buffers | `.proto`                                                                                                    | [Protocol Buffers](#protocol-buffers)                   |
 | HCL (Terraform)  | `.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`                                                                 | [HCL](#hcl)                                             |
 | PHP              | `.php`, `.phtml`                                                                                            | [PHP](#php)                                             |
+| Shell            | `.sh`, `.bash`, `.bashrc`, `.bash_profile`, `.envrc`                                                        | [Shell](#shell)                                         |
 
 <!-- </block> -->
 
@@ -1012,6 +1013,73 @@ enum Status: string
 - **A syntax error stops the run for the definition that holds it, and for each type around it.** The other
   definitions still resolve. The parser fails on a constructor parameter with `readonly` but no visibility, such as
   `__construct(readonly int $id)`, so a path into its class stops the run.
+
+<!-- </block> -->
+
+## Shell
+
+<!-- <block name="shell-paths"> -->
+
+```bash
+#!/usr/bin/env bash
+GO_VERSION=1.22.5
+export REGISTRY='ghcr.io/acme'
+readonly IMAGE="${REGISTRY}/app:${GO_VERSION}"
+PORT="${PORT:-8080}"
+TARGETS=(linux darwin)
+
+if [[ "$(uname)" == Darwin ]]; then
+  SED=gsed
+else
+  SED=sed
+fi
+
+log() { echo "$@" >&2; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --go) GO_VERSION="$2"; shift 2 ;;
+  esac
+done
+```
+
+| Path           | Points at                                            |
+|----------------|------------------------------------------------------|
+| `#/GO_VERSION` | `1.22.5`, as the copy in the loop doesn't count      |
+| `#/REGISTRY`   | `ghcr.io/acme`                                       |
+| `#/IMAGE`      | `"${REGISTRY}/app:${GO_VERSION}"`, as written        |
+| `#/PORT`       | `"${PORT:-8080}"`, as written                        |
+| `#/TARGETS`    | `(linux darwin)`, as written                         |
+| `#/SED`        | a violation, as both branches define it              |
+| `#/log`        | the whole function                                   |
+
+- **A variable or a function set outside functions, loops and subshells is a symbol.** The conditions and bodies of
+  `if`, the items of `case`, `{ ... }` groups and the commands of `&&` and `||` count. So a name set in two branches
+  is defined twice. Names set in `for`, `while` and `until` loops, in `( ... )`, in functions and in a statement that
+  ends with `&` don't count, as bash sets them in a subshell or each time the loop runs.
+- **`export`, `readonly`, `declare` and `typeset` set a name too**, with or without flags such as `-r`. When the
+  statement sets one name, the symbol covers the whole statement. In `export A=1 B=2`, `A` covers only `A=1`. The
+  value is still the one written: bash stores `abc` for `declare -l X=ABC` and `3` for `declare -i X=1+2`, but the
+  path gives `ABC` and `1+2`.
+- **These are not symbols:** `NAME+=value`, `A[0]=x`, `FOO=1 make` (it sets `FOO` only for `make`), `export NAME`
+  without `=`, `local`, `: "${NAME:=default}"`, and names set by `read`, `for` or `getopts`.
+- **Strings follow bash's quoting.** `'a b'` is `a b`. In `"..."`, only `\$`, `` \` ``, `\"` and `\\` lose their
+  backslash, and a `\` at the end of a line goes away with the line end. Outside quotes, every backslash goes:
+  `a\ b` is `a b`. Parts written together are joined: `"a"'b'c` is `abc`. `X=` is the empty string.
+- **A value that bash expands stays as written**, such as `$HOME`, `$(cmd)`, `` `cmd` `` or `~/bin`. So does a word
+  that starts with `~` after a quote, such as `"a"~/b`, and an array. Use `same-as-pattern` to take `8080` out of
+  `"${PORT:-8080}"`.
+- **A path to a `$'...'` or `$"..."` string stops the run.**
+- **A function's name can hold `-`, `.` and `:`.** Write each `:` as `%3A`: `ns::helper` is `#/ns%3A%3Ahelper`.
+- **zsh files (`.zsh`, `.zshrc`) have no symbols.** The parser misreads much of zsh's syntax.
+- **After a syntax error, the parser often skips a large part of the file**, and every name in that part stops the
+  run. It fails on `sed -e /^$/d`, on `${x/#$/y}`, and on a command whose name holds `::` after an assignment, such as
+  `V=2 ns::log "x"`. A comment in backticks, such as `` find . `# skip vendor` -name x ``, is worse: the parser reads
+  the rest of the file as the command's argument, so no name after it is found.
+- **A value outside quotes that goes on to the next line after a `\` is not found.** The parser reads `X=a\` and `b`
+  on the next line as `X=a` set only for a command `b`. Bash sets `X=ab`. Put the value in quotes instead.
+- **A value that ends with a lone `$` takes in the next line.** In `Z=$` followed by `W=1`, `#/Z` gives `$`, the line
+  end and `W=1`, as written, and `#/W` is not found. Bash sets `Z` to `$`. Write `Z='$'` instead.
 
 <!-- </block> -->
 

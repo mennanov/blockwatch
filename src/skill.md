@@ -159,8 +159,8 @@ Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`
 `.hh`, `.hpp`, `.hxx`), Python (`.py`, `.pyi`, `.pyw`), Starlark (`.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`,
 `BUCK`, `WORKSPACE`, `Tiltfile`), Rust (`.rs`), TypeScript (`.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`), JavaScript
 (`.js`, `.mjs`, `.cjs`, `.jsx`), Java (`.java`), C# (`.cs`), Kotlin (`.kt`, `.kts`), Swift (`.swift`), Protocol
-Buffers (`.proto`), HCL (`.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`), and PHP (`.php`, `.phtml`). A path into any
-other file fails the run.
+Buffers (`.proto`), HCL (`.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`), PHP (`.php`, `.phtml`), and shell (`.sh`,
+`.bash`, `.bashrc`, `.bash_profile`, `.envrc`). A path into any other file fails the run.
 
 ### Writing a path
 
@@ -414,6 +414,24 @@ type are symbols too: `Config.java#/Config/MAX_PORTS`. In HCL, each block, attri
 - `use` imports, trait uses, closures and the keys of a returned array, such as a Laravel config, are not symbols.
 - Strings follow PHP's escapes, and a heredoc or a nowdoc loses its closing marker's indent. A string with a variable,
   such as `"v$major"`, a string whose bytes are not UTF-8, and a string that PHP rejects stay as written.
+
+### Shell
+
+- A variable or a function set outside functions, loops and subshells is a symbol: `install.sh#/GO_VERSION`. The
+  conditions and bodies of `if`, `case` items, `{ ... }` groups and `&&` and `||` lists count, so a name set in both
+  branches of an `if` is a violation. A statement that ends with `&` doesn't count.
+- `export`, `readonly`, `declare` and `typeset` set a name too. In `export A=1 B=2`, `A` covers only `A=1`. The
+  value is the one written, even when a flag changes it: `declare -l X=ABC` gives `ABC`.
+- `NAME+=value`, `A[0]=x`, `FOO=1 make`, `export NAME` without `=`, `local` and `: "${NAME:=default}"` are not
+  symbols.
+- Strings follow bash's quoting, and parts written together are joined. A value that bash expands, such as `$HOME`,
+  `"${PORT:-8080}"`, `$(cmd)` or `~/bin`, stays as written, and so does an array. A path to a `$'...'` or `$"..."`
+  string fails the run.
+- A function's name can hold `-`, `.` and `:`. Write each `:` as `%3A`: `#/ns%3A%3Ahelper`.
+- zsh files have no symbols. After a syntax error, the parser often skips a large part of the file, and every name
+  in it fails the run. After a comment in backticks, such as `` `# skip vendor` ``, no name is found. Neither is a
+  value outside quotes that goes on to the next line after a `\`. A value that ends with a lone `$`, such as `Z=$`,
+  takes in the next line, so write `Z='$'`.
 
 ## The config file (`blockwatch.toml`)
 
