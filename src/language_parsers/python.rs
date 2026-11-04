@@ -3,7 +3,7 @@ use crate::language_parsers::{
     walk_tree,
 };
 use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, Value};
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Python, with its symbols.
@@ -62,7 +62,8 @@ impl CodeLanguage for Python {
     /// `None` for any other node, for bytes, and for an f-string with a field, such as `f"{x}"`.
     ///
     /// # Errors
-    /// Returns an error if an escape gives a character by its name, or stands for no character.
+    /// Returns an error if an escape gives a character by its name, stands for no character, or
+    /// is cut short, such as `\x4`.
     fn decode_string(&self, node: &Node, source: &str) -> anyhow::Result<Option<String>> {
         let mut cursor = node.walk();
         match node.kind() {
@@ -71,16 +72,20 @@ impl CodeLanguage for Python {
             }),
             "string" => {
                 // The start holds the prefix and the opening quotes, such as `rb"`.
-                let bytes = node
+                let start = node
                     .child(0)
-                    .is_some_and(|start| node_text(&start, source).contains(['b', 'B']));
+                    .map(|start| node_text(&start, source))
+                    .unwrap_or_default();
                 let parts: Vec<Node> = node.named_children(&mut cursor).collect();
-                if bytes || parts.iter().any(|part| part.kind() == "interpolation") {
+                if start.contains(['b', 'B'])
+                    || parts.iter().any(|part| part.kind() == "interpolation")
+                {
                     return Ok(None);
                 }
+                let is_raw = start.contains(['r', 'R']);
                 let mut text = String::new();
                 for part in parts.iter().filter(|part| part.kind() == "string_content") {
-                    push_content(part, source, &mut text)?;
+                    push_content(part, source, is_raw, &mut text)?;
                 }
                 Ok(Some(text))
             }
@@ -135,14 +140,21 @@ fn definition<'tree>(
 }
 
 /// Adds the text of `content`, a part of a string between its quotes and its fields, to `text`.
+/// `is_raw` tells whether the string is raw, such as `r"\d"`.
 ///
 /// # Errors
-/// Returns an error if an escape gives a character by its name, or stands for no character.
-fn push_content(content: &Node, source: &str, text: &mut String) -> anyhow::Result<()> {
+/// Returns an error if an escape gives a character by its name, stands for no character, or is
+/// cut short, such as `\x4`.
+fn push_content(
+    content: &Node,
+    source: &str,
+    is_raw: bool,
+    text: &mut String,
+) -> anyhow::Result<()> {
     let mut written_up_to = content.start_byte();
     let mut cursor = content.walk();
     for part in content.named_children(&mut cursor) {
-        push_written(source, written_up_to..part.start_byte(), text);
+        push_written(source, written_up_to..part.start_byte(), is_raw, text)?;
         let escape = node_text(&part, source);
         match part.kind() {
             "escape_sequence" => push_escape(escape, text)?,
@@ -152,19 +164,42 @@ fn push_content(content: &Node, source: &str, text: &mut String) -> anyhow::Resu
         }
         written_up_to = part.end_byte();
     }
-    push_written(source, written_up_to..content.end_byte(), text);
-    Ok(())
+    push_written(source, written_up_to..content.end_byte(), is_raw, text)
 }
 
-/// Adds the text of `source` in `range`, which holds no escapes, to `text`.
-fn push_written(source: &str, range: std::ops::Range<usize>, text: &mut String) {
+/// Adds the text of `source` in `range`, which holds no escapes, to `text`. `is_raw` tells
+/// whether the string is raw.
+///
+/// # Errors
+/// Returns an error if a string that is not raw holds an escape that is cut short, such as `\x4`
+/// or `\N` without a name.
+fn push_written(
+    source: &str,
+    range: std::ops::Range<usize>,
+    is_raw: bool,
+    text: &mut String,
+) -> anyhow::Result<()> {
     #[expect(
         clippy::string_slice,
         reason = "tree-sitter nodes start and end on whole characters"
     )]
     let written = &source[range];
+    // The grammar reads only a whole escape as an escape. So a backslash left in the text starts
+    // an escape that Python keeps as written, such as `\d`, or one that it rejects.
+    // Starlark reads its strings the same way, so the messages name no language.
+    let cut_short = |after: &str| match after.chars().next() {
+        Some('x') => Some("`\\x` needs 2 hex digits"),
+        Some('u') => Some("`\\u` needs 4 hex digits"),
+        Some('U') => Some("`\\U` needs 8 hex digits"),
+        Some('N') => Some("`\\N` needs a character name in braces"),
+        _ => None,
+    };
+    if !is_raw && let Some(problem) = written.split('\\').skip(1).find_map(cut_short) {
+        bail!("{problem}");
+    }
     // Python reads a CRLF line end in a file as a line feed.
     text.push_str(&written.replace("\r\n", "\n"));
+    Ok(())
 }
 
 /// Adds the character that `escape`, such as `\n` or `\x41`, stands for to `text`. An escape
@@ -514,6 +549,49 @@ FINE = "ok"
         assert_eq!(
             unresolved(&python(source)?, source, "/JOINED")?,
             decode_error(4, 10, r"`\ud800` stands for no character")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn truncated_escape_parse_symbols_makes_the_name_unreadable() -> anyhow::Result<()> {
+        // The grammar reads none of these as an escape, but Python rejects each one. A raw string
+        // has no escapes.
+        let source = r#"SHORT_X = "\x4"
+SHORT_U = "a\u00e"
+SIGNED = "\U+0000041"
+NAMELESS = f"\N"
+UNCLOSED = "\N{x"
+RAW = r"\x4\N"
+UPPER_RAW = R"\u12"
+"#;
+
+        assert_eq!(
+            symbols(&python(source)?, source),
+            vec![
+                symbol("/RAW", r#"RAW = r"\x4\N""#, Some(r"\x4\N")),
+                symbol("/UPPER_RAW", r#"UPPER_RAW = R"\u12""#, Some(r"\u12")),
+            ]
+        );
+        assert_eq!(
+            unresolved(&python(source)?, source, "/SHORT_X")?,
+            decode_error(1, 11, r"`\x` needs 2 hex digits")
+        );
+        assert_eq!(
+            unresolved(&python(source)?, source, "/SHORT_U")?,
+            decode_error(2, 11, r"`\u` needs 4 hex digits")
+        );
+        assert_eq!(
+            unresolved(&python(source)?, source, "/SIGNED")?,
+            decode_error(3, 10, r"`\U` needs 8 hex digits")
+        );
+        assert_eq!(
+            unresolved(&python(source)?, source, "/NAMELESS")?,
+            decode_error(4, 12, r"`\N` needs a character name in braces")
+        );
+        assert_eq!(
+            unresolved(&python(source)?, source, "/UNCLOSED")?,
+            decode_error(5, 12, r"`\N` needs a character name in braces")
         );
         Ok(())
     }

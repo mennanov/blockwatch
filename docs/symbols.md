@@ -467,7 +467,8 @@ def load(path):
   value: `type Pair[T] = tuple[T, T]` is `#/Pair`.
 - **Strings follow Python's escapes.** `"\xe9"` is `é`. An escape Python doesn't know, such as `\d`, stays as written.
   A raw string is its text. An f-string without a field is its text, with `{{` as `{`. An f-string with a field and
-  bytes stay as written. A path to a string with a `\N{...}` escape stops the run.
+  bytes stay as written. A path to a string with a `\N{...}` escape stops the run, and so does a path to a string
+  with an escape that Python rejects, such as `"\x4"` or `"\N"`.
 - **Starlark files, such as `BUILD` and `.bzl`, follow the same rules.** A rule call, such as
   `cc_library(name = "lib")`, is not a symbol.
 - **Class members are not symbols yet.**

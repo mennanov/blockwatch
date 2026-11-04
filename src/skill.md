@@ -287,7 +287,7 @@ type are symbols too: `Config.java#/Config/MAX_PORTS`. In HCL, each block, attri
 - Imports, `as` targets, `a, b = 1, 2`, `obj.x = 1` and `_` are not symbols. A type alias is one, without a value:
   `type Pair[T] = tuple[T, T]` is `#/Pair`.
 - Strings follow Python's escapes. An f-string with a field and bytes stay as written. A path to a string with a
-  `\N{...}` escape fails the run.
+  `\N{...}` escape, or with an escape that Python rejects, such as `"\x4"`, fails the run.
 - Starlark files, such as `BUILD` and `.bzl`, follow the same rules. A rule call is not a symbol.
 
 ### Rust

@@ -19,6 +19,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   `define('NAME', value)` call is a symbol too, at `#/NAME`. The namespace is not part of a path. See
   [PHP](docs/symbols.md#php).
 
+### Fixed
+
+- A Python or Starlark string with an escape that Python rejects, such as `"\x4"` or `"\N"`, gave its text as the
+  value. Now a path to it stops the run, as a path to a string with a `\N{...}` escape does.
+
 ## [0.16.6] - 2026-11-04
 
 ### Added
