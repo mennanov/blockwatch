@@ -159,8 +159,8 @@ Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`
 `.hh`, `.hpp`, `.hxx`), Python (`.py`, `.pyi`, `.pyw`), Starlark (`.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`,
 `BUCK`, `WORKSPACE`, `Tiltfile`), Rust (`.rs`), TypeScript (`.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`), JavaScript
 (`.js`, `.mjs`, `.cjs`, `.jsx`), Java (`.java`), C# (`.cs`), Kotlin (`.kt`, `.kts`), Swift (`.swift`), Protocol
-Buffers (`.proto`), and HCL (`.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`). A path into any other file fails the
-run.
+Buffers (`.proto`), HCL (`.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`), and PHP (`.php`, `.phtml`). A path into any
+other file fails the run.
 
 ### Writing a path
 
@@ -241,7 +241,7 @@ files. A path is each element's name from the root element down. An attribute is
 ### Code files
 
 Each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is `#/NAME`, such
-as `consts.go#/MaxPorts`. In Java, C#, Kotlin, Swift and Protocol Buffers, the members of a
+as `consts.go#/MaxPorts`. In Java, C#, Kotlin, Swift, Protocol Buffers and PHP, the members of a
 type are symbols too: `Config.java#/Config/MAX_PORTS`. In HCL, each block, attribute and object key is a symbol:
 `main.tf#/variable/region/default`.
 
@@ -252,8 +252,8 @@ type are symbols too: `Config.java#/Config/MAX_PORTS`. In HCL, each block, attri
 - A name defined twice is a violation.
 - A syntax error fails the run only for a name whose definition holds it, or a path with a name from the text the
   parser skipped. So does a string blockwatch can't decode.
-- Members, such as a method or a field, are not symbols yet, except in Java, C#, Kotlin, Swift, Protocol Buffers
-  and HCL.
+- Members, such as a method or a field, are not symbols yet, except in Java, C#, Kotlin, Swift, Protocol Buffers,
+  HCL and PHP.
 
 ### Go
 
@@ -394,6 +394,26 @@ type are symbols too: `Config.java#/Config/MAX_PORTS`. In HCL, each block, attri
   label or key with an escape gives no symbol.
 - Strings follow HCL's escapes, and a `<<-` heredoc loses its indent. A string or heredoc with `${...}` or `%{...}`
   stays as written.
+
+### PHP
+
+- The namespace is not part of a path: `#/Invoice/STATUS_PAID`. Each top-level constant, variable, function, class,
+  interface, trait and enum is a symbol, and so is each member of a type: a constant, a property, a method or an enum
+  case.
+- A property and a variable keep their `$`: `#/Invoice/$perPage`, and `#/$version` for a top-level
+  `$version = '2.4.1';`. A constructor parameter with a visibility, such as `private readonly`, is a property, and its
+  value is its default. The parser fails on `readonly` without a visibility, as in `__construct(readonly int $id)`,
+  so a path into that class fails the run.
+- `define('NAME', value);` is a symbol, `#/NAME`, also inside a function or a method, when it is a whole statement
+  whose name is plain text.
+- A definition in an `if`, `try`, `switch` or `{ }` block counts, such as a function in `if (!function_exists(...))`.
+  One in a loop doesn't, and inside a function only a `define` counts. A name defined in both branches of an `if` is
+  a violation.
+- Names compare as written, though PHP ignores the case of class, function and method names. Attributes are part of
+  a definition. Doc comments are not. In `const A = 1, B = 2;`, each name covers only its own part.
+- `use` imports, trait uses, closures and the keys of a returned array, such as a Laravel config, are not symbols.
+- Strings follow PHP's escapes, and a heredoc or a nowdoc loses its closing marker's indent. A string with a variable,
+  such as `"v$major"`, a string whose bytes are not UTF-8, and a string that PHP rejects stay as written.
 
 ## The config file (`blockwatch.toml`)
 

@@ -196,6 +196,20 @@ fn csproj_target_resolves() {
 }
 
 #[test]
+fn php_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/php_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
+fn phtml_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/phtml_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
 fn json_target_resolves() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/symbol_references/json_source.rs");

@@ -12,6 +12,13 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- Symbols in PHP files (`.php` and `.phtml`). `Invoice.php#/Invoice/STATUS_PAID` points at a class constant,
+  `#/Invoice/$perPage` at a property, and `version.php#/$wp_version` at a top-level variable. A
+  `define('NAME', value)` call is a symbol too, at `#/NAME`. The namespace is not part of a path. See
+  [PHP](docs/symbols.md#php).
+
 ## [0.16.6] - 2026-11-04
 
 ### Added

@@ -44,6 +44,7 @@ declares, instead of tags in a comment.
 | Swift            | `.swift`                                                                                                    | [Swift](#swift)                                         |
 | Protocol Buffers | `.proto`                                                                                                    | [Protocol Buffers](#protocol-buffers)                   |
 | HCL (Terraform)  | `.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`                                                                 | [HCL](#hcl)                                             |
+| PHP              | `.php`, `.phtml`                                                                                            | [PHP](#php)                                             |
 
 <!-- </block> -->
 
@@ -323,9 +324,9 @@ is `@` and its name, under its element:
 
 In a code file, each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is
 `#/NAME`.
-With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`. In Java, C#, Kotlin, Swift and Protocol
-Buffers, the members of a type are symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`. In HCL, each
-block, attribute and object key is a symbol: `main.tf#/variable/region/default`.
+With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`. In Java, C#, Kotlin, Swift, Protocol
+Buffers and PHP, the members of a type are symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`. In
+HCL, each block, attribute and object key is a symbol: `main.tf#/variable/region/default`.
 
 - **A value is the initializer as written.** blockwatch never works it out: `20 * 1024 * 1024` stays as it is, and so
   does `0x10`. Use `same-as-pattern` to take the part you need.
@@ -339,8 +340,8 @@ block, attribute and object key is a symbol: `main.tf#/variable/region/default`.
   with a name from the text that the parser had to skip. Other names in the file still resolve. The message shows
   where the error is.
 - **A path to a string that blockwatch can't decode stops the run.** Other paths in the file still resolve.
-- **Members are not symbols yet**, such as a method or a field, except in Java, C#, Kotlin, Swift, Protocol Buffers
-  and HCL.
+- **Members are not symbols yet**, such as a method or a field, except in Java, C#, Kotlin, Swift, Protocol Buffers,
+  HCL and PHP.
 
 <!-- </block> -->
 
@@ -924,6 +925,92 @@ resource "aws_instance" "web" {
   them are not part of them.
 - **A syntax error stops the run for the definition that holds it, and for each block around it.** After an error, the
   parser can read the rest of the file wrongly, so a later path may not resolve.
+
+<!-- </block> -->
+
+## PHP
+
+<!-- <block name="php-paths"> -->
+
+```php
+<?php
+namespace App\Billing;
+
+const MAX_RETRIES = 3;
+define('API_URL', 'https://api.example.com');
+$version = '2.4.1';
+
+if (!function_exists('money')) {
+    function money(int $cents): string { return number_format($cents / 100, 2); }
+}
+
+#[Entity]
+final class Invoice extends Model
+{
+    public const STATUS_PAID = 'paid';
+    protected static int $perPage = 25;
+    protected $table;
+
+    public function __construct(private readonly string $currency = "EUR") {}
+
+    public function table(): string { return $this->table; }
+}
+
+enum Status: string
+{
+    case Open = 'open';
+    case Paid = 'paid';
+}
+```
+
+| Path                    | Points at                                       |
+|-------------------------|-------------------------------------------------|
+| `#/MAX_RETRIES`         | `3`                                             |
+| `#/API_URL`             | `https://api.example.com`                       |
+| `#/$version`            | `2.4.1`                                         |
+| `#/money`               | the whole function                              |
+| `#/Invoice`             | the whole class, with `#[Entity]`               |
+| `#/Invoice/STATUS_PAID` | `paid`                                          |
+| `#/Invoice/$perPage`    | `25`                                            |
+| `#/Invoice/$table`      | `protected $table;`, as it has no default       |
+| `#/Invoice/$currency`   | `EUR`                                           |
+| `#/Invoice/table`       | the whole method                                |
+| `#/Status/Paid`         | `paid`                                          |
+| `#/App`                 | nothing, as a namespace is not a symbol         |
+
+- **Each top-level constant, variable, function, class, interface, trait and enum is a symbol, and so is each member
+  of a type**: a constant, a property, a method or an enum case. Both `const NAME = value;` and
+  `define('NAME', value);` define a constant.
+- **The namespace is not part of a path.** Two namespaces in one file that define one name make that path a
+  violation.
+- **A property and a variable keep their `$`**: `#/Invoice/$perPage`. So `$table` and `table()` have different paths.
+- **A top-level variable is a symbol**: `$version = '2.4.1';` is `#/$version`. Only `$name = value` counts, not
+  `$items['key'] = 1` or `$object->name = 1`. In `$a = $b = 1`, only `$a` is a symbol, and its value is `$b = 1`.
+- **A constructor parameter with a visibility is a property**: `private readonly string $currency` gives
+  `#/Invoice/$currency`. Its value is its default.
+- **A definition in an `if`, `else`, `try`, `catch`, `finally`, `switch`, `declare` or `{ }` block counts**, such as a
+  function in `if (!function_exists('money'))`. One in a loop doesn't. A name defined in both branches of an `if` is a
+  violation.
+- **Inside a function or a method, only a `define` is a symbol, and its path has no parent.** `define('BOOTED', 1);`
+  in the method `Kernel::boot()` gives `#/BOOTED`. Local variables, and functions and classes declared in a function,
+  are not symbols. Neither are closures, arrow functions and anonymous classes, or a `define` in them.
+- **A `define` counts only as a whole statement whose name is plain text.** It covers the statement, with its `;`.
+  `define($name, 1)`, `define('A\\', 1)`, `defined('X') or define('X', 1)` and a call with named arguments are not
+  symbols.
+- **Names compare as written.** PHP ignores the case of class, function and method names, but `#/MONEY` doesn't find
+  `function money`.
+- **Attributes are part of a definition. Doc comments are not.** In `const A = 1, B = 2;` and `public $a = 1, $b;`,
+  each name covers only its own part.
+- **`namespace`, `use` imports, trait uses and `declare(strict_types=1)` are not symbols.** A trait's members sit under
+  the trait, not under the classes that use it. The keys of an array, such as `return ['timezone' => 'UTC']` in a
+  Laravel config file, are not symbols yet.
+- **Strings follow PHP's escapes.** `'it\'s'` is `it's`, and `"caf\u{e9}"` is `café`. A heredoc or a nowdoc loses the
+  closing marker's indent on each line. A string with a variable, such as `"v$major"` or `"{$a}"`, stays as written.
+  So does a string whose bytes are not UTF-8, such as `"\xFF"`, and a string that PHP rejects.
+- **In a template, the symbols come from the PHP code.** The HTML around it is skipped.
+- **A syntax error stops the run for the definition that holds it, and for each type around it.** The other
+  definitions still resolve. The parser fails on a constructor parameter with `readonly` but no visibility, such as
+  `__construct(readonly int $id)`, so a path into its class stops the run.
 
 <!-- </block> -->
 

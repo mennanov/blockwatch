@@ -1070,6 +1070,8 @@ mod tests {
             "mjs",
             "mts",
             "nomad",
+            "php",
+            "phtml",
             "props",
             "proto",
             "py",
