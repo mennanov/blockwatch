@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.16.6] - 2026-11-04
+
 ### Added
 
 - Symbols in XML files: `.xml`, the MSBuild files (`.csproj`, `.fsproj`, `.vbproj`, `.vcxproj`, `.props`,
