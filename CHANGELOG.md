@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.16.7] - 2026-11-04
+
 ### Added
 
 - Symbols in PHP files (`.php` and `.phtml`). `Invoice.php#/Invoice/STATUS_PAID` points at a class constant,
