@@ -88,7 +88,7 @@ let between = 2;
                 Comment {
                     position_range: Position::new(17, 1)..Position::new(17, 26),
                     source_range: 559..584,
-                    comment_text: "  / Triple slash comment.".to_string()
+                    comment_text: "    Triple slash comment.".to_string()
                 },
                 Comment {
                     position_range: Position::new(19, 1)..Position::new(19, 23),

@@ -297,7 +297,7 @@ fn escaped(characters: &mut Chars) -> anyhow::Result<char> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let hcl_language = tree_sitter_hcl::LANGUAGE.into();
-    let parser = language_parsers::hash_and_c_style_comments_parser(&hcl_language, "comment")?;
+    let parser = language_parsers::c_style_comments_parser(&hcl_language, &["comment"])?;
     Ok(parser)
 }
 
@@ -898,7 +898,7 @@ spanning multiple lines
                 Comment {
                     position_range: Position::new(10, 1)..Position::new(10, 26),
                     source_range: 143..168,
-                    comment_text: "  / Triple slash comment.".to_string()
+                    comment_text: "    Triple slash comment.".to_string()
                 },
             ]
         );

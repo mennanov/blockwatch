@@ -1,6 +1,5 @@
 use crate::language_parsers::{
-    CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
-    c_style_multiline_comment_processor, comment_visitor, node_text,
+    CommentsParser, LanguageParser, LanguageParserImpl, c_style_comments_parser, node_text,
 };
 use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition};
 use tree_sitter::Node;
@@ -125,28 +124,7 @@ fn escaped_character(escape: &str) -> anyhow::Result<char> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let rust_language = tree_sitter_rust::LANGUAGE.into();
-    let parser = TreeSitterCommentsParser::new(
-        &rust_language,
-        comment_visitor(|node, source_code| match node.kind() {
-            "line_comment" => {
-                let comment = node_text(node, source_code);
-                Some(if comment.starts_with("///") {
-                    comment.replacen("///", "   ", 1)
-                } else if comment.starts_with("//!") {
-                    comment.replacen("//!", "   ", 1)
-                } else if comment.starts_with("//") {
-                    comment.replacen("//", "  ", 1)
-                } else {
-                    comment.to_string()
-                })
-            }
-            "block_comment" => Some(c_style_multiline_comment_processor(node_text(
-                node,
-                source_code,
-            ))),
-            _ => None,
-        }),
-    )?;
+    let parser = c_style_comments_parser(&rust_language, &["line_comment", "block_comment"])?;
     Ok(parser)
 }
 

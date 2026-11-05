@@ -8,11 +8,8 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let scala_language = tree_sitter_scala::LANGUAGE.into();
-    let parser = language_parsers::c_style_line_and_block_comments_parser(
-        &scala_language,
-        "comment",
-        "block_comment",
-    )?;
+    let parser =
+        language_parsers::c_style_comments_parser(&scala_language, &["comment", "block_comment"])?;
     Ok(parser)
 }
 
@@ -80,7 +77,7 @@ object Main {
                 Comment {
                     position_range: Position::new(10, 1)..Position::new(10, 26),
                     source_range: 142..167,
-                    comment_text: "  / Triple slash comment.".to_string()
+                    comment_text: "    Triple slash comment.".to_string()
                 },
             ]
         );

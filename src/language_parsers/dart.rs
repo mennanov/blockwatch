@@ -502,7 +502,7 @@ fn push_representation_field<'tree>(
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let dart_language = tree_sitter_dart::LANGUAGE.into();
     // The grammar gives `///` and `/** */` comments a node kind of their own.
-    let parser = language_parsers::c_style_and_doc_comments_parser(
+    let parser = language_parsers::c_style_comments_parser(
         &dart_language,
         &["comment", "documentation_comment"],
     )?;

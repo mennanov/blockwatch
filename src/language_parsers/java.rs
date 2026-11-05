@@ -1,6 +1,5 @@
 use crate::language_parsers::{
-    Comment, CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser, Visit,
-    c_style_and_doc_line_and_block_comment_text, node_text,
+    CommentsParser, LanguageParser, LanguageParserImpl, c_style_comments_parser, node_text,
 };
 use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, NestedWalk};
 use anyhow::{anyhow, bail};
@@ -232,25 +231,10 @@ fn push_fields<'tree>(
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let java_language = tree_sitter_java::LANGUAGE.into();
-    let parser = TreeSitterCommentsParser::new(
-        &java_language,
-        Box::new(|node, source_code| {
-            // A text block (`"""..."""`) is a `string_literal`, and tree-sitter can nest a
-            // comment-shaped node inside it; its text is string content, not a source comment.
-            if node.kind() == "string_literal" {
-                return Visit::Break(None);
-            }
-            match c_style_and_doc_line_and_block_comment_text(
-                node,
-                source_code,
-                "line_comment",
-                "block_comment",
-            ) {
-                Some(text) => Visit::Break(Some(Comment::from_node(node, source_code, text))),
-                None => Visit::Continue,
-            }
-        }),
-    )?;
+    // A text block (`"""..."""`) is a `string_literal`, and tree-sitter can nest a comment-shaped
+    // node inside it. Its text is string content, not a source comment.
+    let parser = c_style_comments_parser(&java_language, &["line_comment", "block_comment"])?
+        .with_break_at_node_kinds(&["string_literal"]);
     Ok(parser)
 }
 

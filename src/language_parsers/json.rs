@@ -9,7 +9,8 @@ use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for JSON.
 pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    let comments_parser = c_style_comments_parser(&tree_sitter_json::LANGUAGE.into(), "comment")?;
+    let comments_parser =
+        c_style_comments_parser(&tree_sitter_json::LANGUAGE.into(), &["comment"])?;
     Ok(LanguageParserImpl::new(comments_parser).with_symbols(JsonSymbolsParser::new()?))
 }
 

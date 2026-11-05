@@ -1,6 +1,6 @@
 use crate::language_parsers::{
-    CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser, comment_visitor,
-    node_text,
+    CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser, blank_outside,
+    comment_visitor, node_text,
 };
 use tree_sitter::Node;
 
@@ -32,14 +32,7 @@ fn lua_comment_text(node: &Node, comment: &str) -> String {
         }
         None => 0..0,
     };
-    let mut result = " ".repeat(content_range.start);
-    #[expect(
-        clippy::string_slice,
-        reason = "`content_range` is a tree-sitter node's range"
-    )]
-    result.push_str(&comment[content_range.clone()]);
-    result.push_str(&" ".repeat(comment.len() - content_range.end));
-    result
+    blank_outside(comment, content_range)
 }
 
 #[cfg(test)]

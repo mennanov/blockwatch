@@ -191,7 +191,7 @@ fn push_escape(escape: &str, bytes: &mut Vec<u8>) -> anyhow::Result<()> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let go_language = tree_sitter_go::LANGUAGE.into();
-    let parser = language_parsers::c_style_comments_parser(&go_language, "comment")?;
+    let parser = language_parsers::c_style_comments_parser(&go_language, &["comment"])?;
     Ok(parser)
 }
 
@@ -466,7 +466,7 @@ func main() {
                 Comment {
                     position_range: Position::new(16, 1)..Position::new(16, 26),
                     source_range: 229..254,
-                    comment_text: "  / Triple slash comment.".to_string()
+                    comment_text: "    Triple slash comment.".to_string()
                 },
             ]
         );

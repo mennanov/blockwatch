@@ -698,121 +698,45 @@ fn blank_preserving_line_breaks(bytes: &mut [u8]) {
     }
 }
 
-/// C-style comments parser for a query that returns both line and block comments.
+/// `comment` with each byte outside `content`, a byte range of it, turned into a space, so it
+/// keeps its length. The bytes outside `content` must be ASCII, such as the markers of a comment.
+fn blank_outside(comment: &str, content: Range<usize>) -> String {
+    #[expect(clippy::string_slice, reason = "the bytes around `content` are ASCII")]
+    let text = &comment[content.clone()];
+    format!(
+        "{}{text}{}",
+        " ".repeat(content.start),
+        " ".repeat(comment.len() - content.end)
+    )
+}
+
+/// A comments parser for a language whose comments are `//`, `#` or `/* */` comments. A node is a
+/// comment when its kind is in `comment_node_kinds`.
 fn c_style_comments_parser(
-    language: &Language,
-    comment_node_kind: &'static str,
-) -> anyhow::Result<TreeSitterCommentsParser> {
-    TreeSitterCommentsParser::new(
-        language,
-        comment_visitor(move |node, source_code| {
-            if node.kind() != comment_node_kind {
-                return None;
-            }
-            let comment = source_code.get(node.byte_range()).unwrap();
-            Some(if comment.starts_with("//") {
-                comment.replacen("//", "  ", 1)
-            } else {
-                c_style_multiline_comment_processor(comment)
-            })
-        }),
-    )
-}
-
-/// C-style comments parser for the separate line and block comment queries.
-fn c_style_line_and_block_comments_parser(
-    language: &Language,
-    line_comment_node_kind: &'static str,
-    block_comment_node_kind: &'static str,
-) -> anyhow::Result<TreeSitterCommentsParser> {
-    TreeSitterCommentsParser::new(
-        language,
-        comment_visitor(move |node, source_code| {
-            let kind = node.kind();
-            if kind == line_comment_node_kind {
-                Some(node_text(node, source_code).replacen("//", "  ", 1))
-            } else if kind == block_comment_node_kind {
-                Some(c_style_multiline_comment_processor(node_text(
-                    node,
-                    source_code,
-                )))
-            } else {
-                None
-            }
-        }),
-    )
-}
-
-/// C-style comments parser that additionally blanks the full `///` doc-comment marker, for
-/// languages where `///` is the primary documentation style (e.g. Dart, C#). A node is a comment
-/// when its kind is in `comment_node_kinds`.
-fn c_style_and_doc_comments_parser(
     language: &Language,
     comment_node_kinds: &'static [&'static str],
 ) -> anyhow::Result<TreeSitterCommentsParser> {
     TreeSitterCommentsParser::new(
         language,
         comment_visitor(move |node, source_code| {
-            if !comment_node_kinds.contains(&node.kind()) {
-                return None;
-            }
-            let comment = node_text(node, source_code);
-            Some(if comment.starts_with("///") {
-                comment.replacen("///", "   ", 1)
-            } else if comment.starts_with("//") {
-                comment.replacen("//", "  ", 1)
-            } else {
-                c_style_multiline_comment_processor(comment)
-            })
+            comment_node_kinds
+                .contains(&node.kind())
+                .then(|| c_style_comment_text(node_text(node, source_code)))
         }),
     )
 }
 
-/// Normalized comment text for a language with C-style line and block comments and a `///`
-/// doc-comment style (e.g. Java, Swift), or `None` when `node` is not one of those comments.
-fn c_style_and_doc_line_and_block_comment_text(
-    node: &Node,
-    source_code: &str,
-    line_comment_node_kind: &str,
-    block_comment_node_kind: &str,
-) -> Option<String> {
-    let kind = node.kind();
-    if kind == line_comment_node_kind {
-        let comment = node_text(node, source_code);
-        Some(if comment.starts_with("///") {
-            comment.replacen("///", "   ", 1)
-        } else {
-            comment.replacen("//", "  ", 1)
-        })
-    } else if kind == block_comment_node_kind {
-        Some(c_style_multiline_comment_processor(node_text(
-            node,
-            source_code,
-        )))
-    } else {
-        None
+/// `comment`, a `//`, `#` or `/* */` comment, with its markers blanked, so it keeps its length.
+fn c_style_comment_text(comment: &str) -> String {
+    // A doc comment's marker, `///` or `//!`, is blanked whole. Otherwise a tag that wraps over
+    // several doc comment lines would hold the third character of each marker.
+    match ["///", "//!", "//", "#"]
+        .into_iter()
+        .find(|marker| comment.starts_with(marker))
+    {
+        Some(marker) => comment.replacen(marker, &" ".repeat(marker.len()), 1),
+        None => c_style_multiline_comment_processor(comment),
     }
-}
-
-/// Like [`c_style_line_and_block_comments_parser`], but additionally blanks the full `///`
-/// doc-comment marker, for languages where `///` is the primary documentation style
-/// (e.g. Swift).
-fn c_style_and_doc_line_and_block_comments_parser(
-    language: &Language,
-    line_comment_node_kind: &'static str,
-    block_comment_node_kind: &'static str,
-) -> anyhow::Result<TreeSitterCommentsParser> {
-    TreeSitterCommentsParser::new(
-        language,
-        comment_visitor(move |node, source_code| {
-            c_style_and_doc_line_and_block_comment_text(
-                node,
-                source_code,
-                line_comment_node_kind,
-                block_comment_node_kind,
-            )
-        }),
-    )
 }
 
 /// Comments parser shared by the ECMAScript-family grammars (JavaScript, TypeScript, TSX). All
@@ -831,11 +755,7 @@ fn ecmascript_comments_parser(language: &Language) -> anyhow::Result<TreeSitterC
 fn ecmascript_comment_text(node: &Node, source_code: &str) -> Option<String> {
     let text = node_text(node, source_code);
     match node.kind() {
-        "comment" => Some(if text.starts_with("//") {
-            text.replacen("//", "  ", 1)
-        } else {
-            c_style_multiline_comment_processor(text)
-        }),
+        "comment" => Some(c_style_comment_text(text)),
         "html_comment" => Some(if text.starts_with("<!--") {
             text.replacen("<!--", "    ", 1)
         } else {
@@ -869,35 +789,6 @@ fn ecmascript_comment_text(node: &Node, source_code: &str) -> Option<String> {
         }
         _ => None,
     }
-}
-
-/// Comments parser for languages that support `#` line comments in addition to the C-style
-/// `//` and `/* */` comments.
-/// Blanks the leading `//` or `#` line-comment marker, or the `/* */` block-comment delimiters,
-/// of a hash-or-C-style comment, preserving the comment's length.
-fn hash_and_c_style_comment_text(comment: &str) -> String {
-    if comment.starts_with("//") {
-        comment.replacen("//", "  ", 1)
-    } else if comment.starts_with("#") {
-        comment.replacen("#", " ", 1)
-    } else {
-        c_style_multiline_comment_processor(comment)
-    }
-}
-
-fn hash_and_c_style_comments_parser(
-    language: &Language,
-    comment_node_kind: &'static str,
-) -> anyhow::Result<TreeSitterCommentsParser> {
-    TreeSitterCommentsParser::new(
-        language,
-        comment_visitor(move |node, source_code| {
-            if node.kind() != comment_node_kind {
-                return None;
-            }
-            Some(hash_and_c_style_comment_text(node_text(node, source_code)))
-        }),
-    )
 }
 
 /// Python-style comments parser.

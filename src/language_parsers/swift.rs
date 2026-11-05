@@ -1,6 +1,5 @@
 use crate::language_parsers::{
-    CommentsParser, LanguageParser, LanguageParserImpl,
-    c_style_and_doc_line_and_block_comments_parser, node_text,
+    CommentsParser, LanguageParser, LanguageParserImpl, c_style_comments_parser, node_text,
 };
 use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, NestedWalk, child};
 use anyhow::{anyhow, bail};
@@ -366,11 +365,7 @@ fn computed_value(property: Node<'_>) -> Option<Node<'_>> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let swift_language = tree_sitter_swift::LANGUAGE.into();
-    let parser = c_style_and_doc_line_and_block_comments_parser(
-        &swift_language,
-        "comment",
-        "multiline_comment",
-    )?;
+    let parser = c_style_comments_parser(&swift_language, &["comment", "multiline_comment"])?;
     Ok(parser)
 }
 

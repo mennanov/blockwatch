@@ -19,6 +19,12 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   setter, named constructor and enum value in it. A named extension's members sit under its name. See
   [Dart](docs/symbols.md#dart).
 
+### Fixed
+
+- A tag that wraps over several `///` or `//!` comment lines is no longer reported as malformed in C, C++, Go, Groovy,
+  HCL, JavaScript, JSON, Kotlin, MDX, PHP, Protobuf, Scala and TypeScript. These languages now blank the whole
+  marker, as C#, Dart, Java, Rust and Swift already did.
+
 ## [0.16.8] - 2026-11-05
 
 ### Added

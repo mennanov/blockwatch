@@ -10,7 +10,7 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let cpp_language = tree_sitter_cpp::LANGUAGE.into();
-    let parser = language_parsers::c_style_comments_parser(&cpp_language, "comment")?;
+    let parser = language_parsers::c_style_comments_parser(&cpp_language, &["comment"])?;
     Ok(parser)
 }
 
@@ -76,7 +76,7 @@ mod tests {
                 Comment {
                     position_range: Position::new(20, 1)..Position::new(20, 26),
                     source_range: 493..518,
-                    comment_text: "  / Triple slash comment.".to_string()
+                    comment_text: "    Triple slash comment.".to_string()
                 },
             ]
         );

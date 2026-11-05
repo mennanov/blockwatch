@@ -1,6 +1,5 @@
 use crate::language_parsers::{
-    CommentsParser, LanguageParser, LanguageParserImpl, c_style_line_and_block_comments_parser,
-    node_text,
+    CommentsParser, LanguageParser, LanguageParserImpl, c_style_comments_parser, node_text,
 };
 use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, NestedWalk, child};
 use anyhow::{anyhow, bail};
@@ -221,8 +220,7 @@ fn push_property<'tree>(
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let kotlin_language = tree_sitter_kotlin_ng::LANGUAGE.into();
-    let parser =
-        c_style_line_and_block_comments_parser(&kotlin_language, "line_comment", "block_comment")?;
+    let parser = c_style_comments_parser(&kotlin_language, &["line_comment", "block_comment"])?;
     Ok(parser)
 }
 
@@ -770,7 +768,7 @@ mod tests {
                 Comment {
                     position_range: Position::new(19, 1)..Position::new(19, 26),
                     source_range: 490..515,
-                    comment_text: "  / Triple slash comment.".to_string()
+                    comment_text: "    Triple slash comment.".to_string()
                 },
             ]
         );

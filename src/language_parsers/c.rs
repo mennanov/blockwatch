@@ -513,7 +513,7 @@ fn push_escape(escape: &str, bytes: &mut Vec<u8>) -> anyhow::Result<()> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let cpp_language = tree_sitter_c::LANGUAGE.into();
-    let parser = language_parsers::c_style_comments_parser(&cpp_language, "comment")?;
+    let parser = language_parsers::c_style_comments_parser(&cpp_language, &["comment"])?;
     Ok(parser)
 }
 
@@ -1164,7 +1164,7 @@ mod tests {
                 Comment {
                     position_range: Position::new(20, 1)..Position::new(20, 26),
                     source_range: 468..493,
-                    comment_text: "  / Triple slash comment.".to_string()
+                    comment_text: "    Triple slash comment.".to_string()
                 },
             ]
         );

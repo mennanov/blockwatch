@@ -128,7 +128,7 @@ fn enum_value<'tree>(
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let proto_language = tree_sitter_proto::LANGUAGE.into();
-    let parser = language_parsers::c_style_comments_parser(&proto_language, "comment")?;
+    let parser = language_parsers::c_style_comments_parser(&proto_language, &["comment"])?;
     Ok(parser)
 }
 
@@ -387,7 +387,7 @@ spanning multiple lines
                 Comment {
                     position_range: Position::new(12, 1)..Position::new(12, 26),
                     source_range: 153..178,
-                    comment_text: "  / Triple slash comment.".to_string()
+                    comment_text: "    Triple slash comment.".to_string()
                 },
             ]
         );

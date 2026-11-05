@@ -42,7 +42,7 @@ impl MdxParser {
             // MDX compiles to an ES module, where `<!--` doesn't start a comment.
             js_comments_parser: c_style_comments_parser(
                 &tree_sitter_javascript::LANGUAGE.into(),
-                "comment",
+                &["comment"],
             )?,
         })
     }

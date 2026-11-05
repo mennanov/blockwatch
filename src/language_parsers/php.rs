@@ -90,8 +90,7 @@ impl CommentsParser for PhpCommentsParser {
                 .expect("Empty Tree-sitter region query match")
                 .node;
             if node.kind() == "comment" {
-                let text =
-                    language_parsers::hash_and_c_style_comment_text(node_text(&node, source_code));
+                let text = language_parsers::c_style_comment_text(node_text(&node, source_code));
                 comments.push(Comment::from_node(&node, source_code, text));
             } else if let Some(view) = html_view.as_mut() {
                 // A `text` node: copy the HTML template section back into the blanked view.
@@ -1372,7 +1371,7 @@ spanning two lines -->
                 Comment {
                     position_range: Position::new(23, 1)..Position::new(23, 26),
                     source_range: 631..656,
-                    comment_text: "  / Triple slash comment.".to_string()
+                    comment_text: "    Triple slash comment.".to_string()
                 },
             ]
         );

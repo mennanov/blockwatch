@@ -12,7 +12,9 @@
 //! nested `/- -/`, and the strings, chars and `«»` names that can hold comment markers.
 
 use crate::LineIndex;
-use crate::language_parsers::{Comment, CommentsParser, LanguageParser, LanguageParserImpl};
+use crate::language_parsers::{
+    Comment, CommentsParser, LanguageParser, LanguageParserImpl, blank_outside,
+};
 use std::ops::Range;
 use winnow::Result as PResult;
 use winnow::combinator::{alt, delimited, eof, opt, repeat_till};
@@ -47,15 +49,9 @@ impl CommentsParser for LeanCommentsParser {
             .map(move |((opening, closing), range)| {
                 #[expect(clippy::string_slice, reason = "the scanner reads whole characters")]
                 let text = &source_code[range.clone()];
-                #[expect(clippy::string_slice, reason = "comment markers are ASCII")]
                 Comment {
                     position_range: lines.range(&range),
-                    comment_text: format!(
-                        "{}{}{}",
-                        " ".repeat(opening),
-                        &text[opening..text.len() - closing],
-                        " ".repeat(closing)
-                    ),
+                    comment_text: blank_outside(text, opening..text.len() - closing),
                     source_range: range,
                 }
             })

@@ -8,10 +8,9 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let groovy_language = tree_sitter_groovy::LANGUAGE.into();
-    let parser = language_parsers::c_style_line_and_block_comments_parser(
+    let parser = language_parsers::c_style_comments_parser(
         &groovy_language,
-        "line_comment",
-        "block_comment",
+        &["line_comment", "block_comment"],
     )?;
     Ok(parser)
 }
@@ -63,7 +62,7 @@ println(x)
                 Comment {
                     position_range: Position::new(9, 1)..Position::new(9, 26),
                     source_range: 143..168,
-                    comment_text: "  / Triple slash comment.".to_string()
+                    comment_text: "    Triple slash comment.".to_string()
                 },
             ]
         );
