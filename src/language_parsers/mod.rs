@@ -1056,6 +1056,7 @@ mod tests {
             "cts",
             "cxx",
             "d.ts",
+            "dart",
             "envrc",
             "fsproj",
             "go",

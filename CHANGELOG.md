@@ -12,6 +12,13 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- Symbols in Dart files (`.dart`). `config.dart#/Invoice/maxLines` points at a field of the class `Invoice`, and
+  `#/kApiVersion` at a variable at the top of the file. Each type is a symbol, and so is each field, method, getter,
+  setter, named constructor and enum value in it. A named extension's members sit under its name. See
+  [Dart](docs/symbols.md#dart).
+
 ## [0.16.8] - 2026-11-05
 
 ### Added

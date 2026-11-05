@@ -160,8 +160,8 @@ Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`
 `BUCK`, `WORKSPACE`, `Tiltfile`), Rust (`.rs`), TypeScript (`.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`), JavaScript
 (`.js`, `.mjs`, `.cjs`, `.jsx`), Java (`.java`), C# (`.cs`), Kotlin (`.kt`, `.kts`), Swift (`.swift`), Protocol
 Buffers (`.proto`), HCL (`.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`), PHP (`.php`, `.phtml`), shell (`.sh`,
-`.bash`, `.bashrc`, `.bash_profile`, `.envrc`), and Makefile (`Makefile`, `GNUmakefile`, `makefile`, `.mk`, `.mak`).
-A path into any other file fails the run.
+`.bash`, `.bashrc`, `.bash_profile`, `.envrc`), Makefile (`Makefile`, `GNUmakefile`, `makefile`, `.mk`, `.mak`), and
+Dart (`.dart`). A path into any other file fails the run.
 
 ### Writing a path
 
@@ -242,7 +242,7 @@ files. A path is each element's name from the root element down. An attribute is
 ### Code files
 
 Each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is `#/NAME`, such
-as `consts.go#/MaxPorts`. In Java, C#, Kotlin, Swift, Protocol Buffers and PHP, the members of a
+as `consts.go#/MaxPorts`. In Java, C#, Kotlin, Swift, Protocol Buffers, PHP and Dart, the members of a
 type are symbols too: `Config.java#/Config/MAX_PORTS`. In HCL, each block, attribute and object key is a symbol:
 `main.tf#/variable/region/default`.
 
@@ -254,7 +254,7 @@ type are symbols too: `Config.java#/Config/MAX_PORTS`. In HCL, each block, attri
 - A syntax error fails the run only for a name whose definition holds it, or a path with a name from the text the
   parser skipped. So does a string blockwatch can't decode.
 - Members, such as a method or a field, are not symbols yet, except in Java, C#, Kotlin, Swift, Protocol Buffers,
-  HCL and PHP.
+  HCL, PHP and Dart.
 
 ### Go
 
@@ -456,6 +456,21 @@ type are symbols too: `Config.java#/Config/MAX_PORTS`. In HCL, each block, attri
   keeps the `\` and the line end, where make joins the lines.
 - A block tag is found on a recipe line whose first character after the tab is `#`, and after any `#` in a `define`
   body, though make reads no comment there.
+
+### Dart
+
+- Each top-level variable, function, getter, setter, type and type alias is a symbol, and so is each member of a type:
+  a field, a method, a getter, a setter, a named constructor or an enum value. A path goes from the type down:
+  `#/Invoice/maxLines`, `#/Mode/dark`.
+- A named constructor is a symbol: `Invoice.draft()` is `#/Invoice/draft`. The unnamed constructor is not.
+- A named extension's members sit under its name: `#/StringX/isBlank`. An extension without a name has no symbols.
+- A getter and a setter with one name are defined twice, and so are a named constructor and a field with one name.
+- A variable's value is its initializer, and a getter's is the `v` of `=> v`.
+- Annotations are part of a definition. Doc comments are not. In `int a = 1, b = 2;`, each name covers only its own
+  part.
+- Operators, `external` declarations and local declarations are not symbols.
+- Strings follow Dart's escapes, and adjacent strings, such as `'a' "b"`, are joined. A raw string has no escapes. A
+  string with `$name` or `${...}` stays as written. A path to a string that Dart rejects fails the run.
 
 ## The config file (`blockwatch.toml`)
 

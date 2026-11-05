@@ -47,6 +47,7 @@ declares, instead of tags in a comment.
 | PHP              | `.php`, `.phtml`                                                                                            | [PHP](#php)                                             |
 | Shell            | `.sh`, `.bash`, `.bashrc`, `.bash_profile`, `.envrc`                                                        | [Shell](#shell)                                         |
 | Makefile         | `Makefile`, `GNUmakefile`, `makefile`, `.mk`, `.mak`                                                        | [Makefile](#makefile)                                   |
+| Dart             | `.dart`                                                                                                     | [Dart](#dart)                                           |
 
 <!-- </block> -->
 
@@ -327,8 +328,8 @@ is `@` and its name, under its element:
 In a code file, each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is
 `#/NAME`.
 With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`. In Java, C#, Kotlin, Swift, Protocol
-Buffers and PHP, the members of a type are symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`. In
-HCL, each block, attribute and object key is a symbol: `main.tf#/variable/region/default`.
+Buffers, PHP and Dart, the members of a type are symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`.
+In HCL, each block, attribute and object key is a symbol: `main.tf#/variable/region/default`.
 
 - **A value is the initializer as written.** blockwatch never works it out: `20 * 1024 * 1024` stays as it is, and so
   does `0x10`. Use `same-as-pattern` to take the part you need.
@@ -343,7 +344,7 @@ HCL, each block, attribute and object key is a symbol: `main.tf#/variable/region
   where the error is.
 - **A path to a string that blockwatch can't decode stops the run.** Other paths in the file still resolve.
 - **Members are not symbols yet**, such as a method or a field, except in Java, C#, Kotlin, Swift, Protocol Buffers,
-  HCL and PHP.
+  HCL, PHP and Dart.
 
 <!-- </block> -->
 
@@ -1199,6 +1200,75 @@ bin/app: $(SRC)
   - In `lint: N = x;y # value`, `# value` is read as a comment. Make keeps it in the value that `N` has for `lint`.
   - In `D = a$# b`, the `#` and the text after it are read as comments, and `#/D` gives `a$#`. Make reads `$#` as a
     variable reference, so the line has no comment, and the value is `a$# b`.
+
+<!-- </block> -->
+
+## Dart
+
+<!-- <block name="dart-paths"> -->
+
+```dart
+const kApiVersion = '2.1.0';
+int retries = 3, timeout = 30;
+String get greeting => 'hi';
+
+class Invoice {
+  static const int maxLines = 20 * 1024;
+  final int id;
+
+  Invoice(this.id);
+  Invoice.draft() : id = 0;
+
+  int get total => _total;
+  set total(int v) => _total = v;
+  void send() {}
+}
+
+enum Mode { light, dark('d'); const Mode([this.code]); final String? code; }
+
+extension StringX on String { bool get isBlank => trim().isEmpty; }
+```
+
+| Path                 | Points at                                         |
+|----------------------|---------------------------------------------------|
+| `#/kApiVersion`      | `2.1.0`                                           |
+| `#/retries`          | `3`                                               |
+| `#/greeting`         | `hi`                                              |
+| `#/Invoice`          | the whole class                                   |
+| `#/Invoice/maxLines` | `20 * 1024`                                       |
+| `#/Invoice/id`       | `final int id;`, as it has no value               |
+| `#/Invoice/draft`    | the whole constructor                             |
+| `#/Invoice/total`    | a violation, as a getter and a setter share it    |
+| `#/Invoice/send`     | the whole method                                  |
+| `#/Mode/dark`        | `dark('d')`, as an enum value has no value        |
+| `#/Mode/code`        | `final String? code;`                             |
+| `#/StringX/isBlank`  | `trim().isEmpty`                                  |
+
+- **Each top-level variable, function, getter, setter, type and type alias is a symbol, and so is each member of a
+  type**: a field, a method, a getter, a setter, a named constructor or an enum value. Classes, mixins, enums,
+  extensions and extension types are types. Dart has no nested types, so a path has at most two names:
+  `#/Mode/dark`.
+- **A named constructor is a symbol**, as code calls it by its name: `Invoice.draft()` is `#/Invoice/draft`. The
+  unnamed constructor is not, even when it is written `Invoice.new()`. The header of an extension type can declare a
+  named constructor and a field: `extension type Meters.from(double value)` gives `#/Meters/from` and
+  `#/Meters/value`.
+- **A named extension's members sit under its name**: `#/StringX/isBlank`. Two extensions of `String` in one file
+  don't clash. An extension without a name has no symbols.
+- **A getter and a setter with one name are defined twice**, and so are a named constructor and a field with one
+  name, such as `Button.disabled()` and `disabled`. Wrap the one you mean in a block instead.
+- **A variable's value is its initializer, and a getter's is the `v` of `=> v`.** A getter with a block body has no
+  value, and neither has a function, a method or a constructor.
+- **Annotations are part of a definition. Doc comments are not.** In `int a = 1, b = 2;`, each name covers only its
+  own part.
+- **The unnamed constructor, operators, `external` declarations, `library`, `import` and `part` directives, local
+  declarations and closures are not symbols.** A file with `part of` has its own symbols.
+- **Strings follow Dart's escapes.** `'caf\u{e9}'` is `café`. Adjacent strings, such as `'a' "b"`, are joined. A raw
+  string, such as `r'C:\new'`, has no escapes. A `'''` or `"""` string loses a first line that holds only spaces and
+  tabs. Each line end in a string is a line feed, unless a backslash comes before it. A string with `$name` or
+  `${...}` in any part stays as written. A path to a string that Dart rejects, such as `'\u{110000}'`, or to half of a
+  character, such as `'\u{D800}'`, stops the run.
+- **A syntax error stops the run for the member that holds it, and for the type around it.** The other members still
+  resolve.
 
 <!-- </block> -->
 
