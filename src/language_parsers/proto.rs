@@ -49,26 +49,10 @@ fn push_members<'tree>(
 ) {
     let mut cursor = body.walk();
     for member in body.named_children(&mut cursor) {
-        let (name, value, member_body) = match member.kind() {
-            "message" | "group" => (
-                child(member, "message_name"),
-                None,
-                child(member, "message_body"),
-            ),
-            "enum" => (child(member, "enum_name"), None, child(member, "enum_body")),
-            // A service holds its rpcs without a body node around them.
-            "service" => (child(member, "service_name"), None, Some(member)),
-            "rpc" => (child(member, "rpc_name"), None, None),
-            "field" | "map_field" | "oneof_field" => (
-                child(member, "identifier"),
-                child(member, "field_number"),
-                None,
-            ),
-            "enum_field" => {
-                walk.definitions
-                    .extend(enum_value(member, &parents, source));
-                continue;
-            }
+        match member.kind() {
+            "enum_field" => walk
+                .definitions
+                .extend(enum_value(member, &parents, source)),
             // protoc puts the fields of a oneof in its message, so they share the oneof's
             // parents.
             "oneof" => {
@@ -76,7 +60,6 @@ fn push_members<'tree>(
                     walk.add_definition(&parents, name, member.byte_range(), None);
                 }
                 walk.add_body(member, parents.clone());
-                continue;
             }
             // protoc puts an extension field where its `extend` is written, not in the message
             // it extends.
@@ -84,15 +67,40 @@ fn push_members<'tree>(
                 if let Some(body) = child(member, "message_body") {
                     walk.add_body(body, parents.clone());
                 }
-                continue;
             }
-            // Options, `reserved` and `extensions` ranges, and the lines at the top of a file,
-            // such as `package`, define no name that code refers to.
-            _ => continue,
-        };
-        if let Some(name) = name {
-            walk.add_definition_with_body(&parents, name, member.byte_range(), value, member_body);
+            _ => push_definition(member, &parents, walk),
         }
+    }
+}
+
+/// Adds the definition of `member`, a message, enum, service, rpc or field in the definition at
+/// `parents`, and its body, to `walk`. Adds nothing for any other member.
+fn push_definition<'tree>(
+    member: Node<'tree>,
+    parents: &[Node<'tree>],
+    walk: &mut NestedWalk<'tree>,
+) {
+    let (name, value, body) = match member.kind() {
+        "message" | "group" => (
+            child(member, "message_name"),
+            None,
+            child(member, "message_body"),
+        ),
+        "enum" => (child(member, "enum_name"), None, child(member, "enum_body")),
+        // A service holds its rpcs without a body node around them.
+        "service" => (child(member, "service_name"), None, Some(member)),
+        "rpc" => (child(member, "rpc_name"), None, None),
+        "field" | "map_field" | "oneof_field" => (
+            child(member, "identifier"),
+            child(member, "field_number"),
+            None,
+        ),
+        // Options, `reserved` and `extensions` ranges, and the lines at the top of a file, such
+        // as `package`, define no name that code refers to.
+        _ => return,
+    };
+    if let Some(name) = name {
+        walk.add_definition_with_body(parents, name, member.byte_range(), value, body);
     }
 }
 

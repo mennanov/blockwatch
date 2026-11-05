@@ -177,18 +177,9 @@ fn declarations<'tree>(declaration: Node<'tree>, source: &str) -> Vec<Definition
         .named_children(&mut cursor)
         .filter(|child| !node_text(child, source).starts_with(['-', '+']))
         .collect();
-    let is_only_name = names.len() == 1;
-    names
-        .into_iter()
-        .filter(|name| name.kind() == "variable_assignment")
-        .filter_map(|name| {
-            let range = if is_only_name {
-                declaration.byte_range()
-            } else {
-                name.byte_range()
-            };
-            assignment(name, range)
-        })
+    code::part_ranges(declaration.byte_range(), names)
+        .filter(|(name, _)| name.kind() == "variable_assignment")
+        .filter_map(|(name, range)| assignment(name, range))
         .collect()
 }
 

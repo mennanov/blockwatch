@@ -352,18 +352,12 @@ pub(crate) fn without_parentheses(mut node: Node<'_>) -> Node<'_> {
         if node.children(&mut cursor).any(|child| child.kind() == ",") {
             break;
         }
-        let only = {
-            // A comment inside the parentheses is a child too, but not part of the value. The
-            // label of a tuple, such as Swift's `(a: 1)`, is a second child, so the tuple stays.
-            let mut inner = node
-                .named_children(&mut cursor)
-                .filter(|child| !child.is_extra());
-            match (inner.next(), inner.next()) {
-                (Some(only), None) => only,
-                _ => break,
-            }
-        };
-        node = only;
+        // A comment inside the parentheses is a child too, but not part of the value. The label of
+        // a tuple, such as Swift's `(a: 1)`, is a second child, so the tuple stays.
+        match only_child(node) {
+            Some(only) => node = only,
+            None => break,
+        }
     }
     node
 }
@@ -470,6 +464,37 @@ pub(crate) fn child<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>>
         .find(|child| child.kind() == kind)
 }
 
+/// The only named child of `node` that is not a comment, or `None` when it has none or several.
+pub(crate) fn only_child(node: Node<'_>) -> Option<Node<'_>> {
+    let mut cursor = node.walk();
+    let mut children = node
+        .named_children(&mut cursor)
+        .filter(|child| !child.is_extra());
+    match (children.next(), children.next()) {
+        (Some(only), None) => Some(only),
+        _ => None,
+    }
+}
+
+/// Each of `parts` with the byte range of its definition. `parts` are the parts of one
+/// declaration at `whole`, each declaring one name, such as `a = 1` and `b = 2` in
+/// `int a = 1, b = 2;`. A part that is the only one covers the whole declaration.
+pub(crate) fn part_ranges<'tree>(
+    whole: Range<usize>,
+    parts: Vec<Node<'tree>>,
+) -> impl Iterator<Item = (Node<'tree>, Range<usize>)> {
+    // With several parts, each covers only itself, so a change to one does not touch the others.
+    let alone = parts.len() == 1;
+    parts.into_iter().map(move |part| {
+        let range = if alone {
+            whole.clone()
+        } else {
+            part.byte_range()
+        };
+        (part, range)
+    })
+}
+
 /// The value that follows the `token` in `node`, such as the `5` after the `=` in `x = 5`.
 /// Returns `None` when `node` has no `token`.
 pub(crate) fn value_after<'tree>(node: Node<'tree>, token: &str) -> Option<Node<'tree>> {
@@ -558,10 +583,20 @@ pub(crate) fn decode_utf16(
         if character == '\\' {
             push_escape(&mut characters, &mut units)?;
         } else {
-            units.extend(character.encode_utf16(&mut [0; 2]).iter());
+            push_utf16(character, &mut units);
         }
     }
     string_from_utf16(units)
+}
+
+/// Adds the UTF-16 code units of `character` to `units`.
+pub(crate) fn push_utf16(character: char, units: &mut Vec<u16>) {
+    units.extend(character.encode_utf16(&mut [0; 2]).iter());
+}
+
+/// `text` with each line end, CR LF or a CR alone, turned into a line feed.
+pub(crate) fn with_line_feeds(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 /// The character whose code is `digits`, a number in `radix`, which `escape` writes. For

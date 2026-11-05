@@ -54,7 +54,7 @@ impl CodeLanguage for Kotlin {
             code::decode_utf16(content, push_escape).map(Some)
         } else {
             // The compiler reads every line end of a file as a line feed.
-            Ok(Some(content.replace("\r\n", "\n").replace('\r', "\n")))
+            Ok(Some(code::with_line_feeds(content)))
         }
     }
 
@@ -114,7 +114,7 @@ fn push_escape(characters: &mut Peekable<Chars>, units: &mut Vec<u16>) -> anyhow
         }
         _ => bail!("`\\{escaped}` is not an escape in a Kotlin string"),
     };
-    units.extend(character.encode_utf16(&mut [0; 2]).iter());
+    code::push_utf16(character, units);
     Ok(())
 }
 

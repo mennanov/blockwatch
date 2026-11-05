@@ -64,7 +64,11 @@ pub(super) fn nodes_in_order(root: &Node) -> impl Iterator<Item = &Node> {
 }
 
 /// The byte range of a node at `position` in the source that markdown-rs parsed.
-fn byte_range(position: &markdown::unist::Position) -> Range<usize> {
+///
+/// # Panics
+/// Panics if `position` is `None`, which markdown-rs never gives a node it parsed.
+fn byte_range(position: Option<&markdown::unist::Position>) -> Range<usize> {
+    let position = position.expect("markdown-rs gives every node it parses a position");
     position.start.offset..position.end.offset
 }
 
@@ -139,10 +143,7 @@ impl<'s> Sections<'s> {
 
     /// Reads `node`, the next top-level node of the file.
     fn read(&mut self, node: &Node) {
-        let range = byte_range(
-            node.position()
-                .expect("markdown-rs gives every node it parses a position"),
-        );
+        let range = byte_range(node.position());
         match heading_depth(node) {
             Some(depth) => {
                 self.close(depth);
@@ -243,16 +244,11 @@ impl MdCommentsParser {
         for node in nodes_in_order(&root) {
             match node {
                 Node::Html(_) => {
-                    comments.extend(
-                        self.html_comments(
-                            byte_range(
-                                node.position()
-                                    .expect("markdown-rs gives every node it parses a position"),
-                            ),
-                            source,
-                            &lines,
-                        ),
-                    );
+                    comments.extend(self.html_comments(
+                        byte_range(node.position()),
+                        source,
+                        &lines,
+                    ));
                 }
                 Node::Definition(definition) => {
                     comments.extend(link_reference_comment(definition, source, &lines));
@@ -314,12 +310,7 @@ fn link_reference_comment(
     if definition.label.as_deref() != Some("//") || definition.title.is_none() {
         return None;
     }
-    let definition_range = byte_range(
-        definition
-            .position
-            .as_ref()
-            .expect("markdown-rs gives every node it parses a position"),
-    );
+    let definition_range = byte_range(definition.position.as_ref());
     // Nothing else can be on the line of a definition, so the comment takes the line break too,
     // and a block's content starts on the next line.
     let range = definition_range.start..line_end(source.as_bytes(), definition_range.end);

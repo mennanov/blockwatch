@@ -172,21 +172,9 @@ fn javascript_spans(node: &Node) -> Vec<(&str, &[Stop])> {
             vec![(value, stops)]
         }
         Node::MdxJsxFlowElement(MdxJsxFlowElement { attributes, .. })
-        | Node::MdxJsxTextElement(MdxJsxTextElement { attributes, .. }) => attributes
-            .iter()
-            .filter_map(|attribute| match attribute {
-                AttributeContent::Expression(MdxJsxExpressionAttribute { value, stops })
-                | AttributeContent::Property(MdxJsxAttribute {
-                    value:
-                        Some(AttributeValue::Expression(AttributeValueExpression { value, stops })),
-                    ..
-                }) => Some((value.as_str(), stops.as_slice())),
-                AttributeContent::Property(MdxJsxAttribute {
-                    value: None | Some(AttributeValue::Literal(_)),
-                    ..
-                }) => None,
-            })
-            .collect(),
+        | Node::MdxJsxTextElement(MdxJsxTextElement { attributes, .. }) => {
+            attributes.iter().filter_map(attribute_span).collect()
+        }
         // These hold no JavaScript of their own. Code, text and frontmatter can hold comment
         // markers, but those are not JavaScript comments.
         Node::Root(_)
@@ -218,6 +206,23 @@ fn javascript_spans(node: &Node) -> Vec<(&str, &[Stop])> {
         | Node::ListItem(_)
         | Node::Definition(_)
         | Node::Paragraph(_) => Vec::new(),
+    }
+}
+
+/// The JavaScript that `attribute`, an attribute of a JSX element, holds, with its stops: the
+/// whole of `{...props}`, or the value of `name={...}`. Returns `None` for an attribute without
+/// JavaScript, such as `name="text"`.
+fn attribute_span(attribute: &AttributeContent) -> Option<(&str, &[Stop])> {
+    match attribute {
+        AttributeContent::Expression(MdxJsxExpressionAttribute { value, stops })
+        | AttributeContent::Property(MdxJsxAttribute {
+            value: Some(AttributeValue::Expression(AttributeValueExpression { value, stops })),
+            ..
+        }) => Some((value.as_str(), stops.as_slice())),
+        AttributeContent::Property(MdxJsxAttribute {
+            value: None | Some(AttributeValue::Literal(_)),
+            ..
+        }) => None,
     }
 }
 

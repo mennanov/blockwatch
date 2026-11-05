@@ -382,38 +382,14 @@ fn double_quoted_decoded(text: &str) -> anyhow::Result<String> {
     while let Some(char) = chars.next() {
         match char {
             '\\' => {
-                let escape = chars.next().context("a string ends in `\\`")?;
-                let unescaped = match escape {
+                match chars.next().context("a string ends in `\\`")? {
                     // An escaped line break joins lines without a space.
                     '\n' => {
                         let empty_lines = skip_line_prefixes(&mut chars);
                         decoded.push_str(&"\n".repeat(empty_lines));
-                        escaped_end = decoded.len();
-                        continue;
                     }
-                    '0' => '\0',
-                    'a' => '\u{07}',
-                    'b' => '\u{08}',
-                    't' | '\t' => '\t',
-                    'n' => '\n',
-                    'v' => '\u{0B}',
-                    'f' => '\u{0C}',
-                    'r' => '\r',
-                    'e' => '\u{1B}',
-                    ' ' => ' ',
-                    '"' => '"',
-                    '/' => '/',
-                    '\\' => '\\',
-                    'N' => '\u{85}',
-                    '_' => '\u{A0}',
-                    'L' => '\u{2028}',
-                    'P' => '\u{2029}',
-                    'x' => hex_escape(&mut chars, 2)?,
-                    'u' => hex_escape(&mut chars, 4)?,
-                    'U' => hex_escape(&mut chars, 8)?,
-                    other => bail!("`\\{other}` is not an escape"),
-                };
-                decoded.push(unescaped);
+                    escape => decoded.push(escaped_char(escape, &mut chars)?),
+                }
                 escaped_end = decoded.len();
             }
             '\n' => {
@@ -430,6 +406,38 @@ fn double_quoted_decoded(text: &str) -> anyhow::Result<String> {
         }
     }
     Ok(decoded)
+}
+
+/// The character that the escape `escape`, the character after a backslash, stands for. Reads
+/// the hex digits of `\x`, `\u` and `\U` from `chars`.
+///
+/// # Errors
+/// Returns an error if `escape` starts no escape, or the hex digits are missing or stand for no
+/// character.
+fn escaped_char(escape: char, chars: &mut impl Iterator<Item = char>) -> anyhow::Result<char> {
+    Ok(match escape {
+        '0' => '\0',
+        'a' => '\u{07}',
+        'b' => '\u{08}',
+        't' | '\t' => '\t',
+        'n' => '\n',
+        'v' => '\u{0B}',
+        'f' => '\u{0C}',
+        'r' => '\r',
+        'e' => '\u{1B}',
+        ' ' => ' ',
+        '"' => '"',
+        '/' => '/',
+        '\\' => '\\',
+        'N' => '\u{85}',
+        '_' => '\u{A0}',
+        'L' => '\u{2028}',
+        'P' => '\u{2029}',
+        'x' => hex_escape(chars, 2)?,
+        'u' => hex_escape(chars, 4)?,
+        'U' => hex_escape(chars, 8)?,
+        other => bail!("`\\{other}` is not an escape"),
+    })
 }
 
 /// Skips the indentation of the next line and any empty lines before it. Returns how many empty

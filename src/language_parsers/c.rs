@@ -189,10 +189,7 @@ fn declaration_definitions(declaration: Node<'_>, start: usize) -> Vec<Definitio
     let declarators: Vec<Node> = declaration
         .children_by_field_name("declarator", &mut cursor)
         .collect();
-    // In `int a = 1, b = 2;`, each name has its own part, so a change to one does not touch the
-    // other.
-    let alone = declarators.len() == 1;
-    for declarator in declarators {
+    for (declarator, range) in code::part_ranges(start..declaration.end_byte(), declarators) {
         let Some((name, is_function)) = declared_name(declarator) else {
             continue;
         };
@@ -204,11 +201,6 @@ fn declaration_definitions(declaration: Node<'_>, start: usize) -> Vec<Definitio
         if value.is_none() && (is_function || is_extern) {
             continue;
         }
-        let range = if alone {
-            start..declaration.end_byte()
-        } else {
-            declarator.byte_range()
-        };
         definitions.push(Definition::new(Vec::new(), name, range, value));
     }
     definitions
@@ -368,6 +360,9 @@ fn macro_definition<'tree>(
     }))
 }
 
+/// What a macro's body is parsed after, so that it parses as the value of a variable.
+const MACRO_PREFIX: &str = "int x = ";
+
 /// The value of `node`, a `#define` of `name` without parameters, in `source`: its body, read as
 /// the value of a variable. `parser` parses the language of `source`.
 ///
@@ -387,20 +382,40 @@ fn macro_value<'tree>(
     };
     // The grammar keeps the body as one token. As the value of a variable, its strings,
     // parentheses and comments parse as they do in code.
-    const PREFIX: &str = "int x = ";
     let body_text = node_text(&body, source);
-    let text = format!("{PREFIX}{body_text}\n;");
+    let text = format!("{MACRO_PREFIX}{body_text}\n;");
     let tree = parser
         .parse(&text, None)
         .context("failed to parse syntax tree")?;
     let root = tree.root_node();
-    let in_file = |at: usize| body.start_byte() + at - PREFIX.len();
-    // The body holds a `//` comment at its end.
+    let written = written_body(body_text, root);
+    // A body that is not one value, such as `static inline`, or that the grammar can't read,
+    // such as an unclosed string, is kept as written.
+    let initializer = root
+        .child(0)
+        .and_then(|declaration| declaration.child_by_field_name("declarator"))
+        .and_then(|declarator| declarator.child_by_field_name("value"))
+        .filter(|value| {
+            !root.has_error() && value.end_byte() == MACRO_PREFIX.len() + written.len()
+        });
+    Ok(match initializer {
+        Some(initializer) => initializer_value(initializer, &text, body, source),
+        None => Value::Read(ScalarValue {
+            text: written.to_string(),
+            byte_range: body.start_byte()..body.start_byte() + written.len(),
+        }),
+    })
+}
+
+/// `body_text`, the body of a macro, without the `//` comment at its end and the backslashes that
+/// continue it onto the next lines. `root` is the root of the body parsed after
+/// [`MACRO_PREFIX`].
+fn written_body<'a>(body_text: &'a str, root: Node) -> &'a str {
     let mut written = body_text.trim_end();
     if let Some(comment) = root
         .descendant_for_byte_range(
-            PREFIX.len() + written.len() - 1,
-            PREFIX.len() + written.len(),
+            MACRO_PREFIX.len() + written.len() - 1,
+            MACRO_PREFIX.len() + written.len(),
         )
         .filter(|last| last.kind() == "comment")
     {
@@ -408,27 +423,26 @@ fn macro_value<'tree>(
             clippy::string_slice,
             reason = "tree-sitter nodes start on whole characters"
         )]
-        let before = body_text[..comment.start_byte() - PREFIX.len()].trim_end();
+        let before = body_text[..comment.start_byte() - MACRO_PREFIX.len()].trim_end();
         written = before;
     }
     // A backslash can continue the body onto a line that holds only a comment.
     while let Some(continued) = written.strip_suffix('\\') {
         written = continued.trim_end();
     }
-    // A body that is not one value, such as `static inline`, or that the grammar can't read,
-    // such as an unclosed string, is kept as written.
-    let initializer = root
-        .child(0)
-        .and_then(|declaration| declaration.child_by_field_name("declarator"))
-        .and_then(|declarator| declarator.child_by_field_name("value"))
-        .filter(|value| !root.has_error() && value.end_byte() == PREFIX.len() + written.len());
-    let Some(initializer) = initializer else {
-        return Ok(Value::Read(ScalarValue {
-            text: written.to_string(),
-            byte_range: body.start_byte()..body.start_byte() + written.len(),
-        }));
-    };
-    Ok(match code::node_value(initializer, &text, &decode_string) {
+    written
+}
+
+/// The value of `initializer`, the value in `text`, which is the macro body `body` parsed after
+/// [`MACRO_PREFIX`]. Its positions are where the body is in `source`.
+fn initializer_value<'tree>(
+    initializer: Node,
+    text: &str,
+    body: Node<'tree>,
+    source: &str,
+) -> Value<'tree> {
+    let in_file = |at: usize| body.start_byte() + at - MACRO_PREFIX.len();
+    match code::node_value(initializer, text, &decode_string) {
         Ok(value) => Value::Read(ScalarValue {
             text: value.text,
             byte_range: in_file(value.byte_range.start)..in_file(value.byte_range.end),
@@ -439,7 +453,7 @@ fn macro_value<'tree>(
             let at = in_file(string.start_byte());
             Value::Undecodable(Position::new(line, character_column_at(source, at)), error)
         }
-    })
+    }
 }
 
 /// Decodes a C or C++ string literal, or several written one after the other, which C joins.

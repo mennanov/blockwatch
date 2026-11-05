@@ -29,53 +29,10 @@ impl CodeLanguage for EcmaScript {
     /// The top-level definitions under `root`, the root of a TypeScript or JavaScript file's syntax
     /// tree, in document order. `source` is the text of the file.
     fn definitions<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Definition<'tree>> {
-        let mut definitions = Vec::new();
         let mut cursor = root.walk();
-        for statement in root.named_children(&mut cursor) {
-            let Some(declaration) = declaration(statement) else {
-                continue;
-            };
-            match declaration.kind() {
-                "lexical_declaration" | "variable_declaration" => {
-                    let mut inner = declaration.walk();
-                    let declarators: Vec<Node> = declaration
-                        .named_children(&mut inner)
-                        .filter(|child| child.kind() == "variable_declarator")
-                        .collect();
-                    // In `const A = 1, B = 2;`, each name covers only its own part.
-                    let several = declarators.len() > 1;
-                    for declarator in declarators {
-                        let range = if several {
-                            declarator.byte_range()
-                        } else {
-                            statement.byte_range()
-                        };
-                        let value = declarator
-                            .child_by_field_name("value")
-                            .map(without_type_syntax);
-                        definitions.extend(definition(declarator, range, value, source));
-                    }
-                }
-                "function_declaration"
-                | "generator_function_declaration"
-                | "class_declaration"
-                | "abstract_class_declaration"
-                | "interface_declaration"
-                | "type_alias_declaration"
-                | "enum_declaration"
-                | "internal_module"
-                | "module" => {
-                    definitions.extend(definition(
-                        declaration,
-                        statement.byte_range(),
-                        None,
-                        source,
-                    ));
-                }
-                _ => {}
-            }
-        }
-        definitions
+        root.named_children(&mut cursor)
+            .flat_map(|statement| statement_definitions(statement, source))
+            .collect()
     }
 
     /// Decodes a string, or a template without a `${...}` field. Returns `None` for any other node.
@@ -103,6 +60,53 @@ impl CodeLanguage for EcmaScript {
         }
         code::string_from_utf16(units).map(Some)
     }
+}
+
+/// The definitions that `statement`, a top-level statement, makes, in document order.
+fn statement_definitions<'tree>(statement: Node<'tree>, source: &str) -> Vec<Definition<'tree>> {
+    let declaration = match declaration(statement) {
+        Some(declaration) => declaration,
+        None => return Vec::new(),
+    };
+    match declaration.kind() {
+        "lexical_declaration" | "variable_declaration" => {
+            variable_definitions(declaration, statement, source)
+        }
+        "function_declaration"
+        | "generator_function_declaration"
+        | "class_declaration"
+        | "abstract_class_declaration"
+        | "interface_declaration"
+        | "type_alias_declaration"
+        | "enum_declaration"
+        | "internal_module"
+        | "module" => definition(declaration, statement.byte_range(), None, source)
+            .into_iter()
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The definitions of the variables that `declaration`, a `const`, `let` or `var` declaration
+/// that `statement` holds, declares, in document order.
+fn variable_definitions<'tree>(
+    declaration: Node<'tree>,
+    statement: Node<'tree>,
+    source: &str,
+) -> Vec<Definition<'tree>> {
+    let mut cursor = declaration.walk();
+    let declarators: Vec<Node> = declaration
+        .named_children(&mut cursor)
+        .filter(|child| child.kind() == "variable_declarator")
+        .collect();
+    code::part_ranges(statement.byte_range(), declarators)
+        .filter_map(|(declarator, range)| {
+            let value = declarator
+                .child_by_field_name("value")
+                .map(without_type_syntax);
+            definition(declarator, range, value, source)
+        })
+        .collect()
 }
 
 /// The declaration that `statement`, a top-level statement, holds: past its `export` and its
@@ -201,7 +205,7 @@ fn push_escape(escape: &str, units: &mut Vec<u16>) -> anyhow::Result<()> {
         // JavaScript keeps the character after a backslash it doesn't know, such as `\d`.
         _ => first,
     };
-    units.extend(character.encode_utf16(&mut [0; 2]).iter());
+    code::push_utf16(character, units);
     Ok(())
 }
 

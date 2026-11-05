@@ -208,27 +208,16 @@ impl<'s> Walk<'s> {
         match value {
             Value::String(string) => {
                 let written = require_span(value.span())?;
-                let range = start..written.end;
-                let scalar = ScalarValue {
-                    text: string.value().clone(),
-                    byte_range: written,
-                };
-                self.add_symbol(vec![range.clone()], Some(scalar));
-                Ok(vec![range])
+                Ok(self.add_scalar_symbol(start, written, string.value().clone()))
             }
             Value::Integer(_) | Value::Float(_) | Value::Boolean(_) | Value::Datetime(_) => {
                 let written = require_span(value.span())?;
-                let range = start..written.end;
                 #[expect(
                     clippy::string_slice,
                     reason = "`toml_edit` gives spans of whole characters"
                 )]
-                let scalar = ScalarValue {
-                    text: self.source[written.clone()].to_string(),
-                    byte_range: written,
-                };
-                self.add_symbol(vec![range.clone()], Some(scalar));
-                Ok(vec![range])
+                let text = self.source[written.clone()].to_string();
+                Ok(self.add_scalar_symbol(start, written, text))
             }
             Value::Array(array) => {
                 let range = start..require_span(value.span())?.end;
@@ -255,6 +244,23 @@ impl<'s> Walk<'s> {
                 Ok(ranges)
             }
         }
+    }
+
+    /// Adds a symbol at the current path, written from `start`, whose value is `text`, written
+    /// at `written`. Returns where the symbol is written.
+    fn add_scalar_symbol(
+        &mut self,
+        start: usize,
+        written: Range<usize>,
+        text: String,
+    ) -> Vec<Range<usize>> {
+        let range = start..written.end;
+        let value = ScalarValue {
+            text,
+            byte_range: written,
+        };
+        self.add_symbol(vec![range.clone()], Some(value));
+        vec![range]
     }
 
     /// Adds a symbol for every key in the inline table `table`, and returns where its members are

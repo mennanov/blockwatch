@@ -154,7 +154,7 @@ fn push_escape(characters: &mut Peekable<Chars>, units: &mut Vec<u16>) -> anyhow
         // Such as `\?`, which the grammar takes as an escape.
         _ => bail!("`\\{escaped}` is not an escape in a C# string"),
     };
-    units.extend(character.encode_utf16(&mut [0; 2]).iter());
+    code::push_utf16(character, units);
     Ok(())
 }
 
@@ -175,29 +175,26 @@ fn push_members<'tree>(
 ) {
     let mut cursor = body.walk();
     for member in body.named_children(&mut cursor) {
-        let name = member.child_by_field_name("name");
-        let value = match member.kind() {
+        match member.kind() {
             // `namespace Acme;` has no body. The declarations after it are in the namespace.
             "file_scoped_namespace_declaration" => {
-                if let Some(name) = name {
+                if let Some(name) = member.child_by_field_name("name") {
                     parents.extend(namespace_segments(name));
                 }
-                continue;
             }
             "namespace_declaration" => {
+                let name = member.child_by_field_name("name");
                 if let (Some(name), Some(body)) = (name, member.child_by_field_name("body")) {
                     walk.add_body(
                         body,
                         [parents.as_slice(), &namespace_segments(name)].concat(),
                     );
                 }
-                continue;
             }
             // A branch holds its definitions and the next branch, as if the directives were not
             // there.
             "preproc_if" | "preproc_elif" | "preproc_else" => {
                 walk.add_body(member, parents.clone());
-                continue;
             }
             "class_declaration"
             | "struct_declaration"
@@ -205,28 +202,34 @@ fn push_members<'tree>(
             | "enum_declaration"
             | "record_declaration"
             | "delegate_declaration" => {
-                if let Some(name) = name {
+                if let Some(name) = member.child_by_field_name("name") {
                     let body = member.child_by_field_name("body");
                     walk.add_definition_with_body(&parents, name, member.byte_range(), None, body);
                 }
-                continue;
             }
             "field_declaration" | "event_field_declaration" => {
                 push_fields(member, &parents, walk);
-                continue;
             }
-            "property_declaration" if !is_explicit(member) => property_value(member),
-            // A method is a function, so `=> v` is not its value.
-            "method_declaration" | "event_declaration" if !is_explicit(member) => None,
-            "enum_member_declaration" => member.child_by_field_name("value"),
-            // Code never refers to a constructor, a finalizer or an explicit interface member by
-            // name, and indexers and operators have none. Top-level statements are the body of
-            // the program's `Main` method, so what they define is local to it.
-            _ => continue,
-        };
-        if let Some(name) = name {
-            walk.add_definition(&parents, name, member.byte_range(), value);
+            _ => push_member(member, &parents, walk),
         }
+    }
+}
+
+/// Adds the definition of `member`, a property, method, event or enum member in the type at
+/// `parents`, to `walk`. Adds nothing for any other member.
+fn push_member<'tree>(member: Node<'tree>, parents: &[Node<'tree>], walk: &mut NestedWalk<'tree>) {
+    let value = match member.kind() {
+        "property_declaration" if !is_explicit(member) => property_value(member),
+        // A method is a function, so `=> v` is not its value.
+        "method_declaration" | "event_declaration" if !is_explicit(member) => None,
+        "enum_member_declaration" => member.child_by_field_name("value"),
+        // Code never refers to a constructor, a finalizer or an explicit interface member by
+        // name, and indexers and operators have none. Top-level statements are the body of the
+        // program's `Main` method, so what they define is local to it.
+        _ => return,
+    };
+    if let Some(name) = member.child_by_field_name("name") {
+        walk.add_definition(parents, name, member.byte_range(), value);
     }
 }
 
@@ -283,17 +286,9 @@ fn push_fields<'tree>(
         .named_children(&mut cursor)
         .filter(|child| child.kind() == "variable_declarator")
         .collect();
-    // In `int a = 1, b = 2;`, each name has its own part, so a change to one does not touch the
-    // other.
-    let alone = declarators.len() == 1;
-    for declarator in declarators {
+    for (declarator, range) in code::part_ranges(declaration.byte_range(), declarators) {
         let Some(name) = declarator.child_by_field_name("name") else {
             continue;
-        };
-        let range = if alone {
-            declaration.byte_range()
-        } else {
-            declarator.byte_range()
         };
         walk.add_definition(parents, name, range, code::value_after(declarator, "="));
     }

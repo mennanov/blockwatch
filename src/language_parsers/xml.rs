@@ -3,7 +3,7 @@ use crate::language_parsers::{
     xml_style_comments_parser,
 };
 use crate::symbol_path::SymbolPath;
-use crate::symbols::code::{child, position, undecodable_reason};
+use crate::symbols::code::{child, position, undecodable_reason, with_line_feeds};
 use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser, ensure_no_syntax_error};
 use anyhow::{Context, bail};
 use std::collections::HashMap;
@@ -112,16 +112,32 @@ impl<'s, 'tree> Walk<'s, 'tree> {
         let (tag, content) = tag_and_content(element)?;
         let name = child(tag, "Name").context("unexpected XML tag without a name")?;
         self.path.push(node_text(&name, self.source).to_string());
-        let children: Vec<Node> = content.map_or_else(Vec::new, |content| {
-            let mut cursor = content.walk();
-            content
-                .named_children(&mut cursor)
-                .filter(|child| child.kind() == "element")
-                .collect()
-        });
-        match (content, children.is_empty()) {
-            (_, false) => self.add_symbol(self.path.clone(), element, None),
-            (Some(content), true) => {
+        let children = child_elements(content);
+        if children.is_empty() {
+            self.add_text_symbol(element, tag, content);
+        } else {
+            self.add_symbol(self.path.clone(), element, None);
+        }
+        let mut cursor = tag.walk();
+        for attribute in tag.named_children(&mut cursor) {
+            match attribute.kind() {
+                "Attribute" => self.add_attribute_symbol(attribute)?,
+                "Name" => {}
+                other => bail!("unexpected {other} in an XML tag"),
+            }
+        }
+        // The stack takes the last element first, so the children go on it in reverse.
+        let depth = self.path.len();
+        self.pending
+            .extend(children.into_iter().rev().map(|child| (depth, child)));
+        Ok(())
+    }
+
+    /// Adds the symbol of `element`, an element without child elements, at the current path. Its
+    /// value is the text of `content`, or empty when it has no content. `tag` is its start tag.
+    fn add_text_symbol(&mut self, element: Node, tag: Node, content: Option<Node>) {
+        match content {
+            Some(content) => {
                 let text = element_text(content, self.source);
                 // The range leaves out the white space too, so text that needs no decoding is the
                 // source itself, and each of its lines keeps its position.
@@ -139,7 +155,7 @@ impl<'s, 'tree> Walk<'s, 'tree> {
             }
             // Nothing is written between the tags, so the value is the point where the start tag
             // ends: right after `<a/>`, or between the tags of `<a></a>`.
-            (None, true) => {
+            None => {
                 let value = ScalarValue {
                     text: String::new(),
                     byte_range: tag.end_byte()..tag.end_byte(),
@@ -147,19 +163,6 @@ impl<'s, 'tree> Walk<'s, 'tree> {
                 self.add_symbol(self.path.clone(), element, Some(value));
             }
         }
-        let mut cursor = tag.walk();
-        for attribute in tag.named_children(&mut cursor) {
-            match attribute.kind() {
-                "Attribute" => self.add_attribute_symbol(attribute)?,
-                "Name" => {}
-                other => bail!("unexpected {other} in an XML tag"),
-            }
-        }
-        // The stack takes the last element first, so the children go on it in reverse.
-        let depth = self.path.len();
-        self.pending
-            .extend(children.into_iter().rev().map(|child| (depth, child)));
-        Ok(())
     }
 
     /// Adds the symbol of `attribute`, an attribute of the element at the current path.
@@ -221,6 +224,18 @@ impl<'s, 'tree> Walk<'s, 'tree> {
     }
 }
 
+/// The child elements in `content`, the content of an element, in document order. Empty when the
+/// element has no content.
+fn child_elements(content: Option<Node>) -> Vec<Node> {
+    content.map_or_else(Vec::new, |content| {
+        let mut cursor = content.walk();
+        content
+            .named_children(&mut cursor)
+            .filter(|child| child.kind() == "element")
+            .collect()
+    })
+}
+
 /// The tag of `element`, its start tag or the whole of `<a/>`, and its content: what is written
 /// between its start tag and its end tag. The content is `None` when nothing is, as in `<a></a>`.
 ///
@@ -256,6 +271,7 @@ fn element_text(content: Node, source: &str) -> anyhow::Result<String> {
     let mut cursor = content.walk();
     for part in content.named_children(&mut cursor) {
         match part.kind() {
+            // XML reads every line end as a line feed.
             "CharData" => text.push_str(&with_line_feeds(node_text(&part, source))),
             // An empty CDATA section has no text node.
             "CDSect" => text.push_str(&child(part, "CData").map_or_else(String::new, |cdata| {
@@ -292,11 +308,6 @@ fn attribute_text(quoted: &str) -> anyhow::Result<String> {
         text.push_str(rest);
     }
     Ok(text)
-}
-
-/// `text` with each CR LF and each lone CR turned into a line feed, as XML requires.
-fn with_line_feeds(text: &str) -> String {
-    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 /// The character that `reference`, such as `&amp;`, `&#65;` or `&#x41;`, stands for.

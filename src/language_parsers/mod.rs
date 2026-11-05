@@ -761,34 +761,38 @@ fn ecmascript_comment_text(node: &Node, source_code: &str) -> Option<String> {
         } else {
             text.replacen("-->", "   ", 1)
         }),
-        // The braces join the comment, so that a block's content starts after the `}` of its start
-        // tag and ends before the `{` of its end tag.
-        "jsx_expression" => {
-            let child = node.named_child(0)?;
-            #[expect(
-                clippy::string_slice,
-                reason = "tree-sitter nodes start and end on whole characters"
-            )]
-            let before = &source_code[node.start_byte()..child.start_byte()];
-            #[expect(
-                clippy::string_slice,
-                reason = "tree-sitter nodes start and end on whole characters"
-            )]
-            let after = &source_code[child.end_byte()..node.end_byte()];
-            // Code or a second comment after the first child keeps the braces out. So does a `}`
-            // that tree-sitter made up to recover from an error, because it takes no bytes.
-            if after.trim() != "}" {
-                return None;
-            }
-            Some(format!(
-                "{}{}{}",
-                before.replace('{', " "),
-                ecmascript_comment_text(&child, source_code)?,
-                after.replace('}', " ")
-            ))
-        }
+        "jsx_expression" => jsx_comment_text(node, source_code),
         _ => None,
     }
+}
+
+/// The text of `expression`, a JSX `{...}`, with its braces and comment markers blanked, when it
+/// holds nothing but a comment, such as `{/* text */}`. Returns `None` otherwise.
+fn jsx_comment_text(expression: &Node, source_code: &str) -> Option<String> {
+    // The braces join the comment, so that a block's content starts after the `}` of its start
+    // tag and ends before the `{` of its end tag.
+    let child = expression.named_child(0)?;
+    #[expect(
+        clippy::string_slice,
+        reason = "tree-sitter nodes start and end on whole characters"
+    )]
+    let before = &source_code[expression.start_byte()..child.start_byte()];
+    #[expect(
+        clippy::string_slice,
+        reason = "tree-sitter nodes start and end on whole characters"
+    )]
+    let after = &source_code[child.end_byte()..expression.end_byte()];
+    // Code or a second comment after the first child keeps the braces out. So does a `}` that
+    // tree-sitter made up to recover from an error, because it takes no bytes.
+    if after.trim() != "}" {
+        return None;
+    }
+    Some(format!(
+        "{}{}{}",
+        before.replace('{', " "),
+        ecmascript_comment_text(&child, source_code)?,
+        after.replace('}', " ")
+    ))
 }
 
 /// Python-style comments parser.
@@ -822,27 +826,21 @@ fn xml_style_comments_parser(
     TreeSitterCommentsParser::new(
         language,
         comment_visitor(move |node, source_code| {
-            if node.kind() == comment_node_kind {
-                let comment = node_text(node, source_code);
-                let open_idx = comment.find("<!--").expect("open comment tag is expected");
-                let close_idx = comment.rfind("-->").expect("close comment tag is expected");
-                let mut result = String::with_capacity(comment.len());
-                #[expect(clippy::string_slice, reason = "`open_idx` is the index of `<!--`")]
-                result.push_str(&comment[..open_idx]);
-                // Replace "<!--" with spaces.
-                result.push_str("    ");
-                #[expect(clippy::string_slice, reason = "`<!--` and `-->` are ASCII")]
-                result.push_str(&comment[open_idx + 4..close_idx]);
-                // Replace "-->" with spaces.
-                result.push_str("   ");
-                #[expect(clippy::string_slice, reason = "`-->` is ASCII")]
-                result.push_str(&comment[close_idx + 3..]);
-                Some(result)
-            } else {
-                None
-            }
+            (node.kind() == comment_node_kind)
+                .then(|| xml_comment_text(node_text(node, source_code)))
         }),
     )
+}
+
+/// `comment`, an XML or HTML comment, with its `<!--` and `-->` blanked, so it keeps its length.
+fn xml_comment_text(comment: &str) -> String {
+    let (before, rest) = comment
+        .split_once("<!--")
+        .expect("open comment tag is expected");
+    let (content, after) = rest
+        .rsplit_once("-->")
+        .expect("close comment tag is expected");
+    format!("{before}    {content}   {after}")
 }
 
 fn c_style_multiline_comment_processor(comment: &str) -> String {
@@ -864,33 +862,15 @@ fn c_style_multiline_comment_processor(comment: &str) -> String {
 fn blank_decorative_stars(content: &str) -> String {
     let mut result = String::with_capacity(content.len());
     for line in content.split_inclusive('\n') {
-        let mut decorative_star_found = false;
-
-        // Find the index of the first non-whitespace character
-        if let Some(first_non_whitespace_idx) = line.find(|c: char| !c.is_whitespace()) {
-            #[expect(
-                clippy::string_slice,
-                reason = "`find` returns where a character starts"
-            )]
-            let rest = &line[first_non_whitespace_idx..];
-            // Check if that first non-whitespace character is a '*'
-            if let Some(after_star) = rest.strip_prefix('*') {
-                decorative_star_found = true;
-                // Add leading whitespace.
-                #[expect(
-                    clippy::string_slice,
-                    reason = "`find` returns where a character starts"
-                )]
-                result.push_str(&line[..first_non_whitespace_idx]);
-                // Replace "*" with a space.
+        let text = line.trim_start();
+        match text.strip_prefix('*') {
+            Some(after_star) => {
+                #[expect(clippy::string_slice, reason = "`text` is a suffix of `line`")]
+                result.push_str(&line[..line.len() - text.len()]);
                 result.push(' ');
-                // Add the rest of the line.
                 result.push_str(after_star);
             }
-        }
-        if !decorative_star_found {
-            // Not a decorative '*', or all whitespace. Add unchanged.
-            result.push_str(line);
+            None => result.push_str(line),
         }
     }
     result

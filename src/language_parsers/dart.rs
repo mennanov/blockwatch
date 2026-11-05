@@ -59,7 +59,8 @@ fn decode_part(part: &Node, source: &str) -> anyhow::Result<Option<String>> {
     }
     let content = quoting.content(node_text(part, source))?;
     if quoting.raw {
-        Ok(Some(with_line_feeds(content)))
+        // Dart reads every line end in a string as a line feed.
+        Ok(Some(code::with_line_feeds(content)))
     } else {
         unescape(content).map(Some)
     }
@@ -137,12 +138,6 @@ fn without_blank_first_line(content: &str) -> &str {
     content
 }
 
-/// `text` with each line end, CR LF or CR alone, turned into a line feed, as Dart reads a line end
-/// in a string.
-fn with_line_feeds(text: &str) -> String {
-    text.replace("\r\n", "\n").replace('\r', "\n")
-}
-
 /// Decodes the escapes in `content`, the text of a string between its quotes.
 ///
 /// # Errors
@@ -160,7 +155,7 @@ fn unescape(content: &str) -> anyhow::Result<String> {
                 characters.next_if_eq(&'\n');
                 units.push(u16::from(b'\n'));
             }
-            _ => push_char(character, &mut units),
+            _ => code::push_utf16(character, &mut units),
         }
     }
     code::string_from_utf16(units)
@@ -193,7 +188,7 @@ fn push_escape(characters: &mut Peekable<Chars>, units: &mut Vec<u16>) -> anyhow
         // Any other character after a backslash is that character, a line end too.
         _ => escaped,
     };
-    push_char(character, units);
+    code::push_utf16(character, units);
     Ok(())
 }
 
@@ -241,7 +236,7 @@ fn push_code_point_escape(
         Err(_) => {
             let character = char::from_u32(code)
                 .ok_or_else(|| anyhow!("`{escape}` stands for no character"))?;
-            push_char(character, units);
+            code::push_utf16(character, units);
         }
     }
     Ok(())
@@ -255,11 +250,6 @@ fn hex_value(digits: &str, lengths: RangeInclusive<usize>) -> Option<u32> {
         return None;
     }
     u32::from_str_radix(digits, 16).ok()
-}
-
-/// Adds the UTF-16 code units of `character` to `units`.
-fn push_char(character: char, units: &mut Vec<u16>) {
-    units.extend(character.encode_utf16(&mut [0; 2]).iter());
 }
 
 /// Adds the definitions in `body`, the root of a file or the body of a type, to `walk`. `parents`
@@ -433,17 +423,9 @@ fn push_variables<'tree>(
 ) {
     let mut cursor = list.walk();
     let variables: Vec<Node> = list.named_children(&mut cursor).collect();
-    // In `int a = 1, b = 2;`, each name has its own part, so a change to one does not touch the
-    // other.
-    let alone = variables.len() == 1;
-    for variable in variables {
+    for (variable, range) in code::part_ranges(range, variables) {
         let Some(name) = variable.child_by_field_name("name") else {
             continue;
-        };
-        let range = if alone {
-            range.clone()
-        } else {
-            variable.byte_range()
         };
         walk.add_definition(parents, name, range, variable.child_by_field_name("value"));
     }

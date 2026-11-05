@@ -72,32 +72,39 @@ fn comments(input: &mut Input<'_>) -> PResult<Vec<(MarkerLengths, Range<usize>)>
     let mut contexts = Vec::new();
     let mut comments = Vec::new();
     while input.eof_offset() > 0 {
-        match contexts.last_mut() {
-            Some(Context::String) => match string_piece.parse_next(input)? {
-                StringPiece::Text => {}
-                StringPiece::OpenBrace => contexts.push(Context::Code { open_braces: 0 }),
-                StringPiece::End => {
-                    contexts.pop();
-                }
-            },
-            Some(Context::Code { open_braces }) => match code_token.parse_next(input)? {
-                CodeToken::Comment(markers, range) => comments.push((markers, range)),
-                CodeToken::InterpolatedStringStart => contexts.push(Context::String),
-                CodeToken::OpenBrace => *open_braces += 1,
-                CodeToken::CloseBrace => match open_braces.checked_sub(1) {
-                    Some(still_open) => *open_braces = still_open,
-                    None => {
+        // The `{` in the code of an interpolated string that are still open, or `None` outside
+        // interpolated strings, where braces don't change how the code is read.
+        let open_braces = match contexts.last_mut() {
+            Some(Context::String) => {
+                match string_piece.parse_next(input)? {
+                    StringPiece::Text => {}
+                    StringPiece::OpenBrace => contexts.push(Context::Code { open_braces: 0 }),
+                    StringPiece::End => {
                         contexts.pop();
                     }
-                },
-                CodeToken::Other => {}
+                }
+                continue;
+            }
+            Some(Context::Code { open_braces }) => Some(open_braces),
+            None => None,
+        };
+        match code_token.parse_next(input)? {
+            CodeToken::Comment(markers, range) => comments.push((markers, range)),
+            CodeToken::InterpolatedStringStart => contexts.push(Context::String),
+            CodeToken::OpenBrace => {
+                if let Some(open_braces) = open_braces {
+                    *open_braces += 1;
+                }
+            }
+            CodeToken::CloseBrace => match open_braces {
+                // The `}` that closes the code goes back to the text of the string.
+                Some(0) => {
+                    contexts.pop();
+                }
+                Some(open_braces) => *open_braces -= 1,
+                None => {}
             },
-            None => match code_token.parse_next(input)? {
-                CodeToken::Comment(markers, range) => comments.push((markers, range)),
-                CodeToken::InterpolatedStringStart => contexts.push(Context::String),
-                // Outside interpolated strings, braces don't change how the code is read.
-                CodeToken::OpenBrace | CodeToken::CloseBrace | CodeToken::Other => {}
-            },
+            CodeToken::Other => {}
         }
     }
     Ok(comments)

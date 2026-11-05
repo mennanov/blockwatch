@@ -91,7 +91,7 @@ const MULTI_LINE_QUOTES: &str = "\"\"\"";
 /// space before the closing quotes.
 fn multi_line_text(content: &str) -> anyhow::Result<String> {
     // The compiler reads every line end of a file as a line feed.
-    let content = content.replace("\r\n", "\n").replace('\r', "\n");
+    let content = code::with_line_feeds(content);
     let Some(("", rest)) = content.split_once('\n') else {
         bail!("Swift allows no text after the opening quotes of a multi-line string");
     };
@@ -279,6 +279,16 @@ fn push_parts<'tree>(
     walk: &mut NestedWalk<'tree>,
     identifier: impl Fn(Node<'tree>) -> Option<Node<'tree>>,
 ) {
+    for part in parts(declaration) {
+        if let Some(name) = identifier(part.name) {
+            walk.add_definition(parents, name, part.range, part.value);
+        }
+    }
+}
+
+/// The parts of `declaration`, a property declaration or an enum case, one for each name, in
+/// document order.
+fn parts(declaration: Node<'_>) -> Vec<Part<'_>> {
     // In `let a = 1, b = 2` and `case a = 1, b`, each name has its own part, so a change to one
     // does not touch the other. A part runs from its name to the next comma. The attributes,
     // modifiers and keyword before the first name can only go to one part, so they go to the
@@ -317,11 +327,7 @@ fn push_parts<'tree>(
             _ => {}
         }
     }
-    for part in parts {
-        if let Some(name) = identifier(part.name) {
-            walk.add_definition(parents, name, part.range, part.value);
-        }
-    }
+    parts
 }
 
 /// One name of a property declaration or an enum case, with the byte range of its part of the
@@ -337,14 +343,7 @@ struct Part<'tree> {
 /// one statement that is not an expression, such as a `for` loop.
 fn computed_value(property: Node<'_>) -> Option<Node<'_>> {
     // Swift reads a body with one expression as a body that returns it.
-    let statements = child(property, "statements")?;
-    let mut cursor = statements.walk();
-    let mut inner = statements
-        .named_children(&mut cursor)
-        .filter(|statement| !statement.is_extra());
-    let (Some(statement), None) = (inner.next(), inner.next()) else {
-        return None;
-    };
+    let statement = code::only_child(child(property, "statements")?)?;
     match statement.kind() {
         "control_transfer_statement" => statement.child_by_field_name("result"),
         // The grammar's statements that are not expressions, so they return nothing. An `if` and

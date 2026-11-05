@@ -54,6 +54,51 @@ impl PhpCommentsParser {
     }
 }
 
+impl PhpCommentsParser {
+    /// The PHP comments in `source`, in any order. Copies each HTML template section of `source`
+    /// into `html_view`, if any, at the same bytes.
+    fn php_comments(&mut self, source: &str, mut html_view: Option<&mut Vec<u8>>) -> Vec<Comment> {
+        // A single PHP parse yields both the PHP `comment` nodes and the `text` regions that make
+        // up the HTML view.
+        let tree = self.php_tree_sitter_parser.parse(source, None).unwrap();
+        let mut query_cursor = tree_sitter::QueryCursor::new();
+        let mut matches =
+            query_cursor.matches(&self.regions_query, tree.root_node(), source.as_bytes());
+        let mut comments = Vec::new();
+        while let Some(query_match) = matches.next() {
+            let node = query_match
+                .captures()
+                .first()
+                .expect("Empty Tree-sitter region query match")
+                .node;
+            if node.kind() == "comment" {
+                let text = language_parsers::c_style_comment_text(node_text(&node, source));
+                comments.push(Comment::from_node(&node, source, text));
+            } else if let Some(view) = html_view.as_deref_mut() {
+                // A `text` node: copy the HTML template section back into the blanked view.
+                let range = node.byte_range();
+                view[range.clone()].copy_from_slice(&source.as_bytes()[range]);
+            }
+        }
+        comments
+    }
+
+    /// The HTML comments in `html_view`, the HTML view of `source`, in document order.
+    fn html_comments(&mut self, html_view: Vec<u8>, source: &str) -> Vec<Comment> {
+        let view =
+            String::from_utf8(html_view).expect("HTML view is built from the valid-UTF-8 source");
+        self.html_comments_parser
+            .parse(&view)
+            .map(|mut comment| {
+                // Blanking rewrites a PHP region byte by byte, so a multi-byte character there
+                // becomes several spaces and the view's columns run ahead of the source's.
+                comment.set_character_columns(source);
+                comment
+            })
+            .collect()
+    }
+}
+
 impl CommentsParser for PhpCommentsParser {
     fn parse<'source>(
         &'source mut self,
@@ -69,46 +114,9 @@ impl CommentsParser for PhpCommentsParser {
             language_parsers::blank_preserving_line_breaks(&mut view);
             view
         });
-
-        // A single PHP parse yields both the PHP `comment` nodes and the `text` regions that make
-        // up the HTML view.
-        let mut comments = Vec::new();
-        let tree = self
-            .php_tree_sitter_parser
-            .parse(source_code, None)
-            .unwrap();
-        let mut query_cursor = tree_sitter::QueryCursor::new();
-        let mut matches = query_cursor.matches(
-            &self.regions_query,
-            tree.root_node(),
-            source_code.as_bytes(),
-        );
-        while let Some(query_match) = matches.next() {
-            let node = query_match
-                .captures()
-                .first()
-                .expect("Empty Tree-sitter region query match")
-                .node;
-            if node.kind() == "comment" {
-                let text = language_parsers::c_style_comment_text(node_text(&node, source_code));
-                comments.push(Comment::from_node(&node, source_code, text));
-            } else if let Some(view) = html_view.as_mut() {
-                // A `text` node: copy the HTML template section back into the blanked view.
-                let range = node.byte_range();
-                view[range.clone()].copy_from_slice(&source_code.as_bytes()[range]);
-            }
-        }
-        drop(matches);
-
+        let mut comments = self.php_comments(source_code, html_view.as_mut());
         if let Some(view) = html_view {
-            let view =
-                String::from_utf8(view).expect("HTML view is built from the valid-UTF-8 source");
-            comments.extend(self.html_comments_parser.parse(&view).map(|mut comment| {
-                // Blanking rewrites a PHP region byte by byte, so a multi-byte character there
-                // becomes several spaces and the view's columns run ahead of the source's.
-                comment.set_character_columns(source_code);
-                comment
-            }));
+            comments.extend(self.html_comments(view, source_code));
         }
         comments.sort_by_key(|comment| comment.source_range.start);
         comments.into_iter()
@@ -338,12 +346,7 @@ fn define<'tree>(
 /// The text of `string`, a quoted string, when it holds only text, with no escape and no
 /// variable. Returns `None` for an empty string too.
 fn plain_text(string: Node<'_>) -> Option<Node<'_>> {
-    let mut cursor = string.walk();
-    let mut parts = string.named_children(&mut cursor);
-    match (parts.next(), parts.next()) {
-        (Some(text), None) if text.kind() == "string_content" => Some(text),
-        _ => None,
-    }
+    code::only_child(string).filter(|text| text.kind() == "string_content")
 }
 
 /// Whether `string`, a double-quoted string or the body of a heredoc, holds only text and
@@ -412,19 +415,10 @@ fn decode_escapes(content: &str, quote_escape: bool) -> Option<String> {
             bytes.extend_from_slice(character.encode_utf8(&mut [0; 4]).as_bytes());
             continue;
         }
-        let simple = match characters.peek() {
-            Some('n') => Some(b'\n'),
-            Some('r') => Some(b'\r'),
-            Some('t') => Some(b'\t'),
-            Some('v') => Some(0x0b),
-            Some('e') => Some(0x1b),
-            Some('f') => Some(0x0c),
-            Some('\\') => Some(b'\\'),
-            Some('$') => Some(b'$'),
-            Some('"') if quote_escape => Some(b'"'),
-            _ => None,
-        };
-        if let Some(byte) = simple {
+        if let Some(byte) = characters
+            .peek()
+            .and_then(|&escaped| simple_escape(escaped, quote_escape))
+        {
             characters.next();
             bytes.push(byte);
         } else if let Some(digits) = digits(&mut characters, 8, 3) {
@@ -438,21 +432,45 @@ fn decode_escapes(content: &str, quote_escape: bool) -> Option<String> {
             }
         } else if characters.peek() == Some(&'u') && characters.clone().nth(1) == Some('{') {
             characters.nth(1);
-            // PHP rejects `\u{41` without its closing brace, but this reads it as `A`. Such a
-            // file doesn't run, and catching it would take more code than it's worth.
-            let digits: String = characters.by_ref().take_while(|&c| c != '}').collect();
-            // PHP rejects a sign, as in `\u{+41}`, which `from_str_radix` accepts. A surrogate,
-            // such as `\u{D800}`, is not a character.
-            let escaped = Some(digits)
-                .filter(|digits| digits.chars().all(|digit| digit.is_ascii_hexdigit()))
-                .and_then(|digits| u32::from_str_radix(&digits, 16).ok())
-                .and_then(char::from_u32)?;
+            let escaped = code_point_escape(&mut characters)?;
             bytes.extend_from_slice(escaped.encode_utf8(&mut [0; 4]).as_bytes());
         } else {
             bytes.push(b'\\');
         }
     }
     String::from_utf8(bytes).ok()
+}
+
+/// The byte that the escape of one character, `escaped` after a backslash, stands for, such as a
+/// line feed for `n`. `\"` is an escape only when `quote_escape` is true. Returns `None` for a
+/// character that starts no such escape.
+fn simple_escape(escaped: char, quote_escape: bool) -> Option<u8> {
+    match escaped {
+        'n' => Some(b'\n'),
+        'r' => Some(b'\r'),
+        't' => Some(b'\t'),
+        'v' => Some(0x0b),
+        'e' => Some(0x1b),
+        'f' => Some(0x0c),
+        '\\' => Some(b'\\'),
+        '$' => Some(b'$'),
+        '"' if quote_escape => Some(b'"'),
+        _ => None,
+    }
+}
+
+/// The character of a `\u{...}` escape, read from `characters`, which start right after its `{`.
+/// Returns `None` when the braces don't hold hex digits, or the digits stand for no character.
+fn code_point_escape(characters: &mut Peekable<Chars>) -> Option<char> {
+    // PHP rejects `\u{41` without its closing brace, but this reads it as `A`. Such a file doesn't
+    // run, and catching it would take more code than it's worth.
+    let digits: String = characters.by_ref().take_while(|&c| c != '}').collect();
+    // PHP rejects a sign, as in `\u{+41}`, which `from_str_radix` accepts. A surrogate, such as
+    // `\u{D800}`, is not a character.
+    Some(digits)
+        .filter(|digits| digits.chars().all(|digit| digit.is_ascii_hexdigit()))
+        .and_then(|digits| u32::from_str_radix(&digits, 16).ok())
+        .and_then(char::from_u32)
 }
 
 /// Reads up to `max` digits in `radix` from the start of `characters`, and returns their value.
@@ -482,10 +500,7 @@ fn push_elements<'tree>(
         .named_children(&mut cursor)
         .filter(|child| child.kind() == element)
         .collect();
-    // In `const A = 1, B = 2;`, each name has its own part, so a change to one does not touch the
-    // other.
-    let alone = elements.len() == 1;
-    for element in elements {
+    for (element, range) in code::part_ranges(declaration.byte_range(), elements) {
         // A constant's name has no field name, and a property's value has one.
         let name = element
             .child_by_field_name("name")
@@ -496,11 +511,6 @@ fn push_elements<'tree>(
         let value = element
             .child_by_field_name("default_value")
             .or_else(|| code::value_after(element, "="));
-        let range = if alone {
-            declaration.byte_range()
-        } else {
-            element.byte_range()
-        };
         walk.add_definition(parents, name, range, value);
     }
 }

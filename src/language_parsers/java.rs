@@ -62,7 +62,7 @@ const TEXT_BLOCK_QUOTES: &str = "\"\"\"";
 /// after the opening quotes, is left out. The other lines lose the indentation they share, and the
 /// white space at their ends.
 fn text_block_content(block: &str) -> String {
-    let block = block.replace("\r\n", "\n").replace('\r', "\n");
+    let block = code::with_line_feeds(block);
     let content = block
         .split_once('\n')
         .map_or(block.as_str(), |(_, content)| content);
@@ -118,7 +118,7 @@ fn push_escape(characters: &mut Peekable<Chars>, units: &mut Vec<u16>) -> anyhow
         }
         _ => bail!("`\\{escaped}` is not an escape in a Java string"),
     };
-    units.extend(character.encode_utf16(&mut [0; 2]).iter());
+    code::push_utf16(character, units);
     Ok(())
 }
 
@@ -208,17 +208,9 @@ fn push_fields<'tree>(
     let declarators: Vec<Node> = declaration
         .children_by_field_name("declarator", &mut cursor)
         .collect();
-    // In `int a = 1, b = 2;`, each name has its own part, so a change to one does not touch the
-    // other.
-    let alone = declarators.len() == 1;
-    for declarator in declarators {
+    for (declarator, range) in code::part_ranges(declaration.byte_range(), declarators) {
         let Some(name) = declarator.child_by_field_name("name") else {
             continue;
-        };
-        let range = if alone {
-            declaration.byte_range()
-        } else {
-            declarator.byte_range()
         };
         walk.add_definition(
             parents,
