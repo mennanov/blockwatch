@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.16.8] - 2026-11-05
+
 ### Added
 
 - Symbols in Makefiles (`Makefile`, `GNUmakefile`, `makefile`, `.mk` and `.mak`). `Makefile#/GO_VERSION` points at
