@@ -46,6 +46,7 @@ declares, instead of tags in a comment.
 | HCL (Terraform)  | `.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`                                                                 | [HCL](#hcl)                                             |
 | PHP              | `.php`, `.phtml`                                                                                            | [PHP](#php)                                             |
 | Shell            | `.sh`, `.bash`, `.bashrc`, `.bash_profile`, `.envrc`                                                        | [Shell](#shell)                                         |
+| Makefile         | `Makefile`, `GNUmakefile`, `makefile`, `.mk`, `.mak`                                                        | [Makefile](#makefile)                                   |
 
 <!-- </block> -->
 
@@ -1080,6 +1081,124 @@ done
   on the next line as `X=a` set only for a command `b`. Bash sets `X=ab`. Put the value in quotes instead.
 - **A value that ends with a lone `$` takes in the next line.** In `Z=$` followed by `W=1`, `#/Z` gives `$`, the line
   end and `W=1`, as written, and `#/W` is not found. Bash sets `Z` to `$`. Write `Z='$'` instead.
+
+<!-- </block> -->
+
+## Makefile
+
+<!-- <block name="makefile-paths"> -->
+
+```make
+GO_VERSION := 1.22.5
+VERSION ?= $(shell git describe --tags)
+export IMAGE = ghcr.io/acme/app:$(VERSION)
+LINT := v2.10.1   # keep in sync with CI
+TARGETS = linux \
+          darwin
+CFLAGS += -O2
+
+ifeq ($(shell uname),Darwin)
+SED = gsed
+else
+SED = sed
+endif
+
+define BANNER
+Build $(VERSION)
+endef
+
+build: deps
+	go build ./...
+
+bin/app: $(SRC)
+	go build -o $@ .
+
+%.o: %.c
+	$(CC) -c $<
+
+.PHONY: build
+```
+
+| Path           | Points at                                         |
+|----------------|---------------------------------------------------|
+| `#/GO_VERSION` | `1.22.5`                                          |
+| `#/VERSION`    | `$(shell git describe --tags)`, as written        |
+| `#/IMAGE`      | `ghcr.io/acme/app:$(VERSION)`, as written         |
+| `#/LINT`       | `v2.10.1`, without the comment                    |
+| `#/TARGETS`    | `linux darwin`                                    |
+| `#/CFLAGS`     | not found, as `+=` adds to a name                 |
+| `#/SED`        | a violation, as both branches set it              |
+| `#/BANNER`     | `Build $(VERSION)`                                |
+| `#/build`      | the whole rule: the target line and the recipe    |
+| `#/bin~1app`   | the whole rule                                    |
+| `#/%25.o`      | not found, as a pattern rule is not a symbol      |
+| `#/.PHONY`     | not found, as a special target is not a symbol    |
+
+- **A variable or a target set at the top or in a conditional is a symbol.** Every branch of `ifeq`, `ifneq`,
+  `ifdef` and `ifndef` counts, at any depth. So a name set in two branches is defined twice. Variables and targets
+  share one set of names, so a variable and a target with the same name are defined twice too.
+- **Every assignment but `+=` sets a name:** `=`, `:=`, `::=`, `:::=`, `?=` and `!=`, with any of `export`,
+  `override` and `private` in front. So does `define NAME` ... `endef`, with the same keywords and operators.
+  `X ?= 1` next to `X = 2` is defined twice too.
+- **A target covers its whole rule.** In `a b: c`, both `a` and `b` cover the whole rule. A target in two rules is
+  defined twice, even with `::`. Write each `/` in a target as `~1`: `bin/app` is `#/bin~1app`.
+- **A rule ends at its last recipe line.** It takes in a conditional below it when a branch of the conditional starts
+  with a recipe line, since make could read that branch. A rule in a branch of a conditional ends with that branch,
+  since a path can't tell which branch make reads.
+- **A line that starts with a tab is a recipe line only in a rule, as in make.** It is one when the last statement
+  above it, apart from conditionals, comments and other recipe lines, is a rule. Each branch of a conditional starts
+  from the statements above the conditional. After `endif`, a tab line is a recipe line when any branch ended in a
+  rule. Anywhere else, an assignment on such a line sets a name, such as `CC = clang` after a tab, and a `#` on it
+  starts a comment. After `.RECIPEPREFIX = >`, a recipe line starts with `>` in place of a tab.
+- **These are not symbols:** `NAME += value`, a target-specific variable such as `build: NAME = x`, `export NAME`
+  without a value, a computed name such as `$(PKG)_VERSION = 1` or `$(BIN):`, a pattern rule such as `%.o`, a suffix
+  rule, and a special target. A suffix rule, such as `.c.o`, is the old way to write `%.o: %.c`. Its target is one or
+  two of the suffixes that make knows, such as `.c`, `.o` or `.sh`, and it has no prerequisites. So
+  `.sh: install.txt` is a symbol. A special target is `.` followed by only capital letters and `_`, such as
+  `.PHONY`. So `.venv` and `.coverage` are symbols. The files that `include` reads are not searched. A path into
+  such a file works.
+- **A value is read as GNU make reads it, but it is never expanded:**
+  - A `#` starts a comment, which is not part of the value. `\#` gives `#`.
+  - A `\` at the end of a line joins the next line, with one space between them. The white space after the operator
+    is left out, even when the value starts on the next line, as in `SRCS = \`.
+  - `$(...)`, `${...}` and `$$` stay as written, with any `#` in them.
+  - The white space at the end is left out. GNU make keeps it, but a `same-as` check would fail on spaces no one
+    can see.
+  - `X != cmd` gives `cmd`. The command is not run.
+  - A `define` body keeps its comments and its `\#`, as make does.
+  - `X =` gives the empty string.
+  - A carriage return before a line feed is left out, as make does.
+- **A line that make joins to a statement is part of it.** So it sets no name:
+  - After a comment that ends in `\`, the next line is part of the comment.
+  - In `A = a$\` with `B = 1` on the next line, `#/A` gives `a$ B = 1`, and `#/B` is not found.
+  - The lines of a `define` body are part of it, up to the `endef` that make matches to it. A `define` inside it
+    needs its own `endef`, and an `endef` after a tab doesn't count.
+- **BSD make's own lines, such as `.if` and `.include`, set nothing.** An assignment between `.if` and `.endif`
+  sets its name, as anywhere else.
+- **A file that make stops on stops the run:** one with a `define` without `endef`, a conditional without `endif`,
+  an `else` or `endif` outside a conditional, a second `else` in one conditional, or an `ifeq` without its arguments.
+  The message shows the line. For a missing `endif`, that is the end of the file, as in make's own message.
+
+<!-- <block name="makefile-nesting"> -->
+
+- **A file nested more than 128 levels deep stops the run too,** with conditionals or with `$(...)` references.
+  Make reads it, but the `makefile-lossless` crate skips the conditionals nested deeper, so a name set in them would
+  be missing.
+
+<!-- </block> -->
+
+- **Known limits.** blockwatch reads Makefiles with the `makefile-lossless` crate, and keeps what it finds:
+  - A rule takes in the comment lines after its last recipe line. In `test:`, a recipe line, then `# Tools.`, `#/test`
+    covers `# Tools.`. So editing that comment counts as a change to `#/test`.
+  - In a `define` body, a line that starts with a tab keeps a `\` at its end, and the line end after it. Make joins
+    the two lines with one space.
+  - A line that make stops on can give targets. `a b = 6` gives `#/a` and `#/b`, and `= 7` gives `#/7`. Make stops
+    on them with "missing separator" and "empty variable name".
+  - A comment is found on a recipe line whose first character after the tab is `#`, and after any `#` in a `define`
+    body. So a block tag there is found. Make passes these lines on as they are, without reading a comment.
+  - In `lint: N = x;y # value`, `# value` is read as a comment. Make keeps it in the value that `N` has for `lint`.
+  - In `D = a$# b`, the `#` and the text after it are read as comments, and `#/D` gives `a$#`. Make reads `$#` as a
+    variable reference, so the line has no comment, and the value is `a$# b`.
 
 <!-- </block> -->
 

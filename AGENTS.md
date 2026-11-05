@@ -226,11 +226,11 @@ The main modules:
   (`b/src/main.rs`), a path found in the walk and a `file:name` attribute all become a `RepoPath`. So the same file is
   always the same map key.
 - `src/language_parsers/` — one parser for each language, most of them a tree-sitter grammar. Markdown and MDX use
-  the `markdown` crate, and Lean has its own scanner. Each language has a `parser()` that returns a
-  `LanguageParser`, which knows which syntax nodes are comments. `src/block_parser.rs` turns those comments into
-  blocks. `language_parsers()` in `language_parsers/mod.rs` returns `LanguageParsers`: the parser of each extension.
-  Its `parser_for` picks the parser of a file, using the settings' extension mappings too. **To add a language, add a
-  module here and register it in that function.**
+  the `markdown` crate, Makefile uses the `makefile-lossless` crate, and Lean has its own scanner. Each language has
+  a `parser()` that returns a `LanguageParser`, which knows which syntax nodes are comments. `src/block_parser.rs`
+  turns those comments into blocks. `language_parsers()` in `language_parsers/mod.rs` returns `LanguageParsers`: the
+  parser of each extension. Its `parser_for` picks the parser of a file, using the settings' extension mappings too.
+  **To add a language, add a module here and register it in that function.**
 
   Some languages also have symbols. Such a language has a `SymbolsParser`, which its `parser()` passes to
   `.with_symbols(...)`:
@@ -239,6 +239,8 @@ The main modules:
   - TOML finds its symbols with `toml_edit`. What a TOML key means depends on the order of the headers, not on how the
     syntax tree is nested.
   - Markdown finds its sections with the `markdown` crate, the same parser that finds its comments.
+  - Makefile finds its symbols with `makefile-lossless`, the same crate that finds its comments. The crate is pinned to
+    one version. Its known bugs are listed in `docs/symbols.md`, not worked around.
 
   Each language's tests list every symbol it finds. When you give a language symbols, also document its paths in
   `docs/symbols.md` and in the "Symbols" section of the skill, `src/skill.md`. A test in `language_parsers/mod.rs` and the

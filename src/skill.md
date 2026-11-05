@@ -159,8 +159,9 @@ Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`
 `.hh`, `.hpp`, `.hxx`), Python (`.py`, `.pyi`, `.pyw`), Starlark (`.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`,
 `BUCK`, `WORKSPACE`, `Tiltfile`), Rust (`.rs`), TypeScript (`.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`), JavaScript
 (`.js`, `.mjs`, `.cjs`, `.jsx`), Java (`.java`), C# (`.cs`), Kotlin (`.kt`, `.kts`), Swift (`.swift`), Protocol
-Buffers (`.proto`), HCL (`.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`), PHP (`.php`, `.phtml`), and shell (`.sh`,
-`.bash`, `.bashrc`, `.bash_profile`, `.envrc`). A path into any other file fails the run.
+Buffers (`.proto`), HCL (`.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`), PHP (`.php`, `.phtml`), shell (`.sh`,
+`.bash`, `.bashrc`, `.bash_profile`, `.envrc`), and Makefile (`Makefile`, `GNUmakefile`, `makefile`, `.mk`, `.mak`).
+A path into any other file fails the run.
 
 ### Writing a path
 
@@ -432,6 +433,29 @@ type are symbols too: `Config.java#/Config/MAX_PORTS`. In HCL, each block, attri
   in it fails the run. After a comment in backticks, such as `` `# skip vendor` ``, no name is found. Neither is a
   value outside quotes that goes on to the next line after a `\`. A value that ends with a lone `$`, such as `Z=$`,
   takes in the next line, so write `Z='$'`.
+
+### Makefile
+
+- A variable or a target set at the top or in any branch of `ifeq`, `ifneq`, `ifdef` or `ifndef` is a symbol:
+  `Makefile#/GO_VERSION`, `#/build`. A name set in both branches is a violation. So is a variable and a target with
+  the same name, a target in two rules, and `X ?= 1` next to `X = 2`.
+- Every assignment but `+=` sets a name, with any of `export`, `override` and `private`, and so does `define`. A
+  target covers its whole rule, up to its last recipe line. Write each `/` in a target as `~1`: `#/bin~1app`. A line
+  that starts with a tab is a recipe line only when the last statement above it, apart from conditionals and
+  comments, is a rule. Otherwise `CC = clang` after a tab sets `CC`.
+- `NAME += value`, `build: NAME = x`, `export NAME` without a value, computed names such as `$(PKG)_VERSION` or
+  `$(BIN):`, pattern rules such as `%.o`, suffix rules such as `.c.o` without prerequisites, and special targets such
+  as `.PHONY` are not symbols. Files that `include` reads are not searched.
+- A value is read as GNU make reads it, but never expanded. An inline comment and the white space around it are left
+  out, `\#` gives `#`, and a `\` at the end of a line joins the next line with one space. `$(...)` stays as written.
+  `X != cmd` gives `cmd`, which is not run. A line that make joins to a statement sets no name, such as the line
+  after a comment that ends in `\`.
+- A `define` without `endef`, a conditional without `endif`, an `else` or `endif` outside a conditional, a second
+  `else` in one conditional, an `ifeq` without its arguments, and nesting more than 128 levels deep stop the run.
+- A rule also covers the comment lines after its last recipe line. In a `define` body, a tab line that ends in `\`
+  keeps the `\` and the line end, where make joins the lines.
+- A block tag is found on a recipe line whose first character after the tab is `#`, and after any `#` in a `define`
+  body, though make reads no comment there.
 
 ## The config file (`blockwatch.toml`)
 

@@ -21,6 +21,10 @@ config:
     # A shell command or a table row cannot be wrapped without changing what it means.
     code_blocks: false
     tables: false
+  MD010:
+    # A recipe line in a Makefile must start with a tab, so an example with spaces would not work.
+    ignore_code_languages:
+      - make
   MD024:
     # CHANGELOG.md follows Keep a Changelog, where every release repeats "Added" and "Fixed".
     # Requiring uniqueness only among headings sharing a parent still catches a real duplicate.

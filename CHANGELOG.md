@@ -12,6 +12,25 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- Symbols in Makefiles (`Makefile`, `GNUmakefile`, `makefile`, `.mk` and `.mak`). `Makefile#/GO_VERSION` points at
+  the value of a variable, and `#/build` at the rule of a target. A value is read as GNU make reads it, without its
+  inline comment, and is never expanded. See [Makefile](docs/symbols.md#makefile).
+
+### Fixed
+
+- Some block tags in Makefile comments were not found, such as one after an assignment, as in `VERSION := 1.2 # ...`,
+  or one below a `(` that is not part of a reference. Now Makefiles are read with the `makefile-lossless` crate. A
+  comment that ends in `\` takes in the next line. A `#` after a rule's `;`, after a backslash, as in `\#`, or inside
+  `$(...)` doesn't start a comment.
+
+### Changed
+
+- A block tag in a Makefile is now found on a recipe line whose first character after the tab is `#`, and after any
+  `#` in a `define` body. Make reads no comment there, so these tags were not found before. See the known limits in
+  [Makefile](docs/symbols.md#makefile).
+
 ## [0.16.7] - 2026-11-04
 
 ### Added
