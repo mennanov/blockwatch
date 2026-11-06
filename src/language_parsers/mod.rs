@@ -894,22 +894,18 @@ fn c_style_multiline_comment_processor(comment: &str) -> String {
     format!("{before}  {}{closing}", blank_decorative_stars(content))
 }
 
-/// Returns `content`, the text between a block comment's delimiters, with the first `*` on each
-/// line blanked when only whitespace comes before it. Such a `*` only decorates the comment, as in
-/// ` * ` lines, and would otherwise break a tag that spans those lines.
+/// Returns `content`, the text between a block comment's delimiters, with the `*` that start each
+/// line blanked when only whitespace comes before them. Such stars only decorate the comment, as in
+/// ` * ` and ` ** ` lines, and would otherwise break a tag that spans those lines.
 fn blank_decorative_stars(content: &str) -> String {
     let mut result = String::with_capacity(content.len());
     for line in content.split_inclusive('\n') {
         let text = line.trim_start();
-        match text.strip_prefix('*') {
-            Some(after_star) => {
-                #[expect(clippy::string_slice, reason = "`text` is a suffix of `line`")]
-                result.push_str(&line[..line.len() - text.len()]);
-                result.push(' ');
-                result.push_str(after_star);
-            }
-            None => result.push_str(line),
-        }
+        let after_stars = text.trim_start_matches('*');
+        #[expect(clippy::string_slice, reason = "`text` is a suffix of `line`")]
+        result.push_str(&line[..line.len() - text.len()]);
+        result.push_str(&" ".repeat(text.len() - after_stars.len()));
+        result.push_str(after_stars);
     }
     result
 }

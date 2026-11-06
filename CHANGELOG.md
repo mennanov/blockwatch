@@ -23,14 +23,16 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 - In a tag that wraps over several comment lines, a longer marker such as `##`, `////` or `---` is now blanked whole,
   in every language with `#`, `//` or `--` comments. So an attribute value that goes on to such a line loses the extra
-  characters. For example, in Python, a value that goes on to the line `##a` now holds `a` there, not `#a`.
+  characters. For example, in Python, a value that goes on to the line `##a` now holds `a` there, not `#a`. The same
+  goes for the stars at the start of a line in a `/* */` comment, such as ` ** `.
 
 ### Fixed
 
 - A tag that wraps over several comment lines is no longer reported as malformed when each line starts with a longer
   marker, such as `///`, `////`, `//!`, `##`, `---` or Python's `#:`. This works in every language with `//`, `#` or
   `--` comments. In C and C++, it also works with Doxygen's `///<` and `//!<`. In Markdown, a tag can now wrap over
-  several `[//]: # (...)` lines too.
+  several `[//]: # (...)` lines too. In a `/* */` or OCaml `(* *)` comment, it can wrap over lines that start with
+  ` ** `.
 
 ## [0.16.8] - 2026-11-05
 

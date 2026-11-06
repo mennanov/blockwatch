@@ -1157,6 +1157,9 @@ int b; //!< Doxygen documents the member before this comment, in the Qt style.
 //!Doxygen reads this marker with no space after it too.
 int c; ///<
 //<block name="x"> A tag right after the marker keeps its first character.
+/**
+ ** A comment that starts each line with two stars.
+ **/
             "#,
             )
             .collect();
@@ -1225,6 +1228,12 @@ int c; ///<
                     position_range: Position::new(27, 1)..Position::new(27, 75),
                     source_range: 808..882,
                     comment_text: r#"  <block name="x"> A tag right after the marker keeps its first character."#
+                        .to_string()
+                },
+                Comment {
+                    position_range: Position::new(28, 1)..Position::new(30, 5),
+                    source_range: 883..943,
+                    comment_text: "   \n    A comment that starts each line with two stars.\n    "
                         .to_string()
                 },
             ]

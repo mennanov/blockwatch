@@ -57,6 +57,9 @@ let s = "(* not a comment *)" ^ {|(* not a comment *)|}
 
 (* This is a comment
  * spanning multiple lines *)
+(**
+ ** A doc comment that starts each line with two stars.
+ *)
 "#,
             )
             .collect();
@@ -83,6 +86,13 @@ let s = "(* not a comment *)" ^ {|(* not a comment *)|}
                     position_range: Position::new(8, 1)..Position::new(9, 30),
                     source_range: 144..194,
                     comment_text: "   This is a comment\n   spanning multiple lines   ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(10, 1)..Position::new(12, 4),
+                    source_range: 195..258,
+                    comment_text:
+                        "   \n    A doc comment that starts each line with two stars.\n   "
+                            .to_string()
                 },
             ]
         );
