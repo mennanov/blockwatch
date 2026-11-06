@@ -425,7 +425,7 @@ int helper(void) { return 0; }
 - **Prototypes and `extern` variables are not symbols.** The definition is.
 - **`template <...>` and `extern "C"` are part of the definition.** The contents of `extern "C" { ... }` are top-level.
 - **Strings follow C's escapes, and strings written one after the other are joined.** A raw string, `R"(...)"`, is its
-  text. `L`, `u` and `U` strings and character literals stay as written.
+  text, with each `\r\n` line end read as `\n`. `L`, `u` and `U` strings and character literals stay as written.
 - **Namespaces, class members and names such as `Foo::bar` are not symbols yet.**
 
 <!-- </block> -->

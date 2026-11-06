@@ -471,8 +471,9 @@ fn decode_string(node: &Node, source: &str) -> anyhow::Result<Option<String>> {
             _ => Ok(None),
         },
         "raw_string_literal" => match node.child(0).map(|open| open.kind()) {
+            // C++ reads a `\r\n` line end as `\n`, in a raw string too. A lone `\r` stays.
             Some("R\"" | "u8R\"") => Ok(code::child(*node, "raw_string_content")
-                .map(|content| node_text(&content, source).to_string())),
+                .map(|content| node_text(&content, source).replace("\r\n", "\n"))),
             _ => Ok(None),
         },
         _ => Ok(None),
@@ -848,14 +849,19 @@ char C = 'c';
 
     #[test]
     fn raw_strings_parse_symbols_returns_the_text_of_narrow_ones() -> anyhow::Result<()> {
-        let source = r#"const char *Raw = R"d(a"b)d";
+        // A Rust raw string can't hold a carriage return, so the lines with `\r` are escaped.
+        let source = concat!(
+            r#"const char *Raw = R"d(a"b)d";
 const char *Utf8Raw = u8R"(é)";
 const char *WideRaw = LR"(w)";
 const char *Lines = R"(a
 b)";
 const char *Empty = R"()";
 #define MACRO_RAW R"(x")"
-"#;
+"#,
+            "const char *CrlfLines = R\"(a\r\nb)\";\n",
+            "const char *CrLines = R\"(a\rb)\";\n"
+        );
 
         assert_eq!(
             values(&cpp(source)?, source),
@@ -866,6 +872,9 @@ const char *Empty = R"()";
                 value("/Lines", "a\nb"),
                 value("/Empty", ""),
                 value("/MACRO_RAW", r#"x""#),
+                // C++ reads a `\r\n` line end as `\n`, in a raw string too. A lone `\r` stays.
+                value("/CrlfLines", "a\nb"),
+                value("/CrLines", "a\rb"),
             ]
         );
         Ok(())
