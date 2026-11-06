@@ -261,7 +261,7 @@ For plain git hooks, local pre-commit setups, and sandboxing untrusted Lua scrip
 - GraphQL (`.graphql`, `.graphqls`, `.gql`)
 - Groovy (with `.gradle` and `Jenkinsfile` support)
 - HCL (Terraform and OpenTofu: `.tf`, `.tfvars`, `.tofu`, `.hcl`; Nomad: `.nomad`)
-- HTML (with `.xhtml` support)
+- HTML (with `.xhtml` support; comments inside `<script>` and `<style>` are not read)
 - JSON (`.json`, `.jsonc`, `.webmanifest`)
 - Java
 - JavaScript (with `.mjs` and `.cjs` support)
@@ -273,7 +273,7 @@ For plain git hooks, local pre-commit setups, and sandboxing untrusted Lua scrip
 - Markdown
 - Nix
 - OCaml (`.ml`, `.mli`)
-- PHP
+- PHP (comments inside `<script>` and `<style>` are not read)
 - Protocol Buffers (`.proto`)
 - Python (with `.pyi` and `.pyw` support)
 - Ruby (with `Gemfile`, `Rakefile`, `Podfile`, `Brewfile`, `Fastfile`, `Vagrantfile`, `.gemspec`, `.podspec`, `.rake`,

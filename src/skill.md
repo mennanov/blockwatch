@@ -80,6 +80,8 @@ catches drift that a changed-blocks-only check would miss.
 - A quoted value ends at the next quote of the same kind. Put a backslash before a quote that belongs to the value:
   `keep-unique="\"(?P<value>[a-z]+)\""`. The backslash stays in the value, so a regex reads `\"` as `"`. Or use the
   other kind of quote: `keep-unique='"(?P<value>[a-z]+)"'`.
+- In HTML, and in the HTML parts of a PHP file, only `<!-- -->` comments hold tags. A tag in a comment inside a
+  `<script>` or `<style>` element is ignored. Put the tags in `<!-- -->` comments around the element instead.
 - A block can be a `[[block]]` entry in `blockwatch.toml` instead of tags (see
   [The config file](#the-config-file-blockwatchtoml)). A JSON file can't hold a tag, so it needs one. So does a file
   that must not change.
