@@ -33,8 +33,8 @@ impl TargetReference {
     /// - `file:name` or `:name`: addresses a named block.
     /// - `file`: addresses a whole file.
     ///
-    /// Combining `#` and `:` in the same reference is rejected. Colons within a symbol path
-    /// must be percent-encoded as `%3A`.
+    /// A reference with a `#` is a symbol reference. Everything after its first `#` is the path,
+    /// `:` included, as in `theme.css#/:root/--brand`.
     ///
     /// A reference whose block name or symbol path is empty (`file.rs:` or `file.json#`) is
     /// rejected rather than treated as a whole-file reference, avoiding silently turning a syntax
@@ -57,12 +57,7 @@ impl TargetReference {
                  one line"
             );
         }
-        if reference.contains('#') && reference.contains(':') {
-            bail!(
-                "invalid target reference: \"{reference}\" combines '#' and ':'; \
-             these forms are mutually exclusive"
-            );
-        }
+        // The `#` is checked first, so a path can hold a `:`, such as the `:root` of a CSS rule.
         if let Some((file_part, _)) = reference.split_once('#') {
             #[expect(clippy::string_slice, reason = "`file_part` ends right before a `#`")]
             return parse_symbol_reference(file_part, &reference[file_part.len()..], reference);
@@ -372,18 +367,23 @@ mod parse_target_references_tests {
     }
 
     #[test]
-    fn reference_combining_hash_and_colon_returns_error() {
-        let err1 = TargetReference::parse_list("package.json#/foo:bar").unwrap_err();
-        assert!(
-            err1.to_string().contains("combines '#' and ':'"),
-            "unexpected error message: {err1}"
+    fn colon_after_hash_is_part_of_the_path() -> anyhow::Result<()> {
+        let result = TargetReference::parse_list("package.json#/a:b, #/:root")?;
+        assert_eq!(
+            result,
+            vec![
+                path(Some("package.json"), "/a%3Ab")?,
+                path(None, "/%3Aroot")?
+            ]
         );
+        Ok(())
+    }
 
-        let err2 = TargetReference::parse_list("file.rs:block#/foo").unwrap_err();
-        assert!(
-            err2.to_string().contains("combines '#' and ':'"),
-            "unexpected error message: {err2}"
-        );
+    #[test]
+    fn colon_before_hash_is_part_of_the_file() -> anyhow::Result<()> {
+        let result = TargetReference::parse_list("file.rs:name#/x")?;
+        assert_eq!(result, vec![path(Some("file.rs:name"), "/x")?]);
+        Ok(())
     }
 
     #[test]

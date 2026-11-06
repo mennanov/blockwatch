@@ -171,8 +171,8 @@ Dart (`.dart`). A path into any other file fails the run.
 - **Pick a list item by a key's value when items can be added above it:** `#/services/~[name=web]/port` is the `port`
   of the one item whose `name` is `web`. Exactly one item must match, or it is a violation. A string value compares
   without its quotes.
-- **Some characters in a key must be escaped:** `/` as `~1`, `~` as `~0`, `,` as `%2C`, `:` as `%3A` and `%` as
-  `%25`. The key `@types/node` is `#/dependencies/@types~1node`.
+- **Some characters in a key must be escaped:** `/` as `~1`, `~` as `~0`, `,` as `%2C` and `%` as `%25`.
+  The key `@types/node` is `#/dependencies/@types~1node`.
 - **A missing key is a violation.** The message suggests similar paths.
 - **A missing or broken file fails the run.** blockwatch does not guess what a broken file meant. In a code file, only
   a path to a name near a syntax error fails it.
@@ -233,8 +233,7 @@ files. A path is each element's name from the root element down. An attribute is
 - Elements with one name under one parent share a path, so a path through them is a violation. A filter picks one by
   a child element or an attribute: `#/project/dependencies/~[artifactId=guava]/version`,
   `#/Project/ItemGroup/~[@Include=Serilog]/@Version`. Positions such as `/module/1` are not found.
-- A prefix is part of the name. Escape its `:` as `%3A`: `#/manifest/application/@android%3Aname`. `xmlns`
-  attributes are not symbols.
+- A prefix is part of the name: `#/manifest/application/@android:name`. `xmlns` attributes are not symbols.
 - An element without child elements is its decoded text, without the white space around it. CDATA stays as written,
   and comments are left out. An element with child elements gives its whole text.
 - An attribute is its decoded value. The white space around it stays.
@@ -430,7 +429,7 @@ type are symbols too: `Config.java#/Config/MAX_PORTS`. In HCL, each block, attri
 - Strings follow bash's quoting, and parts written together are joined. A value that bash expands, such as `$HOME`,
   `"${PORT:-8080}"`, `$(cmd)` or `~/bin`, stays as written, and so does an array. A path to a `$'...'` or `$"..."`
   string fails the run.
-- A function's name can hold `-`, `.` and `:`. Write each `:` as `%3A`: `#/ns%3A%3Ahelper`.
+- A function's name can hold `-`, `.` and `:`, such as `#/ns::helper`.
 - zsh files have no symbols. After a syntax error, the parser often skips a large part of the file, and every name
   in it fails the run. After a comment in backticks, such as `` `# skip vendor` ``, no name is found. Neither is a
   value outside quotes that goes on to the next line after a `\`. A value that ends with a lone `$`, such as `Z=$`,

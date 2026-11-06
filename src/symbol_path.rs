@@ -10,7 +10,7 @@ use std::fmt;
 ///
 /// Follows RFC 6901 JSON Pointer syntax:
 /// - Always begins with a leading `/`.
-/// - Characters `,` and `:` are percent-encoded in references (`%2C`, `%3A`).
+/// - A `,` is percent-encoded in references (`%2C`). Any other character can be too.
 /// - Percent-decoding is validated strictly (rejecting malformed `%xx` or invalid UTF-8).
 /// - Segments are separated by `/`.
 /// - RFC 6901 escape sequences in each segment are unescaped: `~1` becomes `/` and `~0` becomes `~`.
@@ -103,7 +103,6 @@ impl SymbolPath {
 /// blockwatch attributes and URI fragments:
 /// - `%`: prefix for percent-encoded bytes; raw `%` must be `%25` to avoid ambiguity.
 /// - `,`: separates multiple references in block attributes.
-/// - `:`: separates file and block names in references.
 /// - `#`: separates the file path from the symbol path.
 /// - `"`: delimits double-quoted attribute values in block comments.
 /// - `'`: delimits single-quoted attribute values in block comments.
@@ -112,7 +111,6 @@ const FRAGMENT_ENCODE_SET: &AsciiSet = &CONTROLS
     .add(b' ')
     .add(b'%')
     .add(b',')
-    .add(b':')
     .add(b'#')
     .add(b'"')
     .add(b'\'');

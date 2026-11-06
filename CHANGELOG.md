@@ -12,6 +12,12 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Changed
+
+- A symbol path can hold a `:`, such as `#/manifest/application/@android:name` or `#/ns::helper`. Before, a reference
+  couldn't hold both `#` and `:`, so each `:` had to be written `%3A`. `%3A` still works. Messages now show a `:` as
+  written.
+
 ## [0.17.0] - 2026-11-06
 
 ### Added

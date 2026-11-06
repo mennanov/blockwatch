@@ -458,7 +458,7 @@ mod symbols_tests {
             symbols(&xml(source)?, source),
             vec![
                 symbol("/project", text_of(source, "<project", "</project>")?, None),
-                symbol("/project/@a%3Amode", r#"a:mode="strict""#, Some("strict")),
+                symbol("/project/@a:mode", r#"a:mode="strict""#, Some("strict")),
                 symbol("/project/@kind", "kind='app'", Some("app")),
                 symbol(
                     "/project/version",
@@ -470,7 +470,7 @@ mod symbols_tests {
                     "<java.version>17</java.version>",
                     Some("17")
                 ),
-                symbol("/project/a%3Aname", "<a:name>app</a:name>", Some("app")),
+                symbol("/project/a:name", "<a:name>app</a:name>", Some("app")),
                 symbol("/project/empty", r#"<empty flag="on"/>"#, Some("")),
                 symbol("/project/empty/@flag", r#"flag="on""#, Some("on")),
                 symbol("/project/closed", "<closed></closed>", Some("")),

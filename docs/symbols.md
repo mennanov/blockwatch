@@ -70,7 +70,6 @@ Some characters must be escaped when a key contains them:
 | `/`       | `~1`   | it separates keys                     |
 | `~`       | `~0`   | it starts an escape                   |
 | `,`       | `%2C`  | it separates targets                  |
-| `:`       | `%3A`  | it separates a file from a block name |
 | `%`       | `%25`  | it starts an escape                   |
 
 For example, the key `@types/node` is `#/dependencies/@types~1node`.
@@ -250,8 +249,7 @@ Clone the repository.
   quote, a list item or an HTML block.
 - **The same heading twice under one parent is a violation**, because blockwatch can't tell which one you mean. Two
   `### Example` sections under different `##` headings are fine.
-- **Escape a heading like any key.** `## Input/Output` is `#/Input~1Output`, and `## Step 1: build` is
-  `#/Step 1%3A build`.
+- **Escape a heading like any key.** `## Input/Output` is `#/Input~1Output`.
 - **An `.mdx` file gets the same paths.** The text of a JSX element in a heading counts, and so does the code in
   braces: `## Red <Badge>new</Badge> {version}` is `#/Red new version`. A heading inside a JSX element doesn't count.
   A file that isn't valid MDX stops the run.
@@ -301,8 +299,8 @@ is `@` and its name, under its element:
   such as `artifactId`, or an attribute. In a `.csproj` file, `#/Project/ItemGroup/~[@Include=Serilog]/@Version` is
   the `Version` of the `PackageReference` whose `Include` is `Serilog`. A position, such as
   `#/project/modules/module/1`, is not found.
-- **A prefix is part of the name, as written.** Escape its `:` as `%3A`: `#/manifest/application/@android%3Aname`.
-  Namespaces play no part, and `xmlns` attributes are not symbols. Names compare as written, case included.
+- **A prefix is part of the name, as written:** `#/manifest/application/@android:name`. Namespaces play no part,
+  and `xmlns` attributes are not symbols. Names compare as written, case included.
 - **An element without child elements is its text.** Entities and character references are decoded, CDATA stays as
   written, and comments are left out. The white space around the text is removed, but the line breaks and indents
   inside it stay. `<a/>` and `<a></a>` are empty strings.
@@ -1072,7 +1070,7 @@ done
   that starts with `~` after a quote, such as `"a"~/b`, and an array. Use `same-as-pattern` to take `8080` out of
   `"${PORT:-8080}"`.
 - **A path to a `$'...'` or `$"..."` string stops the run.**
-- **A function's name can hold `-`, `.` and `:`.** Write each `:` as `%3A`: `ns::helper` is `#/ns%3A%3Ahelper`.
+- **A function's name can hold `-`, `.` and `:`,** such as `#/ns::helper`.
 - **zsh files (`.zsh`, `.zshrc`) have no symbols.** The parser misreads much of zsh's syntax.
 - **After a syntax error, the parser often skips a large part of the file**, and every name in that part stops the
   run. It fails on `sed -e /^$/d`, on `${x/#$/y}`, and on a command whose name holds `::` after an assignment, such as
