@@ -25,6 +25,7 @@ async-openai = { version = "0.43.0", features = [
 async-trait = "0.1"
 bigdecimal = "0.4"
 clap = { version = "4.6", features = ["cargo", "derive"] }
+cssparser = "0.38.0"
 fnv = "1.0"
 globset = "0.4.18"
 heck = "0.5"

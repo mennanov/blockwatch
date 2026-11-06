@@ -958,6 +958,7 @@ mod tests {
             "cpp",
             "cs",
             "csproj",
+            "css",
             "cts",
             "cxx",
             "d.ts",

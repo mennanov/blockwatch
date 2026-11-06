@@ -31,6 +31,7 @@ declares, instead of tags in a comment.
 | YAML             | `.yaml`, `.yml`, `.cff`                                                                                     | [YAML](#yaml)                                           |
 | Markdown         | `.md`, `.markdown`, `.mdx`                                                                                  | [Markdown](#markdown)                                   |
 | XML              | `.xml`, `.csproj`, `.fsproj`, `.vbproj`, `.vcxproj`, `.props`, `.targets`, `.xaml`, `.xsd`, `.xsl`, `.xslt` | [XML](#xml)                                             |
+| CSS              | `.css`                                                                                                      | [CSS](#css)                                             |
 | Go               | `.go`                                                                                                       | [Go](#go)                                               |
 | C, C++           | `.c`, `.h`, `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx`                                                    | [C and C++](#c-and-c)                                   |
 | Python           | `.py`, `.pyi`, `.pyw`                                                                                       | [Python and Starlark](#python-and-starlark)             |
@@ -316,6 +317,79 @@ is `@` and its name, under its element:
 - **A syntax error anywhere stops the run**, and so does an empty file. A few valid files stop it too, because of the
   parser: a DOCTYPE without white space before its `]`, as in `[<!ENTITY e "x">]`, and a processing instruction with
   data, such as `<?pi x?>`, inside an element.
+
+<!-- </block> -->
+
+## CSS
+
+`.css` files have symbols.
+
+<!-- <block name="css-paths"> -->
+
+Each rule is a symbol, and so is each at-rule with a block and each declaration in them. A path is the selector or
+at-rule of each rule, from the top down, then a property:
+
+```css
+:root {
+  --brand: #5097ba;
+  --gap: 8px !important;
+}
+
+.dark { --brand: #ffffff; }
+
+@media (max-width: 768px) {
+  .card { padding: 4px; }
+}
+
+.card {
+  display: -webkit-box;
+  display: flex;
+  content: "a\"b";
+  &:hover { color: blue; }
+}
+
+h1, h2 { margin: 0; }
+
+@keyframes spin { to { rotate: 1turn; } }
+```
+
+| Path                                        | Points at                                 |
+|---------------------------------------------|-------------------------------------------|
+| `#/:root/--brand`                           | `#5097ba`                                 |
+| `#/:root/--gap`                             | `8px`, without `!important`               |
+| `#/.dark/--brand`                           | `#ffffff`                                 |
+| `#/--brand`                                 | not found: a property needs its rule      |
+| `#/@media (max-width: 768px)/.card/padding` | `4px`                                     |
+| `#/.card/padding`                           | not found: only the `@media` rule sets it |
+| `#/.card/display`                           | a violation: it is set twice              |
+| `#/.card/content`                           | `a"b`                                     |
+| `#/.card/&:hover/color`                     | `blue`                                    |
+| `#/.card`                                   | the whole rule                            |
+| `#/h1%2C h2/margin`                         | `0`                                       |
+| `#/@keyframes spin/to/rotate`               | `1turn`                                   |
+
+- **A segment is the selector or the at-rule as written.** Comments are left out, and each run of white space is one
+  space: `.card  >  a` is `#/.card > a`. An at-rule is its name and its prelude, such as `@media (max-width: 768px)`.
+  `@supports`, `@layer`, `@container`, `@font-face`, Tailwind's `@theme` and any other at-rule with a block work the
+  same way.
+- **A selector list is one segment.** `h1, h2 { }` is `#/h1%2C h2`, with its `,` escaped. `#/h2` doesn't find it.
+- **A property needs its whole path.** `#/--brand` is not found. Write `#/:root/--brand`.
+- **A selector or a property written twice is a violation**, though CSS uses the last one. A fallback such as
+  `display: -webkit-box; display: flex;` does this, and so does one selector in two rules. Wrap the one you mean in a
+  block instead.
+- **Names compare as written, case included.** `#/.a/color` doesn't find `COLOR`. A position, such as `#/.card/0`, is
+  not found.
+- **A value runs from its first token to its last one.** The white space and comments around it are left out, and so
+  is `!important` at its end. A comment between its tokens stays.
+- **A value that is one string is decoded:** `"a\"b"` is `a"b`. Any other value stays as written, strings included,
+  such as `"Inter", sans-serif`.
+- **A rule covers its selector and its block. A declaration covers `name: value`, with `!important`.** A comment above
+  either is not part of it.
+- **At-rules without a block, such as `@import`, are not symbols.** Neither are `<style>` elements in HTML, nor
+  `.scss`, `.sass` and `.less` files.
+- **A part that CSS says to skip stops the run for each path with a word from it as a segment.** The IE hack
+  `*zoom: 1` stops `#/.btn/zoom`. A declaration outside a rule, or a stray `}`, is skipped with the rule after it.
+  Other paths in the file still resolve.
 
 <!-- </block> -->
 

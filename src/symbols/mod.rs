@@ -156,6 +156,16 @@ impl Symbols {
         }
     }
 
+    /// The `symbols` of a file, in document order, and the words in the text its parser had to
+    /// skip, each with the reason to report.
+    pub(crate) fn with_skipped(symbols: Vec<Symbol>, skipped: HashMap<String, String>) -> Self {
+        Self {
+            symbols,
+            unreadable: HashMap::new(),
+            skipped,
+        }
+    }
+
     /// Finds the one symbol at `path`.
     ///
     /// A filter in `path`, such as `~[name=blue]`, stands for the one child of the path before it

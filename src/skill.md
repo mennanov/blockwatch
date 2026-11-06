@@ -157,11 +157,11 @@ the file cannot hold a comment. To put rules on the value itself, wrap it in a `
 
 Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`.toml`, `Pipfile`), YAML (`.yaml`,
 `.yml`, `.cff`), Markdown (`.md`, `.markdown`, `.mdx`), XML (`.xml`, `.csproj`, `.fsproj`, `.vbproj`, `.vcxproj`,
-`.props`, `.targets`, `.xaml`, `.xsd`, `.xsl`, `.xslt`), Go (`.go`), C and C++ (`.c`, `.h`, `.cc`, `.cpp`, `.cxx`,
-`.hh`, `.hpp`, `.hxx`), Python (`.py`, `.pyi`, `.pyw`), Starlark (`.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`,
-`BUCK`, `WORKSPACE`, `Tiltfile`), Rust (`.rs`), TypeScript (`.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`), JavaScript
-(`.js`, `.mjs`, `.cjs`, `.jsx`), Java (`.java`), C# (`.cs`), Kotlin (`.kt`, `.kts`), Swift (`.swift`), Protocol
-Buffers (`.proto`), HCL (`.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`), PHP (`.php`, `.phtml`), shell (`.sh`,
+`.props`, `.targets`, `.xaml`, `.xsd`, `.xsl`, `.xslt`), CSS (`.css`), Go (`.go`), C and C++ (`.c`, `.h`, `.cc`,
+`.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx`), Python (`.py`, `.pyi`, `.pyw`), Starlark (`.bzl`, `.bazel`, `.bzlmod`,
+`.star`, `BUILD`, `BUCK`, `WORKSPACE`, `Tiltfile`), Rust (`.rs`), TypeScript (`.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`),
+JavaScript (`.js`, `.mjs`, `.cjs`, `.jsx`), Java (`.java`), C# (`.cs`), Kotlin (`.kt`, `.kts`), Swift (`.swift`),
+Protocol Buffers (`.proto`), HCL (`.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`), PHP (`.php`, `.phtml`), shell (`.sh`,
 `.bash`, `.bashrc`, `.bash_profile`, `.envrc`), Makefile (`Makefile`, `GNUmakefile`, `makefile`, `.mk`, `.mak`), and
 Dart (`.dart`). A path into any other file fails the run.
 
@@ -239,6 +239,21 @@ files. A path is each element's name from the root element down. An attribute is
 - An attribute is its decoded value. The white space around it stays.
 - An entity that the DOCTYPE declares, or a reference to a character XML forbids, fails the run for its path.
 - A syntax error anywhere fails the run.
+
+### CSS
+
+Each rule, each at-rule with a block and each declaration in them is a symbol, in `.css` files. A path is the
+selector or at-rule of each rule from the top down, then a property: `theme.css#/:root/--brand`,
+`#/@media (max-width: 768px)/.card/padding`.
+
+- A segment is the selector or the at-rule as written, without comments, and with each run of white space as one
+  space. A selector list is one segment: `#/h1%2C h2/margin`.
+- A property needs its whole path: `#/--brand` is not found.
+- A selector or a property written twice is a violation, such as the fallback `display: -webkit-box; display: flex;`.
+- A value leaves out the white space and comments around it, and `!important`. A value that is one string is decoded.
+  Any other value stays as written.
+- At-rules without a block, such as `@import`, are not symbols. `.scss` and `.less` files have no symbols.
+- A part that CSS says to skip, such as `*zoom: 1`, fails the run for each path with a word from it as a segment.
 
 ### Code files
 

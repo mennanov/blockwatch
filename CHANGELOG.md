@@ -12,6 +12,13 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- Symbols in CSS files (`.css`). `theme.css#/:root/--brand` points at the value of `--brand` in the `:root` rule, and
+  `#/@media (max-width: 768px)/.card/padding` at a declaration in a rule inside `@media`. Each rule, each at-rule with
+  a block and each declaration is a symbol. A value loses `!important` and the comments around it, and a value that is
+  one string is decoded. See [CSS](docs/symbols.md#css).
+
 ### Changed
 
 - A symbol path can hold a `:`, such as `#/manifest/application/@android:name` or `#/ns::helper`. Before, a reference
