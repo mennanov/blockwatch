@@ -182,8 +182,9 @@ fn push_escape(escape: &str, units: &mut Vec<u16>) -> anyhow::Result<()> {
     let first = characters.next().unwrap_or_default();
     let digits = characters.as_str();
     let character = match first {
-        // A backslash at the end of a line joins the next line to it.
-        '\r' | '\n' => return Ok(()),
+        // A backslash at the end of a line joins the next line to it. JavaScript also ends a line
+        // at U+2028 and U+2029.
+        '\r' | '\n' | '\u{2028}' | '\u{2029}' => return Ok(()),
         'b' => '\u{8}',
         'f' => '\u{c}',
         'n' => '\n',
@@ -456,13 +457,21 @@ const EMPTY = "";
     }
 
     #[test]
-    fn crlf_line_endings_parse_symbols_reads_line_feeds() -> anyhow::Result<()> {
-        // A template reads every line end as a line feed.
-        let source = "const SPLIT = \"a\\\r\nb\";\r\nconst TEMPLATE = `a\r\nb`;\r\n";
+    fn line_ends_other_than_a_line_feed_parse_symbols_returns_decoded_values() -> anyhow::Result<()>
+    {
+        // A template reads a CRLF line end as a line feed. A backslash joins the next line to its
+        // own at any line end, and JavaScript also ends a line at U+2028 and U+2029.
+        let source = "const SPLIT = \"a\\\r\nb\";\r\nconst TEMPLATE = `a\r\nb`;\r\n\
+            const LINE_SEPARATOR = \"a\\\u{2028}b\";\r\nconst PARAGRAPH_SEPARATOR = \"a\\\u{2029}b\";\r\n";
 
         assert_eq!(
             values(&typescript(source)?, source),
-            vec![value("/SPLIT", "ab"), value("/TEMPLATE", "a\nb")]
+            vec![
+                value("/SPLIT", "ab"),
+                value("/TEMPLATE", "a\nb"),
+                value("/LINE_SEPARATOR", "ab"),
+                value("/PARAGRAPH_SEPARATOR", "ab"),
+            ]
         );
         Ok(())
     }
