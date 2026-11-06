@@ -192,8 +192,8 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
                 return None;
             }
             let comment = node_text(node, source);
-            if comment.starts_with("#!") {
-                // Skip shebang.
+            // A shebang works only as the first line of a file. Any other `#!` line is a comment.
+            if node.start_byte() == 0 && comment.starts_with("#!") {
                 None
             } else {
                 blank_line_marker(comment, &["#"])
@@ -500,6 +500,7 @@ echo "Hello"  # This is an inline comment
 
 VALUE=42  # Comment after code
 ## A section heading repeats the marker.
+#! Only the first line of a file holds a shebang.
 "#,
             )
             .collect();
@@ -542,9 +543,33 @@ VALUE=42  # Comment after code
                     source_range: 179..219,
                     comment_text: "   A section heading repeats the marker.".to_string()
                 },
+                Comment {
+                    position_range: Position::new(11, 1)..Position::new(11, 50),
+                    source_range: 220..269,
+                    comment_text: " ! Only the first line of a file holds a shebang.".to_string()
+                },
             ]
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn comment_at_the_start_that_is_not_a_shebang_parse_returns_it() -> anyhow::Result<()> {
+        let mut comments_parser = comments_parser()?;
+
+        // Only a `#!` at the first byte of the file is a shebang.
+        for (source, expected) in [
+            ("# Not a shebang.\n", "  Not a shebang."),
+            ("\n#! Not a shebang either.\n", " ! Not a shebang either."),
+        ] {
+            let texts: Vec<String> = comments_parser
+                .parse(source)
+                .map(|comment| comment.comment_text)
+                .collect();
+
+            assert_eq!(texts, [expected], "{source:?}");
+        }
         Ok(())
     }
 }

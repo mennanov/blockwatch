@@ -33,6 +33,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   `--` comments. In C and C++, it also works with Doxygen's `///<` and `//!<`. In Markdown, a tag can now wrap over
   several `[//]: # (...)` lines too. In a `/* */` or OCaml `(* *)` comment, it can wrap over lines that start with
   ` ** `.
+- In Bash and zsh files, a comment that starts with `#!` is no longer skipped, unless it is the shebang on the first
+  line. Before, a tag in such a comment was ignored.
 
 ## [0.16.8] - 2026-11-05
 
