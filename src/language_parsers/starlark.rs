@@ -16,7 +16,7 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let starlark_language = tree_sitter_starlark::LANGUAGE.into();
-    let parser = python_style_comments_parser(&starlark_language, "comment")?;
+    let parser = python_style_comments_parser(&starlark_language, "comment", &["#"])?;
     Ok(parser)
 }
 
@@ -37,6 +37,7 @@ cc_library(
     # Indented comment
     name = "foo", # inline comment
 )
+## A section heading repeats the marker.
 "#,
             )
             .collect();
@@ -58,6 +59,11 @@ cc_library(
                     position_range: Position::new(5, 19)..Position::new(5, 35),
                     source_range: 79..95,
                     comment_text: "  inline comment".to_string()
+                },
+                Comment {
+                    position_range: Position::new(7, 1)..Position::new(7, 41),
+                    source_range: 98..138,
+                    comment_text: "   A section heading repeats the marker.".to_string()
                 },
             ]
         );

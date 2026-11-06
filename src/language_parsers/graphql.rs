@@ -9,7 +9,7 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let graphql_language = tree_sitter_graphql::LANGUAGE.into();
-    let parser = python_style_comments_parser(&graphql_language, "comment")?;
+    let parser = python_style_comments_parser(&graphql_language, "comment", &["#"])?;
     Ok(parser)
 }
 
@@ -30,6 +30,7 @@ type Query {
   # Indented comment
   hello: String # inline comment
 }
+## A section heading repeats the marker.
 "#,
             )
             .collect();
@@ -51,6 +52,11 @@ type Query {
                     position_range: Position::new(5, 17)..Position::new(5, 33),
                     source_range: 76..92,
                     comment_text: "  inline comment".to_string()
+                },
+                Comment {
+                    position_range: Position::new(7, 1)..Position::new(7, 41),
+                    source_range: 95..135,
+                    comment_text: "   A section heading repeats the marker.".to_string()
                 },
             ]
         );

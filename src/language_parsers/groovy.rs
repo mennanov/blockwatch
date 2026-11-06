@@ -11,6 +11,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let parser = language_parsers::c_style_comments_parser(
         &groovy_language,
         &["line_comment", "block_comment"],
+        language_parsers::SLASH_MARKERS,
     )?;
     Ok(parser)
 }
@@ -36,6 +37,8 @@ spanning multiple lines
 */
 println(x)
 /// Triple slash comment.
+//! Rust and Doxygen read this marker as a doc comment.
+//// A banner line repeats the marker.
 "#,
             )
             .collect();
@@ -63,6 +66,17 @@ println(x)
                     position_range: Position::new(9, 1)..Position::new(9, 26),
                     source_range: 143..168,
                     comment_text: "    Triple slash comment.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(10, 1)..Position::new(10, 56),
+                    source_range: 169..224,
+                    comment_text: "    Rust and Doxygen read this marker as a doc comment."
+                        .to_string()
+                },
+                Comment {
+                    position_range: Position::new(11, 1)..Position::new(11, 39),
+                    source_range: 225..263,
+                    comment_text: "     A banner line repeats the marker.".to_string()
                 },
             ]
         );

@@ -1,6 +1,6 @@
 use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
-    c_style_multiline_comment_processor, comment_visitor, node_text,
+    blank_line_marker, c_style_multiline_comment_processor, comment_visitor, node_text,
 };
 
 /// Returns a [`LanguageParser`] for SQL.
@@ -13,7 +13,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let parser = TreeSitterCommentsParser::new(
         &sql_language,
         comment_visitor(|node, source_code| match node.kind() {
-            "comment" => Some(node_text(node, source_code).replacen("--", "  ", 1)),
+            "comment" => blank_line_marker(node_text(node, source_code), &["--"]),
             "marginalia" => Some(c_style_multiline_comment_processor(node_text(
                 node,
                 source_code,
@@ -49,6 +49,7 @@ that spans multiple lines
 */
 
 SELECT COUNT(*) FROM orders; /* Inline block comment */
+--- A separator line repeats the marker.
 "#,
             )
             .collect();
@@ -91,7 +92,12 @@ SELECT COUNT(*) FROM orders; /* Inline block comment */
                     position_range: Position::new(14, 30)..Position::new(14, 56),
                     source_range: 250..276,
                     comment_text: "   Inline block comment   ".to_string()
-                }
+                },
+                Comment {
+                    position_range: Position::new(15, 1)..Position::new(15, 41),
+                    source_range: 277..317,
+                    comment_text: "    A separator line repeats the marker.".to_string()
+                },
             ]
         );
 

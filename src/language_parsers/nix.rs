@@ -8,9 +8,8 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let nix_language = tree_sitter_nix::LANGUAGE.into();
-    // Nix has `#` line comments and `/* */` block comments; the `//` branch of the shared
-    // parser is unreachable because `//` is the attrset-merge operator in Nix.
-    let parser = language_parsers::c_style_comments_parser(&nix_language, &["comment"])?;
+    // `//` is the attrset-merge operator in Nix, not a comment.
+    let parser = language_parsers::c_style_comments_parser(&nix_language, &["comment"], &["#"])?;
     Ok(parser)
 }
 
@@ -34,6 +33,7 @@ mod tests {
   spanning multiple lines
   */
 }
+## A section heading repeats the marker.
 "#,
             )
             .collect();
@@ -56,6 +56,11 @@ mod tests {
                     source_range: 72..129,
                     comment_text: "   This is a block comment\n  spanning multiple lines\n    "
                         .to_string()
+                },
+                Comment {
+                    position_range: Position::new(10, 1)..Position::new(10, 41),
+                    source_range: 132..172,
+                    comment_text: "   A section heading repeats the marker.".to_string()
                 },
             ]
         );

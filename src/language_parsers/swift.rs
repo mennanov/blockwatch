@@ -1,5 +1,6 @@
 use crate::language_parsers::{
-    CommentsParser, LanguageParser, LanguageParserImpl, c_style_comments_parser, node_text,
+    CommentsParser, LanguageParser, LanguageParserImpl, SLASH_MARKERS, c_style_comments_parser,
+    node_text,
 };
 use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, NestedWalk, child};
 use anyhow::{anyhow, bail};
@@ -364,7 +365,11 @@ fn computed_value(property: Node<'_>) -> Option<Node<'_>> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let swift_language = tree_sitter_swift::LANGUAGE.into();
-    let parser = c_style_comments_parser(&swift_language, &["comment", "multiline_comment"])?;
+    let parser = c_style_comments_parser(
+        &swift_language,
+        &["comment", "multiline_comment"],
+        SLASH_MARKERS,
+    )?;
     Ok(parser)
 }
 
@@ -1117,6 +1122,8 @@ mod tests {
                 return
             }
             /// A documentation comment.
+//! Rust and Doxygen read this marker as a doc comment.
+//// A banner line repeats the marker.
             "#,
             )
             .collect();
@@ -1150,7 +1157,17 @@ mod tests {
                     position_range: Position::new(20, 13)..Position::new(20, 41),
                     source_range: 514..542,
                     comment_text: "    A documentation comment.".to_string()
-                }
+                },
+                Comment {
+                    position_range: Position::new(21, 1)..Position::new(21, 56),
+                    source_range: 543..598,
+                    comment_text: "    Rust and Doxygen read this marker as a doc comment.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(22, 1)..Position::new(22, 39),
+                    source_range: 599..637,
+                    comment_text: "     A banner line repeats the marker.".to_string()
+                },
             ]
         );
 

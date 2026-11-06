@@ -1,6 +1,6 @@
 use crate::language_parsers::{
-    CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser, blank_outside,
-    comment_visitor, node_text,
+    CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
+    blank_line_marker, blank_outside, comment_visitor, node_text,
 };
 use tree_sitter::Node;
 
@@ -23,15 +23,20 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     Ok(parser)
 }
 
-/// Blanks out the comment delimiters (`--`, `--[=*[`, `]=*]`) around the `content` field,
-/// preserving the comment's length. A bare `--` has no `content` node.
+/// `comment`, the text of `node`, with its markers blanked, so it keeps its length: the `--` of a
+/// line comment, or the `--[=*[` and `]=*]` around the `content` field of a block comment.
 fn lua_comment_text(node: &Node, comment: &str) -> String {
-    let content_range = match node.child_by_field_name("content") {
-        Some(content) => {
-            content.start_byte() - node.start_byte()..content.end_byte() - node.start_byte()
-        }
-        None => 0..0,
-    };
+    // Only a block comment has an `end` field. A line comment's `content` starts right after `--`,
+    // so it would keep the third `-` of `---`.
+    if node.child_by_field_name("end").is_none() {
+        return blank_line_marker(comment, &["--"])
+            .expect("tree-sitter-lua starts a comment with `--`");
+    }
+    let content = node
+        .child_by_field_name("content")
+        .expect("tree-sitter-lua gives every comment a `content` field");
+    let content_range =
+        content.start_byte() - node.start_byte()..content.end_byte() - node.start_byte();
     blank_outside(comment, content_range)
 }
 
@@ -57,6 +62,7 @@ spanning multiple lines
 --[=[ Bracketed
 comment ]=]
 print(x)
+--- LuaLS reads this marker as a doc comment, as in ---@param.
 "#,
             )
             .collect();
@@ -84,6 +90,12 @@ print(x)
                     position_range: Position::new(9, 1)..Position::new(10, 12),
                     source_range: 116..143,
                     comment_text: "      Bracketed\ncomment    ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(12, 1)..Position::new(12, 63),
+                    source_range: 153..215,
+                    comment_text: "    LuaLS reads this marker as a doc comment, as in ---@param."
+                        .to_string()
                 },
             ]
         );

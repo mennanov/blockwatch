@@ -23,7 +23,7 @@ pub(crate) fn parse_symbols(source: &str) -> anyhow::Result<Symbols> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let toml_language = tree_sitter_toml_ng::LANGUAGE.into();
-    let parser = python_style_comments_parser(&toml_language, "comment")?;
+    let parser = python_style_comments_parser(&toml_language, "comment", &["#"])?;
     Ok(parser)
 }
 
@@ -317,6 +317,7 @@ title = "TOML Example" # Inline comment
 name = "Tom Preston-Werner" # Another inline comment
 dob = 1979-05-27T07:32:00-08:00 # Date of birth with comment
 # End of file
+## A section heading repeats the marker.
 "#,
             )
             .collect();
@@ -353,7 +354,12 @@ dob = 1979-05-27T07:32:00-08:00 # Date of birth with comment
                     position_range: Position::new(8, 1)..Position::new(8, 14),
                     source_range: 203..216,
                     comment_text: "  End of file".to_string()
-                }
+                },
+                Comment {
+                    position_range: Position::new(9, 1)..Position::new(9, 41),
+                    source_range: 217..257,
+                    comment_text: "   A section heading repeats the marker.".to_string()
+                },
             ]
         );
 

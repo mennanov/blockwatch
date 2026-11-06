@@ -8,8 +8,11 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let scala_language = tree_sitter_scala::LANGUAGE.into();
-    let parser =
-        language_parsers::c_style_comments_parser(&scala_language, &["comment", "block_comment"])?;
+    let parser = language_parsers::c_style_comments_parser(
+        &scala_language,
+        &["comment", "block_comment"],
+        language_parsers::SLASH_MARKERS,
+    )?;
     Ok(parser)
 }
 
@@ -51,6 +54,8 @@ object Main {
   */
 }
 /// Triple slash comment.
+//! Rust and Doxygen read this marker as a doc comment.
+//// A banner line repeats the marker.
 "#,
             )
             .collect();
@@ -78,6 +83,17 @@ object Main {
                     position_range: Position::new(10, 1)..Position::new(10, 26),
                     source_range: 142..167,
                     comment_text: "    Triple slash comment.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(11, 1)..Position::new(11, 56),
+                    source_range: 168..223,
+                    comment_text: "    Rust and Doxygen read this marker as a doc comment."
+                        .to_string()
+                },
+                Comment {
+                    position_range: Position::new(12, 1)..Position::new(12, 39),
+                    source_range: 224..262,
+                    comment_text: "     A banner line repeats the marker.".to_string()
                 },
             ]
         );

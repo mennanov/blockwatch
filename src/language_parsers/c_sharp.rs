@@ -296,7 +296,11 @@ fn push_fields<'tree>(
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let c_sharp = tree_sitter_c_sharp::LANGUAGE.into();
-    let parser = language_parsers::c_style_comments_parser(&c_sharp, &["comment"])?;
+    let parser = language_parsers::c_style_comments_parser(
+        &c_sharp,
+        &["comment"],
+        language_parsers::SLASH_MARKERS,
+    )?;
     Ok(parser)
 }
 
@@ -958,6 +962,8 @@ namespace HelloWorld
         }
     }
 }
+//! Rust and Doxygen read this marker as a doc comment.
+//// A banner line repeats the marker.
 "#;
         let blocks: Vec<Comment> = comments_parser.parse(code).collect();
 
@@ -998,7 +1004,18 @@ namespace HelloWorld
                     position_range: Position::new(18, 13)..Position::new(18, 31),
                     source_range: 342..360,
                     comment_text: "   Simple block   ".to_string()
-                }
+                },
+                Comment {
+                    position_range: Position::new(22, 1)..Position::new(22, 56),
+                    source_range: 379..434,
+                    comment_text: "    Rust and Doxygen read this marker as a doc comment."
+                        .to_string()
+                },
+                Comment {
+                    position_range: Position::new(23, 1)..Position::new(23, 39),
+                    source_range: 435..473,
+                    comment_text: "     A banner line repeats the marker.".to_string()
+                },
             ]
         );
 

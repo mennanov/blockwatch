@@ -19,11 +19,17 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   setter, named constructor and enum value in it. A named extension's members sit under its name. See
   [Dart](docs/symbols.md#dart).
 
+### Changed
+
+- In a tag that wraps over several comment lines, a longer marker such as `##` or `---` is now blanked whole. So an
+  attribute value that goes on to such a line loses the extra `#` or `-`. In Python, a value that goes on to the line
+  `##a` now holds `a` there, not `#a`.
+
 ### Fixed
 
-- A tag that wraps over several `///` or `//!` comment lines is no longer reported as malformed in C, C++, Go, Groovy,
-  HCL, JavaScript, JSON, Kotlin, MDX, PHP, Protobuf, Scala and TypeScript. These languages now blank the whole
-  marker, as C#, Dart, Java, Rust and Swift already did.
+- A tag that wraps over several comment lines is no longer reported as malformed when each line starts with a longer
+  marker, such as `///`, `////`, `//!`, `##`, `---` or Python's `#:`. This works in every language with `//`, `#` or
+  `--` comments. In C and C++, it also works with Doxygen's `///<` and `//!<`.
 
 ## [0.16.8] - 2026-11-05
 

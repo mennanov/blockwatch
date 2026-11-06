@@ -614,6 +614,8 @@ let done = 1;
 <!-- html open comment
 let between = 2;
 --> html close comment
+//! Rust and Doxygen read this marker as a doc comment.
+//// A banner line repeats the marker.
             "#,
             )
             .collect();
@@ -669,6 +671,16 @@ let between = 2;
                     position_range: Position::new(28, 1)..Position::new(28, 23),
                     source_range: 833..855,
                     comment_text: "    html close comment".to_string()
+                },
+                Comment {
+                    position_range: Position::new(29, 1)..Position::new(29, 56),
+                    source_range: 856..911,
+                    comment_text: "    Rust and Doxygen read this marker as a doc comment.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(30, 1)..Position::new(30, 39),
+                    source_range: 912..950,
+                    comment_text: "     A banner line repeats the marker.".to_string()
                 },
             ]
         );

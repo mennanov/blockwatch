@@ -1,6 +1,6 @@
 use crate::language_parsers::{
-    CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser, blank_outside,
-    comment_visitor, node_text,
+    CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
+    blank_line_marker, blank_outside, comment_visitor, node_text,
 };
 use tree_sitter::Node;
 
@@ -14,7 +14,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let parser = TreeSitterCommentsParser::new(
         &cmake_language,
         comment_visitor(|node, source_code| match node.kind() {
-            "line_comment" => Some(node_text(node, source_code).replacen('#', " ", 1)),
+            "line_comment" => blank_line_marker(node_text(node, source_code), &["#"]),
             "bracket_comment" => Some(bracket_comment_text(node, node_text(node, source_code))),
             _ => None,
         }),
@@ -55,6 +55,7 @@ spanning multiple lines
 
 #[=[ Bracketed
 comment ]=]
+## A section heading repeats the marker.
 "#,
             )
             .collect();
@@ -82,6 +83,11 @@ comment ]=]
                     position_range: Position::new(9, 1)..Position::new(10, 12),
                     source_range: 125..151,
                     comment_text: "     Bracketed\ncomment    ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(11, 1)..Position::new(11, 41),
+                    source_range: 152..192,
+                    comment_text: "   A section heading repeats the marker.".to_string()
                 },
             ]
         );

@@ -1,5 +1,5 @@
 use crate::language_parsers::{
-    LanguageParser, LanguageParserImpl, c_style_comments_parser, members, node_text,
+    LanguageParser, LanguageParserImpl, SLASH_MARKERS, c_style_comments_parser, members, node_text,
     tree_sitter_parser,
 };
 use crate::symbol_path::SymbolPath;
@@ -9,8 +9,11 @@ use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for JSON.
 pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    let comments_parser =
-        c_style_comments_parser(&tree_sitter_json::LANGUAGE.into(), &["comment"])?;
+    let comments_parser = c_style_comments_parser(
+        &tree_sitter_json::LANGUAGE.into(),
+        &["comment"],
+        SLASH_MARKERS,
+    )?;
     Ok(LanguageParserImpl::new(comments_parser).with_symbols(JsonSymbolsParser::new()?))
 }
 
@@ -218,6 +221,27 @@ mod tests {
 
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].attributes.get("name").unwrap(), "test");
+        Ok(())
+    }
+
+    #[test]
+    fn start_tag_wrapped_over_longer_markers_parse_blocks_returns_block() -> anyhow::Result<()> {
+        let mut parser = parser()?;
+
+        let blocks: Vec<Block> = parser
+            .parse_blocks(
+                r#"{
+  //// <block name="test"
+  //! keep-sorted="asc">
+  "key": "value"
+  // </block>
+}
+"#,
+            )
+            .collect::<anyhow::Result<Vec<_>>>()?;
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].attributes.get("keep-sorted").unwrap(), "asc");
         Ok(())
     }
 

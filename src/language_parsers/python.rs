@@ -247,7 +247,8 @@ fn push_escape(escape: &str, text: &mut String) -> anyhow::Result<()> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let python_language = tree_sitter_python::LANGUAGE.into();
-    let parser = python_style_comments_parser(&python_language, "comment")?;
+    // Sphinx reads a comment that starts with `#:` as the doc of the attribute below it.
+    let parser = python_style_comments_parser(&python_language, "comment", &["#:", "#"])?;
     Ok(parser)
 }
 
@@ -669,6 +670,8 @@ def main():
 # several lines
 
 value = 42  # Comment after code
+## A section heading repeats the marker.
+#: Sphinx reads this marker as the doc of the attribute below it.
 "#,
             )
             .collect();
@@ -705,6 +708,18 @@ value = 42  # Comment after code
                     position_range: Position::new(10, 13)..Position::new(10, 33),
                     source_range: 171..191,
                     comment_text: "  Comment after code".to_string()
+                },
+                Comment {
+                    position_range: Position::new(11, 1)..Position::new(11, 41),
+                    source_range: 192..232,
+                    comment_text: "   A section heading repeats the marker.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(12, 1)..Position::new(12, 66),
+                    source_range: 233..298,
+                    comment_text:
+                        "   Sphinx reads this marker as the doc of the attribute below it."
+                            .to_string()
                 },
             ]
         );

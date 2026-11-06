@@ -487,6 +487,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let parser = language_parsers::c_style_comments_parser(
         &dart_language,
         &["comment", "documentation_comment"],
+        language_parsers::SLASH_MARKERS,
     )?;
     Ok(parser)
 }
@@ -1161,6 +1162,8 @@ int add(int a, int b) {
 spanning multiple lines
 */
 /** Documentation block */
+//! Rust and Doxygen read this marker as a doc comment.
+//// A banner line repeats the marker.
 "#,
             )
             .collect();
@@ -1193,6 +1196,17 @@ spanning multiple lines
                     position_range: Position::new(11, 1)..Position::new(11, 27),
                     source_range: 158..184,
                     comment_text: "    Documentation block   ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(12, 1)..Position::new(12, 56),
+                    source_range: 185..240,
+                    comment_text: "    Rust and Doxygen read this marker as a doc comment."
+                        .to_string()
+                },
+                Comment {
+                    position_range: Position::new(13, 1)..Position::new(13, 39),
+                    source_range: 241..279,
+                    comment_text: "     A banner line repeats the marker.".to_string()
                 },
             ]
         );

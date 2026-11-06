@@ -191,7 +191,11 @@ fn push_escape(escape: &str, bytes: &mut Vec<u8>) -> anyhow::Result<()> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let go_language = tree_sitter_go::LANGUAGE.into();
-    let parser = language_parsers::c_style_comments_parser(&go_language, &["comment"])?;
+    let parser = language_parsers::c_style_comments_parser(
+        &go_language,
+        &["comment"],
+        language_parsers::SLASH_MARKERS,
+    )?;
     Ok(parser)
 }
 
@@ -435,6 +439,8 @@ func main() {
     // Another single line comment
 }
 /// Triple slash comment.
+//! Rust and Doxygen read this marker as a doc comment.
+//// A banner line repeats the marker.
 "#,
             )
             .collect();
@@ -467,6 +473,17 @@ func main() {
                     position_range: Position::new(16, 1)..Position::new(16, 26),
                     source_range: 229..254,
                     comment_text: "    Triple slash comment.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(17, 1)..Position::new(17, 56),
+                    source_range: 255..310,
+                    comment_text: "    Rust and Doxygen read this marker as a doc comment."
+                        .to_string()
+                },
+                Comment {
+                    position_range: Position::new(18, 1)..Position::new(18, 39),
+                    source_range: 311..349,
+                    comment_text: "     A banner line repeats the marker.".to_string()
                 },
             ]
         );

@@ -9,7 +9,7 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let containerfile_language = tree_sitter_containerfile::LANGUAGE.into();
     let parser =
-        language_parsers::python_style_comments_parser(&containerfile_language, "comment")?
+        language_parsers::python_style_comments_parser(&containerfile_language, "comment", &["#"])?
             .with_break_at_node_kinds(&["double_quoted_string", "single_quoted_string"])
             // Because of the bug in the Dockerfile tree-sitter grammar, the strings like
             // "# not a comment" are lexed as a comment. This is a workaround to ignore them.
@@ -44,6 +44,7 @@ RUN echo hi # not a comment
 
   # Indented comment
 COPY . /app
+## A section heading repeats the marker.
 "#,
             )
             .collect();
@@ -65,6 +66,11 @@ COPY . /app
                     position_range: Position::new(8, 3)..Position::new(9, 1),
                     source_range: 99..118,
                     comment_text: "  Indented comment\n".to_string()
+                },
+                Comment {
+                    position_range: Position::new(10, 1)..Position::new(11, 1),
+                    source_range: 130..171,
+                    comment_text: "   A section heading repeats the marker.\n".to_string()
                 },
             ]
         );

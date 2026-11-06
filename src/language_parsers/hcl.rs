@@ -297,7 +297,11 @@ fn escaped(characters: &mut Chars) -> anyhow::Result<char> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let hcl_language = tree_sitter_hcl::LANGUAGE.into();
-    let parser = language_parsers::c_style_comments_parser(&hcl_language, &["comment"])?;
+    let parser = language_parsers::c_style_comments_parser(
+        &hcl_language,
+        &["comment"],
+        &["//!", "//", "#"],
+    )?;
     Ok(parser)
 }
 
@@ -872,6 +876,9 @@ variable "region" {
 spanning multiple lines
 */
 /// Triple slash comment.
+//! Rust and Doxygen read this marker as a doc comment.
+//// A banner line repeats the marker.
+## A section heading repeats the marker.
 "#,
             )
             .collect();
@@ -899,6 +906,22 @@ spanning multiple lines
                     position_range: Position::new(10, 1)..Position::new(10, 26),
                     source_range: 143..168,
                     comment_text: "    Triple slash comment.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(11, 1)..Position::new(11, 56),
+                    source_range: 169..224,
+                    comment_text: "    Rust and Doxygen read this marker as a doc comment."
+                        .to_string()
+                },
+                Comment {
+                    position_range: Position::new(12, 1)..Position::new(12, 39),
+                    source_range: 225..263,
+                    comment_text: "     A banner line repeats the marker.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(13, 1)..Position::new(13, 41),
+                    source_range: 264..304,
+                    comment_text: "   A section heading repeats the marker.".to_string()
                 },
             ]
         );

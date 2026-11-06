@@ -13,7 +13,7 @@
 
 use crate::LineIndex;
 use crate::language_parsers::{
-    Comment, CommentsParser, LanguageParser, LanguageParserImpl, blank_outside,
+    Comment, CommentsParser, LanguageParser, LanguageParserImpl, blank_line_marker, blank_outside,
 };
 use std::ops::Range;
 use winnow::Result as PResult;
@@ -44,29 +44,40 @@ impl CommentsParser for LeanCommentsParser {
             .parse(LocatingSlice::new(source_code))
             .expect("each step of `comments` takes at least one character");
         let lines = LineIndex::new(source_code);
-        comments
-            .into_iter()
-            .map(move |((opening, closing), range)| {
-                #[expect(clippy::string_slice, reason = "the scanner reads whole characters")]
-                let text = &source_code[range.clone()];
-                Comment {
-                    position_range: lines.range(&range),
-                    comment_text: blank_outside(text, opening..text.len() - closing),
-                    source_range: range,
+        comments.into_iter().map(move |(kind, range)| {
+            #[expect(clippy::string_slice, reason = "the scanner reads whole characters")]
+            let text = &source_code[range.clone()];
+            let comment_text = match kind {
+                CommentKind::Line => blank_line_marker(text, &["--"])
+                    .expect("the scanner reads a line comment from its `--`"),
+                CommentKind::Block { opening, closing } => {
+                    blank_outside(text, opening..text.len() - closing)
                 }
-            })
+            };
+            Comment {
+                position_range: lines.range(&range),
+                comment_text,
+                source_range: range,
+            }
+        })
     }
 }
 
 type Input<'source> = LocatingSlice<&'source str>;
 
-/// The lengths in bytes of a comment's opening and closing markers, such as `(2, 2)` for
-/// `/- text -/`. The closing length is 0 for a line comment, and for a block comment that the end
-/// of the file cuts off.
-type MarkerLengths = (usize, usize);
+/// The kind of a comment, which decides how its markers are blanked.
+#[derive(Clone)]
+enum CommentKind {
+    /// A `--` comment, to the end of its line.
+    Line,
+    /// A `/- -/` comment, with the lengths in bytes of its opening and closing markers, such as 2
+    /// and 2 for `/- text -/`. The closing length is 0 when the end of the file cuts the comment
+    /// off.
+    Block { opening: usize, closing: usize },
+}
 
-/// Parses the whole input and returns the markers and byte range of each comment, in source order.
-fn comments(input: &mut Input<'_>) -> PResult<Vec<(MarkerLengths, Range<usize>)>> {
+/// Parses the whole input and returns the kind and byte range of each comment, in source order.
+fn comments(input: &mut Input<'_>) -> PResult<Vec<(CommentKind, Range<usize>)>> {
     // The interpolated strings and their code that the scanner is inside, innermost last. A stack
     // instead of recursion, so that many nested strings can't overflow the stack.
     let mut contexts = Vec::new();
@@ -89,7 +100,7 @@ fn comments(input: &mut Input<'_>) -> PResult<Vec<(MarkerLengths, Range<usize>)>
             None => None,
         };
         match code_token.parse_next(input)? {
-            CodeToken::Comment(markers, range) => comments.push((markers, range)),
+            CodeToken::Comment(kind, range) => comments.push((kind, range)),
             CodeToken::InterpolatedStringStart => contexts.push(Context::String),
             CodeToken::OpenBrace => {
                 if let Some(open_braces) = open_braces {
@@ -122,8 +133,8 @@ enum Context {
 /// One token of Lean code.
 #[derive(Clone)]
 enum CodeToken {
-    /// A comment, with its markers and byte range.
-    Comment(MarkerLengths, Range<usize>),
+    /// A comment, with its kind and byte range.
+    Comment(CommentKind, Range<usize>),
     /// The opening quote of an interpolated string, with the `!` before it.
     InterpolatedStringStart,
     OpenBrace,
@@ -137,7 +148,7 @@ fn code_token(input: &mut Input<'_>) -> PResult<CodeToken> {
     alt((
         alt((line_comment, block_comment))
             .with_span()
-            .map(|(markers, range)| CodeToken::Comment(markers, range)),
+            .map(|(kind, range)| CodeToken::Comment(kind, range)),
         // `s!`, `m!`, `f!` and `println!` take an interpolated string.
         ('!', take_while(0.., [' ', '\t']), '"').value(CodeToken::InterpolatedStringStart),
         '{'.value(CodeToken::OpenBrace),
@@ -179,13 +190,15 @@ fn string_piece(input: &mut Input<'_>) -> PResult<StringPiece> {
 }
 
 /// Parses `--` and the rest of its line.
-fn line_comment(input: &mut Input<'_>) -> PResult<MarkerLengths> {
-    ("--", take_till(0.., '\n')).value((2, 0)).parse_next(input)
+fn line_comment(input: &mut Input<'_>) -> PResult<CommentKind> {
+    ("--", take_till(0.., '\n'))
+        .value(CommentKind::Line)
+        .parse_next(input)
 }
 
 /// Parses a block comment, with the comments nested in it. If it is not closed, it runs to the
 /// end of the file, as in Lean.
-fn block_comment(input: &mut Input<'_>) -> PResult<MarkerLengths> {
+fn block_comment(input: &mut Input<'_>) -> PResult<CommentKind> {
     // `/--` opens a doc comment and `/-!` a module doc comment. Lean reads each as one marker,
     // so their third character is not part of the text.
     let opening = alt(("/--", "/-!", "/-")).parse_next(input)?;
@@ -194,10 +207,18 @@ fn block_comment(input: &mut Input<'_>) -> PResult<MarkerLengths> {
     while depth > 0 {
         match opt(alt(("-/".value(-1), "/-".value(1), any.value(0)))).parse_next(input)? {
             Some(change) => depth += change,
-            None => return Ok((opening.len(), 0)),
+            None => {
+                return Ok(CommentKind::Block {
+                    opening: opening.len(),
+                    closing: 0,
+                });
+            }
         }
     }
-    Ok((opening.len(), 2))
+    Ok(CommentKind::Block {
+        opening: opening.len(),
+        closing: 2,
+    })
 }
 
 /// Parses a string literal. A backslash escapes the character after it. If the string is not
@@ -277,7 +298,7 @@ def x : ℕ := 1 -- trailing
    spanning lines -/
 /-- doc comment -/
 /-! module doc -/
---- triple dash
+--- A separator line repeats the marker.
 "#,
             )
             .collect();
@@ -311,9 +332,9 @@ def x : ℕ := 1 -- trailing
                     comment_text: "    module doc   ".to_string()
                 },
                 Comment {
-                    position_range: Position::new(8, 1)..Position::new(8, 16),
-                    source_range: 121..136,
-                    comment_text: "  - triple dash".to_string()
+                    position_range: Position::new(8, 1)..Position::new(8, 41),
+                    source_range: 121..161,
+                    comment_text: "    A separator line repeats the marker.".to_string()
                 },
             ]
         );

@@ -72,7 +72,10 @@ impl PhpCommentsParser {
                 .expect("Empty Tree-sitter region query match")
                 .node;
             if node.kind() == "comment" {
-                let text = language_parsers::c_style_comment_text(node_text(&node, source));
+                let text = language_parsers::c_style_comment_text(
+                    node_text(&node, source),
+                    &["//!", "//", "#"],
+                );
                 comments.push(Comment::from_node(&node, source, text));
             } else if let Some(view) = html_view.as_deref_mut() {
                 // A `text` node: copy the HTML template section back into the blanked view.
@@ -1343,6 +1346,9 @@ spanning two lines -->
             <p>The header above will say 'This is an  example'.</p>
 <?php
 /// Triple slash comment.
+//! Rust and Doxygen read this marker as a doc comment.
+//// A banner line repeats the marker.
+## A section heading repeats the marker.
 ?>
             "#,
             )
@@ -1382,6 +1388,21 @@ spanning two lines -->
                     position_range: Position::new(23, 1)..Position::new(23, 26),
                     source_range: 631..656,
                     comment_text: "    Triple slash comment.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(24, 1)..Position::new(24, 56),
+                    source_range: 657..712,
+                    comment_text: "    Rust and Doxygen read this marker as a doc comment.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(25, 1)..Position::new(25, 39),
+                    source_range: 713..751,
+                    comment_text: "     A banner line repeats the marker.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(26, 1)..Position::new(26, 41),
+                    source_range: 752..792,
+                    comment_text: "   A section heading repeats the marker.".to_string()
                 },
             ]
         );

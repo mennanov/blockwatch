@@ -9,7 +9,8 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let css_language = tree_sitter_css::LANGUAGE.into();
-    let parser = c_style_comments_parser(&css_language, &["comment"])?;
+    // CSS has only `/* */` comments. `//` doesn't start a comment.
+    let parser = c_style_comments_parser(&css_language, &["comment"], &[])?;
     Ok(parser)
 }
 

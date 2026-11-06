@@ -527,7 +527,11 @@ fn push_escape(escape: &str, bytes: &mut Vec<u8>) -> anyhow::Result<()> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let cpp_language = tree_sitter_c::LANGUAGE.into();
-    let parser = language_parsers::c_style_comments_parser(&cpp_language, &["comment"])?;
+    let parser = language_parsers::c_style_comments_parser(
+        &cpp_language,
+        &["comment"],
+        language_parsers::DOXYGEN_MARKERS,
+    )?;
     Ok(parser)
 }
 
@@ -1146,6 +1150,13 @@ mod tests {
                 return 0;
             }
 /// Triple slash comment.
+//! Doxygen reads this marker as a doc comment, in the Qt style.
+//// A banner line repeats the marker.
+int a; ///< Doxygen documents the member before this comment.
+int b; //!< Doxygen documents the member before this comment, in the Qt style.
+//!Doxygen reads this marker with no space after it too.
+int c; ///<
+//<block name="x"> A tag right after the marker keeps its first character.
             "#,
             )
             .collect();
@@ -1179,6 +1190,42 @@ mod tests {
                     position_range: Position::new(20, 1)..Position::new(20, 26),
                     source_range: 468..493,
                     comment_text: "    Triple slash comment.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(21, 1)..Position::new(21, 65),
+                    source_range: 494..558,
+                    comment_text: "    Doxygen reads this marker as a doc comment, in the Qt style.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(22, 1)..Position::new(22, 39),
+                    source_range: 559..597,
+                    comment_text: "     A banner line repeats the marker.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(23, 8)..Position::new(23, 62),
+                    source_range: 605..659,
+                    comment_text: "     Doxygen documents the member before this comment.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(24, 8)..Position::new(24, 79),
+                    source_range: 667..738,
+                    comment_text: "     Doxygen documents the member before this comment, in the Qt style.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(25, 1)..Position::new(25, 57),
+                    source_range: 739..795,
+                    comment_text: "   Doxygen reads this marker with no space after it too.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(26, 8)..Position::new(26, 12),
+                    source_range: 803..807,
+                    comment_text: "    ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(27, 1)..Position::new(27, 75),
+                    source_range: 808..882,
+                    comment_text: r#"  <block name="x"> A tag right after the marker keeps its first character."#
+                        .to_string()
                 },
             ]
         );

@@ -9,7 +9,7 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let elixir_language = tree_sitter_elixir::LANGUAGE.into();
-    let parser = python_style_comments_parser(&elixir_language, "comment")?;
+    let parser = python_style_comments_parser(&elixir_language, "comment", &["#"])?;
     Ok(parser)
 }
 
@@ -32,6 +32,7 @@ defmodule Greeter do
     :world # inline comment
   end
 end
+## A section heading repeats the marker.
 "#,
             )
             .collect();
@@ -53,6 +54,11 @@ end
                     position_range: Position::new(6, 12)..Position::new(6, 28),
                     source_range: 94..110,
                     comment_text: "  inline comment".to_string()
+                },
+                Comment {
+                    position_range: Position::new(9, 1)..Position::new(9, 41),
+                    source_range: 121..161,
+                    comment_text: "   A section heading repeats the marker.".to_string()
                 },
             ]
         );

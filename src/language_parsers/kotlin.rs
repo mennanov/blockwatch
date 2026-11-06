@@ -1,5 +1,6 @@
 use crate::language_parsers::{
-    CommentsParser, LanguageParser, LanguageParserImpl, c_style_comments_parser, node_text,
+    CommentsParser, LanguageParser, LanguageParserImpl, SLASH_MARKERS, c_style_comments_parser,
+    node_text,
 };
 use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, NestedWalk, child};
 use anyhow::{anyhow, bail};
@@ -220,7 +221,11 @@ fn push_property<'tree>(
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let kotlin_language = tree_sitter_kotlin_ng::LANGUAGE.into();
-    let parser = c_style_comments_parser(&kotlin_language, &["line_comment", "block_comment"])?;
+    let parser = c_style_comments_parser(
+        &kotlin_language,
+        &["line_comment", "block_comment"],
+        SLASH_MARKERS,
+    )?;
     Ok(parser)
 }
 
@@ -736,6 +741,8 @@ mod tests {
                 return
             }
 /// Triple slash comment.
+//! Rust and Doxygen read this marker as a doc comment.
+//// A banner line repeats the marker.
             "#,
             )
             .collect();
@@ -769,6 +776,16 @@ mod tests {
                     position_range: Position::new(19, 1)..Position::new(19, 26),
                     source_range: 490..515,
                     comment_text: "    Triple slash comment.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(20, 1)..Position::new(20, 56),
+                    source_range: 516..571,
+                    comment_text: "    Rust and Doxygen read this marker as a doc comment.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(21, 1)..Position::new(21, 39),
+                    source_range: 572..610,
+                    comment_text: "     A banner line repeats the marker.".to_string()
                 },
             ]
         );

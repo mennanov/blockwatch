@@ -1,6 +1,6 @@
 use crate::language_parsers::{
-    CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser, comment_visitor,
-    node_text,
+    CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
+    blank_line_marker, comment_visitor, node_text,
 };
 
 /// Returns a [`LanguageParser`] for Ruby.
@@ -17,11 +17,10 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
                 return None;
             }
             let comment = node_text(node, source_code);
-            Some(if comment.starts_with('#') {
-                comment.replacen('#', " ", 1)
-            } else {
-                multiline_comment_processor(comment)
-            })
+            Some(
+                blank_line_marker(comment, &["#"])
+                    .unwrap_or_else(|| multiline_comment_processor(comment)),
+            )
         }),
     )?;
     Ok(parser)
@@ -71,6 +70,7 @@ def main
 # several lines
 
 value = 42  # Comment after code
+## RDoc reads this marker as the doc of a method that metaprogramming defines.
 "#,
             )
             .collect();
@@ -107,7 +107,12 @@ value = 42  # Comment after code
                     position_range: Position::new(10, 13)..Position::new(10, 33),
                     source_range: 191..211,
                     comment_text: "  Comment after code".to_string()
-                }
+                },
+                Comment {
+                    position_range: Position::new(11, 1)..Position::new(11, 79),
+                    source_range: 212..290,
+                    comment_text: "   RDoc reads this marker as the doc of a method that metaprogramming defines.".to_string()
+                },
             ]
         );
 

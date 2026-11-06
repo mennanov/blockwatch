@@ -1,5 +1,6 @@
 use crate::language_parsers::{
-    CommentsParser, LanguageParser, LanguageParserImpl, c_style_comments_parser, node_text,
+    CommentsParser, LanguageParser, LanguageParserImpl, SLASH_MARKERS, c_style_comments_parser,
+    node_text,
 };
 use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition};
 use tree_sitter::Node;
@@ -124,7 +125,11 @@ fn escaped_character(escape: &str) -> anyhow::Result<char> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let rust_language = tree_sitter_rust::LANGUAGE.into();
-    let parser = c_style_comments_parser(&rust_language, &["line_comment", "block_comment"])?;
+    let parser = c_style_comments_parser(
+        &rust_language,
+        &["line_comment", "block_comment"],
+        SLASH_MARKERS,
+    )?;
     Ok(parser)
 }
 
@@ -449,6 +454,7 @@ mod tests {
             
             println!("{} + {} = {}", x, y, add(x, y)); // Using the add function.
         }
+//// Four slashes make a plain comment, not a doc comment.
         "#,
             )
             .collect();
@@ -496,7 +502,12 @@ mod tests {
                     position_range: Position::new(23, 56)..Position::new(23, 82),
                     source_range: 650..676,
                     comment_text: "   Using the add function.".to_string()
-                }
+                },
+                Comment {
+                    position_range: Position::new(25, 1)..Position::new(25, 59),
+                    source_range: 687..745,
+                    comment_text: "     Four slashes make a plain comment, not a doc comment.".to_string()
+                },
             ]
         );
 

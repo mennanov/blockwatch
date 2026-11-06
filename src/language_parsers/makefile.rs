@@ -5,7 +5,9 @@
 //! `export define` as a list of names, and every line that starts with a tab as a recipe line.
 
 use crate::LineIndex;
-use crate::language_parsers::{Comment, CommentsParser, LanguageParser, LanguageParserImpl};
+use crate::language_parsers::{
+    Comment, CommentsParser, LanguageParser, LanguageParserImpl, blank_line_marker,
+};
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser};
 use anyhow::bail;
@@ -41,7 +43,8 @@ impl CommentsParser for MakefileCommentsParser {
             let text = &source[range.clone()];
             Comment {
                 position_range: lines.range(&range),
-                comment_text: text.replacen('#', " ", 1),
+                comment_text: blank_line_marker(text, &["#"])
+                    .expect("makefile-lossless starts a comment at its `#`"),
                 source_range: range,
             }
         })
@@ -741,6 +744,7 @@ all:
 
 # Another comment
 # spanning multiple lines
+## A help target prints the comments that start with this marker.
 "#,
             )
             .collect();
@@ -762,6 +766,13 @@ all:
                     position_range: Position::new(7, 1)..Position::new(7, 26),
                     source_range: 77..102,
                     comment_text: "  spanning multiple lines".to_string()
+                },
+                Comment {
+                    position_range: Position::new(8, 1)..Position::new(8, 66),
+                    source_range: 103..168,
+                    comment_text:
+                        "   A help target prints the comments that start with this marker."
+                            .to_string()
                 },
             ]
         );

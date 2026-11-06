@@ -9,7 +9,8 @@ use crate::block_parser::Blocks;
 use crate::blocks::Block;
 use crate::language_parsers::markdown::{nodes_in_order, section_symbols};
 use crate::language_parsers::{
-    Comment, CommentsParser, LanguageParser, TreeSitterCommentsParser, c_style_comments_parser,
+    Comment, CommentsParser, LanguageParser, SLASH_MARKERS, TreeSitterCommentsParser,
+    c_style_comments_parser,
 };
 use crate::symbols::Symbols;
 use markdown::mdast::{
@@ -43,6 +44,7 @@ impl MdxParser {
             js_comments_parser: c_style_comments_parser(
                 &tree_sitter_javascript::LANGUAGE.into(),
                 &["comment"],
+                SLASH_MARKERS,
             )?,
         })
     }
@@ -281,6 +283,11 @@ Text é {/* in text */} and `{/* code span */}`.
 ```js
 {/* in a fenced code block */}
 ```
+
+{
+//! Rust and Doxygen read this marker as a doc comment.
+//// A banner line repeats the marker.
+}
 "#,
         )?;
 
@@ -311,6 +318,17 @@ Text é {/* in text */} and `{/* code span */}`.
                     position_range: Position::new(14, 3)..Position::new(15, 4),
                     source_range: 198..216,
                     comment_text: "    in a child\n   ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(30, 1)..Position::new(30, 56),
+                    source_range: 308..363,
+                    comment_text: "    Rust and Doxygen read this marker as a doc comment."
+                        .to_string()
+                },
+                Comment {
+                    position_range: Position::new(31, 1)..Position::new(31, 39),
+                    source_range: 364..402,
+                    comment_text: "     A banner line repeats the marker.".to_string()
                 },
             ]
         );

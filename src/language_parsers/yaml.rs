@@ -18,7 +18,7 @@ pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let yaml_language = tree_sitter_yaml::LANGUAGE.into();
-    let parser = python_style_comments_parser(&yaml_language, "comment")?;
+    let parser = python_style_comments_parser(&yaml_language, "comment", &["#"])?;
     Ok(parser)
 }
 
@@ -675,6 +675,7 @@ list:
   - item1  # Comment in a list
   - item2
 # End of comments
+## @param image.tag Bitnami Helm charts document each value this way.
 "#,
             )
             .collect();
@@ -706,7 +707,14 @@ list:
                     position_range: Position::new(9, 1)..Position::new(9, 18),
                     source_range: 141..158,
                     comment_text: "  End of comments".to_string()
-                }
+                },
+                Comment {
+                    position_range: Position::new(10, 1)..Position::new(10, 70),
+                    source_range: 159..228,
+                    comment_text:
+                        "   @param image.tag Bitnami Helm charts document each value this way."
+                            .to_string()
+                },
             ]
         );
 

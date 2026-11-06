@@ -1,6 +1,6 @@
 use crate::language_parsers::{
-    CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser, comment_visitor,
-    node_text, walk_tree,
+    CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
+    blank_line_marker, comment_visitor, node_text, walk_tree,
 };
 use crate::symbols::ScalarValue;
 use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, Value};
@@ -196,7 +196,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
                 // Skip shebang.
                 None
             } else {
-                Some(comment.replacen("#", " ", 1))
+                blank_line_marker(comment, &["#"])
             }
         }),
     )?;
@@ -499,6 +499,7 @@ echo "Hello"  # This is an inline comment
 # several lines
 
 VALUE=42  # Comment after code
+## A section heading repeats the marker.
 "#,
             )
             .collect();
@@ -535,6 +536,11 @@ VALUE=42  # Comment after code
                     position_range: Position::new(9, 11)..Position::new(9, 31),
                     source_range: 158..178,
                     comment_text: "  Comment after code".to_string()
+                },
+                Comment {
+                    position_range: Position::new(10, 1)..Position::new(10, 41),
+                    source_range: 179..219,
+                    comment_text: "   A section heading repeats the marker.".to_string()
                 },
             ]
         );

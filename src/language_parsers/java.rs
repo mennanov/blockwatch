@@ -1,5 +1,6 @@
 use crate::language_parsers::{
-    CommentsParser, LanguageParser, LanguageParserImpl, c_style_comments_parser, node_text,
+    CommentsParser, LanguageParser, LanguageParserImpl, SLASH_MARKERS, c_style_comments_parser,
+    node_text,
 };
 use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, NestedWalk};
 use anyhow::{anyhow, bail};
@@ -225,8 +226,12 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let java_language = tree_sitter_java::LANGUAGE.into();
     // A text block (`"""..."""`) is a `string_literal`, and tree-sitter can nest a comment-shaped
     // node inside it. Its text is string content, not a source comment.
-    let parser = c_style_comments_parser(&java_language, &["line_comment", "block_comment"])?
-        .with_break_at_node_kinds(&["string_literal"]);
+    let parser = c_style_comments_parser(
+        &java_language,
+        &["line_comment", "block_comment"],
+        SLASH_MARKERS,
+    )?
+    .with_break_at_node_kinds(&["string_literal"]);
     Ok(parser)
 }
 
@@ -798,6 +803,8 @@ mod tests {
             }
         }
         /// Markdown doc comment.
+//! Rust and Doxygen read this marker as a doc comment.
+//// A banner line repeats the marker.
         "#,
             )
             .collect();
@@ -844,7 +851,17 @@ mod tests {
                     position_range: Position::new(30, 9)..Position::new(30, 34),
                     source_range: 975..1000,
                     comment_text: "    Markdown doc comment.".to_string()
-                }
+                },
+                Comment {
+                    position_range: Position::new(31, 1)..Position::new(31, 56),
+                    source_range: 1001..1056,
+                    comment_text: "    Rust and Doxygen read this marker as a doc comment.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(32, 1)..Position::new(32, 39),
+                    source_range: 1057..1095,
+                    comment_text: "     A banner line repeats the marker.".to_string()
+                },
             ]
         );
 
