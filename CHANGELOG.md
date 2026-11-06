@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.17.0] - 2026-11-06
+
 ### Added
 
 - Symbols in Dart files (`.dart`). `config.dart#/Invoice/maxLines` points at a field of the class `Invoice`, and
