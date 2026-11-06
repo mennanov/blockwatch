@@ -885,8 +885,8 @@ fn c_style_multiline_comment_processor(comment: &str) -> String {
     let (before, rest) = comment
         .split_once("/*")
         .expect("expected '/*' in a comment");
-    // Scala's grammar ends a comment that is never closed at the end of the file, so the `*/`
-    // can be missing.
+    // Scala's grammar and cssparser end a comment that is never closed at the end of the file,
+    // so the `*/` can be missing.
     let (content, closing) = match rest.rsplit_once("*/") {
         Some((content, after)) => (content, format!("  {after}")),
         None => (rest, String::new()),

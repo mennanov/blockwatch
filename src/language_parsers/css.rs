@@ -1,6 +1,12 @@
+//! Finds the comments and the symbols in CSS files with cssparser, the parser in Firefox. It
+//! reads a file the way browsers do. `tree-sitter-css` 0.25 has a syntax error in many valid
+//! files, such as one with `@container` or `@media (width <= 700px)`. It also reads `/*` in an
+//! unquoted `url(...)` as the start of a comment, where browsers read it as part of the URL.
+
 use crate::LineIndex;
 use crate::language_parsers::{
-    CommentsParser, LanguageParser, LanguageParserImpl, c_style_comments_parser,
+    Comment, CommentsParser, LanguageParser, LanguageParserImpl,
+    c_style_multiline_comment_processor,
 };
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser};
@@ -14,7 +20,66 @@ use std::ops::Range;
 
 /// Returns a [`LanguageParser`] for CSS.
 pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?).with_symbols(CssSymbolsParser))
+    Ok(LanguageParserImpl::new(CssCommentsParser).with_symbols(CssSymbolsParser))
+}
+
+/// Finds the `/* */` comments in a CSS file, where cssparser finds them. A comment left open at
+/// the end of the file ends there, as CSS says.
+struct CssCommentsParser;
+
+impl CommentsParser for CssCommentsParser {
+    fn parse<'source>(
+        &'source mut self,
+        source: &'source str,
+    ) -> impl Iterator<Item = Comment> + 'source {
+        let lines = LineIndex::new(source);
+        comment_ranges(source).map(move |range| {
+            #[expect(clippy::string_slice, reason = "cssparser cuts at tokens")]
+            let text = &source[range.clone()];
+            Comment {
+                position_range: lines.range(&range),
+                comment_text: c_style_multiline_comment_processor(text),
+                source_range: range,
+            }
+        })
+    }
+}
+
+/// The byte range of each comment in `source`, in order.
+fn comment_ranges(source: &str) -> impl Iterator<Item = Range<usize>> {
+    // Where `input` starts in `source`.
+    let mut offset = 0;
+    let mut input = Parser::new(source);
+    std::iter::from_fn(move || {
+        loop {
+            let start = input.position().byte_index();
+            match input.next_including_whitespace_and_comments() {
+                Ok(Token::Comment(_)) => {
+                    return Some(offset + start..offset + input.position().byte_index());
+                }
+                // A `Parser` skips a block, comments and all, unless the block is read with
+                // `parse_nested_block`. That takes a closure, so the walk could not stop at each
+                // comment. A token doesn't depend on the blocks around it, so a new `Parser` that
+                // starts right after the block's opening token reads the same tokens. It reads each
+                // closing token as a token of its own.
+                Ok(
+                    Token::Function(_)
+                    | Token::ParenthesisBlock
+                    | Token::SquareBracketBlock
+                    | Token::CurlyBracketBlock,
+                ) => {
+                    offset += input.position().byte_index();
+                    #[expect(clippy::string_slice, reason = "cssparser cuts at tokens")]
+                    let rest = &source[offset..];
+                    input = Parser::new(rest);
+                }
+                // Any other token holds no comment and opens no block.
+                Ok(_) => {}
+                // A `Parser` made with `Parser::new` stops only at the end of its input.
+                Err(_) => return None,
+            }
+        }
+    })
 }
 
 /// A [`SymbolsParser`] for CSS. Each rule and each at-rule with a block is a symbol, at any
@@ -29,8 +94,6 @@ impl SymbolsParser for CssSymbolsParser {
     /// Never returns an error. CSS says how to skip each part it can't read, so every file has
     /// symbols.
     fn parse(&mut self, source: &str) -> anyhow::Result<Symbols> {
-        // tree-sitter-css has a syntax error in many valid files, such as one with `@scope`. So
-        // the symbols come from cssparser, the parser in Firefox, which skips what browsers skip.
         // Browsers drop a BOM before they read a file, so it is not part of the first selector.
         let text = source.strip_prefix('\u{feff}').unwrap_or(source);
         let mut walk = Walk {
@@ -341,23 +404,14 @@ fn words_in(text: &str) -> impl Iterator<Item = &str> {
         .filter(|word| !word.is_empty())
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
-    let css_language = tree_sitter_css::LANGUAGE.into();
-    // CSS has only `/* */` comments. `//` doesn't start a comment.
-    let parser = c_style_comments_parser(&css_language, &["comment"], &[])?;
-    Ok(parser)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Position, language_parsers::Comment};
+    use crate::Position;
 
     #[test]
     fn parses_css_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
-
-        let blocks: Vec<Comment> = comments_parser
+        let blocks: Vec<Comment> = CssCommentsParser
             .parse(
                 r#"
             body {
@@ -403,6 +457,82 @@ mod tests {
             ]
         );
 
+        Ok(())
+    }
+
+    /// Each comment in `source`, as written.
+    fn comments_in(source: &str) -> anyhow::Result<Vec<String>> {
+        Ok(CssCommentsParser
+            .parse(source)
+            .map(|comment| source[comment.source_range].to_string())
+            .collect())
+    }
+
+    #[test]
+    fn comments_in_nested_blocks_parse_returns_each_in_order() -> anyhow::Result<()> {
+        let source = r#"
+            @media (min-width: /* a */ 1px) {
+                .item[data-color /* b */] {
+                    width: calc(1px /* c */ + 2px);
+                }
+                /* d */
+            }
+            /* e */
+        "#;
+
+        assert_eq!(
+            comments_in(source)?,
+            ["/* a */", "/* b */", "/* c */", "/* d */", "/* e */"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn comment_in_an_unquoted_url_parse_returns_no_comment() -> anyhow::Result<()> {
+        // Browsers read `/*` in an unquoted `url(...)` as part of the URL. Any other function,
+        // even one whose name starts with `url`, holds a comment.
+        let source = r#"
+            .a { background: url(/* a */); }
+            .b { background: URL(/* b */); }
+            .c { background: urls(/* c */); }
+        "#;
+
+        assert_eq!(comments_in(source)?, ["/* c */"]);
+        Ok(())
+    }
+
+    #[test]
+    fn comment_markers_in_a_string_parse_returns_no_comment() -> anyhow::Result<()> {
+        let source = r#"
+            .a { content: "/* a */"; quotes: '/* b */'; background: url("/* c */"); }
+            /* d */
+        "#;
+
+        assert_eq!(comments_in(source)?, ["/* d */"]);
+        Ok(())
+    }
+
+    #[test]
+    fn unclosed_comment_at_the_end_parse_returns_it_to_the_end_of_the_file() -> anyhow::Result<()> {
+        let source = ".a { color: red; }\n/* open";
+        let comments: Vec<Comment> = CssCommentsParser.parse(source).collect();
+
+        let texts: Vec<&str> = comments
+            .iter()
+            .map(|comment| comment.comment_text.as_str())
+            .collect();
+        assert_eq!(texts, ["   open"]);
+        assert_eq!(comments[0].source_range.end, source.len());
+        Ok(())
+    }
+
+    #[test]
+    fn deeply_nested_blocks_parse_returns_the_comment_inside() -> anyhow::Result<()> {
+        // Deeper than the 75 nested blocks that cssparser's `parse_nested_block` reads.
+        let depth = 100;
+        let source = format!("{}/* deep */{}", ".a{".repeat(depth), "}".repeat(depth));
+
+        assert_eq!(comments_in(&source)?, ["/* deep */"]);
         Ok(())
     }
 }

@@ -25,6 +25,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   couldn't hold both `#` and `:`, so each `:` had to be written `%3A`. `%3A` still works. Messages now show a `:` as
   written.
 
+### Fixed
+
+- In CSS files, `/*` inside an unquoted `url(...)` no longer starts a comment. Browsers read it as part of the URL. A
+  comment left open at the end of a CSS file is now read as a comment, as CSS says, so a tag in it counts.
+
 ## [0.17.0] - 2026-11-06
 
 ### Added
