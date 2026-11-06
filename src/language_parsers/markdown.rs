@@ -300,8 +300,8 @@ impl CommentsParser for MdCommentsParser {
 }
 
 /// Returns the comment in `definition`, a link reference definition in `source`: its text up to
-/// the end of its line, with everything before the title blanked, so the length is kept. Returns
-/// `None` when `definition` is not a `[//]:` comment, or has no title.
+/// the end of its line, with everything but the text of the title blanked, so the length is kept.
+/// Returns `None` when `definition` is not a `[//]:` comment, or has no title.
 fn link_reference_comment(
     definition: &Definition,
     source: &str,
@@ -316,7 +316,10 @@ fn link_reference_comment(
     let range = definition_range.start..line_end(source.as_bytes(), definition_range.end);
     let mut text = source.as_bytes()[range.clone()].to_vec();
     let title_start = title_start(&text[..definition_range.len()]);
-    blank_preserving_line_breaks(&mut text[..title_start]);
+    // The delimiters around the title are blanked too. Otherwise a tag that wraps over several
+    // `[//]:` lines would hold a `)` and a `(` at each line break.
+    blank_preserving_line_breaks(&mut text[..=title_start]);
+    blank_preserving_line_breaks(&mut text[definition_range.len() - 1..definition_range.len()]);
     Some(Comment {
         position_range: lines.range(&range),
         source_range: range,
@@ -777,6 +780,41 @@ Text
 "#;
 
         assert_eq!(block_names(content)?, ["a", "b", "c"]);
+        Ok(())
+    }
+
+    #[test]
+    fn start_tag_wrapped_over_link_reference_comments_parse_blocks_reads_whole_tag()
+    -> anyhow::Result<()> {
+        let mut parser = parser()?;
+        let content = r#"[//]: # (<block name="a")
+[//]: # (keep-sorted="asc">)
+[//]: # '<block name="b"'
+[//]: # 'keep-sorted="asc">'
+[//]: # "<block name='c'"
+[//]: # "keep-sorted='asc'>"
+
+Text
+
+[//]: # "</block>"
+[//]: # '</block>'
+[//]: # (</block>)
+"#;
+
+        let blocks = parser
+            .parse_blocks(content)
+            .collect::<anyhow::Result<Vec<_>>>()?;
+
+        let tags: Vec<(&str, &str)> = blocks
+            .iter()
+            .map(|block| {
+                (
+                    block.attributes["name"].as_str(),
+                    block.attributes["keep-sorted"].as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(tags, [("a", "asc"), ("b", "asc"), ("c", "asc")]);
         Ok(())
     }
 

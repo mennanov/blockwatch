@@ -29,7 +29,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 - A tag that wraps over several comment lines is no longer reported as malformed when each line starts with a longer
   marker, such as `///`, `////`, `//!`, `##`, `---` or Python's `#:`. This works in every language with `//`, `#` or
-  `--` comments. In C and C++, it also works with Doxygen's `///<` and `//!<`.
+  `--` comments. In C and C++, it also works with Doxygen's `///<` and `//!<`. In Markdown, a tag can now wrap over
+  several `[//]: # (...)` lines too.
 
 ## [0.16.8] - 2026-11-05
 
