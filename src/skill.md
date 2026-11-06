@@ -248,6 +248,7 @@ selector or at-rule of each rule from the top down, then a property: `theme.css#
 
 - A segment is the selector or the at-rule as written, without comments, and with each run of white space as one
   space. A selector list is one segment: `#/h1%2C h2/margin`.
+- Escape `~` and `/` as in any key: `a ~ b` is `#/a ~0 b`, and `16/9` is `16~19`.
 - A property needs its whole path: `#/--brand` is not found.
 - A selector or a property written twice is a violation, such as the fallback `display: -webkit-box; display: flex;`.
 - A value leaves out the white space and comments around it, and `!important`. A value that is one string is decoded.

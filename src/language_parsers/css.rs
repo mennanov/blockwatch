@@ -31,19 +31,32 @@ impl SymbolsParser for CssSymbolsParser {
     fn parse(&mut self, source: &str) -> anyhow::Result<Symbols> {
         // tree-sitter-css has a syntax error in many valid files, such as one with `@scope`. So
         // the symbols come from cssparser, the parser in Firefox, which skips what browsers skip.
+        // Browsers drop a BOM before they read a file, so it is not part of the first selector.
+        let text = source.strip_prefix('\u{feff}').unwrap_or(source);
         let mut walk = Walk {
-            source,
+            source: text,
             path: Vec::new(),
             symbols: Vec::new(),
             skipped: Vec::new(),
         };
-        let mut input = Parser::new(source);
+        let mut input = Parser::new(text);
         let skipped: Vec<&str> = StyleSheetParser::new(&mut input, &mut walk)
             .filter_map(|rule| rule.err().map(|(_, text, _)| text))
             .collect();
         walk.add_skipped(&skipped);
         let skipped = walk.skipped_words();
-        Ok(Symbols::with_skipped(walk.symbols, skipped))
+        // The walk gives byte ranges in `text`, and a symbol's ranges are in `source`.
+        let bom = source.len() - text.len();
+        let mut symbols = walk.symbols;
+        for symbol in &mut symbols {
+            for range in &mut symbol.def_byte_ranges {
+                *range = range.start + bom..range.end + bom;
+            }
+            if let Some(value) = &mut symbol.value {
+                value.byte_range = value.byte_range.start + bom..value.byte_range.end + bom;
+            }
+        }
+        Ok(Symbols::with_skipped(symbols, skipped))
     }
 }
 
@@ -95,6 +108,10 @@ impl Walk<'_> {
     /// Each word in the skipped parts, with the reason to report for it: the position of a part
     /// that holds it.
     fn skipped_words(&self) -> HashMap<String, String> {
+        // Most files skip nothing, and the index reads the whole file.
+        if self.skipped.is_empty() {
+            return HashMap::new();
+        }
         let lines = LineIndex::new(self.source);
         let mut words = HashMap::new();
         for range in &self.skipped {
@@ -278,7 +295,8 @@ impl<'i> RuleBodyItemParser<'i, (), ()> for Walk<'_> {
 }
 
 /// `head`, a selector or an at-rule as written, as a path segment: without its comments, and
-/// with each run of white space as one space. A string keeps its white space.
+/// with each run of white space as one space. A string keeps its white space. White space is
+/// what CSS says it is: a space, a tab, a line break or a form feed.
 fn segment(head: &str) -> String {
     let mut segment = String::with_capacity(head.len());
     // A space is added only before the next character, so none is left at the end. A selector
@@ -297,7 +315,7 @@ fn segment(head: &str) -> String {
                 .split_once("*/")
                 .map_or("", |(_, after)| after)
                 .chars();
-        } else if quote.is_none() && char.is_whitespace() {
+        } else if quote.is_none() && matches!(char, ' ' | '\t' | '\n' | '\r' | '\u{c}') {
             space = true;
         } else {
             if space {
@@ -320,6 +338,7 @@ fn segment(head: &str) -> String {
 /// The words in `text`, which a property could be: runs of letters, digits and `-`.
 fn words_in(text: &str) -> impl Iterator<Item = &str> {
     text.split(|c: char| !(c.is_alphanumeric() || c == '-'))
+        .filter(|word| !word.is_empty())
 }
 
 fn comments_parser() -> anyhow::Result<impl CommentsParser> {
@@ -564,6 +583,15 @@ h1, h2 { margin: 0 }
                 path(&["@media screen and (min-width: 1px)"]),
             ]
         );
+
+        // CSS white space is only a space, a tab, a line break and a form feed. An NBSP is part
+        // of a name.
+        let paths: Vec<SymbolPath> = css(".a\u{a0}b c {}\n.d\t\r\n\u{c}e {}")?
+            .symbols
+            .into_iter()
+            .map(|symbol| symbol.path)
+            .collect();
+        assert_eq!(paths, vec![path(&[".a\u{a0}b c"]), path(&[".d e"])]);
         Ok(())
     }
 
@@ -606,6 +634,7 @@ gap: 0; .card { padding: 0; }
             syntax_error(3, 1, "margin")
         );
         assert!(symbols.resolve(&path(&[".btn", "display"])).is_ok());
+        assert_eq!(unresolved(&symbols, source, "/")?, "symbol not found");
         Ok(())
     }
 
@@ -749,6 +778,28 @@ b";
             .clone()
             .context("a declaration has a value")?;
         assert_eq!(&source[..empty.byte_range.start], ".a { --x:; --y:");
+        Ok(())
+    }
+
+    #[test]
+    fn file_with_a_bom_parse_symbols_leaves_it_out_of_the_first_selector() -> anyhow::Result<()> {
+        let source = "\u{feff}:root { --brand: red; }";
+        let parsed = css(source)?;
+
+        assert_eq!(
+            symbols(&parsed, source),
+            vec![
+                symbol("/:root", ":root { --brand: red; }", None),
+                symbol("/:root/--brand", "--brand: red", Some("red")),
+            ]
+        );
+        let value = parsed
+            .resolve(&path(&[":root", "--brand"]))
+            .map_err(|error| anyhow::anyhow!("{error:?}"))?
+            .value
+            .clone()
+            .context("a declaration has a value")?;
+        assert_eq!(&source[value.byte_range], "red");
         Ok(())
     }
 

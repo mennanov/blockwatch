@@ -373,6 +373,8 @@ h1, h2 { margin: 0; }
   `@supports`, `@layer`, `@container`, `@font-face`, Tailwind's `@theme` and any other at-rule with a block work the
   same way.
 - **A selector list is one segment.** `h1, h2 { }` is `#/h1%2C h2`, with its `,` escaped. `#/h2` doesn't find it.
+- **Escape `~` and `/` as in any key.** `a ~ b` is `#/a ~0 b`, and `@media (aspect-ratio: 16/9)` is
+  `#/@media (aspect-ratio: 16~19)`.
 - **A property needs its whole path.** `#/--brand` is not found. Write `#/:root/--brand`.
 - **A selector or a property written twice is a violation**, though CSS uses the last one. A fallback such as
   `display: -webkit-box; display: flex;` does this, and so does one selector in two rules. Wrap the one you mean in a
