@@ -54,8 +54,14 @@ impl CodeLanguage for EcmaScript {
                 "escape_sequence" => push_escape(written, &mut units)?,
                 // A template with a field has no fixed text.
                 "template_substitution" => return Ok(None),
-                // A template reads a CRLF line end as a line feed. A string can't hold a line end.
-                _ => units.extend(written.replace("\r\n", "\n").encode_utf16()),
+                // A template reads a CRLF or CR line end as a line feed. A string can't hold a line
+                // end.
+                _ => units.extend(
+                    written
+                        .replace("\r\n", "\n")
+                        .replace('\r', "\n")
+                        .encode_utf16(),
+                ),
             }
         }
         code::string_from_utf16(units).map(Some)
@@ -459,9 +465,10 @@ const EMPTY = "";
     #[test]
     fn line_ends_other_than_a_line_feed_parse_symbols_returns_decoded_values() -> anyhow::Result<()>
     {
-        // A template reads a CRLF line end as a line feed. A backslash joins the next line to its
-        // own at any line end, and JavaScript also ends a line at U+2028 and U+2029.
+        // A template reads a CRLF or CR line end as a line feed. A backslash joins the next line to
+        // its own at any line end, and JavaScript also ends a line at U+2028 and U+2029.
         let source = "const SPLIT = \"a\\\r\nb\";\r\nconst TEMPLATE = `a\r\nb`;\r\n\
+            const CR_TEMPLATE = `a\rb`;\r\n\
             const LINE_SEPARATOR = \"a\\\u{2028}b\";\r\nconst PARAGRAPH_SEPARATOR = \"a\\\u{2029}b\";\r\n";
 
         assert_eq!(
@@ -469,6 +476,7 @@ const EMPTY = "";
             vec![
                 value("/SPLIT", "ab"),
                 value("/TEMPLATE", "a\nb"),
+                value("/CR_TEMPLATE", "a\nb"),
                 value("/LINE_SEPARATOR", "ab"),
                 value("/PARAGRAPH_SEPARATOR", "ab"),
             ]

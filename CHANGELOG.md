@@ -35,8 +35,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   ` ** `.
 - In Bash and zsh files, a comment that starts with `#!` is no longer skipped, unless it is the shebang on the first
   line. Before, a tag in such a comment was ignored.
-- In JavaScript and TypeScript, a backslash before U+2028 or U+2029 in a string now joins the two lines, as JavaScript
-  does. Before, the value kept the separator.
+- In JavaScript and TypeScript, two string values now read as JavaScript reads them:
+  - A backslash before U+2028 or U+2029 joins the two lines. Before, the value kept the separator.
+  - A template reads a lone `\r` line end as `\n`. Before, the value kept the `\r`.
 
 ## [0.16.8] - 2026-11-05
 
