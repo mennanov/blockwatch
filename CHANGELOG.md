@@ -21,9 +21,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Changed
 
-- In a tag that wraps over several comment lines, a longer marker such as `##` or `---` is now blanked whole. So an
-  attribute value that goes on to such a line loses the extra `#` or `-`. In Python, a value that goes on to the line
-  `##a` now holds `a` there, not `#a`.
+- In a tag that wraps over several comment lines, a longer marker such as `##`, `////` or `---` is now blanked whole,
+  in every language with `#`, `//` or `--` comments. So an attribute value that goes on to such a line loses the extra
+  characters. For example, in Python, a value that goes on to the line `##a` now holds `a` there, not `#a`.
 
 ### Fixed
 

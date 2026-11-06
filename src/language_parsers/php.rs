@@ -74,7 +74,7 @@ impl PhpCommentsParser {
             if node.kind() == "comment" {
                 let text = language_parsers::c_style_comment_text(
                     node_text(&node, source),
-                    &["//!", "//", "#"],
+                    language_parsers::SLASH_AND_HASH_MARKERS,
                 );
                 comments.push(Comment::from_node(&node, source, text));
             } else if let Some(view) = html_view.as_deref_mut() {

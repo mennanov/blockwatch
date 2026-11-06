@@ -746,6 +746,9 @@ const SLASH_MARKERS: &[&str] = &["//!", "//"];
 /// starts with `///<` or `//!<`.
 const DOXYGEN_MARKERS: &[&str] = &["//!<", "//<", "//!", "//"];
 
+/// The line comment markers of a language with both `//` and `#` line comments.
+const SLASH_AND_HASH_MARKERS: &[&str] = &["//!", "//", "#"];
+
 /// A comments parser for a language whose comments are line comments that start with one of
 /// `line_markers` (see [`blank_line_marker`]), or `/* */` comments. A node is a comment when its
 /// kind is in `comment_node_kinds`.
@@ -765,10 +768,14 @@ fn c_style_comments_parser(
 }
 
 /// `comment`, a line comment that starts with one of `line_markers`, or a `/* */` comment, with its
-/// markers blanked, so it keeps its length.
+/// markers blanked, so it keeps its length. Any other comment is returned as it is.
 fn c_style_comment_text(comment: &str, line_markers: &[&str]) -> String {
-    blank_line_marker(comment, line_markers)
-        .unwrap_or_else(|| c_style_multiline_comment_processor(comment))
+    match blank_line_marker(comment, line_markers) {
+        Some(text) => text,
+        None if comment.starts_with("/*") => c_style_multiline_comment_processor(comment),
+        // A grammar can read other text as a comment, such as a shebang in Scala.
+        None => comment.to_string(),
+    }
 }
 
 /// Comments parser shared by the ECMAScript-family grammars (JavaScript, TypeScript, TSX). All

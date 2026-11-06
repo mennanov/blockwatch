@@ -300,7 +300,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
     let parser = language_parsers::c_style_comments_parser(
         &hcl_language,
         &["comment"],
-        &["//!", "//", "#"],
+        language_parsers::SLASH_AND_HASH_MARKERS,
     )?;
     Ok(parser)
 }

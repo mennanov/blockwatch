@@ -42,9 +42,11 @@ val value = 1
     fn parses_comments_correctly() -> anyhow::Result<()> {
         let mut comments_parser = comments_parser()?;
 
+        // The grammar reads the shebang, which must start the file, as a comment with no marker
+        // to blank. So its text stays as written.
         let comments: Vec<Comment> = comments_parser
             .parse(
-                r#"
+                r#"#!/usr/bin/env -S scala-cli shebang
 // This is a single line comment
 object Main {
   val x = 42 // inline comment
@@ -64,35 +66,40 @@ object Main {
             comments,
             vec![
                 Comment {
+                    position_range: Position::new(1, 1)..Position::new(1, 36),
+                    source_range: 0..35,
+                    comment_text: "#!/usr/bin/env -S scala-cli shebang".to_string()
+                },
+                Comment {
                     position_range: Position::new(2, 1)..Position::new(2, 33),
-                    source_range: 1..33,
+                    source_range: 36..68,
                     comment_text: "   This is a single line comment".to_string()
                 },
                 Comment {
                     position_range: Position::new(4, 14)..Position::new(4, 31),
-                    source_range: 61..78,
+                    source_range: 96..113,
                     comment_text: "   inline comment".to_string()
                 },
                 Comment {
                     position_range: Position::new(6, 3)..Position::new(8, 5),
-                    source_range: 82..139,
+                    source_range: 117..174,
                     comment_text: "   This is a block comment\n  spanning multiple lines\n    "
                         .to_string()
                 },
                 Comment {
                     position_range: Position::new(10, 1)..Position::new(10, 26),
-                    source_range: 142..167,
+                    source_range: 177..202,
                     comment_text: "    Triple slash comment.".to_string()
                 },
                 Comment {
                     position_range: Position::new(11, 1)..Position::new(11, 56),
-                    source_range: 168..223,
+                    source_range: 203..258,
                     comment_text: "    Rust and Doxygen read this marker as a doc comment."
                         .to_string()
                 },
                 Comment {
                     position_range: Position::new(12, 1)..Position::new(12, 39),
-                    source_range: 224..262,
+                    source_range: 259..297,
                     comment_text: "     A banner line repeats the marker.".to_string()
                 },
             ]

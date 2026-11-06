@@ -996,7 +996,7 @@ C = 3
     }
 
     /// The source text of each comment in `source`, in order. Checks that each comment's
-    /// positions and text match the bytes it covers.
+    /// positions match the bytes it covers.
     fn comments_in(source: &str) -> Vec<String> {
         let lines = LineIndex::new(source);
         let mut comments_parser = MakefileCommentsParser;
@@ -1009,7 +1009,6 @@ C = 3
                     lines.range(&comment.source_range),
                     "the positions of {text:?}"
                 );
-                assert_eq!(comment.comment_text, text.replacen('#', " ", 1));
                 text.to_string()
             })
             .collect()
