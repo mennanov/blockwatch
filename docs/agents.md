@@ -43,10 +43,14 @@ Install the skill in one of these ways, then leave the first sentence out of the
 
 Install the plugin once to make the skill available across all projects:
 
+<!-- <block same-as="README.md:plugin-install"> -->
+
 ```text
 /plugin marketplace add mennanov/blockwatch
 /plugin install blockwatch@blockwatch
 ```
+
+<!-- </block> -->
 
 The plugin's skill runs `blockwatch skill` each time it loads, so it always matches the installed version.
 

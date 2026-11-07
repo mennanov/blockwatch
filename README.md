@@ -133,6 +133,8 @@ See the [Validators Reference](docs/validators/README.md) for full details.
 
 ## Installation
 
+<!-- <block name="install"> -->
+
 ```shell
 # macOS and Linux, with Homebrew
 brew install mennanov/blockwatch/blockwatch
@@ -150,6 +152,8 @@ pipx install blockwatch-cli  # or: uv tool install blockwatch-cli
 cargo install blockwatch
 ```
 
+<!-- </block> -->
+
 Prebuilt binaries are on the [Releases](https://github.com/mennanov/blockwatch/releases) page.
 
 ## AI Agents
@@ -158,10 +162,14 @@ The [skill](src/skill.md) tells an agent where blocks make sense, how to format 
 `blockwatch skill` prints it. The [Quick Start](#quick-start) prompt sets it up in a single project. To install it
 globally for every project in Claude Code instead:
 
+<!-- <block name="plugin-install"> -->
+
 ```text
 /plugin marketplace add mennanov/blockwatch
 /plugin install blockwatch@blockwatch
 ```
+
+<!-- </block> -->
 
 See [docs/agents.md](docs/agents.md) for Cursor, Copilot, Codex, and other agent setups.
 

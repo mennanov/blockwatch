@@ -1,0 +1,41 @@
+---
+import type { Icon } from '../lib/icons';
+
+interface Props {
+	icon: Icon;
+}
+
+const { icon } = Astro.props;
+---
+
+<svg
+	class:list={['icon', icon.style]}
+	style={icon.color && `--dark: ${icon.color.dark}; --light: ${icon.color.light}`}
+	viewBox="0 0 24 24"
+	aria-hidden="true"
+>
+	<path d={icon.path} />
+</svg>
+
+<style>
+	/* An icon without a brand color takes --icon-fallback, so a list can mute its generic icons. */
+	.icon {
+		flex: none;
+		width: 1em;
+		height: 1em;
+		color: var(--dark, var(--icon-fallback, currentColor));
+	}
+	:global(:root[data-theme='light']) .icon {
+		color: var(--light, var(--icon-fallback, currentColor));
+	}
+	.fill {
+		fill: currentColor;
+	}
+	.stroke {
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.75;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+</style>

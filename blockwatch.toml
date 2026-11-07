@@ -29,6 +29,16 @@ target = 'Cargo.toml#/dependencies'
 keep-sorted = true
 keep-sorted-pattern = '^(?P<value>[\w-]+) = '
 
+# The docs and the website show the same major version of the GitHub Action. A new major version must reach all of
+# them.
+[[block]]
+target = 'README.md'
+target-pattern = 'mennanov/blockwatch-action@(?P<value>v\d+)'
+same-as = '''docs/ci.md,
+    site/src/pages/index.astro'''
+# The pattern reads both the target's value, `v1`, and each `mennanov/blockwatch-action@v1` in the other files.
+same-as-pattern = '(?:mennanov/blockwatch-action@|^)(?P<value>v\d+)\b'
+
 # Dependabot updates actions/checkout in the workflows, but not this pin, which dist copies into release.yml.
 # The pattern reads both the pin, `v7`, and each `actions/checkout@v7` in the workflows.
 [[block]]

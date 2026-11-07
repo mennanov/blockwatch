@@ -1,0 +1,1561 @@
+---
+import '@fontsource-variable/geist';
+import '@fontsource-variable/geist-mono';
+import '../styles/theme.css';
+import { Code } from 'astro:components';
+import logo from '../assets/logo.svg?raw';
+import Icon from '../components/Icon.astro';
+import { githubIcon, installIcon, languageIcon } from '../lib/icons';
+import { agentPrompt, installs, languages, license, pluginInstall, validators, version } from '../lib/repo';
+
+const title = 'blockwatch: keep code, docs and configs in sync';
+const description = `Write a rule in a comment next to the code. When a change breaks it, your pre-commit hook or CI fails. ${languages.length} languages, free and open source.`;
+
+// One short example per validator, shown on its card. The names must be the ones in the README's validator table; a
+// validator without an example here gets a card with its description only.
+const examples: Record<string, { lang: 'python' | 'javascript' | 'html'; code: string }> = {
+	affects: {
+		lang: 'python',
+		code: `# <block
+#   affects="README.md:login">
+def login(user, password):
+    ...
+# </block>`,
+	},
+	'same-as': {
+		lang: 'python',
+		code: `# <block
+#   same-as="app.json#/port"
+#   same-as-pattern="\\d+">
+PORT = 8080
+# </block>`,
+	},
+	'keep-sorted': {
+		lang: 'python',
+		code: `# <block keep-sorted="asc">
+"billing",
+"search",
+"users",
+# </block>`,
+	},
+	'keep-unique': {
+		lang: 'javascript',
+		code: `// <block keep-unique>
+"user_1",
+"user_2",
+// </block>`,
+	},
+	'line-pattern': {
+		lang: 'python',
+		code: `# <block
+#   line-pattern='^"[a-z-]+"'>
+"valid-slug",
+"another-one",
+# </block>`,
+	},
+	'line-count': {
+		lang: 'python',
+		code: `# <block line-count="<=5">
+"a",
+"b",
+# </block>`,
+	},
+	'check-ai': {
+		lang: 'html',
+		code: `<!-- <block check-ai="Must mention 'Acme Corp'"> -->
+<p>Welcome to Acme Corp!</p>
+<!-- </block> -->`,
+	},
+	'check-lua': {
+		lang: 'python',
+		code: `# <block
+#   check-lua="colors.lua">
+'red',
+'green',
+# </block>`,
+	},
+};
+
+const faq = [
+	{
+		q: 'Does it need Git?',
+		short: 'No',
+		a: 'No. A plain <code>blockwatch</code> run checks every block in the folder. Rules such as <code class="tk-k">affects</code> need to know what changed, so they read a unified diff from stdin. Git, Mercurial and Jujutsu all print one.',
+	},
+	{
+		q: 'Does it send my code anywhere?',
+		short: 'No',
+		a: 'No. blockwatch runs on your machine. The one exception is opt-in: a block you mark with <code class="tk-k">check-ai</code> sends its text to the AI API you set up for it.',
+	},
+	{
+		q: 'Which languages does it read?',
+		short: `${languages.length}`,
+		a: `${languages.length} languages and formats, from Python and Rust to YAML, Markdown and Dockerfiles. A file that can't hold a comment, such as JSON, gets its rules from <code class="tk-s">blockwatch.toml</code>.`,
+	},
+	{
+		q: 'Do I have to write the blocks myself?',
+		short: 'No',
+		a: 'No. blockwatch ships a skill for coding agents. Paste one prompt, and the agent finds the places that must stay in sync and adds the blocks. You review them like any other change.',
+	},
+	{
+		q: 'Is it free?',
+		short: 'Yes',
+		a: 'Yes. blockwatch is open source under the MIT license.',
+	},
+];
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>{title}</title>
+		<meta name="description" content={description} />
+		<meta property="og:title" content={title} />
+		<meta property="og:description" content={description} />
+		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+		<script is:inline>
+			// Starlight saves the reader's theme choice under this key, so the landing page follows the docs.
+			try {
+				const saved = localStorage.getItem('starlight-theme');
+				const dark = saved ? saved === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+				document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+			} catch {
+				document.documentElement.dataset.theme = 'dark';
+			}
+		</script>
+	</head>
+	<body>
+		<header class="top">
+			<div class="brand-row">
+				<a class="brand" href="/"><span class="logo" set:html={logo} />blockwatch</a>
+				<p class="badge"><span class="badge-long">Free, open source, {license} licensed · </span>v{version}</p>
+			</div>
+			<nav>
+				<a href="/docs/">Docs</a>
+				<a class="github" href="https://github.com/mennanov/blockwatch" aria-label="blockwatch on GitHub"
+					><Icon icon={githubIcon} />GitHub</a
+				>
+			</nav>
+		</header>
+
+		<main>
+			<section class="hero wrap">
+				<h1>Catch drift before it ships</h1>
+				<p class="lead">
+					Some values have to change together: a port in three configs, a version in the docs, a constant and the
+					test that checks it. Write those rules in comments. When a change breaks one, your pre-commit hook or CI
+					fails.
+				</p>
+				<div class="actions">
+					<a class="button primary" href="#install" data-event="install-click">Install</a>
+					<a class="button" href="/docs/">Read the docs</a>
+					<a class="button" href="https://github.com/mennanov/blockwatch" data-event="github-click"
+						><Icon icon={githubIcon} />View on GitHub</a
+					>
+				</div>
+
+				<div class="demo" data-step="3" role="group" aria-label="Animated example: a changed port fails the commit">
+					<ol class="demo-tabs">
+						{
+							['Same values in 3 files','One file changes', 'The commit fails', 'Fix both, and it passes'].map(
+								(label, i) => (
+									<li>
+										<button data-goto={i + 1} aria-current={i === 2 ? 'step' : undefined} data-done={i < 2 ? '' : undefined}>
+											<span class="tab-n">{i + 1}</span>
+											<span class="tab-label">{label}</span>
+										</button>
+									</li>
+								),
+							)
+						}
+					</ol>
+					<p class="tab-phone-label" aria-hidden="true" data-phone-label>The commit fails</p>
+					<div class="demo-files">
+						<figure class="file" data-focus="1 2">
+							<figcaption>app/settings.py</figcaption>
+							<pre><code>HOST <span class="tk-k">=</span> <span class="tk-s">"0.0.0.0"</span>
+PORT <span class="tk-k">=</span> <span class="val src" data-src>9090</span><span class="caret"></span></code></pre>
+						</figure>
+						<div class="dependents" data-focus="4">
+						<figure class="file" data-focus="1">
+							<figcaption>Dockerfile</figcaption>
+							<pre><code><span class="tk-k">FROM</span> python:3.13-slim
+<span class="tk-c"># &lt;block
+#   same-as="app/settings.py#/PORT"
+#   same-as-pattern="\d+"&gt;</span>
+<span class="tk-k">EXPOSE</span> <span class="val dep" data-dep>8080</span><span class="caret"></span>
+<span class="tk-c"># &lt;/block&gt;</span></code></pre>
+						</figure>
+						<figure class="file" data-focus="1">
+							<figcaption>deploy.json</figcaption>
+							<pre><code>{"{"} <span class="tk-k">"port"</span><span class="tk-p">:</span> <span class="val dep" data-dep>8080</span><span class="caret"></span> {"}"}</code></pre>
+							<div class="rule-file">
+								<p class="rule-caption">blockwatch.toml</p>
+								<pre><code><span class="tk-p">[[</span>block<span class="tk-p">]]</span>
+target <span class="tk-k">=</span> <span class="tk-s">'deploy.json#/port'</span>
+same-as <span class="tk-k">=</span> <span class="tk-s">'app/settings.py#/PORT'</span></code></pre>
+							</div>
+						</figure>
+						</div>
+						<figure class="terminal" data-focus="3 4-commit">
+							<pre><code><span class="prompt">$</span> <span class="caret t-idle"></span><span class="t-run"><span class="tk-f">git</span> <span class="tk-s">commit</span></span><span class="t-out"><span class="t-block t-fail"><span style="--i: 1"><span class="fail">✗</span> blockwatch<sup>*</sup></span><span style="--i: 2">  Dockerfile   <span class="fail">8080 ≠ 9090</span></span><span style="--i: 3">  deploy.json  <span class="fail">8080 ≠ 9090</span></span></span><span class="t-block t-pass"><span style="--i: 1"><span class="ok">✓</span> blockwatch<sup>*</sup></span></span></span></code></pre>
+						</figure>
+						<div class="focus-ring" aria-hidden="true"></div>
+						<div class="focus-ring" aria-hidden="true"></div>
+						<div class="focus-ring" aria-hidden="true"></div>
+						<svg class="links" aria-hidden="true">
+							<mask id="links-mask" maskUnits="userSpaceOnUse" />
+							<mask id="halo-mask" maskUnits="userSpaceOnUse" />
+							<g mask="url(#halo-mask)"><path class="halo" pathLength="1" /><path class="halo" pathLength="1" /></g>
+							<g mask="url(#links-mask)"><path class="curve" pathLength="1" /><path class="curve" pathLength="1" /></g>
+						</svg>
+					</div>
+				</div>
+				<p class="note">
+					* A simplified demo. blockwatch prints its findings as JSON. <a href="/docs/#how-it-works">See the real output.</a>
+				</p>
+			</section>
+
+			<section id="install" class="wrap">
+				<h2><span class="hash">#</span> Quick start</h2>
+				<ol class="steps">
+					<li>
+						<h3>Install blockwatch</h3>
+						<div class="tabs" role="tablist">
+							{
+								installs.map((install, i) => (
+									<button role="tab" aria-selected={i === 0 ? 'true' : 'false'} data-tab={i}>
+										<Icon icon={installIcon(install.label)} />
+										{install.label}
+									</button>
+								))
+							}
+						</div>
+						<div class="install-panels">
+						{
+							installs.map((install, i) => (
+								<div class="copy-box" data-panel={i} hidden={i !== 0}>
+									<Code code={install.command} lang="shell" theme="css-variables" />
+									<button class="copy" data-copy={install.command} data-event={`copy-install-${install.label.toLowerCase()}`}>
+										Copy
+									</button>
+								</div>
+							))
+						}
+						</div>
+					</li>
+					<li>
+						<h3>Let your coding agent add the blocks</h3>
+						<p>Paste this prompt into Claude Code, Codex, Cursor or any other agent:</p>
+						<div class="copy-box prompt-box">
+							<code>{agentPrompt}</code>
+							<button class="copy" data-copy={agentPrompt} data-event="copy-agent-prompt">Copy</button>
+						</div>
+						<p class="muted">
+							Review the blocks it adds and commit them. The skill stays in the project, so later agents know the rules
+							too. <a href="/docs/agents/">Other agent setups</a>
+						</p>
+					</li>
+					<li>
+						<h3>Check every commit</h3>
+						<div class="two">
+							<figure class="file">
+								<figcaption>.pre-commit-config.yaml</figcaption>
+								<Code
+									code={`- repo: https://github.com/mennanov/blockwatch
+  rev: v${version}
+  hooks:
+    - id: blockwatch`}
+									lang="yaml"
+									theme="css-variables"
+								/>
+							</figure>
+							<figure class="file">
+								<figcaption>GitHub Actions</figcaption>
+								<Code code="- uses: mennanov/blockwatch-action@v1" lang="yaml" theme="css-variables" />
+							</figure>
+						</div>
+						<p class="muted"><a href="/docs/ci/">Plain Git hooks, other CI and SARIF output</a></p>
+					</li>
+				</ol>
+			</section>
+
+			<section class="wrap">
+				<h2><span class="hash">#</span> How it works</h2>
+				<div class="split">
+					<ul class="facts">
+						<li>A <strong>block</strong> is a pair of tags in comments, around the lines a rule covers.</li>
+						<li>The <strong>start tag</strong> holds the rules, such as <code class="tk-k">same-as</code> or <code class="tk-k">keep-sorted</code>.</li>
+						<li>
+							A rule can point at another block, a whole file, or a <a href="/docs/symbols/">symbol</a>: a constant in
+							code, a key in JSON or YAML, a Markdown section.
+						</li>
+						<li>
+							A file that can't hold a comment, such as <code class="tk-s">package.json</code>, gets its blocks
+							from <code class="tk-s">blockwatch.toml</code>.
+						</li>
+						<li>
+							<code>blockwatch</code> checks the whole repository. <code><span class="tk-f">git</span> <span class="tk-s">diff --patch</span> <span class="tk-k">|</span> <span class="tk-f">blockwatch</span> <span class="tk-s">--diff</span></code> also
+							checks the rules that need a change.
+						</li>
+					</ul>
+					<figure class="file">
+						<figcaption>blockwatch.toml</figcaption>
+						<Code
+							code={`# deploy.json can't hold a comment,
+# so its block is declared here.
+[[block]]
+target = 'deploy.json#/port'
+same-as = 'app/settings.py#/PORT'`}
+							lang="toml"
+							theme="css-variables"
+						/>
+					</figure>
+				</div>
+			</section>
+
+			<section class="wrap">
+				<h2><span class="hash">#</span> {validators.length} validators</h2>
+				<p class="section-lead">
+					Two work across files. The rest check one block on its own: the things you would otherwise point out in code
+					review.
+				</p>
+				<div class="grid">
+					{
+						validators.map((validator) => (
+							<a class="card" href={`/docs/validators/${validator.name}/`}>
+								<h3>
+									<code>{validator.name}</code>
+								</h3>
+								<p>{validator.description}</p>
+								{examples[validator.name] && (
+									<Code
+										code={examples[validator.name].code}
+										lang={examples[validator.name].lang}
+										theme="css-variables"
+										wrap
+									/>
+								)}
+							</a>
+						))
+					}
+				</div>
+			</section>
+
+			<section class="wrap">
+				<h2><span class="hash">#</span> {languages.length} languages</h2>
+				<p class="section-lead">
+					blockwatch reads the comments of each language with a real parser, so a tag inside a string is not a block.
+				</p>
+				<ul class="languages">
+					{
+						languages.map((language) => (
+							<li>
+								<Icon icon={languageIcon(language)} />
+								{language}
+							</li>
+						))
+					}
+				</ul>
+			</section>
+
+			<section class="wrap">
+				<h2><span class="hash">#</span> Made for coding agents</h2>
+				<div class="split">
+					<ul class="facts">
+						<li>
+							Agents edit one file and miss the other three that depend on it. Code review catches some of that. A failed
+							commit catches all of it.
+						</li>
+						<li>
+							<code><span class="tk-f">blockwatch</span> <span class="tk-s">skill</span></code> prints a skill that tells an agent where blocks make sense and how to write
+							them.
+						</li>
+						<li>The skill stays in the project. Every agent that works on it later reads the same rules.</li>
+						<li>
+							The skill runs <code><span class="tk-f">blockwatch</span> <span class="tk-s">skill</span></code> each time it loads, so it always matches the installed
+							version.
+						</li>
+					</ul>
+					<figure class="terminal">
+						<figcaption><span></span><span></span><span></span></figcaption>
+						<pre><code>{pluginInstall.map((line) => { const words = line.split(' '); return <Fragment><span class="prompt">&gt;</span> <span class="tk-k">{words[0]}</span>{` ${words.slice(1, -1).join(' ')} `}<span class="tk-s">{words.at(-1)}</span>{'\n'}</Fragment>; })}
+<span class="tk-c"># Claude Code now knows when to add
+# a block, and checks its own work.</span></code></pre>
+					</figure>
+				</div>
+			</section>
+
+			<section class="wrap">
+				<h2><span class="hash">#</span> FAQ</h2>
+				<div class="faq">
+					{
+						faq.map((item) => (
+							<details>
+								<summary>
+									{item.q}
+									<span class="short">{item.short}</span>
+								</summary>
+								<p set:html={item.a} />
+							</details>
+						))
+					}
+				</div>
+			</section>
+
+			<section class="wrap final">
+				<h2>Catch the files you forgot to change</h2>
+				<p class="section-lead">Install blockwatch, then let your agent add the first blocks.</p>
+				<div class="actions">
+					<a class="button primary" href="#install" data-event="install-click-bottom">Install</a>
+					<a class="button" href="/docs/">Read the docs</a>
+					<a class="button" href="https://github.com/mennanov/blockwatch" data-event="github-click-bottom"
+						><Icon icon={githubIcon} />View on GitHub</a
+					>
+				</div>
+			</section>
+		</main>
+
+		<footer class="wrap">
+			<span>MIT license</span>
+			<a href="https://github.com/mennanov/blockwatch">GitHub</a>
+			<a href="https://crates.io/crates/blockwatch">crates.io</a>
+			<a href="https://github.com/mennanov/blockwatch/blob/main/CHANGELOG.md">Changelog</a>
+		</footer>
+
+		<script>
+			for (const tab of document.querySelectorAll<HTMLButtonElement>('[data-tab]')) {
+				tab.addEventListener('click', () => {
+					for (const other of document.querySelectorAll('[data-tab]')) {
+						other.setAttribute('aria-selected', String(other === tab));
+					}
+					for (const panel of document.querySelectorAll<HTMLElement>('[data-panel]')) {
+						panel.hidden = panel.dataset.panel !== tab.dataset.tab;
+					}
+				});
+			}
+			for (const button of document.querySelectorAll<HTMLButtonElement>('[data-copy]')) {
+				button.addEventListener('click', async () => {
+					await navigator.clipboard.writeText(button.dataset.copy ?? '');
+					button.textContent = 'Copied';
+					setTimeout(() => (button.textContent = 'Copy'), 1500);
+				});
+			}
+			setupDemo();
+
+			/**
+			 * Plays the hero example one step at a time, in a loop, once it scrolls into view. A click on a tab plays that
+			 * step the same way, then stops the loop there, so the reader can go at their own pace. With reduced motion,
+			 * the page keeps the failed commit that the HTML shows, and a click shows a step's end state.
+			 */
+			function setupDemo() {
+				const demo = document.querySelector<HTMLElement>('.demo');
+				if (!demo) return;
+				const src = demo.querySelector<HTMLElement>('[data-src]')!;
+				const deps = demo.querySelectorAll<HTMLElement>('[data-dep]');
+				const tabs = [...demo.querySelectorAll<HTMLButtonElement>('[data-goto]')];
+				const phoneLabel = demo.querySelector<HTMLElement>('[data-phone-label]')!;
+				const files = demo.querySelector<HTMLElement>('.demo-files')!;
+				const links = [...demo.querySelectorAll<SVGPathElement>('.links .curve')];
+				const halos = [...demo.querySelectorAll<SVGPathElement>('.links .halo')];
+				const mask = demo.querySelector<SVGMaskElement>('#links-mask')!;
+				const haloMask = demo.querySelector<SVGMaskElement>('#halo-mask')!;
+				const rings = [...demo.querySelectorAll<HTMLElement>('.focus-ring')];
+				// How long each step stays on screen, in milliseconds. Step 3 prints three lines, so it stays longest.
+				const durations = [4500, 5000, 7000, 7500];
+				let timer = 0;
+				let typing: number[] = [];
+				// What the rings mark: the step's number, or `4-commit` once step 4 commits the fixed files.
+				let focus = '3';
+				let playing = false;
+
+				const show = (step: number, animate: boolean) => {
+					clearTimeout(timer);
+					typing.forEach(clearTimeout);
+					typing = [];
+					for (const value of [src, ...deps]) delete value.dataset.typing;
+					demo.dataset.step = String(step);
+					demo.toggleAttribute('data-playing', playing);
+					phoneLabel.textContent = tabs[step - 1].querySelector('.tab-label')!.textContent;
+					demo.style.setProperty('--step-time', `${durations[step - 1]}ms`);
+					for (const [i, tab] of tabs.entries()) {
+						if (i === step - 1) tab.setAttribute('aria-current', 'step');
+						else tab.removeAttribute('aria-current');
+						tab.toggleAttribute('data-done', i < step - 1);
+					}
+					for (const dep of deps) dep.textContent = step === 4 ? '9090' : '8080';
+					src.textContent = step === 1 ? '8080' : '9090';
+					if (animate && step === 2) {
+						type(src, 600);
+					}
+					focus = step === 4 && !animate ? '4-commit' : String(step);
+					if (animate && step === 4) {
+						deps.forEach((dep, i) => type(dep, 600 + i * 1900));
+						// The commit runs once both values are typed, at the time the CSS shows it.
+						typing.push(
+							window.setTimeout(() => {
+								focus = '4-commit';
+								placeRings();
+							}, 4300),
+						);
+					}
+					placeRings();
+					update();
+					if (playing) {
+						timer = window.setTimeout(() => show((step % 4) + 1, true), durations[step - 1]);
+					}
+				};
+
+				/**
+				 * Draws a curve from the value in settings.py to each value that must match it. Each curve has a gap
+				 * wherever it passes over text, so the code stays readable. Everything is measured from the page, so the
+				 * curves follow the values at any width and font.
+				 */
+				const drawLinks = () => {
+					const box = files.getBoundingClientRect();
+					const from = src.getBoundingClientRect();
+					const x1 = from.right - box.left + 4;
+					const y1 = from.top + from.height / 2 - box.top;
+					deps.forEach((dep, i) => {
+						const to = dep.getBoundingClientRect();
+						const y2 = to.top + to.height / 2 - box.top;
+						let d;
+						if (to.left > from.right) {
+							// Side by side: leave the right edge of the value and enter the left edge of the other one.
+							const x2 = to.left - box.left - 4;
+							const bend = (x2 - x1) / 2;
+							d = `M${x1},${y1} C${x1 + bend},${y1} ${x2 - bend},${y2} ${x2},${y2}`;
+						} else {
+							// Stacked on a phone: loop out to the right, where the code lines are short. The second curve
+							// loops wider, so the two don't overlap.
+							const x2 = to.right - box.left + 4;
+							const out = Math.min(Math.max(x1, x2) + 60 + i * 50, box.width - 8);
+							d = `M${x1},${y1} C${out},${y1} ${out},${y2} ${x2},${y2}`;
+						}
+						links[i].setAttribute('d', d);
+						halos[i].setAttribute('d', d);
+					});
+
+					// The mask shows the curves everywhere except over a box around each piece of text in the files.
+					// A range around each text node, not each element, so only the glyphs get a hole, not a whole code box.
+					const holes: DOMRect[] = [];
+					const walker = document.createTreeWalker(files, NodeFilter.SHOW_TEXT);
+					while (walker.nextNode()) {
+						const range = document.createRange();
+						range.selectNodeContents(walker.currentNode);
+						holes.push(...[...range.getClientRects()].filter((rect) => rect.width > 0));
+					}
+					// Each curve has a wide halo in the background color under it, which hides a ring's border where the
+					// curve crosses it. The halo only shows along the ring borders, so it never covers a file or its text.
+					const bands = rings
+						.filter((ring) => !ring.classList.contains('hidden'))
+						.map((ring) => {
+							const rect = ring.getBoundingClientRect();
+							const band = maskRect(rect.left - box.left, rect.top - box.top, rect.width, rect.height, 'none');
+							band.setAttribute('stroke', 'white');
+							band.setAttribute('stroke-width', '6');
+							band.setAttribute('rx', getComputedStyle(ring).borderTopLeftRadius);
+							return band;
+						});
+					haloMask.replaceChildren(...bands);
+					mask.replaceChildren(
+						maskRect(-box.width, -box.height, box.width * 3, box.height * 3, 'white'),
+						// A glyph box is shorter than its line, so each hole also covers the gap to the lines above and below.
+						...holes.map((rect) =>
+							maskRect(rect.left - box.left - 3, rect.top - box.top - 3, rect.width + 6, rect.height + 6, 'black'),
+						),
+					);
+				};
+				const maskRect = (x: number, y: number, width: number, height: number, fill: string) => {
+					const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+					for (const [name, value] of Object.entries({ x, y, width, height, fill })) {
+						rect.setAttribute(name, String(value));
+					}
+					return rect;
+				};
+				/**
+				 * Puts a ring around each part of the demo where the current step happens: every part whose
+				 * `data-focus` lists `focus`, in page order. The first ring moves from step to step, animated in CSS,
+				 * so the eye can follow it. With `jump`, the rings move without the animation, for a change that isn't
+				 * a step, such as a resize. A ring with no part on this step fades out where it is.
+				 */
+				const placeRings = (jump = false) => {
+					const box = files.getBoundingClientRect();
+					const targets = [...files.querySelectorAll<HTMLElement>(`[data-focus~="${focus}"]`)];
+					rings.forEach((ring, i) => {
+						ring.classList.toggle('hidden', !targets[i]);
+						if (!targets[i]) return;
+						const rect = targets[i].getBoundingClientRect();
+						// The first placement jumps too. Otherwise the ring would fly in from the corner.
+						const first = jump || !ring.style.width;
+						if (first) ring.style.transition = 'none';
+						Object.assign(ring.style, {
+							left: `${rect.left - box.left - 4}px`,
+							top: `${rect.top - box.top - 4}px`,
+							width: `${rect.width + 8}px`,
+							height: `${rect.height + 8}px`,
+						});
+						if (first) {
+							ring.getBoundingClientRect();
+							ring.style.transition = '';
+						}
+					});
+					// The gaps in the curves follow the rings while they slide, which takes 0.6 seconds in CSS.
+					const start = performance.now();
+					const follow = () => {
+						drawLinks();
+						if (performance.now() - start < 700) requestAnimationFrame(follow);
+					};
+					requestAnimationFrame(follow);
+				};
+				new ResizeObserver(() => {
+					placeRings(true);
+					drawLinks();
+				}).observe(files);
+				document.fonts.ready.then(drawLinks);
+
+				/**
+				 * Retypes `value` from 8080 to 9090, one key at a time, starting `delay` milliseconds from now. A caret
+				 * shows after the value while it is typed.
+				 */
+				const type = (value: HTMLElement, delay: number) => {
+					const frames = ['808', '80', '8', '', '9', '90', '909', '9090'];
+					value.textContent = '8080';
+					typing.push(window.setTimeout(() => (value.dataset.typing = ''), delay));
+					frames.forEach((frame, i) => {
+						typing.push(
+							window.setTimeout(() => {
+								value.textContent = frame;
+								if (i === frames.length - 1) delete value.dataset.typing;
+								update();
+							}, delay + 300 + i * 200),
+						);
+					});
+				};
+
+				/**
+				 * Marks each dependent value and its curve as matching the value in settings.py or not, then redraws the
+				 * curves. Step 1 marks nothing, so both show in the accent color.
+				 */
+				const update = () => {
+					deps.forEach((dep, i) => {
+						const state = demo.dataset.step === '1' ? null : dep.textContent === src.textContent ? 'good' : 'bad';
+						for (const element of [dep, links[i]]) {
+							if (state) element.dataset.state = state;
+							else delete element.dataset.state;
+						}
+					});
+					drawLinks();
+				};
+
+				const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+				for (const tab of tabs) {
+					tab.addEventListener('click', () => {
+						playing = false;
+						show(Number(tab.dataset.goto), !reducedMotion);
+					});
+				}
+
+				show(3, false);
+				if (reducedMotion) return;
+				const observer = new IntersectionObserver((entries) => {
+					if (entries.some((entry) => entry.isIntersecting)) {
+						observer.disconnect();
+						playing = true;
+						show(1, true);
+						// The page started on step 3, which nobody has watched yet, so the ring has nothing to move from.
+						placeRings(true);
+					}
+				});
+				observer.observe(demo);
+			}
+		</script>
+	</body>
+</html>
+
+<style>
+	:global(:root) {
+		--bg: var(--sl-color-black);
+		--panel: var(--sl-color-gray-6);
+		--line: var(--sl-color-gray-5);
+		--text: var(--sl-color-white);
+		--muted: var(--sl-color-gray-3);
+		--accent: var(--sl-color-accent);
+		--red: #f87171;
+		--green: #4ade80;
+	}
+	:global(:root[data-theme='light']) {
+		--panel: var(--sl-color-gray-7);
+		--red: #c62828;
+		--green: #1b7f3b;
+	}
+	:global(*) {
+		box-sizing: border-box;
+	}
+	:global(body) {
+		margin: 0;
+		background: var(--bg);
+		color: var(--text);
+		font-family: var(--sl-font);
+		line-height: 1.6;
+		-webkit-font-smoothing: antialiased;
+	}
+	a {
+		color: var(--accent);
+	}
+	code,
+	pre {
+		font-family: var(--sl-font-mono);
+		font-size: 0.875rem;
+	}
+	/* A chip marks where code in running text starts and ends. The tk-* classes color its parts. */
+	:is(p, li) > :global(code) {
+		padding: 0.1rem 0.35rem;
+		border: 1px solid var(--line);
+		border-radius: 0.3rem;
+		background: var(--panel);
+		color: var(--text);
+		font-size: 0.85em;
+		/* A command split across two lines is hard to read. The longest one still fits a phone screen. */
+		white-space: nowrap;
+	}
+	.wrap {
+		max-width: 72rem;
+		margin: 0 auto;
+		padding: 0 1rem;
+	}
+	section.wrap {
+		padding-top: 5rem;
+	}
+	/* Two classes, so the smaller padding also wins over the phone-width rule for section.wrap below. */
+	section.hero.wrap {
+		padding-top: 1.5rem;
+	}
+
+	.top {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		max-width: 72rem;
+		margin: 0 auto;
+		padding: 1rem;
+	}
+	.brand-row {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		min-width: 0;
+	}
+	.brand {
+		display: flex;
+		gap: 0.5rem;
+		align-items: center;
+		color: var(--text);
+		text-decoration: none;
+		font-family: var(--sl-font-mono);
+		font-weight: 600;
+	}
+	.logo :global(svg) {
+		width: 1.5rem;
+		height: 1.5rem;
+		display: block;
+	}
+	.top nav {
+		display: flex;
+		gap: 1.25rem;
+	}
+	.top nav a {
+		color: var(--muted);
+		text-decoration: none;
+	}
+	.top nav a:hover {
+		color: var(--text);
+	}
+	.top nav .github {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+
+	.badge {
+		display: inline-block;
+		margin: 0;
+		white-space: nowrap;
+		padding: 0.15rem 0.6rem;
+		border: 1px solid var(--line);
+		border-radius: 999px;
+		font-family: var(--sl-font-mono);
+		font-size: 0.75rem;
+		color: var(--muted);
+	}
+	h1 {
+		font-family: var(--sl-font-mono);
+		font-size: clamp(2rem, 6vw, 3.75rem);
+		line-height: 1.1;
+		letter-spacing: -0.03em;
+		margin: 0 0 1rem;
+		text-wrap: balance;
+	}
+	h2 {
+		font-family: var(--sl-font-mono);
+		font-size: clamp(1.5rem, 3.5vw, 2.25rem);
+		letter-spacing: -0.02em;
+		margin: 0 0 1rem;
+	}
+	.hash {
+		color: var(--accent);
+	}
+	h3 {
+		margin: 0 0 0.5rem;
+		font-size: 1.1rem;
+	}
+	.lead {
+		font-size: 1.15rem;
+		color: var(--muted);
+		max-width: 42rem;
+	}
+	.section-lead {
+		color: var(--muted);
+		max-width: 42rem;
+		margin: 0 0 2rem;
+	}
+	.muted {
+		color: var(--muted);
+		font-size: 0.95rem;
+	}
+	.note {
+		color: var(--muted);
+		font-size: 0.85rem;
+	}
+
+	.actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		margin: 1.75rem 0 2.5rem;
+	}
+	.button {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.6rem 1.2rem;
+		border: 1px solid var(--line);
+		border-radius: 999px;
+		color: var(--text);
+		text-decoration: none;
+		font-family: var(--sl-font-mono);
+		font-weight: 600;
+	}
+	.button:hover {
+		border-color: var(--muted);
+	}
+	.button.primary {
+		background: var(--accent);
+		border-color: var(--accent);
+		color: var(--bg);
+	}
+
+	figure {
+		margin: 0;
+	}
+	.file,
+	.terminal {
+		border: 1px solid var(--line);
+		border-radius: 0.5rem;
+		background: var(--panel);
+		overflow: hidden;
+		min-width: 0;
+	}
+	.file figcaption,
+	.terminal figcaption {
+		padding: 0.4rem 0.75rem;
+		border-bottom: 1px solid var(--line);
+		font-family: var(--sl-font-mono);
+		font-size: 0.75rem;
+		color: var(--muted);
+	}
+	.terminal figcaption {
+		display: flex;
+		gap: 0.35rem;
+	}
+	.terminal figcaption span {
+		width: 0.6rem;
+		height: 0.6rem;
+		border-radius: 50%;
+		background: var(--line);
+	}
+	pre {
+		margin: 0;
+		padding: 0.75rem;
+		overflow-x: auto;
+		line-height: 1.55;
+		scrollbar-color: var(--line) transparent;
+	}
+	/* These are pictures of code, not code to copy, so a long line wraps instead of hiding behind a scroll bar. */
+	/* Slightly smaller than the other code on the page, so the demo's files fit their columns without wrapping. */
+	.demo pre {
+		font-size: 0.8rem;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+	.demo pre code {
+		font-size: inherit;
+	}
+	/* Code highlighted by Astro's Code component is another component's markup, so these rules are global. */
+	:global(.astro-code) {
+		margin: 0;
+		padding: 0.75rem;
+		line-height: 1.55;
+		font-family: var(--sl-font-mono);
+		font-size: 0.875rem;
+		scrollbar-color: var(--line) transparent;
+	}
+	:global(.astro-code code) {
+		font-size: inherit;
+	}
+	.demo {
+		border: 1px solid var(--line);
+		border-radius: 0.75rem;
+		padding: 1rem;
+		background: color-mix(in srgb, var(--panel) 50%, transparent);
+	}
+	.demo-tabs {
+		list-style: none;
+		margin: 0 0 1rem;
+		padding: 0;
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 1.5rem;
+	}
+	.demo-tabs li {
+		position: relative;
+		display: flex;
+	}
+	/* An arrow between two tabs shows that the steps go from left to right. */
+	.demo-tabs li:not(:last-child)::after {
+		content: '→';
+		position: absolute;
+		right: -1.15rem;
+		top: 50%;
+		transform: translateY(-50%);
+		color: var(--muted);
+	}
+	.demo-tabs button {
+		position: relative;
+		flex: 1;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.5rem 0.6rem;
+		overflow: hidden;
+		border: 1px solid var(--line);
+		border-radius: 0.5rem;
+		background: none;
+		color: var(--muted);
+		font: inherit;
+		font-family: var(--sl-font-mono);
+		font-size: 0.8rem;
+		text-align: left;
+		cursor: pointer;
+	}
+	.demo-tabs button:hover {
+		color: var(--text);
+	}
+	.demo-tabs button[aria-current='step'] {
+		border-color: var(--accent);
+		background: var(--panel);
+		color: var(--text);
+		font-weight: 600;
+	}
+	.tab-n {
+		position: relative;
+		flex: none;
+		display: grid;
+		place-items: center;
+		width: 1.4rem;
+		height: 1.4rem;
+		border-radius: 50%;
+		border: 1px solid currentColor;
+		font-size: 0.75rem;
+	}
+	.demo-tabs button[aria-current='step'] .tab-n {
+		border-color: var(--line);
+		color: var(--accent);
+	}
+	.demo-tabs button[data-done] .tab-n {
+		border-color: var(--accent);
+		color: var(--accent);
+	}
+	.tab-phone-label {
+		display: none;
+		margin: 0 0 0.75rem;
+		font-family: var(--sl-font-mono);
+		font-size: 0.85rem;
+		font-weight: 600;
+	}
+	/*
+	 * While the demo plays, an amber ring grows around the current step's number and shows how long until the next
+	 * step. When the demo is paused, the ring is full.
+	 */
+	@property --ring {
+		syntax: '<percentage>';
+		inherits: false;
+		initial-value: 100%;
+	}
+	.tab-n::before {
+		content: '';
+		position: absolute;
+		inset: -1px;
+		display: none;
+		border-radius: 50%;
+		background: conic-gradient(var(--accent) var(--ring), transparent 0);
+		mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+	}
+	.demo-tabs button[aria-current='step'] .tab-n::before {
+		display: block;
+	}
+	.demo[data-playing] [aria-current='step'] .tab-n::before {
+		animation: ring var(--step-time) linear both;
+	}
+	@keyframes ring {
+		from {
+			--ring: 0%;
+		}
+	}
+	.demo-files {
+		position: relative;
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 0.75rem;
+	}
+	/*
+	 * The curves that join the values that must match. They draw themselves in on step 1, turn red while the values
+	 * disagree, and turn green once they match again.
+	 */
+	.links {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		overflow: visible;
+		pointer-events: none;
+	}
+	.links path {
+		fill: none;
+		stroke: var(--accent);
+		stroke-width: 1.5;
+		stroke-linecap: round;
+		stroke-dasharray: 1;
+		opacity: 0.8;
+		transition: stroke 0.3s;
+	}
+	/* The background the demo shows between its files: its own half-clear panel over the page. */
+	.links .halo {
+		stroke: color-mix(in srgb, var(--panel) 50%, var(--bg));
+		stroke-width: 8;
+		opacity: 1;
+	}
+	.links path[data-state='bad'] {
+		stroke: var(--red);
+	}
+	.links path[data-state='good'] {
+		stroke: var(--green);
+	}
+	.demo[data-step='1'] .links path {
+		animation: draw 1.2s ease-out 0.3s both;
+	}
+	.demo[data-step='1'] .links path + path {
+		animation-delay: 1s;
+	}
+	@keyframes draw {
+		from {
+			stroke-dashoffset: 1;
+		}
+	}
+	/* Source on the left, the files that must match it in the middle, the commit on the right. */
+	.demo .demo-files {
+		grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) minmax(0, 0.9fr);
+		column-gap: 3rem;
+		align-items: center;
+	}
+	/* JSON can't hold a comment, so the rule for deploy.json lives in blockwatch.toml. It sits in the same box, so
+	   both dependents show their rule next to their value. The darker band keeps it from reading as part of the JSON. */
+	.rule-file {
+		border-top: 1px solid var(--line);
+		background: color-mix(in srgb, var(--bg) 45%, var(--panel));
+	}
+	.rule-caption {
+		margin: 0;
+		padding: 0.4rem 0.75rem 0;
+		font-family: var(--sl-font-mono);
+		font-size: 0.75rem;
+		color: var(--muted);
+	}
+	.rule-file pre {
+		padding-top: 0.35rem;
+	}
+	.dependents {
+		display: grid;
+		gap: 0.75rem;
+		min-width: 0;
+	}
+	.demo .terminal {
+		align-self: stretch;
+	}
+	/*
+	 * Rings around the parts of the demo where the step happens: each of the three files on step 1, the edited file
+	 * on step 2, the commit on step 3, and on step 4 the fixed files, then the commit. The ring slides from one part to the next, so the
+	 * eye can follow it.
+	 */
+	.focus-ring {
+		position: absolute;
+		border: 1.5px solid color-mix(in srgb, var(--bw-color-focus) 70%, transparent);
+		border-radius: calc(0.5rem + 4px);
+		pointer-events: none;
+		transition:
+			left 0.6s cubic-bezier(0.65, 0, 0.35, 1),
+			top 0.6s cubic-bezier(0.65, 0, 0.35, 1),
+			width 0.6s cubic-bezier(0.65, 0, 0.35, 1),
+			height 0.6s cubic-bezier(0.65, 0, 0.35, 1),
+			opacity 0.3s;
+	}
+	.focus-ring.hidden {
+		opacity: 0;
+	}
+	.demo .terminal sup {
+		color: var(--muted);
+	}
+	.dim,
+	.prompt {
+		color: var(--muted);
+	}
+	/* Code drawn by hand uses the same colors as Shiki's css-variables theme. They are global, because the FAQ answers
+	   are HTML strings, which Astro doesn't scope. */
+	:global(.tk-k) {
+		color: var(--astro-code-token-keyword);
+	}
+	:global(.tk-s) {
+		color: var(--astro-code-token-string-expression);
+	}
+	:global(.tk-c) {
+		color: var(--astro-code-token-comment);
+	}
+	:global(.tk-f) {
+		color: var(--astro-code-token-function);
+	}
+	:global(.tk-p) {
+		color: var(--astro-code-token-punctuation);
+	}
+	.file pre,
+	.terminal pre {
+		color: var(--astro-code-foreground);
+	}
+	.dim {
+		opacity: 0.75;
+	}
+	.val {
+		padding: 0 0.2rem;
+		border-radius: 0.2rem;
+		font-weight: 600;
+		background: color-mix(in srgb, var(--accent) 22%, transparent);
+		color: var(--text);
+		transition: background-color 0.3s, color 0.3s;
+	}
+	.val[data-state='bad'] {
+		background: color-mix(in srgb, var(--red) 22%, transparent);
+	}
+	.demo:not([data-step='1']) .src,
+	.val[data-state='good'] {
+		background: color-mix(in srgb, var(--green) 22%, transparent);
+	}
+	.demo[data-step='1'] .val {
+		animation: pulse 1.2s ease-in-out 2;
+	}
+	@keyframes pulse {
+		50% {
+			box-shadow: 0 0 0 0.25rem color-mix(in srgb, var(--accent) 35%, transparent);
+		}
+	}
+	.caret {
+		display: none;
+		width: 0.55em;
+		height: 1.1em;
+		margin-left: 1px;
+		vertical-align: text-bottom;
+		background: var(--accent);
+		animation: blink 1s steps(1) infinite;
+	}
+	[data-typing] + .caret,
+	.demo[data-step='1'] .t-idle,
+	.demo[data-step='2'] .t-idle {
+		display: inline-block;
+	}
+	@keyframes blink {
+		50% {
+			opacity: 0;
+		}
+	}
+	/*
+	 * Every step keeps the text of all steps in place and only hides what it doesn't show, so the terminal is always as
+	 * tall as its longest output and nothing below it moves. The two outputs share one grid cell for the same reason.
+	 */
+	.t-run,
+	.t-block {
+		visibility: hidden;
+	}
+	.t-out {
+		display: grid;
+	}
+	.t-block {
+		grid-area: 1 / 1;
+	}
+	.t-block > span {
+		display: block;
+	}
+	.demo[data-step='3'] .t-run,
+	.demo[data-step='4'] .t-run,
+	.demo[data-step='3'] .t-fail,
+	.demo[data-step='4'] .t-pass {
+		visibility: visible;
+	}
+	/* The animation is set only while its step shows, so it plays again each time the step comes back. */
+	.demo[data-step='3'] .t-fail > span,
+	.demo[data-step='4'] .t-pass > span {
+		animation: appear 0.25s both;
+		animation-delay: calc(var(--i) * 0.7s);
+	}
+	/* The commit on step 4 waits until both values are typed. */
+	.demo[data-step='4'] .t-run {
+		animation: appear 0.25s 4.3s both;
+	}
+	.demo[data-step='4'] .t-pass > span {
+		animation-delay: calc(4.5s + var(--i) * 0.7s);
+	}
+	@keyframes appear {
+		from {
+			opacity: 0;
+			transform: translateY(0.25rem);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.demo *,
+		.demo *::before {
+			animation: none !important;
+			transition: none !important;
+		}
+	}
+	.fail {
+		color: var(--red);
+		font-weight: 600;
+	}
+	.ok {
+		color: var(--green);
+		font-weight: 600;
+	}
+
+	.steps {
+		list-style: none;
+		counter-reset: step;
+		padding: 0;
+		margin: 2rem 0 0;
+		display: grid;
+		/* One full-width column. With the default track, a long install command widened the column, so switching tabs
+		   changed the width of the box. Now a long command scrolls inside it. */
+		grid-template-columns: minmax(0, 1fr);
+		gap: 2.5rem;
+	}
+	.steps > li {
+		counter-increment: step;
+		position: relative;
+		padding-left: 3rem;
+	}
+	.steps > li::before {
+		content: counter(step);
+		position: absolute;
+		left: 0;
+		top: -0.1rem;
+		width: 2rem;
+		height: 2rem;
+		display: grid;
+		place-items: center;
+		border-radius: 50%;
+		border: 1px solid var(--accent);
+		color: var(--accent);
+		font-family: var(--sl-font-mono);
+	}
+	.tabs {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.25rem;
+		margin-bottom: 0.5rem;
+	}
+	.tabs button {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		font: inherit;
+		font-size: 0.85rem;
+		padding: 0.25rem 0.75rem;
+		border-radius: 999px;
+		border: 1px solid transparent;
+		background: none;
+		color: var(--muted);
+		cursor: pointer;
+	}
+	.tabs button[aria-selected='true'] {
+		border-color: var(--line);
+		color: var(--text);
+		background: var(--panel);
+	}
+	.copy-box {
+		display: flex;
+		gap: 0.75rem;
+		align-items: flex-start;
+		justify-content: space-between;
+		padding: 0.75rem;
+		border: 1px solid var(--line);
+		border-radius: 0.5rem;
+		background: var(--panel);
+	}
+	.copy-box[hidden] {
+		display: none;
+	}
+	/* All install commands share one cell and the hidden ones stay laid out, so the box is as tall as the tallest one.
+	   A long command has a scroll bar, and without this the box would change height when its tab is picked. */
+	.install-panels {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.install-panels > .copy-box {
+		grid-area: 1 / 1;
+		align-items: center;
+	}
+	.install-panels > .copy-box[hidden] {
+		display: flex;
+		visibility: hidden;
+	}
+	.copy-box code,
+	.copy-box :global(.astro-code) {
+		overflow-x: auto;
+		white-space: pre;
+		min-width: 0;
+		padding: 0;
+	}
+	.prompt-box code {
+		white-space: normal;
+	}
+	.copy {
+		flex: none;
+		font: inherit;
+		font-size: 0.8rem;
+		padding: 0.2rem 0.7rem;
+		border-radius: 0.35rem;
+		border: 1px solid var(--line);
+		background: var(--bg);
+		color: var(--text);
+		cursor: pointer;
+	}
+	.copy:hover {
+		border-color: var(--accent);
+	}
+	.two,
+	.split {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 1rem;
+		align-items: start;
+	}
+	.split {
+		gap: 2.5rem;
+	}
+	.facts {
+		margin: 0;
+		padding-left: 1.1rem;
+		display: grid;
+		gap: 0.75rem;
+	}
+	.facts li::marker {
+		color: var(--accent);
+	}
+
+	.grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+		gap: 1rem;
+	}
+	.card {
+		display: flex;
+		flex-direction: column;
+		border: 1px solid var(--line);
+		border-radius: 0.5rem;
+		padding: 1rem;
+		color: var(--text);
+		text-decoration: none;
+		background: var(--panel);
+		min-width: 0;
+	}
+	.card:hover {
+		border-color: var(--accent);
+	}
+	.card h3 code {
+		color: var(--accent);
+		font-size: 1rem;
+	}
+	.card p {
+		color: var(--muted);
+		font-size: 0.9rem;
+		margin: 0 0 0.75rem;
+		flex: 1;
+	}
+	.card :global(.astro-code) {
+		padding: 0.5rem;
+		border-radius: 0.35rem;
+		background: var(--bg) !important;
+		font-size: 0.75rem;
+		overflow-wrap: anywhere;
+	}
+
+	.languages {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+	.languages li {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.25rem 0.75rem 0.25rem 0.6rem;
+		border: 1px solid var(--line);
+		border-radius: 999px;
+		font-family: var(--sl-font-mono);
+		font-size: 0.85rem;
+	}
+	.languages {
+		--icon-fallback: var(--muted);
+	}
+
+	.faq {
+		display: grid;
+		gap: 0.5rem;
+		max-width: 48rem;
+	}
+	details {
+		border: 1px solid var(--line);
+		border-radius: 0.5rem;
+		padding: 0.75rem 1rem;
+		background: var(--panel);
+	}
+	/* The browser's own marker can't be spaced from the text, so this draws one. */
+	summary {
+		display: block;
+		/* A hanging indent, so a question that wraps lines up under its first word, not under the arrow. */
+		padding-left: 1.2rem;
+		cursor: pointer;
+		font-weight: 600;
+		list-style: none;
+	}
+	summary::-webkit-details-marker {
+		display: none;
+	}
+	/* A triangle cut from a square, not a ▸ character. A glyph sits off center in its line box, so turning it would
+	   also move it. The square turns around its own center. */
+	summary::before {
+		content: '';
+		display: inline-block;
+		width: 0.45rem;
+		height: 0.45rem;
+		margin-left: -1.2rem;
+		margin-right: 0.75rem;
+		vertical-align: 0.1em;
+		background: var(--muted);
+		clip-path: polygon(12.5% 0, 87.5% 50%, 12.5% 100%);
+		transition: rotate 0.15s;
+	}
+	details[open] summary::before {
+		rotate: 90deg;
+	}
+	/* The short answer is for skimming. Once the full answer shows, it would only repeat it. */
+	summary .short {
+		margin-left: 0.4em;
+		color: var(--accent);
+		font-weight: 700;
+		white-space: nowrap;
+	}
+	summary .short::before {
+		content: '— ';
+		color: var(--muted);
+		font-weight: 400;
+	}
+	details[open] .short {
+		display: none;
+	}
+	details p {
+		color: var(--muted);
+		margin: 0.5rem 0 0;
+	}
+
+	.final {
+		text-align: center;
+		padding-bottom: 3rem;
+	}
+	.final .section-lead {
+		margin: 0 auto;
+	}
+	.final .actions {
+		justify-content: center;
+	}
+	footer {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 1.5rem;
+		padding-top: 2rem !important;
+		padding-bottom: 3rem !important;
+		border-top: 1px solid var(--line);
+		color: var(--muted);
+		font-size: 0.9rem;
+	}
+	footer a {
+		color: var(--muted);
+	}
+
+	@media (max-width: 40rem) {
+		.badge-long {
+			display: none;
+		}
+		/* The longest line in the demo's Dockerfile is 35 characters, which only fits a phone at this size. */
+		.demo pre {
+			font-size: 0.75rem;
+		}
+		/*
+		 * Four labels don't fit side by side on a phone, and a label that wraps would make the files below jump. So the
+		 * tabs show only their numbers, and the current step's label gets a line of its own under them.
+		 */
+		.demo-tabs {
+			margin-bottom: 0.5rem;
+		}
+		.demo-tabs .tab-label {
+			display: none;
+		}
+		.demo-tabs button {
+			justify-content: center;
+		}
+		.tab-phone-label {
+			display: block;
+		}
+	}
+	@media (max-width: 52rem) {
+		.demo .demo-files,
+		.two,
+		.split {
+			grid-template-columns: minmax(0, 1fr);
+		}
+		section.wrap {
+			padding-top: 3.5rem;
+		}
+	}
+</style>

@@ -8,6 +8,8 @@ homepage = "https://github.com/mennanov/blockwatch"
 license = "MIT"
 keywords = ["linter", "sync", "drift", "comments", "agents"]
 categories = ["development-tools", "command-line-utilities"]
+# The website is built and hosted on its own; the crate doesn't need it.
+exclude = ["site/"]
 
 [workspace]
 members = ["fuzz"]

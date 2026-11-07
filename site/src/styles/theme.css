@@ -1,0 +1,65 @@
+/* Colors and fonts shared by the docs (through Starlight's variables) and the landing page. */
+
+:root {
+	--sl-font: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+	--sl-font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+	--sl-color-accent-low: #3d2a05;
+	--sl-color-accent: #f5a524;
+	--sl-color-accent-high: #ffe2a8;
+	--sl-color-white: #f4f4f5;
+	--sl-color-gray-1: #e4e4e7;
+	--sl-color-gray-2: #c4c4cc;
+	--sl-color-gray-3: #8e8e99;
+	--sl-color-gray-4: #52525b;
+	--sl-color-gray-5: #2c2c31;
+	--sl-color-gray-6: #1a1a1e;
+	--sl-color-black: #0e0e10;
+
+	/* A second color for "look here" marks, such as the demo's focus rings. It sits far from the amber accent and from
+	   the red and green that mean fail and pass, so a mark never reads as a result. */
+	--bw-color-focus: #60a5fa;
+
+	/* Syntax colors for code on the landing page, read by Shiki's css-variables theme. Strings and keywords use cool
+	   hues, so they never look like the red and green that mean fail and pass. Comments use the accent, because on
+	   this site a comment is where the rules live. */
+	--astro-code-foreground: #e4e4e7;
+	--astro-code-background: transparent;
+	--astro-code-token-keyword: #c084fc;
+	--astro-code-token-string: #67e8f9;
+	--astro-code-token-string-expression: #67e8f9;
+	--astro-code-token-constant: #f0abfc;
+	--astro-code-token-function: #f4f4f5;
+	--astro-code-token-parameter: #e4e4e7;
+	--astro-code-token-punctuation: #8e8e99;
+	--astro-code-token-comment: #d4a24c;
+	--astro-code-token-link: #67e8f9;
+}
+
+:root[data-theme='light'] {
+	--sl-color-accent-low: #fdecc8;
+	--sl-color-accent: #a35f00;
+	--sl-color-accent-high: #4f2e00;
+	--sl-color-white: #0e0e10;
+	--sl-color-gray-1: #1a1a1e;
+	--sl-color-gray-2: #2c2c31;
+	--sl-color-gray-3: #52525b;
+	--sl-color-gray-4: #8e8e99;
+	--sl-color-gray-5: #c4c4cc;
+	--sl-color-gray-6: #ececef;
+	--sl-color-gray-7: #f6f6f7;
+	--sl-color-black: #ffffff;
+
+	--bw-color-focus: #2563eb;
+
+	--astro-code-foreground: #1a1a1e;
+	--astro-code-token-keyword: #7e22ce;
+	--astro-code-token-string: #0e7490;
+	--astro-code-token-string-expression: #0e7490;
+	--astro-code-token-constant: #a21caf;
+	--astro-code-token-function: #0e0e10;
+	--astro-code-token-parameter: #2c2c31;
+	--astro-code-token-punctuation: #71717a;
+	--astro-code-token-comment: #8a5a00;
+	--astro-code-token-link: #0e7490;
+}
