@@ -51,6 +51,16 @@ repos:
         types: [ rust ]
         stages: [ pre-commit ]
         pass_filenames: false
+      - id: site-build
+        name: build the site
+        # The site reads these files, and its build fails when a page in docs/ is missing from the
+        # sidebar. A push to main deploys the site, so a broken build would only show up after the
+        # push. The hook needs `npm ci` run once in site/.
+        entry: npm --prefix site run build
+        files: ^(site/|docs/|README\.md$|Cargo\.toml$)
+        language: system
+        stages: [ pre-commit ]
+        pass_filenames: false
 
   # Rules and the set of files linted live in `.markdownlint-cli2.yaml`, which the tool picks up
   # from the repository root. The hook passes only the staged Markdown files, so a commit is judged

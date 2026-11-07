@@ -80,7 +80,7 @@ function repositoryDocs() {
 }
 
 export default defineConfig({
-	site: 'https://blockwatch.pages.dev',
+	site: 'https://blockwatch-cli.pages.dev',
 	integrations: [
 		repositoryDocs(),
 		starlight({

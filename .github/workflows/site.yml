@@ -1,0 +1,60 @@
+name: site
+
+# A pull request only builds the site. The build fails when a file in docs/ is missing from the sidebar, so the pull
+# request that adds the file fails, not the deploy after the merge. A pull request from a fork gets no secrets, so it
+# couldn't deploy anyway.
+#
+# The paths are everything the site reads: its own folder, the docs, README.md, and Cargo.toml for the version on the
+# landing page. So a release commit deploys too.
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "site/**"
+      - "docs/**"
+      - "README.md"
+      - "Cargo.toml"
+      - ".github/workflows/site.yml"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "site/**"
+      - "docs/**"
+      - "README.md"
+      - "Cargo.toml"
+      - ".github/workflows/site.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Two pushes in a row deploy one after the other. Cancelling a deploy halfway could leave the older build live.
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          # Astro needs Node 22.23.4 or newer.
+          node-version: 24
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - name: Deploy to Cloudflare Pages
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: site
+          # Cloudflare treats a deploy as production only when its branch is the project's production branch.
+          command: pages deploy dist --project-name=blockwatch-cli --branch=main
