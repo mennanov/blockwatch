@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.18.0] - 2026-11-07
+
 ### Added
 
 - Symbols in CSS files (`.css`). `theme.css#/:root/--brand` points at the value of `--brand` in the `:root` rule, and
