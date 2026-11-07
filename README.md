@@ -7,8 +7,8 @@
 
 [//]: # (<block name="pitch">)
 Some parts of a codebase have to change together: a function and its docs, or a value duplicated across configs.
-blockwatch lets you write those rules in comments, right next to the code. If they fall out of sync, your pre-commit
-hook or CI run fails.
+blockwatch lets you write those rules in comments, right next to the code, or in `blockwatch.toml`. If they fall out of
+sync, your pre-commit hook or CI run fails.
 
 Supports [37 languages](#supported-languages) and their common file names, such as `Gemfile` or `.mjs`.
 
@@ -42,44 +42,57 @@ future change, add blockwatch to your [pre-commit hook or CI](#ci-integration).
 
 ## How it works
 
-A block is a pair of tags inside comments around some lines of code. The rules go in the start tag. In this example, the
-enum variants must match the list in `README.md`. Each block uses `same-as-pattern` to pick the values to compare. Here,
-`\w+` matches each word, so commas and dashes don't count:
+A block is a pair of tags inside comments around some lines of code. The rules go in the start tag. A file that can't
+hold a comment, such as JSON, gets its rules from `blockwatch.toml` instead.
 
-**src/lib.rs**:
+In this example, a web service listens on port 8080, and three files must agree on that number.
 
-```rust
-pub enum Language {
-    // <block name="languages" same-as="README.md:supported-languages" same-as-pattern="\w+">
-    Rust,
-    Python,
-    // </block>
+**app/settings.py** holds the value. It needs no tag, because the other files point at the constant by its name,
+`app/settings.py#/PORT`:
+
+```python
+PORT = 8080
+```
+
+**Dockerfile** wraps the line in a block. The pattern `\d+` picks `8080` out of `EXPOSE 8080`:
+
+```dockerfile
+FROM python:3.13-slim
+# <block name="port" same-as="app/settings.py#/PORT" same-as-pattern="\d+">
+EXPOSE 8080
+# </block>
+```
+
+**deploy.json** can't hold a comment:
+
+```json
+{
+  "name": "web",
+  "port": 8080
 }
 ```
 
-**README.md**:
+So **blockwatch.toml** declares its block, around the `port` key:
 
-```markdown
-<!-- <block name="supported-languages" same-as-pattern="\w+"> -->
-
-- Rust
-- Python
-
-<!-- </block> -->
+```toml
+[[block]]
+target = 'deploy.json#/port'
+same-as = 'app/settings.py#/PORT'
 ```
 
-If you add a `Go` variant to the enum without updating `README.md`, `blockwatch` fails with exit code 1 and this
-message:
+If you change `PORT` to `9090` and forget the other two files, `blockwatch` fails with exit code 1 and these messages:
 
 ```text
-Block src/lib.rs:languages at line 2 disagrees with README.md:supported-languages: ["Rust", "Python", "Go"] != ["Rust", "Python"]
+Block Dockerfile:port at line 2 disagrees with app/settings.py#/PORT: ["8080"] != ["9090"]
+Block deploy.json:(unnamed) at line 1 of "blockwatch.toml" disagrees with app/settings.py#/PORT: ["8080"] != ["9090"]
 ```
 
-The output shows the values on each side. Add `Go` to `README.md` too, and the run passes.
+The output shows the values on each side. Update both files, and the run passes.
 
-Because `same-as` compares block contents directly, it doesn't need a diff. Running `blockwatch` on its own finds
-mismatches anywhere in the repository. The [other validators](#validators) make code and docs change together, keep
-lists sorted, and more.
+A name after `#` points at a [symbol](docs/symbols.md): a constant in code, a key in JSON, TOML or YAML, a Markdown
+section, and more. Because `same-as` compares values directly, it doesn't need a diff. Running `blockwatch` on its own
+finds mismatches anywhere in the repository. The [other validators](#validators) make code and docs change together,
+keep lists sorted, and more.
 
 ## Validators
 
@@ -178,7 +191,7 @@ git diff --patch HEAD | blockwatch --diff --only-changed
 blockwatch list
 
 # Show what each validator of one named block read
-blockwatch explain src/lib.rs:languages
+blockwatch explain Dockerfile:port
 ```
 
 Rules live in comments, next to the code they describe. Settings that apply to the whole project, such as ignored
@@ -192,15 +205,15 @@ disable = ['check-ai']
 ino = 'cpp'
 ```
 
-The config file can also declare [blocks](docs/cli.md#blocks-in-the-config-file) instead of comment tags: around a key
-in a JSON, TOML, or YAML file, around the text a regex matches, or around a whole file. That is how a file that can't
-hold a tag gets rules, such as `package.json`, a prompt, or a module that a build copies as it is.
+The config file can also declare [blocks](docs/cli.md#blocks-in-the-config-file), as in [How it works](#how-it-works):
+around a symbol, around the text a regex matches, or around a whole file. That is how a file that can't hold a tag gets
+rules, such as `package.json`, a prompt, or a module that a build copies as it is.
 
 To keep a known violation from failing the run without editing the source, pass its `address` from the output to
-`--suppress`. The violation is still reported. For the failure in [How it works](#how-it-works):
+`--suppress`. The violation is still reported. For the `Dockerfile` failure in [How it works](#how-it-works):
 
 ```shell
-blockwatch --suppress src/lib.rs:languages:same-as:270d21b4
+blockwatch --suppress Dockerfile:port:same-as:1037fd9c
 ```
 
 A shorter address like `src/lib.rs` covers more violations. See
