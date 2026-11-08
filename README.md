@@ -1,4 +1,4 @@
-# blockwatch
+# <img src="site/src/assets/logo.svg" alt="" width="32" height="32" align="absmiddle"> blockwatch
 
 [![Build Status](https://github.com/mennanov/blockwatch/actions/workflows/rust.yml/badge.svg)](https://github.com/mennanov/blockwatch/actions)
 [![codecov](https://codecov.io/gh/mennanov/blockwatch/graph/badge.svg?token=LwUfGTZ551)](https://codecov.io/gh/mennanov/blockwatch)
