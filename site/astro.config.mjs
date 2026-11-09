@@ -3,6 +3,7 @@ import { defineConfig } from 'astro/config';
 import path from 'node:path';
 import starlight from '@astrojs/starlight';
 import { sourcePaths, syncDocs } from './scripts/sync-docs.mjs';
+import { umamiScript } from './src/lib/analytics.mjs';
 
 // Every published page must be in this list. The build fails otherwise, so a new file in docs/ can't end up on the
 // site with no way to reach it.
@@ -80,7 +81,7 @@ function repositoryDocs() {
 }
 
 export default defineConfig({
-	site: 'https://blockwatch-cli.pages.dev',
+	site: 'https://blockwatch.sh',
 	integrations: [
 		repositoryDocs(),
 		starlight({
@@ -88,6 +89,7 @@ export default defineConfig({
 			description: 'A linter that keeps code, docs and configs that must change together in sync.',
 			logo: { src: './src/assets/logo.svg', replacesTitle: false },
 			favicon: '/favicon.svg',
+			head: [{ tag: 'script', attrs: umamiScript }],
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/mennanov/blockwatch' }],
 			customCss: [
 				'@fontsource-variable/geist',

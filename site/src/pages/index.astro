@@ -7,6 +7,7 @@ import logo from '../assets/logo.svg?raw';
 import Icon from '../components/Icon.astro';
 import { githubIcon, installIcon, languageIcon } from '../lib/icons';
 import { agentPrompt, installs, languages, license, pluginInstall, validators, version } from '../lib/repo';
+import { umamiScript } from '../lib/analytics.mjs';
 
 const title = 'blockwatch: keep code, docs and configs in sync';
 const description = `Write a rule in a comment next to the code. When a change breaks it, your pre-commit hook or CI fails. ${languages.length} languages, free and open source.`;
@@ -115,6 +116,7 @@ const faq = [
 		<meta property="og:title" content={title} />
 		<meta property="og:description" content={description} />
 		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+		<script is:inline {...umamiScript}></script>
 		<script is:inline>
 			// Starlight saves the reader's theme choice under this key, so the landing page follows the docs.
 			try {
@@ -149,9 +151,9 @@ const faq = [
 					fails.
 				</p>
 				<div class="actions">
-					<a class="button primary" href="#install" data-event="install-click">Install</a>
+					<a class="button primary" href="#install" data-umami-event="install-click">Install</a>
 					<a class="button" href="/docs/">Read the docs</a>
-					<a class="button" href="https://github.com/mennanov/blockwatch" data-event="github-click"
+					<a class="button" href="https://github.com/mennanov/blockwatch" data-umami-event="github-click"
 						><Icon icon={githubIcon} />View on GitHub</a
 					>
 				</div>
@@ -238,7 +240,7 @@ same-as <span class="tk-k">=</span> <span class="tk-s">'app/settings.py#/PORT'</
 							installs.map((install, i) => (
 								<div class="copy-box" data-panel={i} hidden={i !== 0}>
 									<Code code={install.command} lang="shell" theme="css-variables" />
-									<button class="copy" data-copy={install.command} data-event={`copy-install-${install.label.toLowerCase()}`}>
+									<button class="copy" data-copy={install.command} data-umami-event={`copy-install-${install.label.toLowerCase()}`}>
 										Copy
 									</button>
 								</div>
@@ -251,7 +253,7 @@ same-as <span class="tk-k">=</span> <span class="tk-s">'app/settings.py#/PORT'</
 						<p>Paste this prompt into Claude Code, Codex, Cursor or any other agent:</p>
 						<div class="copy-box prompt-box">
 							<code>{agentPrompt}</code>
-							<button class="copy" data-copy={agentPrompt} data-event="copy-agent-prompt">Copy</button>
+							<button class="copy" data-copy={agentPrompt} data-umami-event="copy-agent-prompt">Copy</button>
 						</div>
 						<p class="muted">
 							Review the blocks it adds and commit them. The skill stays in the project, so later agents know the rules
@@ -409,9 +411,9 @@ same-as = 'app/settings.py#/PORT'`}
 				<h2>Catch the files you forgot to change</h2>
 				<p class="section-lead">Install blockwatch, then let your agent add the first blocks.</p>
 				<div class="actions">
-					<a class="button primary" href="#install" data-event="install-click-bottom">Install</a>
+					<a class="button primary" href="#install" data-umami-event="install-click-bottom">Install</a>
 					<a class="button" href="/docs/">Read the docs</a>
-					<a class="button" href="https://github.com/mennanov/blockwatch" data-event="github-click-bottom"
+					<a class="button" href="https://github.com/mennanov/blockwatch" data-umami-event="github-click-bottom"
 						><Icon icon={githubIcon} />View on GitHub</a
 					>
 				</div>
