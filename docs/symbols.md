@@ -49,6 +49,7 @@ declares, instead of tags in a comment.
 | Shell            | `.sh`, `.bash`, `.bashrc`, `.bash_profile`, `.envrc`                                                        | [Shell](#shell)                                         |
 | Makefile         | `Makefile`, `GNUmakefile`, `makefile`, `.mk`, `.mak`                                                        | [Makefile](#makefile)                                   |
 | Dart             | `.dart`                                                                                                     | [Dart](#dart)                                           |
+| Dockerfile       | `Dockerfile`, `Containerfile`, `.dockerfile`, `.containerfile`                                              | [Dockerfile](#dockerfile)                               |
 
 <!-- </block> -->
 
@@ -1343,6 +1344,63 @@ extension StringX on String { bool get isBlank => trim().isEmpty; }
   character, such as `'\u{D800}'`, stops the run.
 - **A syntax error stops the run for the member that holds it, and for the type around it.** The other members still
   resolve.
+
+<!-- </block> -->
+
+## Dockerfile
+
+<!-- <block name="dockerfile-paths"> -->
+
+```dockerfile
+# syntax=docker/dockerfile:1
+ARG GO_VERSION=1.25
+ARG BASE="debian:bookworm-slim"
+
+FROM golang:${GO_VERSION}-alpine AS builder
+ARG GO_VERSION
+ARG TARGETOS TARGETARCH=amd64
+ENV CGO_ENABLED=0 GOFLAGS="-mod=vendor"
+ENV LEGACY some value
+LABEL org.opencontainers.image.version="2.1.0"
+RUN go build -o /app ./cmd/app
+
+FROM ghcr.io/astral-sh/uv:0.13.5 AS uv
+
+FROM ${BASE}
+ENV APP_HOME="/srv/app" PATH="${APP_HOME}/bin:${PATH}"
+COPY --from=builder /app /app
+ENTRYPOINT ["/app"]
+```
+
+| Path                                         | Points at                                          |
+|----------------------------------------------|----------------------------------------------------|
+| `#/GO_VERSION`                               | `1.25`                                             |
+| `#/BASE`                                     | `debian:bookworm-slim`                             |
+| `#/builder`                                  | `golang:${GO_VERSION}-alpine`, as written          |
+| `#/builder/GO_VERSION`                       | not found: it has no default                       |
+| `#/builder/TARGETARCH`                       | `amd64`                                            |
+| `#/builder/CGO_ENABLED`                      | `0`                                                |
+| `#/builder/GOFLAGS`                          | `-mod=vendor`                                      |
+| `#/builder/LEGACY`                           | `some value`                                       |
+| `#/builder/org.opencontainers.image.version` | `2.1.0`                                            |
+| `#/uv`                                       | `ghcr.io/astral-sh/uv:0.13.5`                      |
+| `#/APP_HOME`                                 | `/srv/app`                                         |
+| `#/PATH`                                     | `"${APP_HOME}/bin:${PATH}"`, as written            |
+
+- **Each `ARG` with a default, each `ENV` and each `LABEL` is a symbol, and so is each named stage.**
+- **A named stage is a path segment. An unnamed stage is not.** `FROM ... AS builder` puts its names under `#/builder/`.
+  The names of an unnamed stage sit at the top level, next to the `ARG`s before the first `FROM`.
+- **A named stage's value is its image**, with its tag and digest, as written: `#/uv` gives
+  `ghcr.io/astral-sh/uv:0.13.5`. An image in `COPY --from=...` and an unnamed stage have no symbol.
+- **An `ARG` without a default is not a symbol.** An empty default, such as `ARG NAME=`, gives an empty string.
+- **An `ARG` and an `ENV` with one name in a stage are defined twice**, and so are names repeated across unnamed stages.
+  Wrap the one you mean in a block instead.
+- **In `ENV A=1 B=2` and `ARG A=1 B=2`, each name covers only its own pair.** In `FROM`, the symbol covers the whole
+  line.
+- **Strings decode quotes and line continuations.** `"..."` reads escapes, and `'...'` keeps text as written. Any value
+  with `$NAME` or `${...}` stays as written, with its quotes.
+- **A `# escape=` directive at the top sets the escape character**, usually to a backtick for Windows images.
+- **Instructions after `ONBUILD`, other instructions and comments are not symbols.**
 
 <!-- </block> -->
 

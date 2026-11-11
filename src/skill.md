@@ -162,8 +162,9 @@ Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`
 `.star`, `BUILD`, `BUCK`, `WORKSPACE`, `Tiltfile`), Rust (`.rs`), TypeScript (`.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`),
 JavaScript (`.js`, `.mjs`, `.cjs`, `.jsx`), Java (`.java`), C# (`.cs`), Kotlin (`.kt`, `.kts`), Swift (`.swift`),
 Protocol Buffers (`.proto`), HCL (`.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`), PHP (`.php`, `.phtml`), shell (`.sh`,
-`.bash`, `.bashrc`, `.bash_profile`, `.envrc`), Makefile (`Makefile`, `GNUmakefile`, `makefile`, `.mk`, `.mak`), and
-Dart (`.dart`). A path into any other file fails the run.
+`.bash`, `.bashrc`, `.bash_profile`, `.envrc`), Makefile (`Makefile`, `GNUmakefile`, `makefile`, `.mk`, `.mak`), Dart
+(`.dart`), and Dockerfile (`Dockerfile`, `Containerfile`, `.dockerfile`, `.containerfile`). A path into any other file
+fails the run.
 
 ### Writing a path
 
@@ -488,6 +489,18 @@ type are symbols too: `Config.java#/Config/MAX_PORTS`. In HCL, each block, attri
 - Operators, `external` declarations and local declarations are not symbols.
 - Strings follow Dart's escapes, and adjacent strings, such as `'a' "b"`, are joined. A raw string has no escapes. A
   string with `$name` or `${...}` stays as written. A path to a string that Dart rejects fails the run.
+
+### Dockerfile
+
+- Each `ARG` with a default, each `ENV` and each `LABEL` is a symbol, and so is each named stage.
+- A named stage is a path segment: `FROM ... AS builder` puts its names under `#/builder/`. Names in an unnamed stage
+  sit at the top level.
+- A named stage's value is its image: `#/uv` gives `ghcr.io/astral-sh/uv:0.13.5`.
+- An `ARG` without a default is not a symbol.
+- An `ARG` and an `ENV` with one name in a stage are defined twice, and so are names repeated across unnamed stages.
+- In `ENV A=1 B=2` and `ARG A=1 B=2`, each name covers only its own pair.
+- Strings decode quotes and line continuations. A value with `$NAME` or `${...}` stays as written, with its quotes.
+- A `# escape=` line at the top sets the escape character, such as a backtick for Windows images.
 
 ## The config file (`blockwatch.toml`)
 

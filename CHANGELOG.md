@@ -14,6 +14,10 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Added
 
+- Symbols in Dockerfiles (`Dockerfile`, `Containerfile`, `.dockerfile` and `.containerfile`). `Dockerfile#/GO_VERSION`
+  points at the default value of an `ARG` or the value of an `ENV`, and `#/builder/CGO_ENABLED` at a value in a named
+  stage. Each `ARG` with a default, each `ENV`, each `LABEL` and each named stage is a symbol. See
+  [Dockerfile](docs/symbols.md#dockerfile).
 - Recognize Dockerfiles named with a suffix, such as `Dockerfile.ci` and `Containerfile.prod`.
   `Dockerfile.dockerignore` and `Containerfile.dockerignore` are ignored.
 

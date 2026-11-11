@@ -292,3 +292,10 @@ fn mdx_target_resolves() {
     cmd.arg("tests/testdata/symbol_references/mdx_source.rs");
     cmd.output().unwrap().assert().success();
 }
+
+#[test]
+fn dockerfile_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/dockerfile_source.rs");
+    cmd.output().unwrap().assert().success();
+}
