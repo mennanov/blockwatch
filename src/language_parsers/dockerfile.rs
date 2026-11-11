@@ -50,7 +50,7 @@ impl CodeLanguage for Dockerfile {
                 }
                 let text = joined_lines(node, source);
                 let unquoted = code::between_quotes(&text, "\"")?;
-                let escape = escape_directive(source);
+                let escape = escape_directive(source)?;
                 // Inside double quotes, the escape character before any other character is
                 // kept, as in a shell: `"a\nb"` is `a\nb`.
                 Ok(Some(unescape(unquoted, escape, |next| {
@@ -65,7 +65,7 @@ impl CodeLanguage for Dockerfile {
                 if has_expansion(*node) {
                     return Ok(None);
                 }
-                let escape = escape_directive(source);
+                let escape = escape_directive(source)?;
                 if node_text(node, source).contains(escape) {
                     Ok(Some(unescape(&joined_lines(node, source), escape, |_| {
                         true
@@ -232,12 +232,34 @@ fn has_expansion(node: Node<'_>) -> bool {
 }
 
 /// The escape character for `source`, either `\` or `` ` ``.
-fn escape_directive(source: &str) -> char {
+///
+/// # Errors
+/// Returns an error when Docker would read another escape character, because a `# escape=`
+/// line has a space before its `#`.
+fn escape_directive(source: &str) -> anyhow::Result<char> {
+    let escape = escape_in_directives(source.lines());
+    // The grammar finds the line continuations with `escape`. Decoding with Docker's escape
+    // character instead would mix two sets of rules.
+    if escape_in_directives(
+        source
+            .lines()
+            .map(|line| line.trim_start_matches([' ', '\t'])),
+    ) != escape
+    {
+        anyhow::bail!(
+            "Docker reads the `# escape=` line at the top even with a space before its `#`, but blockwatch can't. Remove the space"
+        );
+    }
+    Ok(escape)
+}
+
+/// The escape character that the directives at the start of `lines` set, or `\` without one.
+fn escape_in_directives<'a>(lines: impl Iterator<Item = &'a str>) -> char {
     // Directives sit only in the comment lines at the top of the file. Any other line, or a
-    // comment that is not a directive, ends them. These rules are the grammar's, so the escape
-    // character is the one the grammar used to find the line continuations.
+    // comment that is not a directive, ends them. These rules are the grammar's. Docker's
+    // rules are the same, except that Docker also allows spaces before the `#`.
     let mut escape = None;
-    for line in source.lines() {
+    for line in lines {
         let Some(text) = line.strip_prefix('#') else {
             break;
         };
@@ -1157,10 +1179,10 @@ ENV SINGLE_BRACED='${FOO}'
         Ok(())
     }
 
-    /// The value of `ENV V=x\y` after `prologue`: `xy` when the escape character is `\`, and
-    /// `x\y` when it is a backtick.
-    fn value_after(prologue: &str) -> anyhow::Result<Option<String>> {
-        let source = format!("{prologue}ENV V=x\\y\n");
+    /// The value of `ENV V=x\y` after `directives`, the comment lines at the top of the file:
+    /// `xy` when the escape character is `\`, and `x\y` when it is a backtick.
+    fn value_after(directives: &str) -> anyhow::Result<Option<String>> {
+        let source = format!("{directives}ENV V=x\\y\n");
         let found = symbols(&dockerfile(&source)?, &source);
         Ok(found
             .into_iter()
@@ -1170,7 +1192,7 @@ ENV SINGLE_BRACED='${FOO}'
 
     #[test]
     fn escape_directive_at_top_parse_symbols_reads_backtick_as_escape() -> anyhow::Result<()> {
-        for prologue in [
+        for directives in [
             "# escape=`\n",
             "#escape=`\n",
             "#  escape =  ` \n",
@@ -1182,9 +1204,9 @@ ENV SINGLE_BRACED='${FOO}'
             "# escape=`\n# escape=\\\n",
         ] {
             assert_eq!(
-                value_after(prologue)?.as_deref(),
+                value_after(directives)?.as_deref(),
                 Some("x\\y"),
-                "{prologue:?}"
+                "{directives:?}"
             );
         }
 
@@ -1194,7 +1216,7 @@ ENV SINGLE_BRACED='${FOO}'
     #[test]
     fn escape_directive_after_end_of_directives_parse_symbols_keeps_backslash() -> anyhow::Result<()>
     {
-        for prologue in [
+        for directives in [
             "\n# escape=`\n",
             "# syntax=docker/dockerfile:1\n\n# escape=`\n",
             "# comment\n# escape=`\n",
@@ -1202,14 +1224,37 @@ ENV SINGLE_BRACED='${FOO}'
             "# unknown=value\n# escape=`\n",
             "# syntax=\n# escape=`\n",
             "# escape2=`\n",
-            // Docker reads this directive, but the grammar does not, and the grammar decides
-            // where the lines of a value end.
-            " # escape=`\n",
+            " # escape=\\\n",
+            "# comment\n # escape=`\n",
         ] {
             assert_eq!(
-                value_after(prologue)?.as_deref(),
+                value_after(directives)?.as_deref(),
                 Some("xy"),
-                "{prologue:?}"
+                "{directives:?}"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn indented_escape_directive_parse_symbols_marks_values_unresolved() -> anyhow::Result<()> {
+        for (directives, value) in [
+            (" # escape=`\n", "x\\y"),
+            ("\t# escape=`\n", "x\\y"),
+            ("# syntax=docker/dockerfile:1\n # escape=`\n", "x\\y"),
+            (" # escape=`\n", "\"x\""),
+        ] {
+            let source = format!("{directives}ENV V={value}\n");
+            assert_eq!(
+                unresolved(&dockerfile(&source)?, &source, "/V")?,
+                format!(
+                    "blockwatch can't decode the string at line {}, column 7: Docker reads the \
+                     `# escape=` line at the top even with a space before its `#`, but \
+                     blockwatch can't. Remove the space",
+                    directives.lines().count() + 1
+                ),
+                "{directives:?}"
             );
         }
 

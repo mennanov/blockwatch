@@ -1406,7 +1406,9 @@ ENTRYPOINT ["/app"]
   written, with its quotes.
 - **A value that a syntax error cuts short fails to resolve.** The grammar can't read an empty line inside a continued
   value, such as `"a\`, an empty line, then `b"`, although Docker can.
-- **A `# escape=` directive at the top sets the escape character**, usually to a backtick for Windows images.
+- **A `# escape=` directive at the top sets the escape character**, usually to a backtick for Windows images. Write
+  the `#` at the start of its line. Docker also reads it after a space, but blockwatch can't, so its values fail to
+  resolve.
 - **Instructions after `ONBUILD`, other instructions and comments are not symbols.**
 
 <!-- </block> -->
