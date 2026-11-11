@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.18.1] - 2026-11-11
+
 ### Added
 
 - Symbols in Dockerfiles (`Dockerfile`, `Containerfile`, `.dockerfile` and `.containerfile`). `Dockerfile#/GO_VERSION`
