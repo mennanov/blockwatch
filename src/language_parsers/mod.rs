@@ -132,22 +132,67 @@ pub(crate) type SharedLanguageParser = Arc<Mutex<dyn LanguageParser>>;
 pub(crate) struct LanguageParsers {
     /// Parsers keyed by file extension, or by the whole file name for files such as `Dockerfile`.
     by_extension: HashMap<OsString, SharedLanguageParser>,
+    /// Parsers keyed by file name prefix (the portion before the first `.`), for files such as
+    /// `Dockerfile.ci`.
+    by_prefix: HashMap<OsString, PrefixRule>,
     /// Maps an extension to a supported one. For example, `ino` to `cpp` makes `.ino` files parse
     /// as C++.
     extension_mappings: HashMap<OsString, OsString>,
 }
 
-impl From<HashMap<OsString, SharedLanguageParser>> for LanguageParsers {
-    /// The parsers by extension, with no extension mappings.
-    fn from(by_extension: HashMap<OsString, SharedLanguageParser>) -> Self {
+/// A rule for matching files by their name prefix (the portion before the first `.`).
+#[derive(Clone)]
+pub(crate) struct PrefixRule {
+    parser: SharedLanguageParser,
+    excluded_suffixes: Vec<OsString>,
+}
+
+impl PrefixRule {
+    /// A prefix rule that excludes files whose suffix matches or ends with any of `excluded_suffixes`.
+    fn new(parser: SharedLanguageParser, excluded_suffixes: &[&str]) -> Self {
         Self {
-            by_extension,
-            extension_mappings: HashMap::new(),
+            parser,
+            excluded_suffixes: excluded_suffixes.iter().map(OsString::from).collect(),
         }
+    }
+
+    /// Whether `suffix` is allowed by this rule.
+    ///
+    /// Returns `true` if no dot-separated segment in `suffix` matches any of the rule's excluded
+    /// suffixes.
+    fn matches(&self, suffix: &str) -> bool {
+        !self.excluded_suffixes.iter().any(|excluded| {
+            match excluded.to_str() {
+                // Any file containing an excluded segment (such as `dockerignore`), anywhere in its
+                // dot-separated suffix, is excluded. For example, `Dockerfile.dockerignore.old` and
+                // `Dockerfile.ci.dockerignore` are both ignore files rather than Dockerfiles.
+                Some(excluded) => suffix.split('.').any(|segment| segment == excluded),
+                None => false,
+            }
+        })
+    }
+}
+
+impl From<HashMap<OsString, SharedLanguageParser>> for LanguageParsers {
+    /// The parsers by extension, with no extension mappings or prefix rules.
+    fn from(by_extension: HashMap<OsString, SharedLanguageParser>) -> Self {
+        Self::new(by_extension, HashMap::new())
     }
 }
 
 impl LanguageParsers {
+    /// Creates language parsers with `by_extension` and `by_prefix`, with no extension mappings.
+    pub(crate) fn new(
+        by_extension: HashMap<OsString, SharedLanguageParser>,
+        by_prefix: HashMap<OsString, PrefixRule>,
+    ) -> Self {
+        Self {
+            by_extension,
+            by_prefix,
+            extension_mappings: HashMap::new(),
+        }
+    }
+
     /// Uses `extension_mappings` to select a parser for the extensions they map.
     pub(crate) fn with_extension_mappings(
         self,
@@ -167,7 +212,7 @@ impl LanguageParsers {
 
     /// The parser for `file_path`, or `None` if neither its extension nor its file name has one.
     ///
-    /// Tries the extensions from the shortest, then the whole file name.
+    /// Tries the extensions from the shortest, then the whole file name, then prefix rules.
     pub(crate) fn parser_for(&self, file_path: &Path) -> Option<&SharedLanguageParser> {
         let file_name = file_path.file_name()?.to_str()?;
 
@@ -180,7 +225,21 @@ impl LanguageParsers {
             }
         }
 
-        self.for_extension(OsStr::new(file_name))
+        if let Some(parser) = self.for_extension(OsStr::new(file_name)) {
+            return Some(parser);
+        }
+
+        let (prefix, suffix) = file_name.split_once('.')?;
+        let prefix = self
+            .extension_mappings
+            .get(OsStr::new(prefix))
+            .map_or(OsStr::new(prefix), OsString::as_os_str);
+        let rule = self.by_prefix.get(prefix)?;
+        if rule.matches(suffix) {
+            Some(&rule.parser)
+        } else {
+            None
+        }
     }
 
     /// The parser for `extension`, after the extension mappings are applied.
@@ -207,6 +266,7 @@ pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
     let css_parser = parser(css::parser()?);
     let dart_parser = parser(dart::parser()?);
     let dockerfile_parser = parser(dockerfile::parser()?);
+    let prefix_dockerfile_parser = Arc::clone(&dockerfile_parser);
     let elixir_parser = parser(elixir::parser()?);
     let go_parser = parser(go::parser()?);
     let go_module_files_parser = parser(go::module_files_parser()?);
@@ -241,7 +301,7 @@ pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
     let yaml_parser = parser(yaml::parser()?);
     let zsh_parser = parser(bash::zsh_parser()?);
 
-    Ok(LanguageParsers::from(HashMap::from([
+    let by_extension = HashMap::from([
         /* <block name="language-extensions"
         affects="README.md:supported-grammar, src/blocks.rs:supported-extensions"
         keep-sorted keep-unique='\("(?P<value>[^"]+)"'> */
@@ -368,7 +428,24 @@ pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
         ("zsh".into(), Arc::clone(&zsh_parser)),
         ("zshrc".into(), zsh_parser),
         // </block>
-    ])))
+    ]);
+
+    let by_prefix = HashMap::from([
+        /* <block name="language-prefixes"
+        same-as="src/blocks.rs:supported-prefixes"
+        same-as-pattern='"(?P<value>[^"]+)"\.into\(\)'> */
+        (
+            "Containerfile".into(),
+            PrefixRule::new(Arc::clone(&prefix_dockerfile_parser), &["dockerignore"]),
+        ),
+        (
+            "Dockerfile".into(),
+            PrefixRule::new(prefix_dockerfile_parser, &["dockerignore"]),
+        ),
+        // </block>
+    ]);
+
+    Ok(LanguageParsers::new(by_extension, by_prefix))
 }
 
 /// Parses comment string from a source code by returning an iterator of `Comment`s.
@@ -1033,5 +1110,149 @@ mod tests {
             "unexpected error message: {err}"
         );
         Ok(())
+    }
+
+    struct StubParser;
+
+    impl LanguageParser for StubParser {
+        fn parse_blocks<'a>(
+            &'a mut self,
+            _contents: &'a str,
+        ) -> Box<dyn Iterator<Item = anyhow::Result<Block>> + 'a> {
+            Box::new(std::iter::empty())
+        }
+
+        fn parse_symbols(&mut self, _contents: &str) -> anyhow::Result<Symbols> {
+            anyhow::bail!("stub parser does not support symbols")
+        }
+    }
+
+    fn stub_parser() -> SharedLanguageParser {
+        Arc::new(Mutex::new(StubParser))
+    }
+
+    fn parsers_with_prefix(
+        prefix: &str,
+        excluded_suffixes: &[&str],
+    ) -> (LanguageParsers, SharedLanguageParser) {
+        let parser = stub_parser();
+        let parsers = LanguageParsers::new(
+            HashMap::new(),
+            HashMap::from([(
+                prefix.into(),
+                PrefixRule::new(Arc::clone(&parser), excluded_suffixes),
+            )]),
+        );
+        (parsers, parser)
+    }
+
+    #[test]
+    fn file_with_prefix_and_suffix_resolves_to_parser() {
+        let (parsers, parser) = parsers_with_prefix("prefix", &[]);
+
+        let resolved = parsers
+            .parser_for(Path::new("prefix.variant"))
+            .expect("prefix.variant must resolve");
+
+        assert!(Arc::ptr_eq(resolved, &parser));
+    }
+
+    #[test]
+    fn file_with_prefix_and_nested_suffix_resolves_to_parser() {
+        let (parsers, parser) = parsers_with_prefix("prefix", &[]);
+
+        let resolved = parsers
+            .parser_for(Path::new("prefix.sub.variant"))
+            .expect("prefix.sub.variant must resolve");
+
+        assert!(Arc::ptr_eq(resolved, &parser));
+    }
+
+    #[test]
+    fn nested_file_with_prefix_and_suffix_resolves_to_parser() {
+        let (parsers, parser) = parsers_with_prefix("prefix", &[]);
+
+        let resolved = parsers
+            .parser_for(Path::new("nested/prefix.variant"))
+            .expect("nested/prefix.variant must resolve");
+
+        assert!(Arc::ptr_eq(resolved, &parser));
+    }
+
+    #[test]
+    fn nested_file_with_prefix_and_nested_suffix_resolves_to_parser() {
+        let (parsers, parser) = parsers_with_prefix("prefix", &[]);
+
+        let resolved = parsers
+            .parser_for(Path::new("nested/prefix.sub.variant"))
+            .expect("nested/prefix.sub.variant must resolve");
+
+        assert!(Arc::ptr_eq(resolved, &parser));
+    }
+
+    #[test]
+    fn prefix_with_excluded_suffix_has_no_parser() {
+        let (parsers, _) = parsers_with_prefix("prefix", &["excluded"]);
+
+        for file_name in [
+            "prefix.excluded",
+            "prefix.sub.excluded",
+            "prefix.excluded.sub",
+            "nested/prefix.excluded",
+            "nested/prefix.sub.excluded",
+            "nested/prefix.excluded.sub",
+        ] {
+            assert!(
+                parsers.parser_for(Path::new(file_name)).is_none(),
+                "expected no parser for {file_name}"
+            );
+        }
+    }
+
+    #[test]
+    fn name_sharing_prefix_without_dot_has_no_parser() {
+        let (parsers, _) = parsers_with_prefix("prefix", &[]);
+
+        for file_name in ["prefixWithoutDot", "NotAPrefix.variant"] {
+            assert!(
+                parsers.parser_for(Path::new(file_name)).is_none(),
+                "expected no parser for {file_name}"
+            );
+        }
+    }
+
+    #[test]
+    fn known_extension_takes_precedence_over_prefix() {
+        let extension_parser = stub_parser();
+        let prefix_parser = stub_parser();
+        let parsers = LanguageParsers::new(
+            HashMap::from([("ext".into(), Arc::clone(&extension_parser))]),
+            HashMap::from([(
+                "prefix".into(),
+                PrefixRule::new(Arc::clone(&prefix_parser), &[]),
+            )]),
+        );
+
+        let resolved = parsers
+            .parser_for(Path::new("prefix.ext"))
+            .expect("prefix.ext must resolve");
+
+        assert!(
+            Arc::ptr_eq(resolved, &extension_parser),
+            "expected extension parser to win over prefix parser"
+        );
+    }
+
+    #[test]
+    fn mapped_prefix_resolves_to_parser() {
+        let (parsers, parser) = parsers_with_prefix("target", &[]);
+        let parsers =
+            parsers.with_extension_mappings(HashMap::from([("alias".into(), "target".into())]));
+
+        let resolved = parsers
+            .parser_for(Path::new("alias.variant"))
+            .expect("alias.variant must resolve");
+
+        assert!(Arc::ptr_eq(resolved, &parser));
     }
 }
