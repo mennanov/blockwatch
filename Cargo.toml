@@ -11,6 +11,12 @@ categories = ["development-tools", "command-line-utilities"]
 # The website is built and hosted on its own; the crate doesn't need it.
 exclude = ["site/"]
 
+# `cargo binstall` checks each release archive against this key. The release workflow signs the archives with the
+# secret half. A version published with a key that didn't sign its archives can't be installed with binstall.
+[package.metadata.binstall.signing]
+algorithm = "minisign"
+pubkey = "RWQAy2A3WWnUR2c5oDQ343TyWusiMS1fWYC5G6bufHV7GbByRW0DQf9i"
+
 [workspace]
 members = ["fuzz"]
 # Only build/test the blockwatch crate by default. The `fuzz` member (and its

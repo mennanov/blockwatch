@@ -302,6 +302,15 @@ The GitHub Actions workflows in `.github/workflows/` build releases with `cargo-
 `dist-workspace.toml`. `cargo release` bumps the version in `Cargo.toml`, in a commit titled `chore: Release`, and
 tags that commit `vX.Y.Z`.
 
+`release.yml` is generated. Change `dist-workspace.toml`, then run `dist generate`. It calls `sign-archives.yml`,
+which signs each archive with minisign. The secret key is `MINISIGN_SECRET_KEY` in the `release` environment, which
+only `v*` tags can use. The public key is in `Cargo.toml`, where `cargo binstall` reads it, and in `SECURITY.md`. If
+signing fails, no GitHub release is created, but the crate is already on crates.io. Fix the cause and release a new
+patch version.
+
+Each action in a workflow is pinned to a full commit, with its version in a comment. Dependabot bumps both, except
+in `release.yml`, whose pins are in `dist-workspace.toml`. The one exception is `mennanov/blockwatch-action@v1`.
+
 `pypi.yml` builds the same tag for PyPI, as `blockwatch-cli`. The pre-commit hooks install that package through the
 root `setup.py`. So if the upload for a tag fails, the hooks at that tag can't install.
 

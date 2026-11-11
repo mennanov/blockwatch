@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Invoked without file arguments, the linter reads `.markdownlint-cli2.yaml` for both the
       # rules and the set of files, so a pull request is judged by exactly the same configuration as
       # a local commit. Unlike the hook, which sees only what is staged, this run covers every file:

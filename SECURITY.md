@@ -8,6 +8,37 @@ To update, run the command you installed blockwatch with, such as `brew upgrade 
 `cargo install blockwatch`. Read [`CHANGELOG.md`](CHANGELOG.md) first: before 1.0, a new minor version can change flags
 and behavior.
 
+## Verifying a Download
+
+Each archive in a release after 0.18.0 has a [minisign](https://jedisct1.github.io/minisign/) signature next to it,
+such as `blockwatch-x86_64-unknown-linux-gnu.tar.xz.sig`. The public key is:
+
+```text
+RWQAy2A3WWnUR2c5oDQ343TyWusiMS1fWYC5G6bufHV7GbByRW0DQf9i
+```
+
+`cargo binstall blockwatch` reads this key from the crate and checks the signature on its own. By default it still
+falls back to other sources when the release has no archive for your platform. To install only an archive this
+project signed, and fail otherwise:
+
+```shell
+cargo binstall --only-signed --disable-strategies quick-install,compile blockwatch
+```
+
+To check an archive you downloaded yourself:
+
+```shell
+# The signature, with the public key above.
+minisign -V -P RWQAy2A3WWnUR2c5oDQ343TyWusiMS1fWYC5G6bufHV7GbByRW0DQf9i \
+  -m blockwatch-x86_64-unknown-linux-gnu.tar.xz -x blockwatch-x86_64-unknown-linux-gnu.tar.xz.sig
+
+# That the release workflow of this repository built the file.
+gh attestation verify blockwatch-x86_64-unknown-linux-gnu.tar.xz --repo mennanov/blockwatch
+
+# That the file belongs to the release. This also works for 0.18.0 and older releases.
+gh release verify-asset v0.18.0 blockwatch-x86_64-unknown-linux-gnu.tar.xz --repo mennanov/blockwatch
+```
+
 ## Reporting a Vulnerability
 
 Don't report a vulnerability in a public issue, pull request or discussion.

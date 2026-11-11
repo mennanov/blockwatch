@@ -20,6 +20,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   [Dockerfile](docs/symbols.md#dockerfile).
 - Recognize Dockerfiles named with a suffix, such as `Dockerfile.ci` and `Containerfile.prod`.
   `Dockerfile.dockerignore` and `Containerfile.dockerignore` are ignored.
+- Each release archive has a minisign signature, such as `blockwatch-x86_64-unknown-linux-gnu.tar.xz.sig`.
+  `cargo binstall blockwatch` checks it against the public key in the crate. Each release file also has a build
+  attestation, which `gh attestation verify` checks. See [Verifying a Download](SECURITY.md#verifying-a-download).
 
 ## [0.18.0] - 2026-11-07
 

@@ -154,7 +154,8 @@ cargo install blockwatch
 
 <!-- </block> -->
 
-Prebuilt binaries are on the [Releases](https://github.com/mennanov/blockwatch/releases) page.
+Prebuilt binaries are on the [Releases](https://github.com/mennanov/blockwatch/releases) page. Each archive is signed.
+See [Verifying a Download](SECURITY.md#verifying-a-download).
 
 ## AI Agents
 

@@ -1,0 +1,78 @@
+# Signs each release archive with minisign, so `cargo binstall` can check a download against the public key in
+# Cargo.toml. release.yml calls it after the builds and uploads the signatures with the archives.
+#
+# This job only signs. It never builds or runs code from the repository, so the secret key stays away from the
+# dependencies' build scripts.
+name: Sign archives
+
+on:
+  workflow_call:
+    inputs:
+      # dist passes its plan to every custom job. This one doesn't need it.
+      plan:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    # The secret key lives in this environment, which only a version tag can use. A workflow on a branch can't read it.
+    environment: release
+    steps:
+      # Only for the public key in Cargo.toml.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fetch the archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: artifacts-build-local-*
+          path: archives
+          merge-multiple: true
+      - name: Install minisign
+        run: sudo apt-get update && sudo apt-get install --yes minisign
+      - name: Sign and verify
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$MINISIGN_SECRET_KEY" ]; then
+            echo "error: the MINISIGN_SECRET_KEY secret of the 'release' environment is empty" >&2
+            exit 1
+          fi
+          # The key is written outside the workspace, so no later step can upload it.
+          key="$RUNNER_TEMP/minisign.key"
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          trap 'rm -f "$key"' EXIT
+
+          pubkey=$(sed -n 's/^pubkey = "\(.*\)"$/\1/p' Cargo.toml)
+          if [ -z "$pubkey" ]; then
+            echo "error: Cargo.toml has no 'pubkey' under [package.metadata.binstall.signing]" >&2
+            exit 1
+          fi
+
+          shopt -s nullglob
+          archives=(archives/*.tar.xz archives/*.zip)
+          if [ "${#archives[@]}" -eq 0 ]; then
+            echo "error: the build jobs uploaded no .tar.xz or .zip archive to sign" >&2
+            exit 1
+          fi
+
+          mkdir signatures
+          for archive in "${archives[@]}"; do
+            signature="signatures/$(basename "$archive").sig"
+            # -W reads a key without a password. The step has no terminal to ask for one.
+            minisign -S -W -s "$key" -m "$archive" -x "$signature"
+            # A secret key that doesn't match Cargo.toml would sign archives that binstall then refuses. Checking
+            # here stops the release before it is published.
+            minisign -V -P "$pubkey" -m "$archive" -x "$signature"
+          done
+      # release.yml uploads every file of each `artifacts-*` artifact to the release.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: artifacts-signatures
+          path: signatures/*.sig
+          if-no-files-found: error
