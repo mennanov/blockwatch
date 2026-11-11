@@ -1390,9 +1390,12 @@ ENTRYPOINT ["/app"]
 - **Each `ARG` with a default, each `ENV` and each `LABEL` is a symbol, and so is each named stage.**
 - **A named stage is a path segment. An unnamed stage is not.** `FROM ... AS builder` puts its names under `#/builder/`.
   The names of an unnamed stage sit at the top level, next to the `ARG`s before the first `FROM`.
+- **A stage name keeps its case.** Docker ignores the case, so `--from=builder` finds `AS Builder`, but the path must
+  be `#/Builder/`.
 - **A named stage's value is its image**, with its tag and digest, as written: `#/uv` gives
   `ghcr.io/astral-sh/uv:0.13.5`. An image in `COPY --from=...` and an unnamed stage have no symbol.
-- **An `ARG` without a default is not a symbol.** An empty default, such as `ARG NAME=`, gives an empty string.
+- **An `ARG` without a default is not a symbol.** An `ENV` or a `LABEL` without a value, such as `ENV NAME` alone on
+  its line, fails to resolve. Docker rejects it too. An empty default, such as `ARG NAME=`, gives an empty string.
 - **An `ARG` and an `ENV` with one name in a stage are defined twice**, and so are names repeated across unnamed stages.
   Wrap the one you mean in a block instead.
 - **In `ENV A=1 B=2` and `ARG A=1 B=2`, each name covers only its own pair.** In `FROM`, the symbol covers the whole

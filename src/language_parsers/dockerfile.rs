@@ -152,11 +152,31 @@ fn pair_definitions<'tree>(
         .named_children(&mut cursor)
         .filter(|pair| pair.kind() == pair_kind)
         .filter_map(|pair| {
+            let name = pair.child_by_field_name(name_field)?;
+            let mut cursor = pair.walk();
+            let has_equals = pair.children(&mut cursor).any(|child| child.kind() == "=");
+            let value = match pair.child_by_field_name(value_field) {
+                // Without an `=`, as in `ENV NAME value`, a value starts on the line of its
+                // name, even after a line continuation, which is a part of the value. The
+                // grammar reads `ENV NAME` without a value, which Docker rejects, as a name
+                // whose value is the next line.
+                Some(value)
+                    if !has_equals && value.start_position().row > name.end_position().row =>
+                {
+                    Some(Value::Undecodable(
+                        code::position(&value, source),
+                        anyhow::anyhow!(
+                            "the name has no value on its line, so the grammar read the next line as its value"
+                        ),
+                    ))
+                }
+                _ => pair_value(pair, value_field, source),
+            };
             Some(Definition {
                 parents: stage.into_iter().collect(),
-                names: vec![pair.child_by_field_name(name_field)?],
+                names: vec![name],
                 range: pair.byte_range(),
-                value: pair_value(pair, value_field, source),
+                value,
             })
         })
         .collect()
@@ -213,34 +233,40 @@ fn has_expansion(node: Node<'_>) -> bool {
 
 /// The escape character for `source`, either `\` or `` ` ``.
 fn escape_directive(source: &str) -> char {
+    // Directives sit only in the comment lines at the top of the file. Any other line, or a
+    // comment that is not a directive, ends them. These rules are the grammar's, so the escape
+    // character is the one the grammar used to find the line continuations.
+    let mut escape = None;
     for line in source.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if let Some(rest) = trimmed.strip_prefix('#') {
-            let rest = rest.trim();
-            if let Some(directive) = rest.strip_prefix("escape") {
-                let directive = directive.trim_start();
-                if let Some(val) = directive.strip_prefix('=') {
-                    let val = val.trim();
-                    if val.starts_with('`') {
-                        return '`';
-                    }
-                    if val.starts_with('\\') {
-                        return '\\';
-                    }
-                }
-            }
-            // Docker allows other parser directives such as `# syntax=` before `# escape=`.
-            if !rest.starts_with("syntax") && !rest.starts_with("check") {
-                break;
-            }
-        } else {
+        let Some(text) = line.strip_prefix('#') else {
             break;
+        };
+        match directive(text) {
+            (key, value @ ("\\" | "`")) if key == "escape" && escape.is_none() => {
+                escape = value.chars().next();
+            }
+            (key, value) if (key == "syntax" || key == "check") && !value.is_empty() => {}
+            _ => break,
         }
     }
-    '\\'
+    escape.unwrap_or('\\')
+}
+
+/// The key, in lowercase, and the value of `text`, a comment after its `#`, read as a directive
+/// such as `` escape=` ``. The value is the first word after the `=`, or empty without one.
+fn directive(text: &str) -> (String, &str) {
+    const SPACES: [char; 2] = [' ', '\t'];
+    let text = text.trim_start_matches(SPACES);
+    let (key, rest) = text.split_at(
+        text.find(|c: char| !c.is_ascii_alphabetic())
+            .unwrap_or(text.len()),
+    );
+    let value = rest
+        .trim_start_matches(SPACES)
+        .strip_prefix('=')
+        .and_then(|value| value.trim_start_matches(SPACES).split(SPACES).next())
+        .unwrap_or("");
+    (key.to_ascii_lowercase(), value)
 }
 
 /// The text of `node`, a string, with its lines joined: without each line continuation, and
@@ -753,6 +779,42 @@ b"
     }
 
     #[test]
+    fn name_without_value_on_its_line_parse_symbols_marks_it_unresolved() -> anyhow::Result<()> {
+        for (source, line) in [
+            ("ENV NAME\n", 2),
+            ("ENV NAME\nENV OTHER=1\n", 2),
+            ("ENV NAME\n\nENV OTHER=1\n", 3),
+            ("LABEL NAME\nENV OTHER=1\n", 2),
+        ] {
+            assert_eq!(
+                unresolved(&dockerfile(source)?, source, "/NAME")?,
+                format!(
+                    "blockwatch can't decode the string at line {line}, column 1: the name has no \
+                     value on its line, so the grammar read the next line as its value"
+                ),
+                "{source:?}"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn value_after_line_continuation_parse_symbols_returns_the_value() -> anyhow::Result<()> {
+        let source = "ENV SPACE \\\nvalue\nENV EQUALS=\\\nvalue\n";
+
+        assert_eq!(
+            symbols(&dockerfile(source)?, source),
+            vec![
+                symbol("/SPACE", "SPACE \\\nvalue", Some("value")),
+                symbol("/EQUALS", "EQUALS=\\\nvalue", Some("value")),
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn syntax_error_on_the_next_line_parse_symbols_keeps_the_value() -> anyhow::Result<()> {
         let source = r#"ENV NEXT=1
 UNKNOWN instruction
@@ -817,8 +879,8 @@ LABEL description="v1#2"
     }
 
     #[test]
-    fn double_quoted_string_with_escapes_and_continuation_decodes_correctly() -> anyhow::Result<()>
-    {
+    fn double_quoted_string_parse_symbols_drops_escape_only_before_quote_dollar_and_itself()
+    -> anyhow::Result<()> {
         let source = r#"ENV ESCAPED="hello\"world"
 ENV BACKSLASH="hello\\world"
 ENV DOLLAR="cost\$5"
@@ -854,7 +916,7 @@ line2"
     }
 
     #[test]
-    fn single_quoted_string_decodes_without_reading_escapes() -> anyhow::Result<()> {
+    fn single_quoted_string_parse_symbols_reads_no_escapes() -> anyhow::Result<()> {
         let source = r#"ENV SINGLE='hello\world'
 ENV CONTINUATION='line1\
 line2'
@@ -876,7 +938,7 @@ line2'
     }
 
     #[test]
-    fn file_with_escape_directive_uses_backtick() -> anyhow::Result<()> {
+    fn file_with_escape_directive_parse_symbols_decodes_with_backtick() -> anyhow::Result<()> {
         let source = r#"# escape=`
 ENV WIN_PATH=C:\Windows\Temp
 ENV ESCAPED="hello`"world"
@@ -1007,8 +1069,7 @@ LABEL fourth="a"'b'
     }
 
     #[test]
-    fn double_quoted_and_unquoted_string_with_expansion_keeps_quotes_and_as_written()
-    -> anyhow::Result<()> {
+    fn string_with_expansion_parse_symbols_keeps_value_as_written() -> anyhow::Result<()> {
         let source = r#"ENV DOUBLE="$FOO"
 ENV BRACED="${FOO:-default}"
 ENV UNQUOTED=$FOO
@@ -1037,7 +1098,7 @@ ENV UNQUOTED_BRACED=${FOO:-default}
     }
 
     #[test]
-    fn single_quoted_string_with_dollar_keeps_literal_dollar() -> anyhow::Result<()> {
+    fn single_quoted_string_with_dollar_parse_symbols_keeps_dollar() -> anyhow::Result<()> {
         let source = r#"ENV SINGLE='$FOO'
 ENV SINGLE_BRACED='${FOO}'
 "#;
@@ -1054,8 +1115,7 @@ ENV SINGLE_BRACED='${FOO}'
     }
 
     #[test]
-    fn stage_with_dollar_in_name_is_not_a_symbol_and_names_sit_at_top_level() -> anyhow::Result<()>
-    {
+    fn stage_with_dollar_in_name_parse_symbols_puts_its_names_at_top_level() -> anyhow::Result<()> {
         let source = "FROM alpine:3.20 AS $stage\nARG PORT=8080\n";
 
         assert_eq!(
@@ -1067,7 +1127,7 @@ ENV SINGLE_BRACED='${FOO}'
     }
 
     #[test]
-    fn unquoted_string_with_escape_and_line_continuation_decodes_correctly() -> anyhow::Result<()> {
+    fn unquoted_string_with_escape_parse_symbols_drops_escape_character() -> anyhow::Result<()> {
         let source = "ENV ESCAPED=hello\\ world\nENV CONTINUATION=line1\\\nline2\n";
 
         assert_eq!(
@@ -1097,18 +1157,61 @@ ENV SINGLE_BRACED='${FOO}'
         Ok(())
     }
 
-    #[test]
-    fn escape_directive_with_leading_empty_line_uses_backtick() -> anyhow::Result<()> {
-        let source = "\n# escape=`\nENV WIN_PATH=C:\\Windows\\Temp\n";
+    /// The value of `ENV V=x\y` after `prologue`: `xy` when the escape character is `\`, and
+    /// `x\y` when it is a backtick.
+    fn value_after(prologue: &str) -> anyhow::Result<Option<String>> {
+        let source = format!("{prologue}ENV V=x\\y\n");
+        let found = symbols(&dockerfile(&source)?, &source);
+        Ok(found
+            .into_iter()
+            .find(|(path, _, _)| path == "/V")
+            .and_then(|(_, _, value)| value))
+    }
 
-        assert_eq!(
-            symbols(&dockerfile(source)?, source),
-            vec![symbol(
-                "/WIN_PATH",
-                "WIN_PATH=C:\\Windows\\Temp",
-                Some("C:\\Windows\\Temp")
-            )]
-        );
+    #[test]
+    fn escape_directive_at_top_parse_symbols_reads_backtick_as_escape() -> anyhow::Result<()> {
+        for prologue in [
+            "# escape=`\n",
+            "#escape=`\n",
+            "#  escape =  ` \n",
+            "# Escape=`\n",
+            "# syntax=docker/dockerfile:1\n# escape=`\n",
+            "# check=skip=all\n# escape=`\n",
+            "# syntax=docker/dockerfile:1\r\n# escape=`\r\n",
+            // Docker rejects a second escape directive. The grammar keeps the first one.
+            "# escape=`\n# escape=\\\n",
+        ] {
+            assert_eq!(
+                value_after(prologue)?.as_deref(),
+                Some("x\\y"),
+                "{prologue:?}"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn escape_directive_after_end_of_directives_parse_symbols_keeps_backslash() -> anyhow::Result<()>
+    {
+        for prologue in [
+            "\n# escape=`\n",
+            "# syntax=docker/dockerfile:1\n\n# escape=`\n",
+            "# comment\n# escape=`\n",
+            "# syntax is great\n# escape=`\n",
+            "# unknown=value\n# escape=`\n",
+            "# syntax=\n# escape=`\n",
+            "# escape2=`\n",
+            // Docker reads this directive, but the grammar does not, and the grammar decides
+            // where the lines of a value end.
+            " # escape=`\n",
+        ] {
+            assert_eq!(
+                value_after(prologue)?.as_deref(),
+                Some("xy"),
+                "{prologue:?}"
+            );
+        }
 
         Ok(())
     }

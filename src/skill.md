@@ -494,7 +494,7 @@ type are symbols too: `Config.java#/Config/MAX_PORTS`. In HCL, each block, attri
 
 - Each `ARG` with a default, each `ENV` and each `LABEL` is a symbol, and so is each named stage.
 - A named stage is a path segment: `FROM ... AS builder` puts its names under `#/builder/`. Names in an unnamed stage
-  sit at the top level.
+  sit at the top level. A stage name keeps its case: `AS Builder` gives `#/Builder/`, though Docker ignores the case.
 - A named stage's value is its image: `#/uv` gives `ghcr.io/astral-sh/uv:0.13.5`.
 - An `ARG` without a default is not a symbol.
 - An `ARG` and an `ENV` with one name in a stage are defined twice, and so are names repeated across unnamed stages.
