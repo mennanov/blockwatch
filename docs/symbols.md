@@ -1397,8 +1397,12 @@ ENTRYPOINT ["/app"]
   Wrap the one you mean in a block instead.
 - **In `ENV A=1 B=2` and `ARG A=1 B=2`, each name covers only its own pair.** In `FROM`, the symbol covers the whole
   line.
-- **Strings decode quotes and line continuations.** `"..."` reads escapes, and `'...'` keeps text as written. Any value
-  with `$NAME` or `${...}` stays as written, with its quotes.
+- **Strings decode quotes and line continuations.** In `"..."`, the escape character goes away only before `"`, `$` or
+  itself, so `"a\nb"` stays `a\nb`. `'...'` reads no escapes. Parts written together, such as `"a"b`, make one value.
+  A comment line inside a continued value is left out, as Docker does. Any value with `$NAME` or `${...}` stays as
+  written, with its quotes.
+- **A value that a syntax error cuts short fails to resolve.** The grammar can't read an empty line inside a continued
+  value, such as `"a\`, an empty line, then `b"`, although Docker can.
 - **A `# escape=` directive at the top sets the escape character**, usually to a backtick for Windows images.
 - **Instructions after `ONBUILD`, other instructions and comments are not symbols.**
 

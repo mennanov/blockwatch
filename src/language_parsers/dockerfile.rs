@@ -14,12 +14,30 @@ impl CodeLanguage for Dockerfile {
         let mut stage = None;
         let mut cursor = root.walk();
         for instruction in root.named_children(&mut cursor) {
-            if instruction.kind() == "from_instruction" {
+            let mut found = if instruction.kind() == "from_instruction" {
                 stage = stage_name(instruction, source);
-                definitions.extend(stage.map(|name| stage_definition(instruction, name)));
+                stage
+                    .map(|name| stage_definition(instruction, name))
+                    .into_iter()
+                    .collect()
             } else {
-                definitions.extend(instruction_definitions(instruction, stage, source));
+                instruction_definitions(instruction, stage, source)
+            };
+            if let Some(error) = error_after(instruction) {
+                // The grammar stops at the error, so the last value can miss its rest.
+                for definition in found
+                    .iter_mut()
+                    .filter(|definition| definition.range.end == instruction.end_byte())
+                {
+                    definition.value = Some(Value::Undecodable(
+                        code::position(&error, source),
+                        anyhow::anyhow!(
+                            "the instruction has a syntax error here, so its value could be cut short"
+                        ),
+                    ));
+                }
             }
+            definitions.extend(found);
         }
         definitions
     }
@@ -30,24 +48,28 @@ impl CodeLanguage for Dockerfile {
                 if has_expansion(*node) {
                     return Ok(None);
                 }
-                let text = node_text(node, source);
-                let unquoted = code::between_quotes(text, "\"")?;
+                let text = joined_lines(node, source);
+                let unquoted = code::between_quotes(&text, "\"")?;
                 let escape = escape_directive(source);
-                Ok(Some(unescape(unquoted, escape)))
+                // Inside double quotes, the escape character before any other character is
+                // kept, as in a shell: `"a\nb"` is `a\nb`.
+                Ok(Some(unescape(unquoted, escape, |next| {
+                    next == '"' || next == '$' || next == escape
+                })))
             }
             "single_quoted_string" => {
-                let text = node_text(node, source);
-                let unquoted = code::between_quotes(text, "'")?;
-                Ok(Some(unquoted.to_string()))
+                let text = joined_lines(node, source);
+                Ok(Some(code::between_quotes(&text, "'")?.to_string()))
             }
             "unquoted_string" => {
                 if has_expansion(*node) {
                     return Ok(None);
                 }
-                let text = node_text(node, source);
                 let escape = escape_directive(source);
-                if text.contains(escape) {
-                    Ok(Some(unescape(text, escape)))
+                if node_text(node, source).contains(escape) {
+                    Ok(Some(unescape(&joined_lines(node, source), escape, |_| {
+                        true
+                    })))
                 } else {
                     Ok(None)
                 }
@@ -65,6 +87,17 @@ impl CodeLanguage for Dockerfile {
 fn stage_name<'tree>(from: Node<'tree>, source: &str) -> Option<Node<'tree>> {
     from.child_by_field_name("as")
         .filter(|name| !node_text(name, source).contains('$'))
+}
+
+/// The syntax error right after `instruction`, on the line where it ends. `None` when there is
+/// none.
+fn error_after<'tree>(instruction: Node<'tree>) -> Option<Node<'tree>> {
+    // The grammar ends an instruction where it can't read on, such as at an empty line inside a
+    // continued value, and puts the rest of the instruction in an error node next to it. An
+    // error that starts on a later line is a broken instruction of its own, such as `FOO bar`.
+    instruction.next_sibling().filter(|next| {
+        next.is_error() && next.start_position().row == instruction.end_position().row
+    })
 }
 
 /// The definition of the stage `name`, which `from` starts. Its value is the image.
@@ -210,20 +243,58 @@ fn escape_directive(source: &str) -> char {
     '\\'
 }
 
-/// Unescapes `text` using `escape_char`. An escape character before a newline joins the line.
-fn unescape(text: &str, escape_char: char) -> String {
+/// The text of `node`, a string, with its lines joined: without each line continuation, and
+/// without each comment line inside it.
+fn joined_lines(node: &Node, source: &str) -> String {
+    // Docker joins the lines of an instruction before it reads the quotes, so this happens
+    // inside quotes too. The grammar finds the continuations and the comment lines with the
+    // same rules as Docker, such as the spaces it allows after the escape character.
+    let mut text = String::new();
+    let mut start = node.start_byte();
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        let end = match child.kind() {
+            "line_continuation" => child.start_byte(),
+            // The grammar leaves the spaces before the `#` out of the comment, but Docker
+            // drops the whole line.
+            "comment" => {
+                #[expect(
+                    clippy::string_slice,
+                    reason = "tree-sitter gives character boundaries"
+                )]
+                let before = source[start..child.start_byte()].trim_end_matches([' ', '\t']);
+                start + before.len()
+            }
+            _ => continue,
+        };
+        #[expect(
+            clippy::string_slice,
+            reason = "tree-sitter gives character boundaries"
+        )]
+        text.push_str(&source[start..end]);
+        start = child.end_byte();
+    }
+    #[expect(
+        clippy::string_slice,
+        reason = "tree-sitter gives character boundaries"
+    )]
+    text.push_str(&source[start..node.end_byte()]);
+    text
+}
+
+/// `text` without each `escape_char` before a character that `is_escaped` accepts. `text` must
+/// have its lines joined already, as [`joined_lines`] does.
+fn unescape(text: &str, escape_char: char, is_escaped: impl Fn(char) -> bool) -> String {
     let mut result = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch == escape_char {
             match chars.next() {
-                Some('\r') => {
-                    if chars.peek() == Some(&'\n') {
-                        chars.next();
-                    }
+                Some(next_ch) if is_escaped(next_ch) => result.push(next_ch),
+                Some(next_ch) => {
+                    result.push(ch);
+                    result.push(next_ch);
                 }
-                Some('\n') => {}
-                Some(next_ch) => result.push(next_ch),
                 None => result.push(ch),
             }
         } else {
@@ -651,6 +722,51 @@ ARG PORT=8080
     }
 
     #[test]
+    fn value_cut_short_by_syntax_error_parse_symbols_marks_it_unresolved() -> anyhow::Result<()> {
+        let source = r#"ENV BEFORE=1 CUT="a\
+
+b"
+ARG ESCAPED="a\\
+b"
+"#;
+        let parsed = dockerfile(source)?;
+
+        assert_eq!(
+            unresolved(&parsed, source, "/CUT")?,
+            "blockwatch can't decode the string at line 1, column 18: the instruction has a \
+             syntax error here, so its value could be cut short"
+        );
+        assert_eq!(
+            unresolved(&parsed, source, "/ESCAPED")?,
+            "blockwatch can't decode the string at line 4, column 13: the instruction has a \
+             syntax error here, so its value could be cut short"
+        );
+        assert_eq!(
+            symbols(&parsed, source)
+                .into_iter()
+                .filter(|(path, _, _)| path == "/BEFORE")
+                .collect::<Vec<_>>(),
+            vec![symbol("/BEFORE", "BEFORE=1", Some("1"))]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn syntax_error_on_the_next_line_parse_symbols_keeps_the_value() -> anyhow::Result<()> {
+        let source = r#"ENV NEXT=1
+UNKNOWN instruction
+"#;
+
+        assert_eq!(
+            symbols(&dockerfile(source)?, source),
+            vec![symbol("/NEXT", "NEXT=1", Some("1"))]
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn arg_with_empty_default_parse_symbols_returns_empty_string() -> anyhow::Result<()> {
         let source = "ARG EMPTY=\n";
 
@@ -705,6 +821,8 @@ LABEL description="v1#2"
     {
         let source = r#"ENV ESCAPED="hello\"world"
 ENV BACKSLASH="hello\\world"
+ENV DOLLAR="cost\$5"
+ENV KEPT="a\nb"
 ENV CONTINUATION="line1\
 line2"
 "#;
@@ -722,6 +840,8 @@ line2"
                     r#"BACKSLASH="hello\\world""#,
                     Some(r#"hello\world"#)
                 ),
+                symbol("/DOLLAR", r#"DOLLAR="cost\$5""#, Some("cost$5")),
+                symbol("/KEPT", r#"KEPT="a\nb""#, Some(r#"a\nb"#)),
                 symbol(
                     "/CONTINUATION",
                     "CONTINUATION=\"line1\\\nline2\"",
@@ -747,7 +867,7 @@ line2'
                 symbol(
                     "/CONTINUATION",
                     "CONTINUATION='line1\\\nline2'",
-                    Some("line1\\\nline2")
+                    Some("line1line2")
                 ),
             ]
         );
@@ -760,6 +880,8 @@ line2'
         let source = r#"# escape=`
 ENV WIN_PATH=C:\Windows\Temp
 ENV ESCAPED="hello`"world"
+ENV BACKTICK="a``b"
+ENV KEPT="a`nb\c"
 ENV CONTINUATION="line1`
 line2"
 "#;
@@ -777,11 +899,68 @@ line2"
                     r#"ESCAPED="hello`"world""#,
                     Some(r#"hello"world"#)
                 ),
+                symbol("/BACKTICK", r#"BACKTICK="a``b""#, Some("a`b")),
+                symbol("/KEPT", r#"KEPT="a`nb\c""#, Some(r#"a`nb\c"#)),
                 symbol(
                     "/CONTINUATION",
                     "CONTINUATION=\"line1`\nline2\"",
                     Some("line1line2")
                 ),
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn continuation_with_spaces_after_the_escape_parse_symbols_joins_the_lines()
+    -> anyhow::Result<()> {
+        // The spaces and tabs after each escape character are written as escapes, so that an
+        // editor that trims them can't change the test.
+        let source = "ENV DOUBLE=\"a\\  \nb\" TAB=\"a\\\t\nb\"\n\
+                      ENV UNQUOTED=a\\ \nb SINGLE='a\\ \nb' CRLF=\"a\\ \r\nb\"\n";
+
+        assert_eq!(
+            symbols(&dockerfile(source)?, source),
+            vec![
+                symbol("/DOUBLE", "DOUBLE=\"a\\  \nb\"", Some("ab")),
+                symbol("/TAB", "TAB=\"a\\\t\nb\"", Some("ab")),
+                symbol("/UNQUOTED", "UNQUOTED=a\\ \nb", Some("ab")),
+                symbol("/SINGLE", "SINGLE='a\\ \nb'", Some("ab")),
+                symbol("/CRLF", "CRLF=\"a\\ \r\nb\"", Some("ab")),
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn comment_line_inside_a_value_parse_symbols_leaves_the_line_out() -> anyhow::Result<()> {
+        let source = r#"ENV DOUBLE="a\
+# comment
+b"
+ENV INDENTED="a\
+    # comment
+	# comment
+b"
+ENV UNQUOTED=a\
+# comment
+b
+ENV SPACES="a\
+  b"
+"#;
+
+        assert_eq!(
+            symbols(&dockerfile(source)?, source),
+            vec![
+                symbol("/DOUBLE", "DOUBLE=\"a\\\n# comment\nb\"", Some("ab")),
+                symbol(
+                    "/INDENTED",
+                    "INDENTED=\"a\\\n    # comment\n\t# comment\nb\"",
+                    Some("ab")
+                ),
+                symbol("/UNQUOTED", "UNQUOTED=a\\\n# comment\nb", Some("ab")),
+                symbol("/SPACES", "SPACES=\"a\\\n  b\"", Some("a  b")),
             ]
         );
 
