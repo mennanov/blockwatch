@@ -270,6 +270,7 @@ mod test_utils {
                 line: 7,
             },
             is_entry_modified: false,
+            target_if: None,
         })
     }
 }

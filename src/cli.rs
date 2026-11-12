@@ -315,12 +315,15 @@ fn build_context(
     );
     let language_parsers = language_parsers.with_extension_mappings(settings.extensions().clone());
 
+    let has_cli_file_filter =
+        !args.path_arguments().is_empty() || !args.raw_settings().ignore.is_empty();
     let scan = scan::Scan::new(
         file_system,
         &path_filter,
         &language_parsers,
         &virtual_blocks,
-    );
+    )
+    .require_covered_targets(!has_cli_file_filter);
     let parsed = scan.parse_blocks(&modified_lines_by_file, scan_mode)?;
     let scanned_files = parsed.scanned_files.iter().cloned().map(Ok);
     match scan_mode {

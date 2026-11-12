@@ -5,7 +5,7 @@ use crate::blocks::{Block, BlockSeverity, BlockWithContext, Content, Declaration
 use crate::diff_parser::LineChanges;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
-use crate::symbols::Symbols;
+use crate::symbols::{ResolveError, Symbols};
 use anyhow::{Context, anyhow, bail};
 use regex::{Captures, Regex, RegexBuilder};
 use std::collections::HashMap;
@@ -30,6 +30,38 @@ pub(crate) struct VirtualBlock {
     pub(crate) is_entry_modified: bool,
     /// The block's severity, from its `severity` attribute.
     pub(crate) severity: BlockSeverity,
+    /// Condition a file matched by a glob `target` must pass to receive this block.
+    pub(crate) target_if: Option<TargetIf>,
+}
+
+/// Condition that a file matched by a glob target must pass to receive a [`VirtualBlock`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TargetIf {
+    /// Symbol paths that must resolve in the file.
+    pub(crate) symbols: Vec<SymbolPath>,
+}
+
+impl TargetIf {
+    /// Whether a file with `symbols` passes this condition.
+    ///
+    /// A missing symbol means the file does not pass, and returns `Ok(false)`. A symbol that
+    /// matches several elements still counts as present.
+    ///
+    /// # Errors
+    /// Returns an error if resolving a symbol fails because its definition can't be read.
+    pub(crate) fn covers(&self, symbols: &Symbols) -> anyhow::Result<bool> {
+        for path in &self.symbols {
+            match symbols.resolve(path) {
+                Ok(_)
+                | Err(
+                    ResolveError::AmbiguousSymbol { .. } | ResolveError::AmbiguousFilter { .. },
+                ) => {}
+                Err(ResolveError::NotFound { .. }) => return Ok(false),
+                Err(ResolveError::Unreadable { reason }) => return Err(anyhow!("{reason}")),
+            }
+        }
+        Ok(true)
+    }
 }
 
 /// How to find a [`VirtualBlock`] in its file.
@@ -129,7 +161,7 @@ impl Hash for TargetPattern {
 }
 
 /// A `[[block]]` entry of the config file. It shows as `line 7 of "blockwatch.toml"`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct ConfigEntry {
     /// The config file.
     pub(crate) file: PathBuf,
@@ -669,6 +701,104 @@ MODELS = [
     fn target_patterns_with_different_text_are_not_equal() -> anyhow::Result<()> {
         // `a+` and `aa*` match the same text, but only the text of a pattern is compared.
         assert_ne!(TargetPattern::new("a+")?, TargetPattern::new("aa*")?);
+        Ok(())
+    }
+
+    #[test]
+    fn target_if_with_present_symbols_covers_returns_true() -> anyhow::Result<()> {
+        let yaml = "flag: true\nextra: 1\n";
+        let symbols = LanguageParsers::new()
+            .parser_for(Path::new("a.yml"))
+            .expect("YAML has a parser")
+            .lock()
+            .expect("a thread panicked while it held the parser")
+            .parse_symbols(yaml)?;
+
+        let single = TargetIf {
+            symbols: vec![SymbolPath::parse("/flag")?],
+        };
+        let multiple = TargetIf {
+            symbols: vec![SymbolPath::parse("/flag")?, SymbolPath::parse("/extra")?],
+        };
+
+        assert!(single.covers(&symbols)?);
+        assert!(multiple.covers(&symbols)?);
+        Ok(())
+    }
+
+    #[test]
+    fn target_if_with_a_missing_symbol_covers_returns_false() -> anyhow::Result<()> {
+        let yaml = "extra: 1\n";
+        let symbols = LanguageParsers::new()
+            .parser_for(Path::new("a.yml"))
+            .expect("YAML has a parser")
+            .lock()
+            .expect("a thread panicked while it held the parser")
+            .parse_symbols(yaml)?;
+
+        let missing = TargetIf {
+            symbols: vec![SymbolPath::parse("/flag")?],
+        };
+        let one_missing = TargetIf {
+            symbols: vec![SymbolPath::parse("/extra")?, SymbolPath::parse("/flag")?],
+        };
+
+        assert!(!missing.covers(&symbols)?);
+        assert!(!one_missing.covers(&symbols)?);
+        Ok(())
+    }
+
+    #[test]
+    fn target_if_with_ambiguous_symbol_or_filter_covers_returns_true() -> anyhow::Result<()> {
+        // Markdown lets a heading appear twice, so `/A` resolves to `AmbiguousSymbol`.
+        let md_symbols = LanguageParsers::new()
+            .parser_for(Path::new("doc.md"))
+            .expect("Markdown has a parser")
+            .lock()
+            .expect("a thread panicked while it held the parser")
+            .parse_symbols("# A\none\n# A\ntwo\n")?;
+        let ambiguous_symbol_path = SymbolPath::parse("/A")?;
+        match md_symbols.resolve(&ambiguous_symbol_path) {
+            Err(ResolveError::AmbiguousSymbol { .. }) => {}
+            other => panic!("expected AmbiguousSymbol, got {other:?}"),
+        }
+        let ambiguous_symbol = TargetIf {
+            symbols: vec![ambiguous_symbol_path],
+        };
+        assert!(ambiguous_symbol.covers(&md_symbols)?);
+
+        // Two items with the same `name` make `~[name=a]` resolve to `AmbiguousFilter`.
+        let yaml_symbols = LanguageParsers::new()
+            .parser_for(Path::new("a.yml"))
+            .expect("YAML has a parser")
+            .lock()
+            .expect("a thread panicked while it held the parser")
+            .parse_symbols("items:\n  - name: a\n  - name: a\n")?;
+        let ambiguous_filter_path = SymbolPath::parse("/items/~[name=a]")?;
+        match yaml_symbols.resolve(&ambiguous_filter_path) {
+            Err(ResolveError::AmbiguousFilter { .. }) => {}
+            other => panic!("expected AmbiguousFilter, got {other:?}"),
+        }
+        let ambiguous_filter = TargetIf {
+            symbols: vec![ambiguous_filter_path],
+        };
+        assert!(ambiguous_filter.covers(&yaml_symbols)?);
+        Ok(())
+    }
+
+    #[test]
+    fn target_if_with_unreadable_symbol_covers_returns_error() -> anyhow::Result<()> {
+        let path = SymbolPath::parse("/flag")?;
+        let symbols = Symbols::with_unreadable(
+            Vec::new(),
+            HashMap::from([(path.clone(), "cannot read".to_string())]),
+        );
+        let condition = TargetIf {
+            symbols: vec![path],
+        };
+
+        let error = condition.covers(&symbols).unwrap_err();
+        assert!(error.to_string().contains("cannot read"), "{error}");
         Ok(())
     }
 }

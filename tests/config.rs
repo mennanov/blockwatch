@@ -6,7 +6,7 @@
 
 use assert_cmd::assert::OutputAssertExt;
 use assert_cmd::cargo_bin_cmd;
-use predicates::prelude::predicate;
+use predicates::prelude::{PredicateBooleanExt, predicate};
 use std::path::{Path, PathBuf};
 
 /// A Markdown file with a block that fails `keep-sorted`.
@@ -441,5 +441,252 @@ fn list_shows_a_block_that_the_config_file_skips() -> anyhow::Result<()> {
     output.clone().assert().success();
     let listing: serde_json::Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(listing["doc.md"][0]["name"], "fruits");
+    Ok(())
+}
+
+/// Creates a repository with `a.yml` (uncovered) and `b.yml` (has `flag: true` and `x`).
+/// Returns the repository root.
+fn repo_with_yaml_files(parent: &Path, b_x_yaml: &str) -> anyhow::Result<PathBuf> {
+    let root = parent.join("repo");
+    std::fs::create_dir_all(root.join(".git"))?;
+    std::fs::write(root.join("a.yml"), "other: true\n")?;
+    std::fs::write(root.join("b.yml"), format!("flag: true\nx:\n{b_x_yaml}"))?;
+    Ok(root)
+}
+
+#[test]
+fn glob_target_if_checks_only_covered_files_and_skips_uncovered_ones() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = repo_with_yaml_files(temp.path(), "  one: 1\n  two: 2\n")?;
+    std::fs::write(root.join("empty.yml"), "")?;
+    std::fs::write(
+        root.join("blockwatch.toml"),
+        r"[[block]]
+target = '*.yml#/x'
+line-count = '<=1'
+target-if = { symbols = ['#/flag'] }
+",
+    )?;
+
+    let output = cargo_bin_cmd!().current_dir(&root).output()?;
+    output.clone().assert().failure();
+    let stderr = String::from_utf8(output.stderr)?;
+    assert!(stderr.contains("b.yml"), "{stderr}");
+    assert!(!stderr.contains("a.yml"), "{stderr}");
+    assert!(!stderr.contains("empty.yml"), "{stderr}");
+
+    // A covered file whose `target` symbol is missing still fails the run.
+    std::fs::write(root.join("b.yml"), "flag: true\n")?;
+    cargo_bin_cmd!()
+        .current_dir(&root)
+        .output()?
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("target b.yml#/x does not resolve")
+                .and(predicate::str::contains("symbol not found")),
+        );
+    Ok(())
+}
+
+#[test]
+fn list_omits_uncovered_files_and_referencing_an_uncovered_block_fails() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = repo_with_yaml_files(temp.path(), "  one: 1\n")?;
+    std::fs::write(
+        root.join("blockwatch.toml"),
+        r"[[block]]
+target = '*.yml#/x'
+name = 'x'
+target-if = { symbols = ['#/flag'] }
+",
+    )?;
+    std::fs::write(
+        root.join("README.md"),
+        "<!-- <block same-as=\"a.yml:x\"> -->\ny\n<!-- </block> -->\n",
+    )?;
+
+    let list_output = cargo_bin_cmd!().current_dir(&root).arg("list").output()?;
+    list_output.clone().assert().success();
+    let listing: serde_json::Value = serde_json::from_slice(&list_output.stdout)?;
+    assert!(listing.get("b.yml").is_some());
+    assert!(listing.get("a.yml").is_none());
+
+    cargo_bin_cmd!()
+        .current_dir(&root)
+        .args(["--only-block", "a.yml:x"])
+        .output()?
+        .assert()
+        .failure();
+
+    cargo_bin_cmd!()
+        .current_dir(&root)
+        .arg("README.md")
+        .output()?
+        .assert()
+        .failure();
+    Ok(())
+}
+
+#[test]
+fn full_runs_fail_when_no_file_matches_target_if() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = temp.path().join("repo");
+    std::fs::create_dir_all(root.join(".git"))?;
+    std::fs::write(root.join("a.yml"), "other: true\n")?;
+    let config = r"[[block]]
+target = '*.yml#/x'
+target-if = { symbols = ['#/flag'] }
+";
+    std::fs::write(root.join("blockwatch.toml"), config)?;
+    std::fs::write(root.join("other.toml"), config)?;
+
+    let has_no_covered_error = || {
+        predicate::str::contains("invalid block at line 1 of \"blockwatch.toml\"").and(
+            predicate::str::contains("no file the glob matches passes target-if"),
+        )
+    };
+    let file_diff = "\
+diff --git a/a.yml b/a.yml
+index 1111111..2222222 100644
+--- a/a.yml
++++ b/a.yml
+@@ -1 +1,2 @@
+ other: true
++more: true
+";
+    let entry_diff = "\
+diff --git a/blockwatch.toml b/blockwatch.toml
+index 1111111..2222222 100644
+--- a/blockwatch.toml
++++ b/blockwatch.toml
+@@ -1,3 +1,3 @@
+ [[block]]
+ target = '*.yml#/x'
+-target-if = { symbols = ['#/old'] }
++target-if = { symbols = ['#/flag'] }
+";
+
+    for args in [
+        vec![],
+        vec!["list"],
+        vec!["--only-block", "a.yml:x"],
+        vec!["--skip-block", "a.yml:x"],
+        vec!["-E", "foo=yaml"],
+        vec!["-d", "line-pattern"],
+        vec!["-e", "line-count"],
+    ] {
+        cargo_bin_cmd!()
+            .current_dir(&root)
+            .args(&args)
+            .output()?
+            .assert()
+            .failure()
+            .stderr(has_no_covered_error());
+    }
+
+    cargo_bin_cmd!()
+        .current_dir(&root)
+        .args(["--config", "other.toml"])
+        .output()?
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "no file the glob matches passes target-if",
+        ));
+
+    cargo_bin_cmd!()
+        .current_dir(&root)
+        .arg("--diff")
+        .write_stdin(file_diff)
+        .output()?
+        .assert()
+        .failure()
+        .stderr(has_no_covered_error());
+
+    cargo_bin_cmd!()
+        .current_dir(&root)
+        .args(["--diff", "--only-changed"])
+        .write_stdin(entry_diff)
+        .output()?
+        .assert()
+        .failure()
+        .stderr(has_no_covered_error());
+
+    // Config `ignore` skipping the only covered file must still fail a full run.
+    std::fs::write(root.join("b.yml"), "flag: true\nx: 1\n")?;
+    std::fs::write(
+        root.join("blockwatch.toml"),
+        format!("ignore = ['b.yml']\n{config}"),
+    )?;
+    cargo_bin_cmd!()
+        .current_dir(&root)
+        .output()?
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "no file the glob matches passes target-if",
+        ));
+    Ok(())
+}
+
+#[test]
+fn scoped_runs_succeed_when_no_checked_file_matches_target_if() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = temp.path().join("repo");
+    std::fs::create_dir_all(root.join(".git"))?;
+    std::fs::write(root.join("a.yml"), "other: true\n")?;
+    std::fs::write(
+        root.join("README.md"),
+        "<!-- <block name=\"doc\"> -->\nhello\n<!-- </block> -->\n",
+    )?;
+    std::fs::write(
+        root.join("blockwatch.toml"),
+        r"[[block]]
+target = '*.yml#/x'
+target-if = { symbols = ['#/flag'] }
+",
+    )?;
+
+    // Path arguments skip the check even when no file in the repository passes `target-if`.
+    for arg in ["README.md", "a.yml"] {
+        cargo_bin_cmd!()
+            .current_dir(&root)
+            .arg(arg)
+            .output()?
+            .assert()
+            .success();
+    }
+
+    cargo_bin_cmd!()
+        .current_dir(&root)
+        .args(["--ignore", "a.yml"])
+        .output()?
+        .assert()
+        .success();
+
+    cargo_bin_cmd!()
+        .current_dir(&root)
+        .args(["explain", "README.md:doc"])
+        .output()?
+        .assert()
+        .success();
+
+    let file_diff = "\
+diff --git a/a.yml b/a.yml
+index 1111111..2222222 100644
+--- a/a.yml
++++ b/a.yml
+@@ -1 +1,2 @@
+ other: true
++more: true
+";
+    cargo_bin_cmd!()
+        .current_dir(&root)
+        .args(["--diff", "--only-changed"])
+        .write_stdin(file_diff)
+        .output()?
+        .assert()
+        .success();
     Ok(())
 }

@@ -463,6 +463,8 @@ same-as-pattern = 'os\.environ\["(?P<value>[A-Z_]+)"\]'
   [Glob targets](#glob-targets).
 - `target-pattern` is a regex that finds the block in a file. It needs a file as `target`. See
   [Target patterns](#target-patterns).
+- `target-if` keeps only the glob files that pass a condition. It needs a glob in `target`. See
+  [Glob targets](#glob-targets).
 - Every other key is an attribute, with the same name and meaning as in a tag. An unknown attribute is an error.
 - A value is a string. `true` stands for an attribute without a value, so `keep-unique = true` is `keep-unique`. An
   integer counts as its digits, so `check-lua-timeout = 30` works. Any other value is an error.
@@ -550,6 +552,24 @@ same-as = 'go.mod:go-version'
 - **A path that exists is never a glob.** `app/[id]/meta.json` is that one file. A path that doesn't exist is a glob
   only when it has `*`, `?`, `[`, `{` or `\`.
 - **A glob that matches no file stops every run**, so a typo can't turn the rule off.
+- **Add `target-if` to check only the matching files that also pass a condition.** List the symbol paths that each
+  file needs in `target-if.symbols`, written like `#/path`. Only files with every listed symbol get the block. The rest
+  are skipped.
+
+  ```toml
+  # Check PR path filters on workflows that filter push paths and also run on pull_request.
+  [[block]]
+  target = '.github/workflows/*.yml#/on/push/paths'
+  target-if = { symbols = ['#/on/push/paths', '#/on/pull_request'] }
+  same-as = '#/on/pull_request/paths'
+  ```
+
+  - Each file the glob matches must use a language with [symbols](symbols.md) and have no syntax error.
+  - A symbol counts as present even when it matches more than one item, such as duplicate headings in Markdown.
+  - When a file passes, its `target` must still resolve. If not, the run stops.
+  - If no file the glob matches passes `target-if`, a full run stops. A run limited by path arguments, `--ignore`,
+    `explain`, or `--diff --only-changed` allows zero matches, unless `--diff --only-changed` also changed that
+    `[[block]]` entry.
 
 ## Suppressing a Violation
 

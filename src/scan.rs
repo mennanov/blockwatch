@@ -6,7 +6,7 @@ use crate::fs::{FileSystem, PathFilter};
 use crate::language_parsers::{LanguageParsers, SharedLanguageParser};
 use crate::repo_path::RepoPath;
 use crate::symbols::Symbols;
-use crate::virtual_blocks::{Locator, VirtualBlock};
+use crate::virtual_blocks::{ConfigEntry, Locator, VirtualBlock};
 use anyhow::{Context, anyhow, bail};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -90,6 +90,9 @@ pub(crate) struct Scan<'a, F: FileSystem> {
     /// whose file is missing, and a hash map has no stable order.
     virtual_blocks: &'a [VirtualBlock],
     virtual_blocks_by_file: HashMap<&'a RepoPath, Vec<&'a VirtualBlock>>,
+    /// Fails the scan when a `[[block]]` entry with `target-if` covers no file, so a condition
+    /// that matches nothing is caught. Disabled when a scan only checks part of the repository.
+    require_covered_targets: bool,
 }
 
 impl<'a, F: FileSystem> Scan<'a, F> {
@@ -114,7 +117,15 @@ impl<'a, F: FileSystem> Scan<'a, F> {
             parsers,
             virtual_blocks,
             virtual_blocks_by_file,
+            require_covered_targets: true,
         }
+    }
+
+    /// Sets whether [`Self::parse_blocks`] fails if a `[[block]]` entry with `target-if` covers no
+    /// file in the run.
+    pub(crate) fn require_covered_targets(mut self, require: bool) -> Self {
+        self.require_covered_targets = require;
+        self
     }
 
     /// Parses source files into the blocks a run should consider, together with the counts of
@@ -127,18 +138,20 @@ impl<'a, F: FileSystem> Scan<'a, F> {
     ///
     /// Fails if `line_changes_by_file` is invalid, e.g. it refers to files that do not exist. Also
     /// fails if a virtual block's target does not resolve in a file that is read, or if its file
-    /// passes the filters but does not exist. In [`ScanMode::OnlyChanged`], only a virtual block
-    /// whose entry the diff modified fails for a missing file.
+    /// passes the filters but does not exist. When `require_covered_targets` is true, fails if a
+    /// `target-if` entry covers no scanned file; in [`ScanMode::OnlyChanged`], that check and the
+    /// missing-file check only apply to an entry the diff modified.
     pub(crate) fn parse_blocks(
         &self,
         line_changes_by_file: &DiffChanges,
         scan_mode: ScanMode,
     ) -> anyhow::Result<ParsedBlocks> {
         self.ensure_diff_has_valid_paths(line_changes_by_file)?;
-        match scan_mode {
+        let mut covered_entries = HashSet::new();
+        let parsed = match scan_mode {
             ScanMode::All => {
                 self.ensure_target_files_exist(self.virtual_blocks.iter())?;
-                self.parse_all_files(line_changes_by_file)
+                self.parse_all_files(line_changes_by_file, &mut covered_entries)?
             }
             ScanMode::OnlyChanged => {
                 self.ensure_target_files_exist(
@@ -146,9 +159,38 @@ impl<'a, F: FileSystem> Scan<'a, F> {
                         .iter()
                         .filter(|virtual_block| virtual_block.is_entry_modified),
                 )?;
-                self.parse_changed_files(line_changes_by_file)
+                self.parse_changed_files(line_changes_by_file, &mut covered_entries)?
+            }
+        };
+        if self.require_covered_targets {
+            self.ensure_covered_targets(&covered_entries, scan_mode)?;
+        }
+        Ok(parsed)
+    }
+
+    /// Fails if any `[[block]]` entry with `target-if` covered no scanned file in this run.
+    fn ensure_covered_targets(
+        &self,
+        covered_entries: &HashSet<&'a ConfigEntry>,
+        scan_mode: ScanMode,
+    ) -> anyhow::Result<()> {
+        for virtual_block in self.virtual_blocks {
+            if virtual_block.target_if.is_none() {
+                continue;
+            }
+            match scan_mode {
+                ScanMode::All => {}
+                // In `--only-changed`, an entry whose definition didn't change may match a glob
+                // whose covered files were untouched by the diff.
+                ScanMode::OnlyChanged if !virtual_block.is_entry_modified => continue,
+                ScanMode::OnlyChanged => {}
+            }
+            if !covered_entries.contains(&virtual_block.entry) {
+                return Err(anyhow!("no file the glob matches passes target-if")
+                    .context(virtual_block.entry.error_context()));
             }
         }
+        Ok(())
     }
 
     /// The files of the walk that a run can check, in walk order: those that the path filter
@@ -217,7 +259,11 @@ impl<'a, F: FileSystem> Scan<'a, F> {
     /// Parses every block in every file of the repository, marking the ones the line changes
     /// touched. Line changes for files the walk did not reach contribute nothing to the result;
     /// the walk defines the scope, and the diff only says which of the blocks it found had changed.
-    fn parse_all_files(&self, line_changes_by_file: &DiffChanges) -> anyhow::Result<ParsedBlocks> {
+    fn parse_all_files(
+        &self,
+        line_changes_by_file: &DiffChanges,
+        covered_entries: &mut HashSet<&'a ConfigEntry>,
+    ) -> anyhow::Result<ParsedBlocks> {
         let mut parsed = ParsedBlocks::default();
         for repo_path_result in self.file_system.walk(None) {
             let file_path =
@@ -225,7 +271,7 @@ impl<'a, F: FileSystem> Scan<'a, F> {
             if !self.path_filter.is_selected(file_path.as_path()) {
                 continue;
             }
-            let file_blocks = parse_file(
+            let (file_blocks, covered) = parse_file_with_coverage(
                 self.file_system,
                 file_path.as_path(),
                 line_changes_by_file.for_file(&file_path),
@@ -233,6 +279,7 @@ impl<'a, F: FileSystem> Scan<'a, F> {
                 self.parsers,
                 self.virtual_blocks_of(&file_path),
             )?;
+            covered_entries.extend(covered);
             parsed.record(file_path, file_blocks);
         }
         Ok(parsed)
@@ -243,6 +290,7 @@ impl<'a, F: FileSystem> Scan<'a, F> {
     fn parse_changed_files(
         &self,
         line_changes_by_file: &DiffChanges,
+        covered_entries: &mut HashSet<&'a ConfigEntry>,
     ) -> anyhow::Result<ParsedBlocks> {
         // A changed entry in the config file changes the rules of its block, as a changed tag
         // does. So the block is checked even when the diff does not touch its file.
@@ -261,7 +309,7 @@ impl<'a, F: FileSystem> Scan<'a, F> {
             if !self.path_filter.is_selected(file_path.as_path()) {
                 continue;
             }
-            let file_blocks = parse_file(
+            let (file_blocks, covered) = parse_file_with_coverage(
                 self.file_system,
                 file_path.as_path(),
                 line_changes_by_file.for_file(file_path),
@@ -279,6 +327,7 @@ impl<'a, F: FileSystem> Scan<'a, F> {
                     error.context(invalid_diff_target_message(file_path))
                 }
             })?;
+            covered_entries.extend(covered);
             parsed.record(file_path.clone(), file_blocks);
         }
         Ok(parsed)
@@ -314,9 +363,33 @@ pub(crate) fn parse_file(
     parsers: &LanguageParsers,
     virtual_blocks: &[&VirtualBlock],
 ) -> anyhow::Result<Option<FileBlocks>> {
+    Ok(parse_file_with_coverage(
+        file_system,
+        file_path,
+        line_changes,
+        scan_mode,
+        parsers,
+        virtual_blocks,
+    )?
+    .0)
+}
+
+/// Parses the blocks of one file and also returns every virtual block entry whose `target-if`
+/// condition passed on the file.
+///
+/// # Errors
+/// Same as [`parse_file`].
+fn parse_file_with_coverage<'v>(
+    file_system: &impl FileSystem,
+    file_path: &Path,
+    line_changes: &LineChanges,
+    scan_mode: ScanMode,
+    parsers: &LanguageParsers,
+    virtual_blocks: &[&'v VirtualBlock],
+) -> anyhow::Result<(Option<FileBlocks>, Vec<&'v ConfigEntry>)> {
     let parser = parsers.parser_for(file_path);
     if parser.is_none() && virtual_blocks.is_empty() {
-        return Ok(None);
+        return Ok((None, Vec::new()));
     }
     let source_code = match String::from_utf8(file_system.read(file_path)?) {
         Ok(source_code) => source_code,
@@ -332,21 +405,24 @@ pub(crate) fn parse_file(
         }
         // No block refers into a file without blocks, so its text is not kept.
         Err(_) => {
-            return Ok(Some(FileBlocks {
-                file_content: String::new(),
-                blocks_with_context: Vec::new(),
-            }));
+            return Ok((
+                Some(FileBlocks {
+                    file_content: String::new(),
+                    blocks_with_context: Vec::new(),
+                }),
+                Vec::new(),
+            ));
         }
     };
-    parse_source(
+    let (file_blocks, covered_entries) = parse_source(
         parser,
         file_path,
         source_code,
         line_changes,
         scan_mode,
         virtual_blocks,
-    )
-    .map(Some)
+    )?;
+    Ok((Some(file_blocks), covered_entries))
 }
 
 /// Whether a file that is not valid UTF-8 has blocks: one of its `virtual_blocks`, or a tag in
@@ -377,19 +453,20 @@ fn non_utf8_file_has_blocks(
 
 /// Parses the blocks of `source_code`, the text of `file_path`: its tags and its
 /// `virtual_blocks`. Marks the ones `line_changes` touched and keeps those `scan_mode` keeps, in
-/// source order. Without a `parser`, the file has no tags.
+/// source order, and also returns each `target-if` entry that passed on `source_code`. Without a
+/// `parser`, the file has no tags.
 ///
 /// # Errors
 /// Returns an error if a tag is malformed or a name is used twice, or if a virtual block's target
 /// does not resolve in the file.
-fn parse_source(
+fn parse_source<'v>(
     parser: Option<&SharedLanguageParser>,
     file_path: &Path,
     source_code: String,
     line_changes: &LineChanges,
     scan_mode: ScanMode,
-    virtual_blocks: &[&VirtualBlock],
-) -> anyhow::Result<FileBlocks> {
+    virtual_blocks: &[&'v VirtualBlock],
+) -> anyhow::Result<(FileBlocks, Vec<&'v ConfigEntry>)> {
     // Tracks where each name in this file is first declared, to reject duplicate blocks.
     let mut names_seen = HashMap::new();
     let mut blocks_with_context = match parser {
@@ -404,7 +481,7 @@ fn parse_source(
         // Tags are found in the file's comments, and only a parser knows how a comment is written.
         None => Vec::new(),
     };
-    blocks_with_context.extend(virtual_blocks_in_file(
+    let (virtual_blocks, covered_entries) = virtual_blocks_in_file(
         virtual_blocks,
         parser,
         file_path,
@@ -412,13 +489,17 @@ fn parse_source(
         line_changes,
         scan_mode,
         &mut names_seen,
-    )?);
+    )?;
+    blocks_with_context.extend(virtual_blocks);
     // The tags come in source order. The virtual blocks join them there.
     blocks_with_context.sort_by(|a, b| a.block.cmp(&b.block));
-    Ok(FileBlocks {
-        file_content: source_code,
-        blocks_with_context,
-    })
+    Ok((
+        FileBlocks {
+            file_content: source_code,
+            blocks_with_context,
+        },
+        covered_entries,
+    ))
 }
 
 /// The blocks that tags declare in `source`, the text of `file_path`, with what `line_changes`
@@ -469,30 +550,32 @@ fn tag_blocks(
 }
 
 /// The blocks that `virtual_blocks` declare in `source`, the text of `file_path`, with what
-/// `line_changes` touched in each. Keeps those `scan_mode` keeps, in the order of
-/// `virtual_blocks`, and records every block's name in `names_seen`.
+/// `line_changes` touched in each, and each `[[block]]` entry whose `target-if` condition passed.
+/// Keeps the blocks `scan_mode` keeps, in the order of `virtual_blocks`, and records every
+/// block's name in `names_seen`.
 ///
 /// # Errors
-/// Returns an error if a block wraps a symbol and the file has no parser, no symbols or a syntax
-/// error, if a target does not resolve, or if a block has a name that `names_seen` already holds.
-fn virtual_blocks_in_file(
-    virtual_blocks: &[&VirtualBlock],
+/// Returns an error if a block wraps or checks a symbol and the file has no parser, no symbols or
+/// a syntax error, if `target-if` can't read a symbol, if a target does not resolve, or if a
+/// block has a name that `names_seen` already holds.
+fn virtual_blocks_in_file<'v>(
+    virtual_blocks: &[&'v VirtualBlock],
     parser: Option<&SharedLanguageParser>,
     file_path: &Path,
     source: &str,
     line_changes: &LineChanges,
     scan_mode: ScanMode,
     names_seen: &mut HashMap<String, String>,
-) -> anyhow::Result<Vec<BlockWithContext>> {
-    // Only a block that wraps a symbol needs the file's symbols. A language without symbols must
-    // not fail the other blocks.
-    let first_symbol_block =
-        virtual_blocks
-            .iter()
-            .find(|virtual_block| match virtual_block.locator {
+) -> anyhow::Result<(Vec<BlockWithContext>, Vec<&'v ConfigEntry>)> {
+    // Only a block that wraps or checks a symbol needs the file's symbols. A language without
+    // symbols must not fail the other blocks.
+    let first_symbol_block = virtual_blocks.iter().find(|virtual_block| {
+        virtual_block.target_if.is_some()
+            || match virtual_block.locator {
                 Locator::Symbol(_) => true,
                 Locator::Pattern(_) | Locator::File => false,
-            });
+            }
+    });
     // The file's symbols are the same for each of its virtual blocks. So is the error when they
     // can't be found, which then shows the first block that needs them.
     let symbols = match (first_symbol_block, parser) {
@@ -507,14 +590,24 @@ fn virtual_blocks_in_file(
         }
     };
     let mut blocks_with_context = Vec::new();
+    let mut covered_entries = Vec::new();
     for virtual_block in virtual_blocks {
+        if let Some(target_if) = &virtual_block.target_if {
+            let covers = target_if
+                .covers(&symbols)
+                .map_err(|error| virtual_block.unresolved(error))?;
+            if !covers {
+                continue;
+            }
+            covered_entries.push(&virtual_block.entry);
+        }
         let block_with_context = virtual_block.resolve(&symbols, source, line_changes)?;
         reject_duplicate_name(&block_with_context.block, file_path, names_seen)?;
         if scan_mode.keeps(&block_with_context) {
             blocks_with_context.push(block_with_context);
         }
     }
-    Ok(blocks_with_context)
+    Ok((blocks_with_context, covered_entries))
 }
 
 /// Rejects a block whose `name` was already used earlier in the same file. Otherwise records in
@@ -2127,6 +2220,279 @@ mod parse_blocks_tests {
             format!("{error:#}"),
             "block a.json:n at line 7 of \"blockwatch.toml\" duplicates the name of the block at \
              line 3"
+        );
+        Ok(())
+    }
+
+    /// A virtual block around `target` (`file#/symbol` or `file`), conditional on
+    /// `condition_symbols` via `target-if`.
+    fn virtual_block_with_target_if(
+        target: &str,
+        attributes: &[(&str, &str)],
+        condition_symbols: &[&str],
+    ) -> anyhow::Result<VirtualBlock> {
+        let mut block = test_utils::virtual_block(target, attributes)?;
+        block.target_if = Some(crate::virtual_blocks::TargetIf {
+            symbols: condition_symbols
+                .iter()
+                .map(|path| crate::symbol_path::SymbolPath::parse(path))
+                .collect::<anyhow::Result<Vec<_>>>()?,
+        });
+        Ok(block)
+    }
+
+    #[test]
+    fn target_if_parse_blocks_skips_uncovered_files_and_keeps_covered_ones() -> anyhow::Result<()> {
+        let virtual_blocks = [
+            virtual_block_with_target_if("a.yml#/x", &[("name", "x")], &["#/flag"])?,
+            virtual_block_with_target_if("b.yml#/x", &[("name", "x")], &["#/flag"])?,
+        ];
+
+        let blocks = parse_with_virtual_blocks(
+            &[
+                // Uncovered: no `#/flag` and not even `#/x`.
+                ("a.yml", "other: true\n"),
+                ("b.yml", "flag: true\nx: 1\n"),
+            ],
+            &PathFilter::allow_all(),
+            &virtual_blocks,
+        )?;
+
+        assert!(!blocks.contains_key(&RepoPath::from_reference("a.yml")?));
+        assert_eq!(
+            blocks[&RepoPath::from_reference("b.yml")?]
+                .blocks_with_context
+                .len(),
+            1
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn target_if_covering_file_whose_target_does_not_resolve_parse_blocks_returns_error()
+    -> anyhow::Result<()> {
+        let virtual_blocks = [virtual_block_with_target_if("a.yml#/x", &[], &["#/flag"])?];
+
+        let error = parse_with_virtual_blocks(
+            &[("a.yml", "flag: true\n")],
+            &PathFilter::allow_all(),
+            &virtual_blocks,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "invalid block at line 7 of \"blockwatch.toml\": target a.yml#/x does not resolve: \
+             symbol not found"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn target_if_on_uncovered_file_with_duplicate_tag_name_parse_blocks_skips_virtual_block()
+    -> anyhow::Result<()> {
+        let virtual_blocks = [
+            virtual_block_with_target_if("a.yml", &[("name", "x")], &["#/flag"])?,
+            virtual_block_with_target_if("b.yml", &[("name", "x")], &["#/flag"])?,
+        ];
+        // `a.yml` has a tag named `x`, but `target-if` skips the virtual block there.
+        let a_source = "other: true\n# <block name=\"x\">\nx: 1\n# </block>\n";
+
+        let blocks = parse_with_virtual_blocks(
+            &[("a.yml", a_source), ("b.yml", "flag: true\n")],
+            &PathFilter::allow_all(),
+            &virtual_blocks,
+        )?;
+
+        assert_eq!(
+            blocks[&RepoPath::from_reference("a.yml")?]
+                .blocks_with_context
+                .len(),
+            1
+        );
+        assert_eq!(
+            blocks[&RepoPath::from_reference("b.yml")?]
+                .blocks_with_context
+                .len(),
+            1
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn target_if_on_file_with_syntax_error_parse_blocks_returns_error() -> anyhow::Result<()> {
+        let virtual_blocks = [
+            virtual_block_with_target_if("bad.json", &[], &["#/a"])?,
+            virtual_block_with_target_if("good.json", &[], &["#/a"])?,
+        ];
+
+        let error = parse_with_virtual_blocks(
+            &[("bad.json", "{"), ("good.json", "{\"a\": 1}")],
+            &PathFilter::allow_all(),
+            &virtual_blocks,
+        )
+        .unwrap_err();
+
+        assert!(
+            format!("{error:#}").starts_with(
+                "invalid block at line 7 of \"blockwatch.toml\": target bad.json does not resolve:"
+            ),
+            "{error:#}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn target_if_on_file_without_symbols_parse_blocks_returns_error() -> anyhow::Result<()> {
+        let txt_block = virtual_block_with_target_if("notes.txt", &[], &["#/x"])?;
+        let error = parse_with_virtual_blocks(
+            &[("notes.txt", "hello\n")],
+            &PathFilter::allow_all(),
+            &[txt_block],
+        )
+        .unwrap_err();
+        assert_eq!(
+            format!("{error:#}"),
+            "invalid block at line 7 of \"blockwatch.toml\": target notes.txt does not resolve: \
+             file format is unsupported"
+        );
+
+        let ruby_block = virtual_block_with_target_if("a.rb", &[], &["#/x"])?;
+        let error = parse_with_virtual_blocks(
+            &[("a.rb", "x = 1\n")],
+            &PathFilter::allow_all(),
+            &[ruby_block],
+        )
+        .unwrap_err();
+        assert_eq!(
+            format!("{error:#}"),
+            "invalid block at line 7 of \"blockwatch.toml\": target a.rb does not resolve: \
+             symbols are not supported for this language"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn target_if_with_unreadable_symbol_parse_blocks_returns_error() -> anyhow::Result<()> {
+        let block = virtual_block_with_target_if("a.xml", &[], &["#/t"])?;
+        let source = "<t>&#0;</t>";
+
+        let error =
+            parse_with_virtual_blocks(&[("a.xml", source)], &PathFilter::allow_all(), &[block])
+                .unwrap_err();
+
+        let message = format!("{error:#}");
+        assert!(
+            message.starts_with(
+                "invalid block at line 7 of \"blockwatch.toml\": target a.xml does not resolve:"
+            ),
+            "{message}"
+        );
+        assert!(
+            message.contains("is not a character that XML allows"),
+            "{message}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn target_if_covering_no_file_in_full_run_parse_blocks_returns_error() -> anyhow::Result<()> {
+        let virtual_blocks = [
+            virtual_block_with_target_if("a.yml#/x", &[], &["#/flag"])?,
+            virtual_block_with_target_if("b.yml#/x", &[], &["#/flag"])?,
+        ];
+
+        let error = parse_with_virtual_blocks(
+            &[("a.yml", "other: 1\n"), ("b.yml", "other: 2\n")],
+            &PathFilter::allow_all(),
+            &virtual_blocks,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "invalid block at line 7 of \"blockwatch.toml\": no file the glob matches passes \
+             target-if"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn target_if_covering_only_ignored_files_in_full_run_parse_blocks_returns_error()
+    -> anyhow::Result<()> {
+        let virtual_blocks = [
+            virtual_block_with_target_if("a.yml#/x", &[], &["#/flag"])?,
+            virtual_block_with_target_if("b.yml#/x", &[], &["#/flag"])?,
+        ];
+        // Config `ignore` skips the only covered file (`b.yml`), so a full run must fail.
+        let path_filter = PathFilter::with_ignored_paths(HashSet::from(["b.yml".to_string()]));
+
+        let error = parse_with_virtual_blocks(
+            &[("a.yml", "other: true\n"), ("b.yml", "flag: true\nx: 1\n")],
+            &path_filter,
+            &virtual_blocks,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "invalid block at line 7 of \"blockwatch.toml\": no file the glob matches passes \
+             target-if"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn target_if_covering_no_file_when_uncovered_allowed_parse_blocks_succeeds()
+    -> anyhow::Result<()> {
+        let virtual_blocks = [virtual_block_with_target_if("a.yml#/x", &[], &["#/flag"])?];
+        let files = HashMap::from([("a.yml".to_string(), "other: true\n".to_string())]);
+
+        let parsed = Scan::new(
+            &FakeFileSystem::new(files),
+            &PathFilter::allow_all(),
+            &LanguageParsers::new(),
+            &virtual_blocks,
+        )
+        .require_covered_targets(false)
+        .parse_blocks(&DiffChanges::default(), ScanMode::All)?;
+
+        assert!(parsed.blocks.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn only_changed_target_if_covering_no_file_parse_blocks_checks_only_modified_entry()
+    -> anyhow::Result<()> {
+        let unmodified = virtual_block_with_target_if("a.yml#/x", &[], &["#/flag"])?;
+        let files = HashMap::from([("a.yml".to_string(), "other: true\n".to_string())]);
+        let file_diff = diff_changes([(RepoPath::from_reference("a.yml")?, vec![added(1)])]);
+
+        // Unmodified entry: checking an uncovered file in the diff succeeds.
+        let parsed = Scan::new(
+            &FakeFileSystem::new(files.clone()),
+            &PathFilter::allow_all(),
+            &LanguageParsers::new(),
+            std::slice::from_ref(&unmodified),
+        )
+        .parse_blocks(&file_diff, ScanMode::OnlyChanged)?;
+        assert!(parsed.blocks.is_empty());
+
+        // Modified entry whose files fail `target-if`: must fail.
+        let mut modified = unmodified;
+        modified.is_entry_modified = true;
+        let error = Scan::new(
+            &FakeFileSystem::new(files),
+            &PathFilter::allow_all(),
+            &LanguageParsers::new(),
+            &[modified],
+        )
+        .parse_blocks(&DiffChanges::default(), ScanMode::OnlyChanged)
+        .unwrap_err();
+        assert_eq!(
+            format!("{error:#}"),
+            "invalid block at line 7 of \"blockwatch.toml\": no file the glob matches passes \
+             target-if"
         );
         Ok(())
     }

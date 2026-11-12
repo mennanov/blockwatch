@@ -12,6 +12,12 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- Filter glob targets in `blockwatch.toml` with `target-if = { symbols = ['#/path'] }`. Only matched files that
+  define every listed symbol receive the block. Covered files must still resolve `target`, and full runs fail when no
+  matched file passes. See [Glob targets](docs/cli.md#glob-targets).
+
 ## [0.19.0] - 2026-11-12
 
 ### Added
