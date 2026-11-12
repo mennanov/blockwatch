@@ -1,4 +1,4 @@
-//! One tree-sitter-backed comment parser per supported language, keyed by file extension.
+//! One comment parser per supported language, most of them backed by tree-sitter.
 
 mod bash;
 mod c;
@@ -44,15 +44,16 @@ mod yaml;
 
 use crate::block_parser::BlocksFromCommentsParser;
 use crate::blocks::Block;
+use crate::language_resolver::{Language, LanguageResolver};
 use crate::symbols::{Symbols, SymbolsParser};
 use crate::{Position, character_column_at};
 use anyhow::Context;
 use std::collections::HashMap;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::ops::Range;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
-use tree_sitter::{Language, Node, Parser, Tree, TreeCursor};
+use std::sync::Mutex;
+use tree_sitter::{Node, Parser, Tree, TreeCursor};
 
 /// Parses the source files of one language.
 pub(crate) trait LanguageParser: Send + Sync {
@@ -123,329 +124,174 @@ impl<C: CommentsParser> LanguageParser for LanguageParserImpl<C> {
 
 /// A parser for one language, shared between files and threads.
 ///
-/// Each parser owns a mutable tree-sitter `Parser` and is therefore behind a `Mutex`; the `Arc`
-/// lets languages that share a grammar (`.cc` and `.cpp`, `.yaml` and `.yml`) share one instance.
-pub(crate) type SharedLanguageParser = Arc<Mutex<dyn LanguageParser>>;
+/// Each parser owns a mutable tree-sitter `Parser` and is therefore behind a `Mutex`.
+pub(crate) type SharedLanguageParser = Mutex<Box<dyn LanguageParser>>;
 
-/// The language parsers of a run, and how a file name selects one.
-#[derive(Clone, Default)]
+/// The language parsers of a run, one for each [`Language`], and how a file name selects one.
 pub(crate) struct LanguageParsers {
-    /// Parsers keyed by file extension, or by the whole file name for files such as `Dockerfile`.
-    by_extension: HashMap<OsString, SharedLanguageParser>,
-    /// Parsers keyed by file name prefix (the portion before the first `.`), for files such as
-    /// `Dockerfile.ci`.
-    by_prefix: HashMap<OsString, PrefixRule>,
-    /// Maps an extension to a supported one. For example, `ino` to `cpp` makes `.ino` files parse
-    /// as C++.
-    extension_mappings: HashMap<OsString, OsString>,
-}
-
-/// A rule for matching files by their name prefix (the portion before the first `.`).
-#[derive(Clone)]
-pub(crate) struct PrefixRule {
-    parser: SharedLanguageParser,
-    excluded_suffixes: Vec<OsString>,
-}
-
-impl PrefixRule {
-    /// A prefix rule that excludes files whose suffix matches or ends with any of `excluded_suffixes`.
-    fn new(parser: SharedLanguageParser, excluded_suffixes: &[&str]) -> Self {
-        Self {
-            parser,
-            excluded_suffixes: excluded_suffixes.iter().map(OsString::from).collect(),
-        }
-    }
-
-    /// Whether `suffix` is allowed by this rule.
-    ///
-    /// Returns `true` if no dot-separated segment in `suffix` matches any of the rule's excluded
-    /// suffixes.
-    fn matches(&self, suffix: &str) -> bool {
-        !self.excluded_suffixes.iter().any(|excluded| {
-            match excluded.to_str() {
-                // Any file containing an excluded segment (such as `dockerignore`), anywhere in its
-                // dot-separated suffix, is excluded. For example, `Dockerfile.dockerignore.old` and
-                // `Dockerfile.ci.dockerignore` are both ignore files rather than Dockerfiles.
-                Some(excluded) => suffix.split('.').any(|segment| segment == excluded),
-                None => false,
-            }
-        })
-    }
-}
-
-impl From<HashMap<OsString, SharedLanguageParser>> for LanguageParsers {
-    /// The parsers by extension, with no extension mappings or prefix rules.
-    fn from(by_extension: HashMap<OsString, SharedLanguageParser>) -> Self {
-        Self::new(by_extension, HashMap::new())
-    }
+    resolver: LanguageResolver,
+    bash: SharedLanguageParser,
+    c: SharedLanguageParser,
+    cmake: SharedLanguageParser,
+    c_sharp: SharedLanguageParser,
+    cpp: SharedLanguageParser,
+    css: SharedLanguageParser,
+    dart: SharedLanguageParser,
+    dockerfile: SharedLanguageParser,
+    elixir: SharedLanguageParser,
+    go: SharedLanguageParser,
+    go_module: SharedLanguageParser,
+    graphql: SharedLanguageParser,
+    groovy: SharedLanguageParser,
+    hcl: SharedLanguageParser,
+    html: SharedLanguageParser,
+    java: SharedLanguageParser,
+    javascript: SharedLanguageParser,
+    json: SharedLanguageParser,
+    kotlin: SharedLanguageParser,
+    lean: SharedLanguageParser,
+    lua: SharedLanguageParser,
+    makefile: SharedLanguageParser,
+    markdown: SharedLanguageParser,
+    mdx: SharedLanguageParser,
+    nix: SharedLanguageParser,
+    ocaml: SharedLanguageParser,
+    php: SharedLanguageParser,
+    proto: SharedLanguageParser,
+    python: SharedLanguageParser,
+    ruby: SharedLanguageParser,
+    rust: SharedLanguageParser,
+    scala: SharedLanguageParser,
+    sql: SharedLanguageParser,
+    starlark: SharedLanguageParser,
+    swift: SharedLanguageParser,
+    toml: SharedLanguageParser,
+    tsx: SharedLanguageParser,
+    typescript: SharedLanguageParser,
+    xml: SharedLanguageParser,
+    yaml: SharedLanguageParser,
+    zsh: SharedLanguageParser,
 }
 
 impl LanguageParsers {
-    /// Creates language parsers with `by_extension` and `by_prefix`, with no extension mappings.
-    pub(crate) fn new(
-        by_extension: HashMap<OsString, SharedLanguageParser>,
-        by_prefix: HashMap<OsString, PrefixRule>,
-    ) -> Self {
-        Self {
-            by_extension,
-            by_prefix,
-            extension_mappings: HashMap::new(),
-        }
-    }
-
-    /// Uses `extension_mappings` to select a parser for the extensions they map.
+    /// Uses `extension_mappings` to select a parser for the extensions and file names they map.
     pub(crate) fn with_extension_mappings(
         self,
-        extension_mappings: HashMap<OsString, OsString>,
+        extension_mappings: HashMap<OsString, Language>,
     ) -> Self {
         Self {
-            extension_mappings,
+            resolver: LanguageResolver::new(extension_mappings),
             ..self
         }
     }
 
-    /// The extensions, and whole file names, that have a parser. The extension mappings are not
-    /// included.
-    pub(crate) fn extensions(&self) -> impl Iterator<Item = &OsString> {
-        self.by_extension.keys()
-    }
-
-    /// The parser for `file_path`, or `None` if neither its extension nor its file name has one.
-    ///
-    /// Tries the extensions from the shortest, then the whole file name, then prefix rules.
+    /// The parser for `file_path`, or `None` if its name has no language.
     pub(crate) fn parser_for(&self, file_path: &Path) -> Option<&SharedLanguageParser> {
-        let file_name = file_path.file_name()?.to_str()?;
-
-        for (i, _) in file_name.match_indices('.').rev() {
-            #[expect(clippy::string_slice, reason = "`i` is the index of a `.`")]
-            let extension = &file_name[i + 1..];
-
-            if let Some(parser) = self.for_extension(OsStr::new(extension)) {
-                return Some(parser);
-            }
-        }
-
-        if let Some(parser) = self.for_extension(OsStr::new(file_name)) {
-            return Some(parser);
-        }
-
-        let (prefix, suffix) = file_name.split_once('.')?;
-        let prefix = self
-            .extension_mappings
-            .get(OsStr::new(prefix))
-            .map_or(OsStr::new(prefix), OsString::as_os_str);
-        let rule = self.by_prefix.get(prefix)?;
-        if rule.matches(suffix) {
-            Some(&rule.parser)
-        } else {
-            None
-        }
+        self.resolver
+            .resolve(file_path)
+            .map(|language| self.parser(language))
     }
 
-    /// The parser for `extension`, after the extension mappings are applied.
-    pub(crate) fn for_extension(&self, extension: &OsStr) -> Option<&SharedLanguageParser> {
-        let extension = self
-            .extension_mappings
-            .get(extension)
-            .map_or(extension, OsString::as_os_str);
-        self.by_extension.get(extension)
+    /// The parser for `language`.
+    pub(crate) fn parser(&self, language: Language) -> &SharedLanguageParser {
+        match language {
+            Language::Bash => &self.bash,
+            Language::C => &self.c,
+            Language::CMake => &self.cmake,
+            Language::CSharp => &self.c_sharp,
+            Language::Cpp => &self.cpp,
+            Language::Css => &self.css,
+            Language::Dart => &self.dart,
+            Language::Dockerfile => &self.dockerfile,
+            Language::Elixir => &self.elixir,
+            Language::Go => &self.go,
+            Language::GoModule => &self.go_module,
+            Language::GraphQl => &self.graphql,
+            Language::Groovy => &self.groovy,
+            Language::Hcl => &self.hcl,
+            Language::Html => &self.html,
+            Language::Java => &self.java,
+            Language::JavaScript => &self.javascript,
+            Language::Json => &self.json,
+            Language::Kotlin => &self.kotlin,
+            Language::Lean => &self.lean,
+            Language::Lua => &self.lua,
+            Language::Makefile => &self.makefile,
+            Language::Markdown => &self.markdown,
+            Language::Mdx => &self.mdx,
+            Language::Nix => &self.nix,
+            Language::OCaml => &self.ocaml,
+            Language::Php => &self.php,
+            Language::Proto => &self.proto,
+            Language::Python => &self.python,
+            Language::Ruby => &self.ruby,
+            Language::Rust => &self.rust,
+            Language::Scala => &self.scala,
+            Language::Sql => &self.sql,
+            Language::Starlark => &self.starlark,
+            Language::Swift => &self.swift,
+            Language::Toml => &self.toml,
+            Language::Tsx => &self.tsx,
+            Language::TypeScript => &self.typescript,
+            Language::Xml => &self.xml,
+            Language::Yaml => &self.yaml,
+            Language::Zsh => &self.zsh,
+        }
     }
 }
 
-/// Returns all available language parsers, with no extension mappings.
+/// Builds every language parser, with no extension mappings.
+///
+/// Returns an error if a grammar fails to load.
 pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
     fn parser<P: LanguageParser + 'static>(p: P) -> SharedLanguageParser {
-        Arc::new(Mutex::new(p))
+        Mutex::new(Box::new(p))
     }
 
-    let bash_parser = parser(bash::parser()?);
-    let c_parser = parser(c::parser()?);
-    let c_sharp_parser = parser(c_sharp::parser()?);
-    let cmake_parser = parser(cmake::parser()?);
-    let cpp_parser = parser(cpp::parser()?);
-    let css_parser = parser(css::parser()?);
-    let dart_parser = parser(dart::parser()?);
-    let dockerfile_parser = parser(dockerfile::parser()?);
-    let prefix_dockerfile_parser = Arc::clone(&dockerfile_parser);
-    let elixir_parser = parser(elixir::parser()?);
-    let go_parser = parser(go::parser()?);
-    let go_module_files_parser = parser(go::module_files_parser()?);
-    let graphql_parser = parser(graphql::parser()?);
-    let groovy_parser = parser(groovy::parser()?);
-    let hcl_parser = parser(hcl::parser()?);
-    let html_parser = parser(html::parser()?);
-    let java_parser = parser(java::parser()?);
-    let js_parser = parser(javascript::parser()?);
-    let json_parser = parser(json::parser()?);
-    let kotlin_parser = parser(kotlin::parser()?);
-    let lean_parser = parser(lean::parser()?);
-    let lua_parser = parser(lua::parser()?);
-    let makefile_parser = parser(makefile::parser()?);
-    let markdown_parser = parser(markdown::parser()?);
-    let mdx_parser = parser(mdx::parser()?);
-    let nix_parser = parser(nix::parser()?);
-    let ocaml_parser = parser(ocaml::parser()?);
-    let php_parser = parser(php::parser()?);
-    let proto_parser = parser(proto::parser()?);
-    let python_parser = parser(python::parser()?);
-    let ruby_parser = parser(ruby::parser()?);
-    let rust_parser = parser(rust::parser()?);
-    let scala_parser = parser(scala::parser()?);
-    let sql_parser = parser(sql::parser()?);
-    let starlark_parser = parser(starlark::parser()?);
-    let swift_parser = parser(swift::parser()?);
-    let toml_parser = parser(toml::parser()?);
-    let typescript_parser = parser(typescript::parser()?);
-    let typescript_tsx_parser = parser(tsx::parser()?);
-    let xml_parser = parser(xml::parser()?);
-    let yaml_parser = parser(yaml::parser()?);
-    let zsh_parser = parser(bash::zsh_parser()?);
-
-    let by_extension = HashMap::from([
-        /* <block name="language-extensions"
-        affects="README.md:supported-grammar, src/blocks.rs:supported-extensions"
-        keep-sorted keep-unique='\("(?P<value>[^"]+)"'> */
-        ("BUCK".into(), Arc::clone(&starlark_parser)),
-        ("BUILD".into(), Arc::clone(&starlark_parser)),
-        ("Brewfile".into(), Arc::clone(&ruby_parser)),
-        ("CMakeLists.txt".into(), Arc::clone(&cmake_parser)),
-        ("Containerfile".into(), Arc::clone(&dockerfile_parser)),
-        ("Dockerfile".into(), Arc::clone(&dockerfile_parser)),
-        ("Fastfile".into(), Arc::clone(&ruby_parser)),
-        ("GNUmakefile".into(), Arc::clone(&makefile_parser)),
-        ("Gemfile".into(), Arc::clone(&ruby_parser)),
-        ("Jenkinsfile".into(), Arc::clone(&groovy_parser)),
-        ("Makefile".into(), Arc::clone(&makefile_parser)),
-        ("Pipfile".into(), Arc::clone(&toml_parser)),
-        ("Podfile".into(), Arc::clone(&ruby_parser)),
-        ("Rakefile".into(), Arc::clone(&ruby_parser)),
-        ("Tiltfile".into(), Arc::clone(&starlark_parser)),
-        ("Vagrantfile".into(), Arc::clone(&ruby_parser)),
-        ("WORKSPACE".into(), Arc::clone(&starlark_parser)),
-        ("bash".into(), Arc::clone(&bash_parser)),
-        ("bash_profile".into(), Arc::clone(&bash_parser)),
-        ("bashrc".into(), Arc::clone(&bash_parser)),
-        ("bazel".into(), Arc::clone(&starlark_parser)),
-        ("builder".into(), Arc::clone(&ruby_parser)),
-        ("bzl".into(), Arc::clone(&starlark_parser)),
-        ("bzlmod".into(), Arc::clone(&starlark_parser)),
-        ("c".into(), c_parser),
-        ("cc".into(), Arc::clone(&cpp_parser)),
-        ("cff".into(), Arc::clone(&yaml_parser)),
-        ("cjs".into(), Arc::clone(&js_parser)),
-        ("cmake".into(), cmake_parser),
-        ("containerfile".into(), Arc::clone(&dockerfile_parser)),
-        ("cpp".into(), Arc::clone(&cpp_parser)),
-        ("cs".into(), c_sharp_parser),
-        ("csproj".into(), Arc::clone(&xml_parser)),
-        ("css".into(), css_parser),
-        ("cts".into(), Arc::clone(&typescript_parser)),
-        ("cxx".into(), Arc::clone(&cpp_parser)),
-        ("d.ts".into(), Arc::clone(&typescript_parser)),
-        ("dart".into(), dart_parser),
-        ("dockerfile".into(), dockerfile_parser),
-        ("envrc".into(), Arc::clone(&bash_parser)),
-        ("ex".into(), Arc::clone(&elixir_parser)),
-        ("exs".into(), elixir_parser),
-        ("fsproj".into(), Arc::clone(&xml_parser)),
-        ("gemspec".into(), Arc::clone(&ruby_parser)),
-        ("go".into(), go_parser),
-        ("go.mod".into(), Arc::clone(&go_module_files_parser)),
-        ("go.sum".into(), Arc::clone(&go_module_files_parser)),
-        ("go.work".into(), go_module_files_parser),
-        ("gql".into(), Arc::clone(&graphql_parser)),
-        ("gradle".into(), Arc::clone(&groovy_parser)),
-        ("graphql".into(), Arc::clone(&graphql_parser)),
-        ("graphqls".into(), graphql_parser),
-        ("groovy".into(), Arc::clone(&groovy_parser)),
-        ("h".into(), Arc::clone(&cpp_parser)),
-        ("hcl".into(), Arc::clone(&hcl_parser)),
-        ("hh".into(), Arc::clone(&cpp_parser)),
-        ("hpp".into(), Arc::clone(&cpp_parser)),
-        ("htm".into(), Arc::clone(&html_parser)),
-        ("html".into(), Arc::clone(&html_parser)),
-        ("hxx".into(), cpp_parser),
-        ("java".into(), java_parser),
-        ("jbuilder".into(), Arc::clone(&ruby_parser)),
-        ("jenkinsfile".into(), groovy_parser),
-        ("js".into(), Arc::clone(&js_parser)),
-        ("json".into(), Arc::clone(&json_parser)),
-        ("jsonc".into(), Arc::clone(&json_parser)),
-        ("jsx".into(), Arc::clone(&js_parser)),
-        ("kt".into(), Arc::clone(&kotlin_parser)),
-        ("kts".into(), kotlin_parser),
-        ("lean".into(), lean_parser),
-        ("lua".into(), Arc::clone(&lua_parser)),
-        ("mak".into(), Arc::clone(&makefile_parser)),
-        ("makefile".into(), Arc::clone(&makefile_parser)),
-        ("markdown".into(), Arc::clone(&markdown_parser)),
-        ("md".into(), markdown_parser),
-        ("mdx".into(), mdx_parser),
-        ("mjs".into(), js_parser),
-        ("mk".into(), makefile_parser),
-        ("ml".into(), Arc::clone(&ocaml_parser)),
-        ("mli".into(), ocaml_parser),
-        ("mts".into(), Arc::clone(&typescript_parser)),
-        ("nix".into(), nix_parser),
-        ("nomad".into(), Arc::clone(&hcl_parser)),
-        ("php".into(), Arc::clone(&php_parser)),
-        ("phtml".into(), php_parser),
-        ("podspec".into(), Arc::clone(&ruby_parser)),
-        ("props".into(), Arc::clone(&xml_parser)),
-        ("proto".into(), proto_parser),
-        ("py".into(), Arc::clone(&python_parser)),
-        ("pyi".into(), Arc::clone(&python_parser)),
-        ("pyw".into(), python_parser),
-        ("rake".into(), Arc::clone(&ruby_parser)),
-        ("rb".into(), Arc::clone(&ruby_parser)),
-        ("rockspec".into(), lua_parser),
-        ("rs".into(), rust_parser),
-        ("ru".into(), ruby_parser),
-        ("sbt".into(), Arc::clone(&scala_parser)),
-        ("scala".into(), scala_parser),
-        ("sh".into(), bash_parser),
-        ("sql".into(), sql_parser),
-        ("star".into(), starlark_parser),
-        ("swift".into(), swift_parser),
-        ("targets".into(), Arc::clone(&xml_parser)),
-        ("tf".into(), Arc::clone(&hcl_parser)),
-        ("tfvars".into(), Arc::clone(&hcl_parser)),
-        ("tofu".into(), hcl_parser),
-        ("toml".into(), toml_parser),
-        ("ts".into(), typescript_parser),
-        ("tsx".into(), typescript_tsx_parser),
-        ("vbproj".into(), Arc::clone(&xml_parser)),
-        ("vcxproj".into(), Arc::clone(&xml_parser)),
-        ("webmanifest".into(), json_parser),
-        ("xaml".into(), Arc::clone(&xml_parser)),
-        ("xhtml".into(), html_parser),
-        ("xml".into(), Arc::clone(&xml_parser)),
-        ("xsd".into(), Arc::clone(&xml_parser)),
-        ("xsl".into(), Arc::clone(&xml_parser)),
-        ("xslt".into(), xml_parser),
-        ("yaml".into(), Arc::clone(&yaml_parser)),
-        ("yml".into(), yaml_parser),
-        ("zsh".into(), Arc::clone(&zsh_parser)),
-        ("zshrc".into(), zsh_parser),
-        // </block>
-    ]);
-
-    let by_prefix = HashMap::from([
-        /* <block name="language-prefixes"
-        same-as="src/blocks.rs:supported-prefixes"
-        same-as-pattern='"(?P<value>[^"]+)"\.into\(\)'> */
-        (
-            "Containerfile".into(),
-            PrefixRule::new(Arc::clone(&prefix_dockerfile_parser), &["dockerignore"]),
-        ),
-        (
-            "Dockerfile".into(),
-            PrefixRule::new(prefix_dockerfile_parser, &["dockerignore"]),
-        ),
-        // </block>
-    ]);
-
-    Ok(LanguageParsers::new(by_extension, by_prefix))
+    Ok(LanguageParsers {
+        resolver: LanguageResolver::new(HashMap::new()),
+        bash: parser(bash::parser()?),
+        c: parser(c::parser()?),
+        cmake: parser(cmake::parser()?),
+        c_sharp: parser(c_sharp::parser()?),
+        cpp: parser(cpp::parser()?),
+        css: parser(css::parser()?),
+        dart: parser(dart::parser()?),
+        dockerfile: parser(dockerfile::parser()?),
+        elixir: parser(elixir::parser()?),
+        go: parser(go::parser()?),
+        go_module: parser(go::module_files_parser()?),
+        graphql: parser(graphql::parser()?),
+        groovy: parser(groovy::parser()?),
+        hcl: parser(hcl::parser()?),
+        html: parser(html::parser()?),
+        java: parser(java::parser()?),
+        javascript: parser(javascript::parser()?),
+        json: parser(json::parser()?),
+        kotlin: parser(kotlin::parser()?),
+        lean: parser(lean::parser()?),
+        lua: parser(lua::parser()?),
+        makefile: parser(makefile::parser()?),
+        markdown: parser(markdown::parser()?),
+        mdx: parser(mdx::parser()?),
+        nix: parser(nix::parser()?),
+        ocaml: parser(ocaml::parser()?),
+        php: parser(php::parser()?),
+        proto: parser(proto::parser()?),
+        python: parser(python::parser()?),
+        ruby: parser(ruby::parser()?),
+        rust: parser(rust::parser()?),
+        scala: parser(scala::parser()?),
+        sql: parser(sql::parser()?),
+        starlark: parser(starlark::parser()?),
+        swift: parser(swift::parser()?),
+        toml: parser(toml::parser()?),
+        tsx: parser(tsx::parser()?),
+        typescript: parser(typescript::parser()?),
+        xml: parser(xml::parser()?),
+        yaml: parser(yaml::parser()?),
+        zsh: parser(bash::zsh_parser()?),
+    })
 }
 
 /// Parses comment string from a source code by returning an iterator of `Comment`s.
@@ -473,7 +319,7 @@ type NodeVisitor = Box<dyn Fn(&Node, &str) -> Visit + Send + Sync>;
 ///
 /// # Errors
 /// Returns an error if the language cannot be set on the parser.
-pub(crate) fn tree_sitter_parser(language: &Language) -> anyhow::Result<Parser> {
+pub(crate) fn tree_sitter_parser(language: &tree_sitter::Language) -> anyhow::Result<Parser> {
     let mut parser = Parser::new();
     parser
         .set_language(language)
@@ -488,7 +334,7 @@ struct TreeSitterCommentsParser {
 }
 
 impl TreeSitterCommentsParser {
-    fn new(language: &Language, node_visitor: NodeVisitor) -> anyhow::Result<Self> {
+    fn new(language: &tree_sitter::Language, node_visitor: NodeVisitor) -> anyhow::Result<Self> {
         let parser = tree_sitter_parser(language)?;
         Ok(Self {
             parser,
@@ -830,7 +676,7 @@ const SLASH_AND_HASH_MARKERS: &[&str] = &["//!", "//", "#"];
 /// `line_markers` (see [`blank_line_marker`]), or `/* */` comments. A node is a comment when its
 /// kind is in `comment_node_kinds`.
 fn c_style_comments_parser(
-    language: &Language,
+    language: &tree_sitter::Language,
     comment_node_kinds: &'static [&'static str],
     line_markers: &'static [&'static str],
 ) -> anyhow::Result<TreeSitterCommentsParser> {
@@ -857,7 +703,9 @@ fn c_style_comment_text(comment: &str, line_markers: &[&str]) -> String {
 
 /// Comments parser shared by the ECMAScript-family grammars (JavaScript, TypeScript, TSX). All
 /// three use the same node kinds for comments, so they differ only in which grammar is loaded.
-fn ecmascript_comments_parser(language: &Language) -> anyhow::Result<TreeSitterCommentsParser> {
+fn ecmascript_comments_parser(
+    language: &tree_sitter::Language,
+) -> anyhow::Result<TreeSitterCommentsParser> {
     TreeSitterCommentsParser::new(language, comment_visitor(ecmascript_comment_text))
 }
 
@@ -915,7 +763,7 @@ fn jsx_comment_text(expression: &Node, source_code: &str) -> Option<String> {
 /// `line_markers` (see [`blank_line_marker`]). A node is a comment when its kind is
 /// `comment_node_kind`.
 fn python_style_comments_parser(
-    language: &Language,
+    language: &tree_sitter::Language,
     comment_node_kind: &'static str,
     line_markers: &'static [&'static str],
 ) -> anyhow::Result<TreeSitterCommentsParser> {
@@ -935,7 +783,7 @@ fn python_style_comments_parser(
 
 /// XML-style comments parser.
 fn xml_style_comments_parser(
-    language: &Language,
+    language: &tree_sitter::Language,
     comment_node_kind: &'static str,
 ) -> anyhow::Result<TreeSitterCommentsParser> {
     TreeSitterCommentsParser::new(
@@ -990,11 +838,14 @@ fn blank_decorative_stars(content: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::symbol_path::SymbolPath;
 
     #[test]
     fn extensions_with_symbols_match_the_documented_list() -> anyhow::Result<()> {
         let mut extensions_with_symbols = Vec::new();
-        for (extension, parser) in language_parsers()?.by_extension {
+        let parsers = language_parsers()?;
+        for &(name, language) in crate::language_resolver::NAMES {
+            let parser = parsers.parser(language);
             // A parser without symbols refuses every source with the same error, so an empty
             // source is enough to tell. A parser with symbols may accept it or report it as broken.
             let has_symbols = match parser
@@ -1006,7 +857,7 @@ mod tests {
                 Err(err) => err.to_string() != "symbols are not supported for this language",
             };
             if has_symbols {
-                extensions_with_symbols.push(extension.to_string_lossy().into_owned());
+                extensions_with_symbols.push(name);
             }
         }
         extensions_with_symbols.sort();
@@ -1116,147 +967,24 @@ mod tests {
         Ok(())
     }
 
-    struct StubParser;
-
-    impl LanguageParser for StubParser {
-        fn parse_blocks<'a>(
-            &'a mut self,
-            _contents: &'a str,
-        ) -> Box<dyn Iterator<Item = anyhow::Result<Block>> + 'a> {
-            Box::new(std::iter::empty())
-        }
-
-        fn parse_symbols(&mut self, _contents: &str) -> anyhow::Result<Symbols> {
-            anyhow::bail!("stub parser does not support symbols")
-        }
-    }
-
-    fn stub_parser() -> SharedLanguageParser {
-        Arc::new(Mutex::new(StubParser))
-    }
-
-    fn parsers_with_prefix(
-        prefix: &str,
-        excluded_suffixes: &[&str],
-    ) -> (LanguageParsers, SharedLanguageParser) {
-        let parser = stub_parser();
-        let parsers = LanguageParsers::new(
-            HashMap::new(),
-            HashMap::from([(
-                prefix.into(),
-                PrefixRule::new(Arc::clone(&parser), excluded_suffixes),
-            )]),
-        );
-        (parsers, parser)
-    }
-
     #[test]
-    fn file_with_prefix_and_suffix_resolves_to_parser() {
-        let (parsers, parser) = parsers_with_prefix("prefix", &[]);
+    fn typescript_file_with_type_assertion_resolves_its_symbols() -> anyhow::Result<()> {
+        let parsers = language_parsers()?;
+        let path = SymbolPath::parse("/a")?;
+        let resolves = |parser: &SharedLanguageParser| -> anyhow::Result<bool> {
+            let symbols = parser
+                .lock()
+                .expect("a thread panicked while it held the parser")
+                .parse_symbols("let a = <string>b;\n")?;
+            Ok(symbols.resolve(&path).is_ok())
+        };
 
-        let resolved = parsers
-            .parser_for(Path::new("prefix.variant"))
-            .expect("prefix.variant must resolve");
-
-        assert!(Arc::ptr_eq(resolved, &parser));
-    }
-
-    #[test]
-    fn file_with_prefix_and_nested_suffix_resolves_to_parser() {
-        let (parsers, parser) = parsers_with_prefix("prefix", &[]);
-
-        let resolved = parsers
-            .parser_for(Path::new("prefix.sub.variant"))
-            .expect("prefix.sub.variant must resolve");
-
-        assert!(Arc::ptr_eq(resolved, &parser));
-    }
-
-    #[test]
-    fn nested_file_with_prefix_and_suffix_resolves_to_parser() {
-        let (parsers, parser) = parsers_with_prefix("prefix", &[]);
-
-        let resolved = parsers
-            .parser_for(Path::new("nested/prefix.variant"))
-            .expect("nested/prefix.variant must resolve");
-
-        assert!(Arc::ptr_eq(resolved, &parser));
-    }
-
-    #[test]
-    fn nested_file_with_prefix_and_nested_suffix_resolves_to_parser() {
-        let (parsers, parser) = parsers_with_prefix("prefix", &[]);
-
-        let resolved = parsers
-            .parser_for(Path::new("nested/prefix.sub.variant"))
-            .expect("nested/prefix.sub.variant must resolve");
-
-        assert!(Arc::ptr_eq(resolved, &parser));
-    }
-
-    #[test]
-    fn prefix_with_excluded_suffix_has_no_parser() {
-        let (parsers, _) = parsers_with_prefix("prefix", &["excluded"]);
-
-        for file_name in [
-            "prefix.excluded",
-            "prefix.sub.excluded",
-            "prefix.excluded.sub",
-            "nested/prefix.excluded",
-            "nested/prefix.sub.excluded",
-            "nested/prefix.excluded.sub",
-        ] {
-            assert!(
-                parsers.parser_for(Path::new(file_name)).is_none(),
-                "expected no parser for {file_name}"
-            );
-        }
-    }
-
-    #[test]
-    fn name_sharing_prefix_without_dot_has_no_parser() {
-        let (parsers, _) = parsers_with_prefix("prefix", &[]);
-
-        for file_name in ["prefixWithoutDot", "NotAPrefix.variant"] {
-            assert!(
-                parsers.parser_for(Path::new(file_name)).is_none(),
-                "expected no parser for {file_name}"
-            );
-        }
-    }
-
-    #[test]
-    fn known_extension_takes_precedence_over_prefix() {
-        let extension_parser = stub_parser();
-        let prefix_parser = stub_parser();
-        let parsers = LanguageParsers::new(
-            HashMap::from([("ext".into(), Arc::clone(&extension_parser))]),
-            HashMap::from([(
-                "prefix".into(),
-                PrefixRule::new(Arc::clone(&prefix_parser), &[]),
-            )]),
-        );
-
-        let resolved = parsers
-            .parser_for(Path::new("prefix.ext"))
-            .expect("prefix.ext must resolve");
-
-        assert!(
-            Arc::ptr_eq(resolved, &extension_parser),
-            "expected extension parser to win over prefix parser"
-        );
-    }
-
-    #[test]
-    fn mapped_prefix_resolves_to_parser() {
-        let (parsers, parser) = parsers_with_prefix("target", &[]);
-        let parsers =
-            parsers.with_extension_mappings(HashMap::from([("alias".into(), "target".into())]));
-
-        let resolved = parsers
-            .parser_for(Path::new("alias.variant"))
-            .expect("alias.variant must resolve");
-
-        assert!(Arc::ptr_eq(resolved, &parser));
+        let typescript = parsers
+            .parser_for(Path::new("a.ts"))
+            .expect("`.ts` files have a parser");
+        assert!(resolves(typescript)?);
+        // TSX reads `<string>` as the start of an element, so the source tells the two apart.
+        assert!(!resolves(parsers.parser(Language::Tsx))?);
+        Ok(())
     }
 }

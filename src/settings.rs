@@ -1,6 +1,7 @@
 //! Project settings: how they are validated, and how the flags and the config file are merged.
 
 use crate::blocks::BlockAddress;
+use crate::language_resolver::Language;
 use crate::paths_glob::glob_builder;
 use crate::validators::Validator;
 use anyhow::{Context, bail};
@@ -30,9 +31,7 @@ pub(crate) struct RawSettings {
 
 impl RawSettings {
     /// Checks all the setting values and returns them parsed.
-    ///
-    /// `supported_extensions` is a set of supported file extensions.
-    fn parse(&self, supported_extensions: &HashSet<&OsString>) -> anyhow::Result<ParsedSettings> {
+    fn parse(&self) -> anyhow::Result<ParsedSettings> {
         let ignore = self
             .ignore
             .iter()
@@ -46,10 +45,8 @@ impl RawSettings {
             .extensions
             .iter()
             .map(|(key, value)| {
-                let language = OsString::from(value);
-                if !supported_extensions.contains(&language) {
-                    bail!("unsupported extension mapping: {key}={value}");
-                }
+                let language = Language::from_key(value)
+                    .with_context(|| format!("unsupported extension mapping: {key}={value}"))?;
                 Ok((OsString::from(key), language))
             })
             .collect::<anyhow::Result<_>>()?;
@@ -67,7 +64,7 @@ impl RawSettings {
 #[derive(Debug)]
 struct ParsedSettings {
     ignore: Vec<Glob>,
-    extensions: HashMap<OsString, OsString>,
+    extensions: HashMap<OsString, Language>,
     validator_selection: ValidatorSelection,
     block_selection: BlockSelection,
 }
@@ -79,7 +76,7 @@ struct ParsedSettings {
 #[derive(Debug)]
 pub(crate) struct Settings {
     ignored_globs: GlobSet,
-    extensions: HashMap<OsString, OsString>,
+    extensions: HashMap<OsString, Language>,
     validator_selection: ValidatorSelection,
     block_selection: BlockSelection,
 }
@@ -96,19 +93,14 @@ impl Settings {
     /// - If `flags` lists any block to check or to skip, the `only_blocks` and `skip_blocks` lists
     ///   of `config_file` are ignored.
     ///
-    /// `supported_extensions` are the extensions that have a language parser. Returns an error if
-    /// either source has an invalid value. The error says which source it came from.
+    /// Returns an error if either source has an invalid value. The error says which source it
+    /// came from.
     pub(crate) fn resolve(
         flags: RawSettings,
         config_file: RawSettings,
-        supported_extensions: &HashSet<&OsString>,
     ) -> anyhow::Result<Settings> {
-        let flags = flags
-            .parse(supported_extensions)
-            .context("invalid command-line flags")?;
-        let config_file = config_file
-            .parse(supported_extensions)
-            .context("invalid config file")?;
+        let flags = flags.parse().context("invalid command-line flags")?;
+        let config_file = config_file.parse().context("invalid config file")?;
 
         // `-e keep-sorted` usually means "run only keep-sorted this time". Adding it to the config
         // file's lists would not do that. It could also mix `enable` with `disable`, which is not
@@ -151,9 +143,9 @@ impl Settings {
         &self.ignored_globs
     }
 
-    /// Maps an extension to a supported one. For example, `ino` to `cpp` makes `.ino` files parse
-    /// as C++.
-    pub(crate) fn extensions(&self) -> &HashMap<OsString, OsString> {
+    /// Maps an extension or a whole file name to a language. For example, `ino` to
+    /// `Language::Cpp` makes `.ino` files parse as C++.
+    pub(crate) fn extensions(&self) -> &HashMap<OsString, Language> {
         &self.extensions
     }
 
@@ -249,15 +241,11 @@ mod tests {
     use super::*;
 
     fn resolve(flags: RawSettings, config_file: RawSettings) -> anyhow::Result<Settings> {
-        let (cpp, py) = (OsString::from("cpp"), OsString::from("py"));
-        Settings::resolve(flags, config_file, &HashSet::from([&cpp, &py]))
+        Settings::resolve(flags, config_file)
     }
 
     fn check_error(settings: RawSettings) -> String {
-        let cpp = OsString::from("cpp");
-        let error = settings
-            .parse(&HashSet::from([&cpp]))
-            .expect_err("the settings must be rejected");
+        let error = settings.parse().expect_err("the settings must be rejected");
         format!("{error:#}")
     }
 
@@ -315,8 +303,8 @@ mod tests {
         assert_eq!(
             resolve(flags, config_file)?.extensions,
             HashMap::from([
-                (OsString::from("cxx"), OsString::from("cpp")),
-                (OsString::from("pyw"), OsString::from("py")),
+                (OsString::from("cxx"), Language::Cpp),
+                (OsString::from("pyw"), Language::Python),
             ])
         );
         Ok(())
@@ -334,7 +322,7 @@ mod tests {
         };
         assert_eq!(
             resolve(flags, config_file)?.extensions,
-            HashMap::from([(OsString::from("hpp"), OsString::from("cpp"))])
+            HashMap::from([(OsString::from("hpp"), Language::Cpp)])
         );
         Ok(())
     }

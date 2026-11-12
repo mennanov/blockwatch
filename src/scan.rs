@@ -557,6 +557,7 @@ mod parse_blocks_tests {
     use crate::fs::PathFilter;
     use crate::fs::test_utils::FakeFileSystem;
     use crate::language_parsers::language_parsers;
+    use crate::language_resolver::Language;
     use crate::test_utils::{self, diff_changes};
     use std::collections::HashSet;
     use std::ops::Range;
@@ -1289,7 +1290,7 @@ mod parse_blocks_tests {
                 .to_string(),
         )]));
         let parsers = language_parsers()?
-            .with_extension_mappings(HashMap::from([("rust".into(), "rs".into())]));
+            .with_extension_mappings(HashMap::from([("rust".into(), Language::Rust)]));
 
         let blocks_by_file = Scan::new(&file_system, &PathFilter::allow_all(), &parsers, &[])
             .parse_blocks(&DiffChanges::default(), ScanMode::All)?
@@ -1312,7 +1313,7 @@ mod parse_blocks_tests {
         let blocks = Scan::new(
             &FakeFileSystem::new(files),
             &PathFilter::allow_all(),
-            &LanguageParsers::default(),
+            &language_parsers()?,
             &[],
         )
         .parse_blocks(&DiffChanges::default(), ScanMode::All)?
@@ -1621,7 +1622,7 @@ mod parse_blocks_tests {
         let blocks = Scan::new(
             &FakeFileSystem::new(HashMap::default()),
             &PathFilter::allow_all(),
-            &LanguageParsers::default(),
+            &language_parsers()?,
             &[],
         )
         .parse_blocks(&line_changes, ScanMode::All)?

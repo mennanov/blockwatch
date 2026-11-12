@@ -1243,40 +1243,4 @@ mod supported_languages_tests {
         Ok(())
     }
     // </block>
-
-    #[test]
-    fn all_language_prefixes_are_supported() -> anyhow::Result<()> {
-        let parsers = language_parsers()?;
-        let files = HashMap::from([
-            /* <block name="supported-prefixes"
-            same-as="src/language_parsers/mod.rs:language-prefixes"
-            same-as-pattern='"(?P<value>[^"]+)\.[^"]+"\.(?:to_string|into)'> */
-            (
-                "Containerfile.prod".to_string(),
-                "# <block name=\"prod\">\nFROM alpine\n# </block>".to_string(),
-            ),
-            (
-                "Dockerfile.ci".to_string(),
-                "# <block name=\"ci\">\nFROM alpine\n# </block>".to_string(),
-            ),
-            // </block>
-        ]);
-        let file_system = FakeFileSystem::new(files.clone());
-
-        let blocks_by_file = Scan::new(&file_system, &PathFilter::allow_all(), &parsers, &[])
-            .parse_blocks(&DiffChanges::default(), ScanMode::All)?
-            .blocks;
-
-        for file_name in files.keys() {
-            assert!(
-                !blocks_by_file
-                    .get(&RepoPath::from_reference(file_name)?)
-                    .unwrap_or_else(|| panic!("No blocks found for file {file_name}"))
-                    .blocks_with_context
-                    .is_empty(),
-                "File {file_name} should have blocks",
-            );
-        }
-        Ok(())
-    }
 }

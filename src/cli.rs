@@ -175,8 +175,7 @@ fn prepare(args: &flags::Args) -> anyhow::Result<Prepared> {
     let file_system = Arc::new(crate::fs::FileSystemImpl::new(&repository_root()?)?);
     let (scan_mode, line_changes) = run_inputs(args, file_system.as_ref())?;
     let language_parsers = language_parsers::language_parsers()?;
-    let (settings, virtual_blocks) =
-        read_config(args, file_system.as_ref(), &line_changes, &language_parsers)?;
+    let (settings, virtual_blocks) = read_config(args, file_system.as_ref(), &line_changes)?;
     let (context, scan_stats) = build_context(
         args,
         &settings,
@@ -293,14 +292,9 @@ fn read_config(
     args: &flags::Args,
     file_system: &impl FileSystem,
     line_changes: &DiffChanges,
-    language_parsers: &language_parsers::LanguageParsers,
 ) -> anyhow::Result<(Settings, Vec<VirtualBlock>)> {
     let config = config::read(args.config.as_deref(), file_system, line_changes)?;
-    let settings = Settings::resolve(
-        args.raw_settings(),
-        config.settings,
-        &language_parsers.extensions().collect(),
-    )?;
+    let settings = Settings::resolve(args.raw_settings(), config.settings)?;
     Ok((settings, config.blocks))
 }
 

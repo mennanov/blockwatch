@@ -12,6 +12,15 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Changed
+
+- An extension mapping no longer applies to the variants of `Dockerfile` and `Containerfile`, such as
+  `Dockerfile.ci`:
+  - With `-E Buildfile=Dockerfile`, `Buildfile` is still a Dockerfile, but `Buildfile.ci` is not. Map the whole name
+    instead: `-E Buildfile.ci=Dockerfile`.
+  - With `-E Dockerfile=sh`, `Dockerfile` is still read as a shell script, but `Dockerfile.ci` is now read as a
+    Dockerfile. Before, it was skipped.
+
 ## [0.18.1] - 2026-11-11
 
 ### Added

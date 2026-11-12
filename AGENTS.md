@@ -171,8 +171,8 @@ The whole pipeline is in `src/cli.rs`. `src/main.rs` only calls `blockwatch::run
    matches, found with `paths_glob::PathsGlob`. `config::read` marks the blocks whose entry the diff touches.
 5. Walk the repository with the `ignore` crate, which respects `.gitignore`. Keep the files that the paths and globs
    from the command line select, and that don't match the settings' ignore globs. `PathArguments::resolve` turns an
-   existing file or directory into a glob first, so `src` selects `src/**`. Pick each file's language by its
-   extension, using the settings' extension mappings too.
+   existing file or directory into a glob first, so `src` selects `src/**`. `LanguageResolver::resolve` picks each
+   file's `Language` from its name, using the settings' extension mappings too.
 6. For each file, the matching `language_parsers::<lang>` (usually a tree-sitter grammar) finds the comments.
    `tag_parser` and `block_parser` turn the comment text into `Block` values, with their attributes and their byte and
    line ranges.
@@ -225,12 +225,17 @@ The main modules:
 - `src/repo_path.rs` — `RepoPath`, the one way to write a path relative to the repository root. A diff header
   (`b/src/main.rs`), a path found in the walk and a `file:name` attribute all become a `RepoPath`. So the same file is
   always the same map key.
+- `src/language_resolver.rs` — `Language`, with one variant for each parser, and `LanguageResolver`, which picks a
+  file's `Language` from its name. `NAMES` lists each extension and whole file name with its `Language`, and
+  `NAME_RULES` lists the names whose variants, such as `Dockerfile.ci`, keep their language. The settings turn each
+  extension mapping's value into a `Language` with `Language::from_key`.
 - `src/language_parsers/` — one parser for each language, most of them a tree-sitter grammar. Markdown and MDX use
   the `markdown` crate, Makefile uses the `makefile-lossless` crate, and Lean has its own scanner. Each language has
   a `parser()` that returns a `LanguageParser`, which knows which syntax nodes are comments. `src/block_parser.rs`
-  turns those comments into blocks. `language_parsers()` in `language_parsers/mod.rs` returns `LanguageParsers`: the
-  parser of each extension. Its `parser_for` picks the parser of a file, using the settings' extension mappings too.
-  **To add a language, add a module here and register it in that function.**
+  turns those comments into blocks. `language_parsers()` in `language_parsers/mod.rs` builds `LanguageParsers`: one
+  parser for each `Language`. Its `parser_for` asks the resolver for a file's `Language`, then returns its parser.
+  **To add a language, add a module here. Then add a `Language` variant, its rows in `NAMES`, a field in
+  `LanguageParsers`, its arm in `LanguageParsers::parser`, and its parser in `language_parsers()`.**
 
   Some languages also have symbols. Such a language has a `SymbolsParser`, which its `parser()` passes to
   `.with_symbols(...)`:

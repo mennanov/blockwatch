@@ -161,7 +161,7 @@ mod tests {
     use crate::diff_parser::DiffChanges;
     use crate::fs::PathFilter;
     use crate::fs::test_utils::FakeFileSystem;
-    use crate::language_parsers::{LanguageParsers, language_parsers};
+    use crate::language_parsers::language_parsers;
     use crate::repo_path::RepoPath;
     use crate::scan::{Scan, ScanMode};
     use crate::test_utils::{validation_context, virtual_block};
@@ -401,7 +401,7 @@ mod tests {
         .parse_blocks(&DiffChanges::default(), ScanMode::All)?;
         let context = ValidationContext::new(
             parsed.blocks,
-            LanguageParsers::default(),
+            language_parsers()?,
             DiffChanges::default(),
             Vec::new(),
         );

@@ -1898,6 +1898,7 @@ print("target")
 #[cfg(test)]
 mod test_utils {
     use crate::blocks::FileBlocks;
+    use crate::language_parsers::language_parsers;
     use crate::validators::{ValidationContext, ValidationReport};
     use crate::virtual_blocks::VirtualBlock;
     use std::collections::HashMap;
@@ -1954,10 +1955,7 @@ mod test_utils {
     pub(super) fn merge_validation_contexts(
         contexts: Vec<Arc<ValidationContext>>,
     ) -> Arc<ValidationContext> {
-        let parsers = contexts
-            .first()
-            .map(|context| context.parsers.clone())
-            .unwrap_or_default();
+        let parsers = language_parsers().expect("every grammar loads");
         let mut merged_modified_blocks = HashMap::new();
         let mut merged_line_changes = HashMap::new();
         for context in contexts {

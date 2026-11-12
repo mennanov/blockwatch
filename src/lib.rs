@@ -19,7 +19,6 @@
 #![warn(clippy::self_named_module_files)]
 
 use serde::Serialize;
-use std::ffi::OsStr;
 use std::ops::Range;
 
 mod block_parser;
@@ -31,6 +30,7 @@ mod explain;
 mod flags;
 mod fs;
 mod language_parsers;
+mod language_resolver;
 mod path_arguments;
 mod paths_glob;
 mod repo_path;
@@ -63,10 +63,8 @@ pub use cli::run;
 /// ```
 pub fn count_rust_blocks(source: &str) -> anyhow::Result<usize> {
     let parsers = language_parsers::language_parsers()?;
-    let rust_parser = parsers
-        .for_extension(OsStr::new("rs"))
-        .expect("Rust has a parser");
-    rust_parser
+    parsers
+        .parser(language_resolver::Language::Rust)
         .lock()
         .expect("a thread panicked while it held the parser")
         .parse_blocks(source)

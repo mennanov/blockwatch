@@ -310,12 +310,9 @@ mod tests {
         source: &str,
         line_changes: &[LineChange],
     ) -> anyhow::Result<BlockWithContext> {
-        let extension = Path::new(file)
-            .extension()
-            .expect("the file has an extension");
         let symbols = language_parsers()?
-            .for_extension(extension)
-            .expect("the extension has a parser")
+            .parser_for(Path::new(file))
+            .expect("the file has a parser")
             .lock()
             .expect("a thread panicked while it held the parser")
             .parse_symbols(source)?;
