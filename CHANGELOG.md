@@ -22,6 +22,12 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
   `Makefile.PL`, `Makefile.SH`, `Makefile.bat` and `Makefile.cmd` are other languages, so they are not read as
   Makefiles.
+- Read a copy of a file in the language of the file it copies. A copy ends in `.example`, `.sample`, `.dist`,
+  `.template` or `.in`: `config.toml.example` is TOML, and `config.h.in` is C++. Template languages such as `.j2`
+  are not stripped.
+
+Files that these names match were skipped before, and are now checked. To skip them, add them to `ignore` in the
+config file, or pass `--ignore`.
 
 ### Changed
 

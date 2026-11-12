@@ -226,7 +226,9 @@ The main modules:
   (`b/src/main.rs`), a path found in the walk and a `file:name` attribute all become a `RepoPath`. So the same file is
   always the same map key.
 - `src/language_resolver.rs` — `Language`, with one variant for each parser, and `LanguageResolver`, which picks a
-  file's `Language` from its name. `NAMES` lists each extension and whole file name with its `Language`, and
+  file's `Language` from its name. `NAMES` lists each extension and whole file name with its `Language`.
+  `COPY_SUFFIXES` lists the suffixes, such as `.example`, that are stripped when no ending of the whole name has a
+  language.
   `NAME_RULES` lists the names whose variants, such as `Dockerfile.ci`, keep their language. The settings turn each
   extension mapping's value into a `Language` with `Language::from_key`.
 - `src/language_parsers/` — one parser for each language, most of them a tree-sitter grammar. Markdown and MDX use

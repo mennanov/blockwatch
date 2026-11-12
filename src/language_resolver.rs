@@ -202,6 +202,10 @@ pub(crate) const NAMES: &[(&str, Language)] = {
     ]
 };
 
+/// The suffixes that mark a copy of another file in the same language, such as
+/// `config.toml.example`. `.in` is the input that autoconf or CMake turns into the file.
+const COPY_SUFFIXES: &[&str] = &[".dist", ".example", ".in", ".sample", ".template"];
+
 /// The names whose variants are files of the same language, such as `Dockerfile.ci`,
 /// `Dockerfile-dev` and `Dockerfile_prod`. Each row has the spellings of a name, their language,
 /// and the `.`-separated parts that make a variant some other kind of file:
@@ -237,21 +241,38 @@ impl LanguageResolver {
     }
 
     /// The language of the file at `path`, or `None` when no parser reads it. Only the file name
-    /// counts, not the directories or the content.
+    /// counts, not the directories or the content. The first of these that gives a language wins:
+    ///
+    /// 1. the endings of the name, the shortest first, with the extension mappings;
+    /// 2. the rest of the name before a copy suffix, by its endings and then its variant rule;
+    /// 3. the variant rule of the name.
     pub(crate) fn resolve(&self, path: &Path) -> Option<Language> {
         let file_name = path.file_name()?.to_str()?;
+        self.language_of_ending(file_name)
+            .or_else(|| {
+                // The copy suffix goes before the variant rule runs, because `Dockerfile.yml.example`
+                // is an example YAML file, not a Dockerfile.
+                let rest = COPY_SUFFIXES
+                    .iter()
+                    .find_map(|suffix| file_name.strip_suffix(suffix))?;
+                self.language_of_ending(rest)
+                    .or_else(|| name_rule_language(rest))
+            })
+            .or_else(|| name_rule_language(file_name))
+    }
 
+    /// The language of the shortest ending of `name` that has one, where an ending is what follows
+    /// a `.`, or the whole name. Returns `None` when no ending has a language.
+    fn language_of_ending(&self, name: &str) -> Option<Language> {
         // The last extension says what the file is now, so `Dockerfile.ci.yml` is YAML.
-        for (i, _) in file_name.rmatch_indices('.') {
+        for (i, _) in name.rmatch_indices('.') {
             #[expect(clippy::string_slice, reason = "`i` is the index of a `.`")]
-            let extension = &file_name[i + 1..];
+            let extension = &name[i + 1..];
             if let Some(language) = self.language_of(extension) {
                 return Some(language);
             }
         }
-
-        self.language_of(file_name)
-            .or_else(|| name_rule_language(file_name))
+        self.language_of(name)
     }
 
     /// The language of `key`, an extension or a whole file name, with the mappings applied.
@@ -379,6 +400,8 @@ mod tests {
         );
         assert_resolves_with(&[("y.rs", Python)], &[("a.y.rs", Some(Rust))]);
         assert_resolves_with(&[("txt", Toml)], &[("CMakeLists.txt", Some(Toml))]);
+        // An ending with a language wins over stripping a copy suffix.
+        assert_resolves_with(&[("in", Cpp)], &[("a.rs.in", Some(Cpp))]);
     }
 
     /// `Dockerfile`, `Containerfile`, `Jenkinsfile` and `Makefile`, in each spelling the list
@@ -450,6 +473,52 @@ mod tests {
         ]);
     }
 
+    /// A copy suffix marks a copy of another file in the same language: a sample (`.example`,
+    /// `.sample`), a default (`.dist`), or an input that a tool turns into the file (`.in`,
+    /// `.template`). It is stripped once, and the rest of the name picks the language by the rules
+    /// above, mappings included. It is stripped before a variant is looked for, so
+    /// `Dockerfile.yml.example` is an example YAML file.
+    #[test]
+    fn name_with_copy_suffix_resolves_by_the_rest() {
+        assert_resolves(&[
+            ("config.toml.example", Toml),
+            ("config.h.in", Cpp),
+            ("phpunit.xml.dist", Xml),
+            ("settings.py.sample", Python),
+            ("values.yaml.template", Yaml),
+            ("CMakeLists.txt.in", CMake),
+            ("Makefile.in", Makefile),
+            ("Dockerfile-dev.example", Dockerfile),
+            ("Dockerfile.yml.example", Yaml),
+            // The rest can be a variant, as in gettext's `po/Makefile.in.in`.
+            ("Makefile.in.in", Makefile),
+        ]);
+        assert_resolves_with(&[("ino", Cpp)], &[("a.ino.in", Some(Cpp))]);
+        // A copy follows a mapping of the name it copies. A variant doesn't.
+        assert_resolves_with(
+            &[("Dockerfile", Bash)],
+            &[
+                ("Dockerfile.example", Some(Bash)),
+                ("Dockerfile.ci", Some(Dockerfile)),
+            ],
+        );
+        assert_no_language(&[
+            // Other template languages and backups are not stripped.
+            "values.yaml.j2",
+            "a.rs.tmpl",
+            "a.rs.orig",
+            // The rest has no language.
+            ".env.example",
+            "config.in",
+            "Dockerfile.dockerignore.example",
+            // Only one suffix is stripped.
+            "a.rs.in.in",
+            "a.rs.example.in",
+            // A suffix with nothing before it.
+            ".example",
+        ]);
+    }
+
     /// An extension mapping, from `-E` or `[extensions]`, gives an extension or a whole file name
     /// a language, or replaces the one it has.
     #[test]
@@ -497,7 +566,7 @@ mod tests {
     /// Case matters, because some languages differ only by case, such as `.C` (C++) and `.c` (C).
     #[test]
     fn name_is_matched_case_sensitively() {
-        assert_no_language(&["a.RS", "DOCKERFILE", "DOCKERFILE.ci"]);
+        assert_no_language(&["a.RS", "DOCKERFILE", "DOCKERFILE.ci", "config.toml.EXAMPLE"]);
     }
 
     #[test]
