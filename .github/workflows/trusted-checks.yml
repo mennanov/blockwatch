@@ -20,7 +20,7 @@ jobs:
   blockwatch:
     runs-on: ubuntu-latest
     steps:
-      - uses: mennanov/blockwatch-action@v1
+      - uses: mennanov/blockwatch-action@v1.1.39
         env:
           BLOCKWATCH_LUA_MODE: safe
         with:

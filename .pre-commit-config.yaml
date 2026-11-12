@@ -74,3 +74,10 @@ repos:
       - id: markdownlint-cli2
         stages: [ pre-commit ]
   # </block>
+
+  # Version 1.32.0 is the first that accepts a version tag in a workflow when `actions.lock` pins it.
+  # Settings are in `.github/zizmor.yml`.
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: v1.32.0
+    hooks:
+      - id: zizmor

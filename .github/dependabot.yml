@@ -4,6 +4,8 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    cooldown:
+      default-days: 7
     groups:
       all-dependencies:
         patterns:
@@ -14,6 +16,10 @@ updates:
       - ".github/workflows/release.yml"
     schedule:
       interval: "monthly"
+    # A release must be a week old before Dependabot proposes it, so a hijacked release is
+    # likely to be pulled before it reaches this repository.
+    cooldown:
+      default-days: 7
     groups:
       github-actions:
         patterns:

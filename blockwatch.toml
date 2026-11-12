@@ -39,16 +39,14 @@ same-as = '''docs/ci.md,
 # The pattern reads both the target's value, `v1`, and each `mennanov/blockwatch-action@v1` in the other files.
 same-as-pattern = '(?:mennanov/blockwatch-action@|^)(?P<value>v\d+)\b'
 
-# Dependabot updates actions/checkout in the workflows, but not this pin, which dist copies into release.yml.
-# The pattern reads both the pin, a commit, and the commit of each `actions/checkout@` in the workflows.
+# Dependabot updates actions/checkout in the workflows and in actions.lock, but not this pin, which dist copies
+# into release.yml. The workflows name the action by tag, so only the lockfile and release.yml hold its commit.
+# The pattern reads both the pin, a commit, and the commit after each `actions/checkout@`. The lockfile has that
+# form where a composite action uses checkout.
 [[block]]
 target = 'dist-workspace.toml#/dist/github-action-commits/actions~1checkout'
-same-as = '''.github/workflows/codeql.yml,
-    .github/workflows/markdownlint.yml,
-    .github/workflows/pypi.yml,
-    .github/workflows/rust.yml,
-    .github/workflows/sign-archives.yml,
-    .github/workflows/site.yml'''
+same-as = '''.github/workflows/actions.lock,
+    .github/workflows/release.yml'''
 same-as-pattern = '(?:actions/checkout@|^)(?P<value>[0-9a-f]{40})\b'
 
 # SECURITY.md shows the public key that signs the release archives, for people who check a download by hand. A new
