@@ -550,7 +550,7 @@ ENV APP_HOME="/srv/app" PATH="${APP_HOME}/bin:${PATH}"
 ENTRYPOINT ["/app"]
 "#;
 
-        // <block affects="docs/symbols.md:dockerfile-paths, src/skill.md#/blockwatch/Symbols/Dockerfile">
+        // <block affects="docs/symbols.md:dockerfile-paths">
         assert_eq!(
             symbols(&dockerfile(source)?, source),
             vec![

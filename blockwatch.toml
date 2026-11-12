@@ -35,7 +35,8 @@ keep-sorted-pattern = '^(?P<value>[\w-]+) = '
 target = 'README.md'
 target-pattern = 'mennanov/blockwatch-action@(?P<value>v\d+)'
 same-as = '''docs/ci.md,
-    site/src/pages/index.astro'''
+    site/src/pages/index.astro,
+    src/skill.md'''
 # The pattern reads both the target's value, `v1`, and each `mennanov/blockwatch-action@v1` in the other files.
 same-as-pattern = '(?:mennanov/blockwatch-action@|^)(?P<value>v\d+)\b'
 
@@ -57,8 +58,35 @@ same-as = 'SECURITY.md'
 same-as-pattern = '\b(?P<value>RW[A-Za-z0-9+/]{54})\b'
 
 # `blockwatch skill` prints src/skill.md, and some projects hold a saved copy of that output. A tag in that file would
-# become a block in every one of those projects. So blocks point at its sections by their headings, and these entries hold the pattern
-# that reads a section, which the section can't hold itself.
+# become a block in every one of those projects. So the skill's rules live in the entries below, and blocks point at
+# its sections by their headings.
+# An agent loads the whole skill into its context each time it uses it, so the skill must stay short.
+[[block]]
+target = 'src/skill.md'
+name = 'skill-line-count'
+line-count = '<=250'
+
+# The skill and docs/symbols.md both list the languages whose types have member symbols.
+[[block]]
+target = 'src/skill.md'
+target-pattern = 'are symbols too, under the type.s name, in (?P<value>[^.]+)\.'
+name = 'skill-languages-with-members'
+same-as = 'docs/symbols.md:languages-with-members'
+same-as-pattern = '[\w#]+'
+
+[[block]]
+target = 'docs/symbols.md'
+target-pattern = 'In (?P<value>Java[^.]+), the members of a type are symbols too'
+name = 'languages-with-members'
+same-as-pattern = '[\w#]+'
+
+[[block]]
+target = 'src/skill.md#/blockwatch/Where blocks add value'
+name = 'where-blocks-add-value'
+same-as = 'src/validators/mod.rs:validator-registry'
+same-as-format = 'identifier'
+same-as-pattern = '^\|\s*[^|]+\|\s*`(?P<value>[a-z-]+)`\s*\|'
+
 [[block]]
 target = 'src/skill.md#/blockwatch/Validator reference'
 name = 'validator-reference'
@@ -67,4 +95,11 @@ same-as-pattern = '^\|\s*`(?P<value>[a-z-]+)`'
 [[block]]
 target = 'src/skill.md#/blockwatch/Symbols/Files with symbols'
 name = 'languages-with-symbols'
-same-as-pattern = '^- (?P<value>[^:]+):'
+same-as-pattern = '`(?P<value>[^`]+)`'
+
+[[block]]
+target = 'src/skill.md#/blockwatch/Config file/Project settings'
+name = 'skill-config-keys'
+same-as = 'src/config.rs:config-keys'
+same-as-format = 'identifier'
+same-as-pattern = '^\|\s*`(?P<value>[a-z-]+)`'

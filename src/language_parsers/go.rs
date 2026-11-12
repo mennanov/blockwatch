@@ -247,7 +247,7 @@ func init() {}
 func _() {}
 "#;
 
-        // <block affects="docs/symbols.md:go-paths, src/skill.md#/blockwatch/Symbols/Go">
+        // <block affects="docs/symbols.md:go-paths">
         assert_eq!(
             symbols(&go(source)?, source),
             vec![

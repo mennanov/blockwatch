@@ -303,7 +303,7 @@ export { MODE as ALIAS };
 export * from "./other";
 "#;
 
-        // <block affects="docs/symbols.md:typescript-paths, src/skill.md#/blockwatch/Symbols/TypeScript and JavaScript">
+        // <block affects="docs/symbols.md:typescript-paths">
         assert_eq!(
             symbols(&typescript(source)?, source),
             vec![

@@ -602,7 +602,7 @@ int cond = 1;
 #endif
 "#;
 
-        // <block affects="docs/symbols.md:c-paths, src/skill.md#/blockwatch/Symbols/C and C++">
+        // <block affects="docs/symbols.md:c-paths">
         assert_eq!(
             symbols(&c(source)?, source),
             vec![

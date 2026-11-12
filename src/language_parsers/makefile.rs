@@ -279,7 +279,7 @@ inline: ; echo hi
 .RECIPEPREFIX = >
 ";
 
-        // <block affects="docs/symbols.md:makefile-paths, src/skill.md#/blockwatch/Symbols/Makefile">
+        // <block affects="docs/symbols.md:makefile-paths">
         assert_eq!(
             symbols(&makefile(source)?, source),
             vec![

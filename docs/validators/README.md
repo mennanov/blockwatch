@@ -24,7 +24,7 @@ between two references is fine.
 ## Which validator do I want?
 
 <!-- <block name="validators-index"
-     affects="src/skill.md#/blockwatch/Annotating a new project/Where blocks add value (catalog)"
+     affects="src/skill.md#/blockwatch/Where blocks add value"
      same-as="src/validators/mod.rs:validator-registry, README.md:available-validators"
      same-as-format="identifier"
      same-as-pattern='\[`(?P<value>[a-z-]+)`\]\('> -->

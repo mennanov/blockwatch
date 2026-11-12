@@ -251,9 +251,9 @@ The main modules:
     one version. Its known bugs are listed in `docs/symbols.md`, not worked around.
 
   Each language's tests list every symbol it finds. When you give a language symbols, also document its paths in
-  `docs/symbols.md` and in the "Symbols" section of the skill, `src/skill.md`. A test in `language_parsers/mod.rs` and the
-  repository's own blocks keep the list of file types with symbols, and each language's section, in sync with the
-  code.
+  `docs/symbols.md` and add the language to "Files with symbols" in `src/skill.md`. A test in `language_parsers/mod.rs`
+  and the repository's own blocks keep the list of file types with symbols, and each language's section in
+  `docs/symbols.md`, in sync with the code.
 - `src/symbols/mod.rs` — `Symbol`, the `SymbolsParser` trait, and `resolve`, which finds the symbol a path refers to.
   `ensure_no_syntax_error` refuses a file with a syntax error, instead of resolving a path through tree-sitter's error
   recovery.
@@ -296,7 +296,7 @@ guidance for working on blockwatch.
 
 `src/skill.md` must not hold block tags. A project that saves the skill parses it too, so each tag would become a block
 in that project. To point a block at a section of the skill, use the section's headings, such as
-`src/skill.md#/blockwatch/Symbols/JSON`. To point at only a part of a section, give that part a heading of its own.
+`src/skill.md#/blockwatch/Validator reference`. To point at only a part of a section, give that part a heading of its own.
 When the section needs a rule of its own, such as a `same-as-pattern`, add a `[[block]]` entry for it to
 `blockwatch.toml`, next to the others for `src/skill.md`.
 

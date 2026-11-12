@@ -280,7 +280,7 @@ until true; do UNTIL_NAME=1; done
 for ((i = 0; i < 3; i++)); do C_LOOPED=1; done
 "#;
 
-        // <block affects="docs/symbols.md:shell-paths, src/skill.md#/blockwatch/Symbols/Shell">
+        // <block affects="docs/symbols.md:shell-paths">
         assert_eq!(
             symbols(&bash(source)?, source),
             vec![

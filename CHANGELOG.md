@@ -47,6 +47,8 @@ config file, or pass `--ignore`.
   the shortest ending won. Without mappings, no file changes language. With one, a name in the list keeps its
   language: `-E txt=md` no longer turns `CMakeLists.txt` into Markdown, `-E ts=js` no longer reaches `.d.ts` files,
   and `-E mod=...` no longer reaches `go.mod`. A longer mapping now wins too: `-E y.rs=py` makes `a.y.rs` Python.
+- The agent skill that `blockwatch skill` prints is about a third as long: 19 KB instead of 67 KB. It takes less of
+  an agent's context each time it loads. The full reference stays in the docs.
 
 ## [0.18.1] - 2026-11-11
 

@@ -5,718 +5,256 @@ description: Use when a change touches something that another place must match, 
 
 # blockwatch
 
-This text is the output of `blockwatch skill`. If you read it from a saved copy instead, replace the copy with the stub
-in [Installing this skill](#installing-this-skill). A saved copy goes stale when blockwatch is upgraded.
+This text is the output of `blockwatch skill`. If you read it from a saved copy instead, replace the copy with the
+stub in [Installing this skill](#installing-this-skill). A saved copy goes stale when blockwatch is upgraded.
 
-blockwatch is a language-agnostic linter that enforces rules declared inside HTML-like `<block ...>` tags placed in
-source-file comments. It works across Rust, Python, JS/TS, Go, Java, Markdown, YAML, TOML, HTML, and more. By default it
-checks the whole tree; given a `git diff` on stdin plus `--diff --only-changed` it checks only the blocks that diff
-changed. Project-wide settings, and blocks declared there instead of with tags, live in `blockwatch.toml` (see
-[The config file](#the-config-file-blockwatchtoml)).
+blockwatch enforces rules written in `<block ...>` comments or in `blockwatch.toml`. Add only high-value blocks that
+catch real mistakes someone could plausibly make. Too many blocks create noise and get ignored.
 
-Use this skill in three situations:
+## Workflows
 
-- **As you write code (the default):** the moment you write something a block would guard, add the block in the same
-  change, even if the project has no blocks yet. Don't wait for a separate pass.
-- **First-time / bulk pass:** when the user asks you to annotate an existing project.
-- **Maintaining blocks:** keeping existing blocks valid when you edit files that already contain them.
+### 1. Maintaining existing blocks (when editing annotated files)
 
-In all three, add only high-value blocks. A block must catch a real mistake someone could plausibly make, not decorate.
-Too many blocks create noise and get ignored. When in doubt, leave it out.
+1. **Keep tags intact.** Never delete `<block>` / `</block>` tags unless told to. Put new items inside the block.
+   Deleting a block silently removes its rule.
+2. **Check `blockwatch.toml` before editing.** A `[[block]]` entry can wrap a key, a regex match, or a whole file with
+   no visible tags. Update the entry in the same change if you rename or move what it wraps.
+3. **Honor every validator on touched blocks.** Keep `keep-sorted` lists ordered, avoid `keep-unique` duplicates, match
+   `line-pattern`, stay within `line-count`, update `affects` targets, and keep `same-as` values aligned.
+4. **Update renamed addresses.** If you rename or move a `name`d block, update `FILE:BLOCK_NAME` in all `affects`,
+   `same-as`, `only-blocks`, and `skip-blocks` references.
+5. **Verify.** Run `git diff --patch | blockwatch --diff`. Fix every violation your change caused. Report pre-existing
+   unrelated ones to the user.
 
-## Annotate as you write code
+### 2. Annotating as you code (default)
 
-This is the primary way blocks should get added: incrementally, as part of normal coding. Whenever you write or change
-code matching a row in **Where blocks add value** (below), add the tag right then, using the **Validator reference**
-for the syntax.
+When you write or change code matching **Where blocks add value** below, wrap it (or add a `[[block]]` entry) in the
+same change. Then run `git diff --patch | blockwatch --diff`, plus `blockwatch explain FILE:NAME` on any new pattern,
+glob, or `#/path` rule.
 
-Introduce a list that should stay ordered → wrap it in `keep-sorted` in the same edit. Add a fact that also lives in the
-docs or config → add `affects` in the same edit. Retrofitting later is exactly the cost this avoids.
+### 3. Annotating an existing project
 
-Then run `git diff --patch | blockwatch --diff` to confirm the new tags pass (see *Running and verifying*).
+1. Search code, docs, and config (`rg`) for copied values, code-to-doc mirrors, ordered or unique lists, and strict line
+   formats.
+2. Add minimal `<block>` tags in comments, or `[[block]]` entries in `blockwatch.toml` for files that can't hold
+   comments (JSON) or must stay untouched (prompts, migrations).
+3. Run `blockwatch list` to confirm every tag parses, `blockwatch explain FILE:NAME` on pattern/glob rules, and
+   `blockwatch` on the clean tree.
+4. Put project-wide ignores, extension maps, and validator defaults in `blockwatch.toml`.
+5. Wire blockwatch into [hooks and CI](#wiring-into-hooks-and-ci).
 
-## Annotating a new project
+## Where blocks add value
 
-1. Survey the repo for the patterns in the catalog below. Read the code *and* the docs/config; use `rg`/grep to find
-   lists, enums, match arms, tables, and constants.
-2. For each candidate, add the minimal block tag using the comment syntax of that file's language. For one key of a
-   JSON, TOML or YAML file, a `[[block]]` entry in `blockwatch.toml` is often simpler. A JSON file needs one, since it
-   can't hold a tag. So does a file that must not change, such as a prompt or an applied migration.
-3. Run `blockwatch list` to confirm every new tag parses and is recognized, then run `blockwatch` to confirm all blocks
-   pass on the current (clean) tree. Fix any tag you placed on already-inconsistent content.
-4. Put the flags every run needs, such as `--ignore` for generated code, in `blockwatch.toml`.
-5. Commit, then wire blockwatch into hooks/CI (see below) so the rules are enforced from now on.
+| You see...                                                      | Use            | Why                                                                 |
+|-----------------------------------------------------------------|----------------|---------------------------------------------------------------------|
+| Code and docs/config that must change together                  | `affects`      | Fails `--diff` if this block changes without its target (one-way)   |
+| The same value copied across code, docs, config, or paths       | `same-as`      | Fails whenever copies disagree, even without a diff                 |
+| A hand-maintained list, enum, or match that should stay ordered | `keep-sorted`  | Prevents out-of-order entries and review nits                       |
+| A list of IDs, routes, or names that must not repeat            | `keep-unique`  | Catches accidental duplicates                                       |
+| Items with a strict format, or text that must never appear      | `line-pattern` | Enforces a per-line regex or blocks forbidden text                  |
+| A list or API surface that must stay within a line budget       | `line-count`   | Bounds the number of non-blank (or matching) lines                  |
+| Domain logic too complex for regex                              | `check-lua`    | Runs a local Lua 5.4 script with optional `ctx.affects` targets     |
+| Prose rules regex can't express ("must mention X", "no TODOs")  | `check-ai`     | LLM check; needs `BLOCKWATCH_AI_API_KEY` (can vary across runs)     |
 
-### Where blocks add value (catalog)
+Prefer the built-in validators over `check-ai`: they are offline, fast, and free. Prefer `same-as` over bare `affects`
+when two places share a value, because `same-as` checks equality even without a diff. To catch a change to either side,
+put `affects` on both blocks, each with a `name`.
 
-| You see...                                                                                                                                   | Add                      | Why                                                                        |
-|----------------------------------------------------------------------------------------------------------------------------------------------|--------------------------|----------------------------------------------------------------------------|
-| A hand-maintained list/enum/match that should stay ordered (dependencies, CLI flags, feature lists, route tables)                            | `keep-sorted`            | Eliminates "please sort this" review nits                                  |
-| A list that must not repeat (allowlists, IDs, registered names)                                                                              | `keep-unique`            | Prevents accidental duplicates                                             |
-| The same fact in two places — an enum and its docs, a version constant and a changelog row, a config key and its README table                | `affects` + `name`       | Forces docs/config to be updated alongside code                            |
-| The same **value** duplicated across places — a constant and its docs, a port in code and in a manifest, an env-var set and its README table | `same-as` + `name`       | Fails when the copies actually disagree, not just when one side is touched |
-| A list whose items have a strict format (slugs, semver, env-var names)                                                                       | `line-pattern="<regex>"` | Catches typos at the source                                                |
-| Text that must never appear in a block (a test host in a production config, a call to a deprecated helper)                                   | `line-pattern-forbidden` | Stops a known-bad value from coming back                                   |
-| A block that must not grow past N lines (public API surface, a switch mapped to a fixed enum)                                                | `line-count="<=N"`       | Flags unbounded growth                                                     |
-| Prose or config with a natural-language rule ("must mention X", "no TODOs left")                                                             | `check-ai="..."`         | Rules regex can't express                                                  |
-| Domain logic too complex for regex                                                                                                           | `check-lua="script.lua"` | Custom programmable checks                                                 |
+## Tag syntax
 
-Prefer the deterministic validators (`keep-sorted`, `keep-unique`, `affects`, `same-as`, `line-pattern`, `line-count`)
-first — they are free, fast, and need no API keys. Reserve `check-ai` for rules the cheaper validators genuinely can't
-express.
-
-When two blocks should hold the same value, prefer `same-as` over a bare `affects`: `affects` only notices that one side
-was edited, while `same-as` fails when the copies actually disagree. Put reciprocal blocks on both sides (each `name`d),
-and — because `same-as` also fires without a diff — a periodic bare `blockwatch` run over the whole tree (see CI below)
-catches drift that a changed-blocks-only check would miss.
-
-### Placing tags
-
-- Tags live **inside comments**, using the host language's comment syntax. Open with `<block ...>`, close with
-  `</block>`.
-- The block's *content* is the lines between the two tags.
-- To mention a tag in a comment without making one, put it in backticks: ``# checks the `<block>` rules``. Without
-  the backticks, it opens a block that is never closed, and the run fails.
-- A quoted value ends at the next quote of the same kind. Put a backslash before a quote that belongs to the value:
-  `keep-unique="\"(?P<value>[a-z]+)\""`. The backslash stays in the value, so a regex reads `\"` as `"`. Or use the
-  other kind of quote: `keep-unique='"(?P<value>[a-z]+)"'`.
-- In HTML, and in the HTML parts of a PHP file, only `<!-- -->` comments hold tags. A tag in a comment inside a
-  `<script>` or `<style>` element is ignored. Put the tags in `<!-- -->` comments around the element instead.
-- A block can be a `[[block]]` entry in `blockwatch.toml` instead of tags (see
-  [The config file](#the-config-file-blockwatchtoml)). A JSON file can't hold a tag, so it needs one. So does a file
-  that must not change.
-- Under `--diff --only-changed` a block is only validated when its content (or its start tag) is touched by the diff, so
-  annotating is safe to do incrementally — adding a tag never retroactively fails unrelated code. A bare
-  `blockwatch` run checks every block in the tree, so use it to find the tags you placed on already-inconsistent
-  content.
+- Place `<block ...>` and `</block>` inside the host language's comments. The lines between them are the block's content.
+- Mention `<block>` in a comment inside backticks (``# checks `<block>` rules``); bare `<block` opens a tag.
+- Quote values with `'...'` or `"..."`. Escape embedded quotes of the same kind (`\"` keeps the backslash in a regex),
+  or switch to the other quote kind: `keep-unique='"(?P<value>[a-z]+)"'`.
+- Keep each pattern or target reference on one line; line breaks after commas between targets are fine.
+- In HTML and HTML parts of PHP, only `<!-- -->` comments count; tags inside `<script>` or `<style>` are ignored.
 
 ```python
 DEPENDENCIES = [
     # <block keep-sorted keep-unique>
     "anyhow",
     "clap",
-    "serde",
     # </block>
 ]
 ```
 
 ```rust
-// <block affects="README.md:supported-langs">
-pub enum Language { Rust, Python }
+// <block name="langs" same-as="README.md:supported-langs" same-as-pattern="(?P<value>\w+),$">
+pub enum Language {
+    Rust,
+    Python,
+}
 // </block>
 ```
 
-```markdown
-<!-- <block name="supported-langs"> -->
-
-- Rust
-- Python
-
-<!-- </block> -->
-```
-
-(Editing the enum now forces you to touch the `supported-langs` block in `README.md`.)
-
 ## Validator reference
 
-| Attribute                | Syntax                                                                                                                                | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-|--------------------------|---------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `name`                   | `name="foo"`                                                                                                                          | Gives the block a name, so `affects` and `same-as` can point at it; shown by `blockwatch list`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `affects`                | `affects="file:foo"`, `":foo"` (same file), `"file"` (whole file) or `"file#/path"` (one [symbol](#symbols)); comma-separate multiple | If this block's content changes in a diff, each target must change too, else a violation. Only fires under `--diff`. One-way: put `affects` on **both** blocks, each with a `name`, to catch both directions. A whole-file target is satisfied by *any* change to the file; use it for files that cannot hold a comment (`.env`, lockfiles). If the file has symbols, point at one instead (`package.json#/version`): only a change to that key or its value counts. A missing target file fails the run; a missing block or key is a violation.                                                                                                                                                  |
-| `same-as`                | `same-as="file:foo"`, `":foo"` (same file), `"file"` (whole file) or `"file#/path"` (one [symbol](#symbols)); comma-separate multiple | This block and each target must hold the same **value**. Unlike `affects`, it also runs on a full-tree scan. Under `--only-changed`, only a changed block that *carries* `same-as` starts the check, so put `same-as` on both blocks if a change to either side must be caught. Without a pattern, each line that isn't blank is a value, trimmed, and the lines must match in order. A whole-file or `#/path` target has no block of its own, so **this** block's `same-as-pattern` reads it. A `#/path` target is read as text: a string without its quotes, any other value as written, and a value that holds other values (an object, a table, a mapping or a list) as it is in the file.    |
-| `same-as-paths`          | `same-as-paths="services/*/"`                                                                                                         | This block must hold the same values as the repository paths that match the glob: sorted, each once. A glob that ends with `/` lists directories (`services/auth/`), otherwise files. `*` stops at `/`, `**` crosses it. One glob; for several directories use braces: `{services,workers}/*/`. Without `same-as-pattern`, each line of this block must be a path, in sorted order; a pattern reads both this block and the paths. Files that `.gitignore` leaves out and symlinks are not listed; the `ignore` setting doesn't apply. A glob that matches nothing is a violation.                                                                                                                |
-| `same-as-pattern`        | `same-as-pattern="id: (?P<value>\d+)"`                                                                                                | Per line, compare the `value` capture group (or the whole match); **every** match on a line counts, and all lines flatten into one list — values are compared, not their layout. With several named groups, such as `(?P<key>\w+)=(?P<value>\d+)`, each match is one record, compared whole; both patterns need the same group names. Each side reads *itself*, so put a pattern on both blocks when the two are in different formats.                                                                                                                                                                                                                                                            |
-| `same-as-mode`           | `same-as-mode="set"` `/ sequence / single / subset`                                                                                   | `set` order/duplicate-insensitive; `sequence` ordered; `single` exactly one token per side; `subset` this block's tokens must all appear in the target (directional). Only the block with `same-as` or `same-as-paths` may have it; on a target it stops the run. Default: `sequence` when this block has no `same-as-pattern`, else `set`; a target's pattern doesn't change it.                                                                                                                                                                                                                                                                                                                 |
-| `same-as-format`         | `same-as-format="numeric"` / `"identifier"` / `"flat"`                                                                                | `numeric`: parse tokens as numbers before comparing, so `8080` == `8080.0`. `identifier`: compare the words of a name, so `PreExistingFailure` == `pre-existing-failure` == `PRE_EXISTING_FAILURE`; a run of capitals is one word (`HTTPServer` == `http-server`). `flat`: compare only the lower-cased letters and digits, so `CronTab` == `crontab` == `cron-tab`; use it when one side has no word breaks, since `identifier` keeps `Signin` != `sign-in`. With several groups in `same-as-pattern`, each can have its own: `name:identifier,value:numeric`; a group left out compares as written. Only the block with `same-as` or `same-as-paths` may have it; on a target it stops the run. |
-| `keep-sorted`            | `keep-sorted` / `keep-sorted="asc"` / `keep-sorted="desc"`                                                                            | Default `asc`, compared lexicographically.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `keep-sorted-pattern`    | `keep-sorted-pattern="id: (?P<value>\d+)"`                                                                                            | Sort by the regex capture group named `value` instead of the whole line.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `keep-sorted-format`     | `keep-sorted-format="numeric"`                                                                                                        | Compare the value numerically rather than as text (`"10"` after `"2"`). Every line must then *be* a number, and a trailing comma is part of the trimmed line — on a real list literal pair this with `keep-sorted-pattern` to lift the number out, or the run is a hard error.                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `keep-unique`            | `keep-unique` / `keep-unique="^ID:(?P<value>\d+)"`                                                                                    | Uniqueness on the whole line, or on the `value` capture group.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `line-pattern`           | `line-pattern='^"[a-z0-9-]+",?$'`                                                                                                     | Every line in the block must match, against the **trimmed** line as the file spells it — quotes, trailing commas and all. A pattern written for the bare value (`^[a-z0-9-]+$`) rejects every line of a quoted list, valid entries included.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `line-pattern-forbidden` | `line-pattern-forbidden="TODO"`                                                                                                       | No line in the block may match, against the **trimmed** line. Without anchors, it rejects a line that has the text anywhere. A block can have it next to `line-pattern`. The regex syntax has no look-ahead, so use this instead of `(?!...)`.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `line-count`             | `line-count="<=5"`                                                                                                                    | Operators: `<`, `>`, `<=`, `>=`, `==`. Blank lines don't count.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `line-count-pattern`     | `line-count-pattern='^"\w+",$'`                                                                                                       | Count only the lines that match, against the **trimmed** line. A line whose match or `value` group is empty doesn't count.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `check-ai`               | `check-ai="Must mention 'Acme'"`                                                                                                      | LLM validation. Requires `BLOCKWATCH_AI_API_KEY` (plus optional `BLOCKWATCH_AI_MODEL`, `BLOCKWATCH_AI_API_URL`). One network call per block, and the answer is a guess: the same block can pass one run and fail the next.                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `check-ai-pattern`       | `check-ai-pattern="\$(?P<value>\d+)"`                                                                                                 | Send only the matching parts of the block to the model instead of the whole block, which keeps the prompt focused and the token cost down. **Every** match is sent, joined by newlines; a pattern matching nothing is a violation, not a silent pass.                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `check-lua`              | `check-lua="scripts/x.lua"`                                                                                                           | Script defines `validate(ctx, content)` returning `nil` (pass) or an error string. `ctx` has `file` (repository-relative, always `/`-separated, in every run mode), `line`, `attrs`; if the block also has `affects`, `ctx.affects` is a list of the affected targets (`{ file, name, content }`, same path format) for IO-free cross-block checks — a whole-file target carries the file's text with `name == nil`.                                                                                                                                                                                                                                                                              |
-| `check-lua-pattern`      | `check-lua-pattern='str = "(?P<value>[^"]+)"'`                                                                                        | Pass only the extracted values to the script instead of the whole block. **Every** match contributes its value, and `content` becomes a 1-based array (read `content[1]` for a single value); the regex runs against the entire block (not per line), so it may span several lines. Empty array when nothing matches.                                                                                                                                                                                                                                                                                                                                                                             |
-| `check-lua-timeout`      | `check-lua-timeout="60"`                                                                                                              | Wall-clock budget for the script, in whole seconds; default `30`. A script that runs past it fails the run with an error, not a violation. A value below `1` is a hard error.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `severity`               | `severity="error"` (default) `/ warning / info / hint`                                                                                | Only `error` fails the run (exit 1); the others are reported but exit 0.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Attribute                | Example / Values                                      | Behavior                                                                          |
+|--------------------------|-------------------------------------------------------|-----------------------------------------------------------------------------------|
+| `name`                   | `name="foo"`                                          | Names a block (`FILE:foo`) for `affects`, `same-as`, `list`, and `explain`.       |
+| `affects`                | `affects="file:foo, :bar, file, file#/path, #/path"`  | Under `--diff`, changing this block requires each target to change (one-way).     |
+| `same-as`                | `same-as="file:foo, :bar, file, file#/path, #/path"`  | Compares this block's values with each target; runs with or without a diff.       |
+| `same-as-paths`          | `same-as-paths="services/*/"`                         | Compares values against sorted repo paths matching a glob (trailing `/` dirs).    |
+| `same-as-pattern`        | `same-as-pattern="id: (?P<value>\d+)"`                | Per-line regex extracting `value` (or named groups as records, or full match).    |
+| `same-as-mode`           | `set` / `sequence` / `single` / `subset`              | How values compare. Default: `sequence` without `same-as-pattern`, `set` with.    |
+| `same-as-format`         | `numeric` / `identifier` / `flat` / `grp:fmt,...`     | Compares as numbers (`8080`==`8080.0`), name words, or letters and digits.        |
+| `keep-sorted`            | `keep-sorted` / `"asc"` / `"desc"`                    | Checks text order on trimmed lines (default `asc`).                               |
+| `keep-sorted-pattern`    | `keep-sorted-pattern="id: (?P<value>\d+)"`            | Sorts by `value` group (or full match) instead of the whole trimmed line.         |
+| `keep-sorted-format`     | `keep-sorted-format="numeric"`                        | Compares extracted values as exact numbers (`2` < `10`).                          |
+| `keep-unique`            | `keep-unique` / `keep-unique="ID:(?P<value>\d+)"`     | Rejects duplicate trimmed lines, or duplicate `value` captures.                   |
+| `line-pattern`           | `line-pattern='^"[a-z0-9-]+",?$'`                     | Every trimmed non-blank line as written (quotes and commas included) must match.  |
+| `line-pattern-forbidden` | `line-pattern-forbidden="TODO"`                       | No trimmed non-blank line may match; use instead of unsupported look-ahead.       |
+| `line-count`             | `line-count="<=5"`                                    | Bounds non-blank line count using `<`, `<=`, `==`, `>=`, or `>`.                  |
+| `line-count-pattern`     | `line-count-pattern='^"\w+",$'`                       | Counts only trimmed lines that match with a non-empty value.                      |
+| `check-ai`               | `check-ai="Must mention 'Acme'"`                      | LLM (`BLOCKWATCH_AI_API_KEY`, `BLOCKWATCH_AI_MODEL`, `BLOCKWATCH_AI_API_URL`).    |
+| `check-ai-pattern`       | `check-ai-pattern="\$(?P<value>\d+)"`                 | Sends only matching parts joined by newlines; zero matches is a violation.        |
+| `check-lua`              | `check-lua="scripts/x.lua"`                           | Runs Lua 5.4 `validate(ctx, content)` returning `nil` or an error string.         |
+| `check-lua-pattern`      | `check-lua-pattern='str = "(?P<value>[^"]+)"'`        | Runs regex over whole block; passes matches as a 1-based array `content`.         |
+| `check-lua-timeout`      | `check-lua-timeout="60"`                              | Whole-second wall-clock budget (default `30`, min `1`); timeout fails the run.    |
+| `severity`               | `error` (default) / `warning` / `info` / `hint`       | Only `error` exits `1`; the rest report violations and exit `0`.                  |
 
-An attribute that changes how a validator works, such as `keep-sorted-pattern` or `check-lua-timeout`, needs the
-validator's main attribute on the same block. Alone, it stops the run, because it would do nothing. `same-as-pattern`
-is the one exception: a target may have it, to pick its own values. So it needs `same-as`, `same-as-paths` or `name`.
+Key rules:
+
+- Modifier attributes require their main attribute on the same block. Exception: `same-as-pattern` may sit on a `name`d
+  target block.
+- Under `--diff --only-changed`, `same-as` only runs when the block *carrying* `same-as` changed. Put `same-as` on both
+  `name`d sides to catch edits to either side.
+- `same-as-pattern` is per-block; for whole-file, `#/path`, or `same-as-paths` targets, the referencing block's pattern
+  reads both sides.
+- `same-as-paths`: `*` stops at `/`, `**` crosses it; use braces (`{a,b}/*/`) for multiple globs; `.gitignore`d files and
+  symlinks are skipped; `ignore` does not apply; zero matches is a violation.
+- `same-as-format="identifier"` compares the words of a name, and a run of capitals is one word: `HTTPServer` ==
+  `http-server`, but `Signin` != `sign-in`. `flat` compares only the lower-cased letters and digits: `Signin` ==
+  `sign-in`, but `v2` != `v`.
+- `keep-sorted-format="numeric"` requires every value to parse as a number; pair it with `keep-sorted-pattern` when
+  lines have quotes, commas, or labels.
+- `check-lua` `ctx` provides `file` (repo-relative, `/`-separated), `line`, `attrs`, and `ctx.affects` (`{file, name,
+  content}` list when `affects` is also set). Controlled by `BLOCKWATCH_LUA_MODE` (`sandboxed` default, `safe`, `unsafe`).
 
 ## Symbols
 
-A symbol is one value inside a file, such as the `version` key in `package.json`. `affects` and `same-as` point at one
-with `file#/path`, or with `#/path` for the block's own file. Use a symbol when only one key in a file matters, or when
-the file cannot hold a comment. To put rules on the value itself, wrap it in a `[[block]]` entry in `blockwatch.toml`.
+A symbol points to one value or definition inside a file (`file#/path`, or `#/path` in the same file) for `affects`,
+`same-as`, `check-lua` (`ctx.affects`), or `[[block]]`.
 
 ### Files with symbols
 
-Only files in these languages have symbols. The names are examples: every file that blockwatch reads as one of these
-languages has them too. `*.json` is an extension, and a name without `*`, such as `.babelrc`, is a whole file name.
-
-- JSON: `*.json`, `*.jsonc`, `*.json5`, `*.webmanifest`, `.babelrc`
-- TOML: `*.toml`, `Pipfile`, `Cargo.lock`
-- YAML: `*.yaml`, `*.yml`, `*.cff`
-- Markdown: `*.md`, `*.markdown`
-- MDX: `*.mdx`
-- XML: `*.xml`, `*.csproj`, `*.props`, `*.xaml`, `*.xsd`, `*.xslt`
-- CSS: `*.css`
-- Go: `*.go`, but not `go.mod`, `go.sum`, `go.work` or `go.work.sum`
-- C: `*.c`
-- C++: `*.cpp`, `*.cc`, `*.h`, `*.hpp`, `*.ino`
-- Python: `*.py`, `*.pyi`, `*.pyw`
-- Starlark: `*.bzl`, `*.bazel`, `*.star`, `BUILD`, `BUCK`, `WORKSPACE`, `Tiltfile`
-- Rust: `*.rs`
-- TypeScript: `*.ts`, `*.mts`, `*.cts`, `*.d.ts`, `*.tsx`
-- JavaScript: `*.js`, `*.mjs`, `*.cjs`, `*.jsx`
-- Java: `*.java`
-- C#: `*.cs`
-- Kotlin: `*.kt`, `*.kts`
-- Swift: `*.swift`
-- Protocol Buffers: `*.proto`
-- HCL: `*.tf` (Terraform), `*.tofu`, `*.tfvars`, `*.hcl`, `*.nomad`
-- PHP: `*.php`, `*.phtml`
-- Bash: `*.sh`, `*.bash`, `*.bashrc`, `*.envrc`, but not Zsh files such as `*.zshrc`
-- Makefile: `Makefile`, `GNUmakefile`, `*.makefile`, `*.mk`, `*.mak`
-- Dart: `*.dart`
-- Dockerfile: `Dockerfile`, `Containerfile`, `*.dockerfile`
-
-A path into any other file fails the run, except a variant or a copy of one of these files.
+`JSON`, `TOML`, `YAML`, `Markdown`, `MDX`, `XML`, `CSS`, `Go`, `C`, `C++`, `Python`, `Starlark`, `Rust`,
+`TypeScript`, `JavaScript`, `Java`, `C#`, `Kotlin`, `Swift`, `Protocol Buffers`, `HCL`, `PHP`, `Bash`,
+`Makefile`, `Dart`, `Dockerfile`.
 
 ### Variants and copies
 
-A variant or a copy of a file with symbols has the same symbols:
+- Files mapped via `-E` or `extensions` inherit that language's symbols.
+- Copy suffixes (`.dist`, `.example`, `.in`, `.sample`, `.template`) read as the base name
+  (`config.toml.example#/port`).
+- Variants of `Dockerfile`, `Containerfile`, and `Makefile` with `.`, `-`, or `_` (such as `Dockerfile.ci`,
+  `Dockerfile-dev`, `Makefile.am`) keep their symbols, except `Dockerfile.dockerignore` and `Makefile.{PL,SH,bat,cmd}`.
+  No `.` may follow a `-` or `_`: `Dockerfile-logo.png` is not a variant. Zsh (`*.zsh`) and Go module files
+  (`go.mod`, `go.sum`, `go.work`) have no symbols.
 
-- A variant is a Dockerfile, Containerfile or Makefile name, such as `Dockerfile` or `makefile`, followed by `.`, `-`
-  or `_`, such as `Dockerfile.ci`, `Dockerfile-dev` or `Makefile.am`. `Makefile.am#/CFLAGS` works. After `-` or `_`,
-  no `.` may follow. `Dockerfile.dockerignore`, `Makefile.PL`, `Makefile.SH`, `Makefile.bat` and `Makefile.cmd` are
-  not variants.
-- A copy ends in `.example`, `.sample`, `.dist`, `.template` or `.in`, and has the symbols of the rest of its name.
-  `config.toml.example#/server/port` works like `config.toml#/server/port`.
+### Path syntax and discovery
 
-### Writing a path
+- **RFC 6901 paths:** `/` separates keys; 0-based indices for arrays (`#/files/0`). Escape `/` as `~1`, `~` as `~0`,
+  `,` as `%2C`, `%` as `%25` (for example, `#/dependencies/@types~1node`).
+- **Value filters:** `~[key=value]` picks the unique item where `key` equals `value` (`#/services/~[name=web]/port`, or
+  XML `#/Project/ItemGroup/~[@Include=Serilog]/@Version`). Zero or multiple matches fail.
+- **How formats map:**
+  - **JSON / TOML / YAML:** keys, tables, and list items; strings read without quotes, containers as raw file text.
+  - **Markdown / MDX:** heading path from `#` down (`README.md#/My project/Install`); `same-as` reads the body without
+    the heading line.
+  - **XML / CSS:** element names and `@attr` (`pom.xml#/project/version`, `#/Project/@Sdk`); CSS selectors/at-rules and
+    properties (`theme.css#/:root/--brand`).
+  - **Code files:** top-level names (`consts.go#/MaxPorts`, `main.tf#/variable/region/default`). The members of a type
+    are symbols too, under the type's name, in Java, C#, Kotlin, Swift, Protocol Buffers, PHP and Dart. Strings read
+    without quotes; other values stay unevaluated as written.
+- **Check paths with the CLI:** a missing key is a violation (exit `1`) that prints `"did you mean: ..."` suggestions,
+  and `blockwatch explain FILE:NAME` prints the exact extracted text.
+- **These stop the run (exit `2`):** a missing file, multi-document YAML, and a syntax error. In a code file, a syntax
+  error stops it only for paths to names near the error.
 
-- **Paths follow RFC 6901.** `/` separates keys. An array item is its position, counted from 0: `#/files/0`.
-- **Pick a list item by a key's value when items can be added above it:** `#/services/~[name=web]/port` is the `port`
-  of the one item whose `name` is `web`. Exactly one item must match, or it is a violation. A string value compares
-  without its quotes.
-- **Some characters in a key must be escaped:** `/` as `~1`, `~` as `~0`, `,` as `%2C` and `%` as `%25`.
-  The key `@types/node` is `#/dependencies/@types~1node`.
-- **A missing key is a violation.** The message suggests similar paths.
-- **A missing or broken file fails the run.** blockwatch does not guess what a broken file meant. In a code file, only
-  a path to a name near a syntax error fails it.
+## Config file
 
-### JSON
+`blockwatch.toml` at the repository root applies to every run (override with `--config FILE`). Use single quotes for
+globs and regexes. Unknown keys fail the run.
 
-Every key and every array item is a symbol.
+### Project settings
 
-- A comment is not an array item, so it does not shift the positions after it.
-- A trailing comma breaks the file, even in `.jsonc`.
-- Some JSON files allow more than JSON, such as trailing commas in `*.code-workspace` and `*.sublime-settings`, or
-  JSON5 syntax in `*.json5` and `.babelrc`. A path into one stops the run once the file uses that syntax.
-- A key written twice is a violation, because blockwatch can't tell which copy you mean.
+| Key           | Equivalent flag | Merge with CLI flags                 |
+|---------------|-----------------|--------------------------------------|
+| `ignore`      | `--ignore`      | Adds to CLI list                     |
+| `extensions`  | `-E`            | Adds to CLI map; CLI wins on ties    |
+| `enable`      | `--enable`      | CLI replaces config (never mix both) |
+| `disable`     | `--disable`     | CLI replaces config (never mix both) |
+| `only-blocks` | `--only-block`  | CLI replaces config                  |
+| `skip-blocks` | `--skip-block`  | CLI replaces config                  |
 
-### TOML
+Environment variables (`BLOCKWATCH_AI_*`, `BLOCKWATCH_LUA_MODE`) stay out of `blockwatch.toml`.
 
-Every key, every table and every array item is a symbol.
+### Virtual blocks (`[[block]]`)
 
-- A path follows the keys, however the file writes them. `[tool.ruff]` with `line-length = 88` below it is
-  `#/tool/ruff/line-length`, and so is `tool.ruff.line-length = 88`.
-- A quoted key is one part of the path, dots and all. Under `[a]`, `"b.c" = 1` is `#/a/b.c`.
-- `[[bin]]` entries count from 0: `#/bin/0/name`. A sub-table belongs to the entry above it.
-- A table covers every place it is written. `affects` counts a change to any of them. `same-as` compares the text of
-  each place, in order.
-- A key written twice breaks the file.
-
-### YAML
-
-Every key and every list item is a symbol. Block style and flow style give the same paths.
-
-- A string counts as the text YAML reads, `|` and `>` blocks included. Tags and anchors are not part of a value.
-  An empty value (`key:`) is an empty string.
-- An alias (`*name`) is not a symbol, so a path to it or through it is not found. In a list, it still takes its
-  position. `<<` is an ordinary key.
-- A key that is a list or a mapping (`? [a, b]`) is skipped with everything under it.
-- A key written twice is a violation.
-- A file with several documents fails the run. Use a named block there instead.
-
-### Markdown
-
-Every section is a symbol: a heading and everything up to the next heading of the same or a higher
-level. Its path is the text of each heading it is under, then its own, the top `#` title included:
-`README.md#/My project/Install/From source`.
-
-- A section holds its subsections. `affects` counts a change to any of its lines, the heading included.
-- `same-as` compares the section's text without its heading line.
-- A heading counts as a reader sees it: ``## The `--diff` flag`` is `#/The --diff flag`.
-- Headings underlined with `===` or `---` count. A `#` line in a code block doesn't, and neither does a heading in a
-  quote, a list item or an HTML block.
-- The same heading twice under one parent is a violation.
-- An `.mdx` file gets the same paths. JSX text and the code in braces count as heading text. A heading inside a JSX
-  element doesn't count.
-
-### XML
-
-Every element and every attribute is a symbol, in `.xml` files and in `.csproj`, `.props`, `.xaml` and the other XML
-files. A path is each element's name from the root element down. An attribute is `@` and its name:
-`pom.xml#/project/version`, `#/Project/@Sdk`.
-
-- Elements with one name under one parent share a path, so a path through them is a violation. A filter picks one by
-  a child element or an attribute: `#/project/dependencies/~[artifactId=guava]/version`,
-  `#/Project/ItemGroup/~[@Include=Serilog]/@Version`. Positions such as `/module/1` are not found.
-- A prefix is part of the name: `#/manifest/application/@android:name`. `xmlns` attributes are not symbols.
-- An element without child elements is its decoded text, without the white space around it. CDATA stays as written,
-  and comments are left out. An element with child elements gives its whole text.
-- An attribute is its decoded value. The white space around it stays.
-- An entity that the DOCTYPE declares, or a reference to a character XML forbids, fails the run for its path.
-- A syntax error anywhere fails the run.
-
-### CSS
-
-Each rule, each at-rule with a block and each declaration in them is a symbol, in `.css` files. A path is the
-selector or at-rule of each rule from the top down, then a property: `theme.css#/:root/--brand`,
-`#/@media (max-width: 768px)/.card/padding`.
-
-- A segment is the selector or the at-rule as written, without comments, and with each run of white space as one
-  space. A selector list is one segment: `#/h1%2C h2/margin`.
-- Escape `~` and `/` as in any key: `a ~ b` is `#/a ~0 b`, and `16/9` is `16~19`.
-- A property needs its whole path: `#/--brand` is not found.
-- A selector or a property written twice is a violation, such as the fallback `display: -webkit-box; display: flex;`.
-- A value leaves out the white space and comments around it, and `!important`. A value that is one string is decoded.
-  Any other value stays as written.
-- At-rules without a block, such as `@import`, are not symbols. `.scss` and `.less` files have no symbols.
-- A part that CSS says to skip, such as `*zoom: 1`, fails the run for each path with a word from it as a segment.
-
-### Code files
-
-Each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is `#/NAME`, such
-as `consts.go#/MaxPorts`. In Java, C#, Kotlin, Swift, Protocol Buffers, PHP and Dart, the members of a
-type are symbols too: `Config.java#/Config/MAX_PORTS`. In HCL, each block, attribute and object key is a symbol:
-`main.tf#/variable/region/default`.
-
-- A value is the initializer as written, never worked out: `20 * 1024 * 1024` stays as it is. Use `same-as-pattern`
-  to take the part you need. A string counts as the text it holds. Parentheses around the whole value are removed.
-- A name without a value, such as a function or a type, gives the text of its whole definition.
-- A symbol covers its own definition, but not the comments above it.
-- A name defined twice is a violation.
-- A syntax error fails the run only for a name whose definition holds it, or a path with a name from the text the
-  parser skipped. So does a string blockwatch can't decode.
-- Members, such as a method or a field, are not symbols yet, except in Java, C#, Kotlin, Swift, Protocol Buffers,
-  HCL, PHP and Dart.
-
-### Go
-
-- In a group, such as `const ( ... )`, a name covers only its own line. Outside a group, it covers the whole
-  declaration.
-- Names get their values by position. In `var x, y = f()`, neither name has a value.
-- A type is not part of a value: `const X Mode = 3` is `3`. A name after `iota` with no value of its own gives its
-  line.
-- Strings follow Go's escapes. A rune, such as `'r'`, stays as written.
-- Methods, `func init` and `_` are not symbols. `go.mod`, `go.sum` and `go.work` have no symbols.
-
-### C and C++
-
-- A macro is a symbol wherever it is defined, even inside an `#if`. Its value is its body without comments:
-  `#define FLAGS (1u << 4) // bits` is `1u << 4`. A body that is not one value, such as `static inline`, stays as
-  written. `#define FOO_H` is the empty string. A macro with parameters has no value.
-- A macro defined in each branch of an `#if` is defined twice. A `/* */` comment inside a macro's body fails the run
-  for that macro.
-- The enumerators of a plain `enum` are top-level names. Those of an `enum class` are not.
-- In `int a = 1, b = 2;`, a name covers only its own part. In `typedef struct foo {...} foo_t;`, both names point at
-  the whole `typedef`.
-- Prototypes, `extern` variables, namespaces, class members and names such as `Foo::bar` are not symbols.
-- Strings follow C's escapes, and strings written one after the other are joined. `L`, `u` and `U` strings stay as
-  written.
-
-### Python and Starlark
-
-- The bodies of a top-level `if`, `try` or `with` are top-level too. So a name defined under both `if TYPE_CHECKING:`
-  and `else:` is defined twice. The bodies of `for`, `while` and `match` don't count.
-- `A = B = 5` gives both names the whole statement. `X: int` has no value. A decorator is part of the definition.
-- Imports, `as` targets, `a, b = 1, 2`, `obj.x = 1` and `_` are not symbols. A type alias is one, without a value:
-  `type Pair[T] = tuple[T, T]` is `#/Pair`.
-- Strings follow Python's escapes. An f-string with a field and bytes stay as written. A path to a string with a
-  `\N{...}` escape, or with an escape that Python rejects, such as `"\x4"`, fails the run.
-- Starlark files, such as `BUILD` and `.bzl`, follow the same rules. A rule call is not a symbol.
-
-### Rust
-
-- Constants, statics, functions, types, traits, `macro_rules!` macros and modules are symbols. A type is not part of a
-  value: `const X: u8 = 3` is `3`.
-- The attributes above an item, such as `#[cfg(...)]`, are part of it. So a name defined under both `#[cfg(unix)]` and
-  `#[cfg(windows)]` is defined twice.
-- A module with a body is a symbol, but the items in it are not yet. `mod file;`, `impl` blocks, `use`, `extern`
-  blocks, `const _` and items that a macro makes are not symbols.
-- Strings follow Rust's escapes. Byte strings, C strings and characters stay as written.
-
-### TypeScript and JavaScript
-
-- `const`, `let`, `var`, functions, classes, enums, interfaces, type aliases and namespaces are symbols. A type and a
-  value with one name, such as `type Mode` and `const Mode`, are defined twice.
-- In `const A = 1, B = 2;`, a name covers only its own part. Type syntax is not part of a value: `"dev" as const` is
-  `dev`.
-- A function with overloads is its implementation. `declare const`, `declare function`, imports, `export { ... }`,
-  `const { a } = b` and `module.exports` are not symbols.
-- Strings follow JavaScript's escapes. A template with a field stays as written. A path to a string with a legacy
-  escape, such as `\07`, fails the run.
-
-### Java
-
-- Each type is a symbol, and so is each member in it: a field, a method, an enum constant, an annotation element or a
-  nested type. A path goes from the top-level type down: `#/Config/Limits/ID`.
-- Overloads are defined twice, and so are a field and a method with one name, such as `name` and `name()`.
-- Annotations are part of a definition. Javadoc is not. In `int a = 1, b = 2;`, a name covers only its own part.
-- An annotation element's value is its `default`. Constructors, initializer blocks, record components, and local and
-  anonymous classes are not symbols.
-- Strings follow Java's escapes. A text block counts as the text Java reads, without the indentation its lines share.
-  A path to a string with `\u005c` fails the run. Java turns `\u005c` into a backslash before it reads the other
-  escapes, so `"\u005cn"` is `"\n"`.
-
-### C\#
-
-- A namespace is part of the path, not a symbol: in `namespace Acme.Billing;`, a constant is
-  `#/Acme/Billing/Config/MaxRetries`. A type outside any namespace starts at the top: `#/Config/MaxRetries`.
-- Each type is a symbol, and so is each member in it: a field, a constant, a property, a method, an event, an enum
-  member or a nested type.
-- Overloads are defined twice. So are the copies of a name in `#if` and `#else`, and `Cache` next to `Cache<T>`.
-- A property's value is the one it starts with: `v` in `X { get; } = v;` and in `X => v;`. A method has no value.
-- Attributes are part of a definition. `///` comments are not. In `int a = 1, b = 2;`, a name covers only its own part.
-  A name written with `@` keeps it: `#/Config/@switch`.
-- Constructors, indexers, operators, explicit interface members, record parameters and top-level statements are not
-  symbols.
-- Strings follow C#'s escapes. A raw string counts as the text C# reads, without the white space before its closing
-  quotes. A string with a hole, such as `$"v{Major}"`, and `"abc"u8` stay as written. A path to a string that C#
-  rejects fails the run.
-
-### Kotlin
-
-- Each top-level property, function, type and type alias is a symbol, and so is each member of a type: a property, a
-  function, an enum entry or a nested type. A path goes from the top-level type down: `#/Config/Mode/GREEN`.
-- A constructor parameter with `val` or `var` is a symbol, and its value is its default. A companion object's members
-  sit under the class: `#/Config/ORIGIN`.
-- Overloads are defined twice, and so are a property and a function with one name, and two extension functions with
-  one name.
-- A property's value is its initializer, or the `v` of `get() = v`. A property with `by` has no value.
-- A name in backticks loses them. Annotations are part of a definition. KDoc is not.
-- Constructors, `init` blocks, local declarations, and the calls in a `.kts` script, such as `plugins { ... }`, are
-  not symbols.
-- Strings follow Kotlin's escapes. A raw string has none. A string with a template, such as `"v$major"`, stays as
-  written. A path to a string that Kotlin rejects fails the run.
-
-### Swift
-
-- Each top-level property, function, type, type alias and macro is a symbol, and so is each member of a type: a
-  property, a function, an enum case, an associated type or a nested type. A path goes from the top-level type down:
-  `#/Config/Mode/red`.
-- An extension's members sit under the type it extends: `#/Config/url`, or `#/String/trimmed` for a type from another
-  file.
-- Overloads are defined twice, and so are a property and a function with one name, copies in `#if` and `#else`, and a
-  protocol requirement and its default.
-- A property's value is its initializer, or the `v` of `{ v }` or `{ return v }`. An enum case's value is its raw
-  value.
-- A name in backticks loses them. Attributes are part of a definition. Doc comments are not. In `let a = 1, b = 2`,
-  each name covers only its own part, and the attributes go to the first.
-- `init`, `deinit`, `subscript`, operators, local declarations and top-level statements are not symbols.
-- Strings follow Swift's escapes, in raw strings too. A multi-line string loses the white space before its closing
-  quotes. A string with an interpolation, such as `"v\(major)"`, stays as written. A path to a string that Swift
-  rejects fails the run.
-
-### Protocol Buffers
-
-- Each message, enum and service is a symbol, at any depth, and so is each field, map field, oneof, enum value, rpc and
-  proto2 group in it. The package is not part of a path: `#/Item/Color/RED`.
-- A field's value is its number, and so is an enum value's, as written: `-2` or `0x3`.
-- A oneof's fields sit in its message: `#/Item/cents`. An extension field sits where its `extend` is written.
-- Options are not symbols. To check one, such as `go_package`, use a `[[block]]` entry with a `target-pattern`.
-
-### HCL
-
-- Terraform, OpenTofu, Terragrunt, Nomad and Packer files are HCL.
-- Each block is a symbol, at any depth, and so is each attribute and each key of an object. A block's path is its type,
-  then each of its labels: `#/resource/aws_instance/web/ami`, `#/variable/region/default`,
-  `#/terraform/required_providers/aws/version`. In a `.tfvars` file, each attribute sits at the top: `#/region`.
-- A path with only some of a block's labels, such as `#/resource/aws_instance`, points at nothing.
-- A block written twice in one body, such as two `ingress` blocks, makes its path a violation. A filter picks one of
-  them: `#/resource/aws_security_group/web/~[from_port=443]/to_port`. `#/locals/name` still resolves when only one of
-  several `locals` blocks sets `name`.
-- A key written as a number or an expression, such as `(var.k)`, is not a segment. List items are not symbols. A
-  label or key with an escape gives no symbol.
-- Strings follow HCL's escapes, and a `<<-` heredoc loses its indent. A string or heredoc with `${...}` or `%{...}`
-  stays as written.
-
-### PHP
-
-- The namespace is not part of a path: `#/Invoice/STATUS_PAID`. Each top-level constant, variable, function, class,
-  interface, trait and enum is a symbol, and so is each member of a type: a constant, a property, a method or an enum
-  case.
-- A property and a variable keep their `$`: `#/Invoice/$perPage`, and `#/$version` for a top-level
-  `$version = '2.4.1';`. A constructor parameter with a visibility, such as `private readonly`, is a property, and its
-  value is its default. The parser fails on `readonly` without a visibility, as in `__construct(readonly int $id)`,
-  so a path into that class fails the run.
-- `define('NAME', value);` is a symbol, `#/NAME`, also inside a function or a method, when it is a whole statement
-  whose name is plain text.
-- A definition in an `if`, `try`, `switch` or `{ }` block counts, such as a function in `if (!function_exists(...))`.
-  One in a loop doesn't, and inside a function only a `define` counts. A name defined in both branches of an `if` is
-  a violation.
-- Names compare as written, though PHP ignores the case of class, function and method names. Attributes are part of
-  a definition. Doc comments are not. In `const A = 1, B = 2;`, each name covers only its own part.
-- `use` imports, trait uses, closures and the keys of a returned array, such as a Laravel config, are not symbols.
-- Strings follow PHP's escapes, and a heredoc or a nowdoc loses its closing marker's indent. A string with a variable,
-  such as `"v$major"`, a string whose bytes are not UTF-8, and a string that PHP rejects stay as written.
-
-### Shell
-
-- A variable or a function set outside functions, loops and subshells is a symbol: `install.sh#/GO_VERSION`. The
-  conditions and bodies of `if`, `case` items, `{ ... }` groups and `&&` and `||` lists count, so a name set in both
-  branches of an `if` is a violation. A statement that ends with `&` doesn't count.
-- `export`, `readonly`, `declare` and `typeset` set a name too. In `export A=1 B=2`, `A` covers only `A=1`. The
-  value is the one written, even when a flag changes it: `declare -l X=ABC` gives `ABC`.
-- `NAME+=value`, `A[0]=x`, `FOO=1 make`, `export NAME` without `=`, `local` and `: "${NAME:=default}"` are not
-  symbols.
-- Strings follow bash's quoting, and parts written together are joined. A value that bash expands, such as `$HOME`,
-  `"${PORT:-8080}"`, `$(cmd)` or `~/bin`, stays as written, and so does an array. A path to a `$'...'` or `$"..."`
-  string fails the run.
-- A function's name can hold `-`, `.` and `:`, such as `#/ns::helper`.
-- zsh files have no symbols. After a syntax error, the parser often skips a large part of the file, and every name
-  in it fails the run. After a comment in backticks, such as `` `# skip vendor` ``, no name is found. Neither is a
-  value outside quotes that goes on to the next line after a `\`. A value that ends with a lone `$`, such as `Z=$`,
-  takes in the next line, so write `Z='$'`.
-
-### Makefile
-
-- A variable or a target set at the top or in any branch of `ifeq`, `ifneq`, `ifdef` or `ifndef` is a symbol:
-  `Makefile#/GO_VERSION`, `#/build`. A name set in both branches is a violation. So is a variable and a target with
-  the same name, a target in two rules, and `X ?= 1` next to `X = 2`.
-- Every assignment but `+=` sets a name, with any of `export`, `override` and `private`, and so does `define`. A
-  target covers its whole rule, up to its last recipe line. Write each `/` in a target as `~1`: `#/bin~1app`. A line
-  that starts with a tab is a recipe line only when the last statement above it, apart from conditionals and
-  comments, is a rule. Otherwise `CC = clang` after a tab sets `CC`.
-- `NAME += value`, `build: NAME = x`, `export NAME` without a value, computed names such as `$(PKG)_VERSION` or
-  `$(BIN):`, pattern rules such as `%.o`, suffix rules such as `.c.o` without prerequisites, and special targets such
-  as `.PHONY` are not symbols. Files that `include` reads are not searched.
-- A value is read as GNU make reads it, but never expanded. An inline comment and the white space around it are left
-  out, `\#` gives `#`, and a `\` at the end of a line joins the next line with one space. `$(...)` stays as written.
-  `X != cmd` gives `cmd`, which is not run. A line that make joins to a statement sets no name, such as the line
-  after a comment that ends in `\`.
-- A `define` without `endef`, a conditional without `endif`, an `else` or `endif` outside a conditional, a second
-  `else` in one conditional, an `ifeq` without its arguments, and nesting more than 128 levels deep stop the run.
-- A rule also covers the comment lines after its last recipe line. In a `define` body, a tab line that ends in `\`
-  keeps the `\` and the line end, where make joins the lines.
-- A block tag is found on a recipe line whose first character after the tab is `#`, and after any `#` in a `define`
-  body, though make reads no comment there.
-
-### Dart
-
-- Each top-level variable, function, getter, setter, type and type alias is a symbol, and so is each member of a type:
-  a field, a method, a getter, a setter, a named constructor or an enum value. A path goes from the type down:
-  `#/Invoice/maxLines`, `#/Mode/dark`.
-- A named constructor is a symbol: `Invoice.draft()` is `#/Invoice/draft`. The unnamed constructor is not.
-- A named extension's members sit under its name: `#/StringX/isBlank`. An extension without a name has no symbols.
-- A getter and a setter with one name are defined twice, and so are a named constructor and a field with one name.
-- A variable's value is its initializer, and a getter's is the `v` of `=> v`.
-- Annotations are part of a definition. Doc comments are not. In `int a = 1, b = 2;`, each name covers only its own
-  part.
-- Operators, `external` declarations and local declarations are not symbols.
-- Strings follow Dart's escapes, and adjacent strings, such as `'a' "b"`, are joined. A raw string has no escapes. A
-  string with `$name` or `${...}` stays as written. A path to a string that Dart rejects fails the run.
-
-### Dockerfile
-
-- Each `ARG` with a default, each `ENV` and each `LABEL` is a symbol, and so is each named stage.
-- A named stage is a path segment: `FROM ... AS builder` puts its names under `#/builder/`. Names in an unnamed stage
-  sit at the top level. A stage name keeps its case: `AS Builder` gives `#/Builder/`, though Docker ignores the case.
-- A named stage's value is its image: `#/uv` gives `ghcr.io/astral-sh/uv:0.13.5`.
-- An `ARG` without a default is not a symbol.
-- An `ARG` and an `ENV` with one name in a stage are defined twice, and so are names repeated across unnamed stages.
-- In `ENV A=1 B=2` and `ARG A=1 B=2`, each name covers only its own pair.
-- Strings decode quotes and line continuations. A value with `$NAME` or `${...}` stays as written, with its quotes.
-- A `# escape=` line at the top sets the escape character, such as a backtick for Windows images.
-
-## The config file (`blockwatch.toml`)
-
-Every run reads `blockwatch.toml` from the repository root, from any directory: the hook, CI and your own runs.
-`--config FILE` reads another file instead.
-
-### Project-wide settings
-
-Put the flags that every run repeats in the config:
+Declare blocks in `blockwatch.toml` when a file can't hold comments (JSON), must stay unchanged (prompts, migrations),
+needs rules on a single scalar without key/quote punctuation, or repeats across a glob:
 
 ```toml
-ignore = ['**/generated/**', 'vendor/**'] # like --ignore
-disable = ['check-ai']                    # like --disable; `enable` is like --enable, never set both
-
-[extensions]
-cu = 'cpp'                                # like -E cu=cpp
-```
-
-- Write globs and regexes in single quotes. TOML then takes them as written, backslashes included.
-- `ignore` and `extensions` add to the flags. `--enable` or `--disable` on the command line replaces the config's
-  selection of validators, and `--only-block` or `--skip-block` replaces its selection of blocks.
-- `only-blocks` and `skip-blocks` list blocks as `FILE:BLOCK_NAME`, like `--only-block` and `--skip-block`. Skip a
-  block only when a normal run can't check it, such as a `check-lua` script that needs the network. Never skip a block
-  to make a failing run pass.
-- An unknown key or a bad value fails the run, so a typo can't turn a setting off.
-- The settings of `check-ai` and `check-lua` stay in environment variables. The config can't hold them.
-
-### Blocks in the config file
-
-A `[[block]]` entry declares a block in a file, with the attributes a tag would have. It wraps one of three things:
-
-- a [symbol](#symbols): `target = 'package.json#/version'`;
-- the text a regex matches: `target = 'settings.py'` with `target-pattern = '^MODEL = .*'`;
-- a whole file: `target = 'settings.py'` alone.
-
-Prefer it to tags when:
-
-- The file can't hold a comment, such as `package.json`.
-- The file must not change, so it can't take a tag. For example, a module that a build copies byte for byte, an applied
-  migration, or a prompt sent to a language model.
-- The rule is about one value, such as a version. The block's content is then just the value, so a rule needs no
-  pattern to skip the key and the quotes.
-- The file should stay free of tags, or the project keeps its rules in one place.
-
-```toml
-# The oldest Rust that CI tests must be the one Cargo.toml promises.
 [[block]]
-target = 'Cargo.toml#/package/rust-version'
-same-as = '.github/workflows/ci.yml#/jobs/test/strategy/matrix/rust/0'
-
-# Bumping React must update the install guide.
-[[block]]
-target = 'package.json#/dependencies/react'
-name = 'react-version'
-affects = 'docs/install.md:react-version'
-
-[[block]]
-target = 'package.json#/version'
+target = 'package.json#/version'               # symbol, file, or glob (plugins/*/package.json#/version)
 line-pattern = '^\d+\.\d+\.\d+$'
 
 [[block]]
-target = 'package.json#/keywords'
-keep-sorted = true
-keep-sorted-pattern = '^"(?P<value>[^"]+)",?$'
-
-# A build copies settings.py as it is. The block is just `model-b` in `MODEL = "model-b"`.
-[[block]]
 target = 'settings.py'
-target-pattern = '^MODEL = "(?P<value>[^"]+)"'
+target-pattern = '^MODEL = "(?P<value>[^"]+)"' # needs a file target; must match once; (?s) spans lines
 name = 'model'
 same-as = 'config/models.json#/default'
 ```
 
-- `target` is required: `file#/path` or `file`. A named block is not a valid target.
-- `target-pattern` needs a file as `target`. It must match exactly once in the file, or the run stops. `^` and `$`
-  match at each line's start and end. Add `(?s)` to span lines, and write `.*?`, not `.*`, which runs to the last
-  possible match. A `value` group picks the content; without one, the content is the whole match.
-- A pattern or a whole file works in any text file, even one blockwatch has no grammar for, such as `.txt`.
-- **The file in `target` can be a glob**, to put one rule on many files of the same shape, including files added
-  later: `target = 'plugins/*/package.json#/version'` with `same-as = 'package.json#/version'`. Each matching file gets
-  its own block, with its own violations, `name` and changes. `*` stops at `/`, and `**` crosses it. A path that
-  exists is never a glob. A glob that matches no file stops the run.
-- `true` stands for an attribute without a value: `keep-unique = true`. An integer counts as its digits:
-  `check-lua-timeout = 30`.
-- A target has at most one entry. Put all its rules in one.
-- **For a symbol, the content is what a reference to the symbol reads.** A string is its value without quotes, so the
-  `line-pattern` above checks `1.2.3`. A list, an object or a table is its text, key line included. That is why the
-  `keep-sorted-pattern` above takes the value out of each quoted item and skips the `"keywords": [` and `]` lines.
-- A `name` works like a tag's. A tag in another file can point at it: `same-as="package.json:react-version"`.
-- Violations are reported in the wrapped file, at the symbol or the match. The message shows the entry's line in
-  `blockwatch.toml`.
-- The block counts as changed when the diff touches what it wraps (the symbol, the match, or any line of a whole file)
-  or the entry. So `--only-changed` checks a block whose entry you edited, even if the wrapped file did not change.
-- A target that does not resolve stops the run: a missing file or key, a file that does not parse, or a pattern that
-  matches no text or more than once.
-
-To only point *at* a key or a file from a tag, a `file#/path` or `file` target is enough. An entry is for putting rules
-*on* it.
-
-## Maintaining blocks (editing annotated files)
-
-When you change code in a file that contains blocks, you **MUST**:
-
-1. **Never delete `<block>` / `</block>` tags** unless explicitly told to. Place new content inside the appropriate
-   block boundaries.
-2. **Respect each block's directives** as you edit: keep `keep-sorted` lists ordered, never introduce a `keep-unique`
-   duplicate, make every new line match `line-pattern`, stay within `line-count`, and satisfy `check-ai` / `check-lua`
-   rules.
-3. **Honor `affects`:** if you change a block carrying `affects="file:name"`, you must also update the referenced
-   `<block name="name">` in `file` — they are meant to move together. A target without `:` or `#` is a whole file, so
-   that file has to change too. A `file#/path` target is one [symbol](#symbols), so its key or its value has to change.
-4. **Check `blockwatch.toml` before editing a file.** A `[[block]]` entry can put rules on a key, on some lines, or on
-   the whole file, though the file shows no tag. If you rename or move that key, or change the text a
-   `target-pattern` matches, update the entry in the same change, or the run stops.
-5. **Update a renamed block's address.** If you rename a block or move it to another file, update its `FILE:BLOCK_NAME`
-   wherever it appears: in `affects` and `same-as` targets, and in `only-blocks` and `skip-blocks` in
-   `blockwatch.toml`. An address that matches no block fails the run.
-6. **Verify** before claiming the change is done (see below).
+- One entry per target. Use `true` for valueless attributes (`keep-unique = true`) and integers for
+  `check-lua-timeout`.
+- A missing target, a `target-pattern` without a unique match, or an empty target glob stops the run.
+- Counts as changed when the diff touches either the wrapped content or the `[[block]]` entry.
 
 ## Running and verifying
 
-You can run the `blockwatch` command directly in the shell:
-
 ```bash
-blockwatch                                                   # validate every block in the tree
-git diff --patch | blockwatch --diff                         # every block, with `affects` enforced on your changes
-git diff --patch HEAD | blockwatch --diff                    # the same, for staged and unstaged changes
-git diff --patch | blockwatch --diff --only-changed          # only the blocks your changes touched
-blockwatch list                                              # JSON dump of every block found (audit / debug)
-blockwatch explain src/lib.rs:languages                      # what each validator of this named block read
-blockwatch src/main.rs "**/*.md"                             # restrict to paths or globs (quote globs)
-blockwatch --ignore "**/generated/**"                        # exclude paths for this run
-blockwatch --only-block src/lib.rs:languages                 # check only this block
+blockwatch                                                # check every block in the repository
+git diff --patch | blockwatch --diff                      # full scan + diff-gated rules (affects)
+git diff --patch HEAD | blockwatch --diff --only-changed  # only blocks touched by diff
+blockwatch list                                           # JSON dump of all parsed blocks
+blockwatch explain FILE:BLOCK_NAME                        # JSON of exact extracted values and targets
+blockwatch --verbosity summary                            # count of files scanned and checked
+blockwatch --suppress FILE:BLOCK_NAME:VALIDATOR:HASH      # suppress a known violation (still reported)
 ```
 
-Every run also applies the settings in `blockwatch.toml`. Put an exclusion the project always needs in its `ignore` key,
-not in each command. A block that its `skip-blocks` lists is never checked, so a passing run says nothing about it.
+- **Stdin is read only with `--diff`.** `--only-changed` requires `--diff`.
+- **Always run `blockwatch explain FILE:NAME`** after adding a pattern, glob, or `#/path` rule to check what it
+  extracted. A rule can pass by matching the same wrong text on both sides.
+- If git sets `diff.noprefix` or `diff.relative`, run
+  `git diff --patch --default-prefix --no-relative | blockwatch --diff`.
+- Exit codes: `0` pass, `1` `error` violation, `2` fatal error (malformed tag, bad config, missing target file).
+- Run `blockwatch --help` for all flags (`-d`, `-e`, `-E`, `--only-block`, `--skip-block`, `--format sarif`).
 
-Stdin is read **only** with `--diff`; piping a diff without it is silently ignored and the whole tree is scanned
-instead. `--only-changed` narrows the run to the blocks the diff touched and requires `--diff`.
+## Wiring into hooks and CI
 
-After editing annotated files, run `git diff --patch | blockwatch --diff`. If it fails, read the message, fix the
-sorting/duplication/pattern/sync issue, and re-run until it passes. A violation in a block you didn't edit is yours to
-fix only if your change caused it, for example when you changed one side of a `same-as` or renamed a block that another
-one points at. Otherwise leave it, and tell the user about it. Use `blockwatch list` to confirm a tag you
-just added is parsed and seen.
-
-After you write a rule with a pattern, a glob or a target, run `blockwatch explain FILE:BLOCK_NAME`. A rule can pass and
-still be wrong, such as a `same-as-pattern` that takes the same wrong part of each line on both sides. `explain` prints,
-as JSON, what each validator read: the values a pattern extracted, the targets it found, the paths a glob matched. Check
-that they are what you meant. The block needs a `name`.
-
-Exit code `1` means at least one `error` violation. Exit code `2` means blockwatch could not check the code, for example
-because of a malformed tag, a bad `blockwatch.toml` or a missing API key. Fix what the error says, then re-run.
-
-The piped diff must carry Git's standard path prefixes, which a plain `git diff` produces. If blockwatch reports that a
-diff target has no recognized prefix or does not exist, the repository sets `diff.noprefix`, a custom `diff.srcPrefix`,
-or `diff.relative`; re-run as
-`git diff --patch --default-prefix --no-relative | blockwatch --diff`. Under `--diff`, an empty diff
-means nothing changed, but stdin that is ANSI-colorized or not a diff is an error.
-
-## Wiring into hooks and CI (do this once, after annotating)
-
-The hook and the GitHub Action below check every block in the repository, and enforce `affects` on the diff. A file
-without a block tag is not parsed, so this stays fast.
-
-**pre-commit** (`.pre-commit-config.yaml`). pre-commit installs blockwatch from PyPI, so contributors don't need to
-install it:
+**pre-commit** (`.pre-commit-config.yaml`):
 
 ```yaml
 - repo: https://github.com/mennanov/blockwatch
   rev: v{{version}}
   hooks:
-    - id: blockwatch
+    - id: blockwatch  # or blockwatch-commit-msg (reads `blockwatch-suppress:` trailers)
 ```
 
-Without the pre-commit framework, write this to `.git/hooks/pre-commit` and `chmod +x` it:
+- `blockwatch-commit-msg` runs at the `commit-msg` stage. Plain `pre-commit install` doesn't install that stage, and the
+  hook then never runs. Run `pre-commit install --hook-type commit-msg`, or add
+  `default_install_hook_types: [ pre-commit, commit-msg ]` to `.pre-commit-config.yaml`.
+- With `check-ai` blocks, add `args: [ --only-changed ]` to the hook. Without it, every commit sends every `check-ai`
+  block to the model.
+
+**Plain `.git/hooks/pre-commit`** (`chmod +x`; checks files on disk, so stop if unstaged changes exist):
 
 ```sh
 #!/bin/sh
 if ! git diff --quiet; then
-  echo 'blockwatch checks the files on disk, so stage or stash the unstaged changes first' >&2
+  echo 'blockwatch checks files on disk; stage or stash unstaged changes first' >&2
   exit 1
 fi
 diff=$(git diff --patch --cached --unified=0) || exit
@@ -724,15 +262,7 @@ if [ -z "$diff" ]; then exec blockwatch; fi
 printf '%s\n' "$diff" | blockwatch --diff
 ```
 
-blockwatch reads the files on disk, not the staged content. The pre-commit framework sets unstaged changes aside before
-it runs a hook, but a plain hook doesn't. So this hook stops when there are unstaged changes, instead of checking them
-in place of the commit.
-
-The plain hook runs `blockwatch` without `--diff` when nothing is staged, because releases up to 0.8.1 reject an empty
-diff.
-
-If the project has `check-ai` blocks, add `args: [ --only-changed ]` to the pre-commit hook, or `--only-changed` after
-`--diff` in the plain hook: a full scan sends every one of them to the model on every commit.
+With `check-ai` blocks, add `--only-changed` after `--diff`.
 
 **GitHub Actions** (`.github/workflows/blockwatch.yml`):
 
@@ -747,13 +277,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: mennanov/blockwatch-action@v1
-        # Only needed if you use check-ai:
-        # env: { BLOCKWATCH_AI_API_KEY: ${{ secrets.BLOCKWATCH_AI_API_KEY }} }
+        # With check-ai: add `with: { only_changed: 'true' }` and `env: { BLOCKWATCH_AI_API_KEY: ... }`
 ```
-
-Validating the PR diff is enough for `affects`/drift checks. A periodic bare `blockwatch` run over the whole tree on
-`main` is a good extra safety net for the deterministic validators — but note it cannot check `affects`, which needs a
-diff to compare against.
 
 ## Installing this skill
 

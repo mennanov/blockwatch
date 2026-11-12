@@ -341,7 +341,7 @@ record Pair<A, B>(A first, B second) {}
 "#;
         let config = text_of(source, "@Deprecated", "\n}")?;
 
-        // <block affects="docs/symbols.md:java-paths, src/skill.md#/blockwatch/Symbols/Java">
+        // <block affects="docs/symbols.md:java-paths">
         assert_eq!(
             symbols(&java(source)?, source),
             vec![

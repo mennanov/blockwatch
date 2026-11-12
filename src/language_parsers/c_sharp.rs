@@ -400,7 +400,7 @@ public class Config
 "#;
         let config = text_of(source, "[Serializable]", "\n}")?;
 
-        // <block affects="docs/symbols.md:c-sharp-paths, src/skill.md#/blockwatch/Symbols/C#">
+        // <block affects="docs/symbols.md:c-sharp-paths">
         assert_eq!(
             symbols(&c_sharp(source)?, source),
             vec![

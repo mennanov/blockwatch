@@ -206,7 +206,7 @@ lazy_static! {
 }
 "#;
 
-        // <block affects="docs/symbols.md:rust-paths, src/skill.md#/blockwatch/Symbols/Rust">
+        // <block affects="docs/symbols.md:rust-paths">
         assert_eq!(
             symbols(&rust(source)?, source),
             vec![

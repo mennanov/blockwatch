@@ -451,7 +451,7 @@ actor Counter {
 }
 "#;
 
-        // <block affects="docs/symbols.md:swift-paths, src/skill.md#/blockwatch/Symbols/Swift">
+        // <block affects="docs/symbols.md:swift-paths">
         assert_eq!(
             symbols(&swift(source)?, source),
             vec![

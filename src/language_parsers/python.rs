@@ -347,7 +347,7 @@ match mode:
         MATCHED = 1
 "#;
 
-        // <block affects="docs/symbols.md:python-paths, src/skill.md#/blockwatch/Symbols/Python and Starlark">
+        // <block affects="docs/symbols.md:python-paths">
         assert_eq!(
             symbols(&python(source)?, source),
             vec![

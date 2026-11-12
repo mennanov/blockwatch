@@ -450,7 +450,7 @@ mod symbols_tests {
 </project>
 "#;
 
-        // <block affects="docs/symbols.md:xml-paths, src/skill.md#/blockwatch/Symbols/XML">
+        // <block affects="docs/symbols.md:xml-paths">
         assert_eq!(
             symbols(&xml(source)?, source),
             vec![

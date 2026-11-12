@@ -333,7 +333,7 @@ object Registry {
 }
 "#;
 
-        // <block affects="docs/symbols.md:kotlin-paths, src/skill.md#/blockwatch/Symbols/Kotlin">
+        // <block affects="docs/symbols.md:kotlin-paths">
         assert_eq!(
             symbols(&kotlin(source)?, source),
             vec![

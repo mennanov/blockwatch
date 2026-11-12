@@ -589,7 +589,7 @@ h1, h2 { margin: 0 }
 @keyframes spin { to { rotate: 1turn; } }
 "#;
 
-        // <block affects="docs/symbols.md:css-paths, src/skill.md#/blockwatch/Symbols/CSS">
+        // <block affects="docs/symbols.md:css-paths">
         assert_eq!(
             symbols(&css(source)?, source),
             vec![

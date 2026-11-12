@@ -262,7 +262,7 @@ mod tests {
             "containers": [{"key": "value"}, ["item"]]
         }"#;
 
-        // <block affects="docs/symbols.md:json-paths, src/skill.md#/blockwatch/Symbols/JSON">
+        // <block affects="docs/symbols.md:json-paths">
         assert_eq!(
             derived_symbols(source)?,
             expected_symbols([

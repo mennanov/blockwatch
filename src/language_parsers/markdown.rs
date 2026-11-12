@@ -396,7 +396,7 @@ mod tests {
             .collect()
     }
 
-    // <block name="markdown-section-tests" affects="docs/symbols.md:markdown-paths, src/skill.md#/blockwatch/Symbols/Markdown">
+    // <block name="markdown-section-tests" affects="docs/symbols.md:markdown-paths">
     #[test]
     fn nested_sections_parse_symbols_returns_each_section_with_its_body() -> anyhow::Result<()> {
         let source = r"Text before the first heading.

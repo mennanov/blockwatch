@@ -561,7 +561,7 @@ extension type Id(int value) {
 "#;
         let invoice = text_of(source, "@immutable\nclass", "\n}")?;
 
-        // <block affects="docs/symbols.md:dart-paths, src/skill.md#/blockwatch/Symbols/Dart">
+        // <block affects="docs/symbols.md:dart-paths">
         assert_eq!(
             symbols(&dart(source)?, source),
             vec![

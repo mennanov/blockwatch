@@ -436,7 +436,7 @@ title: <3 # not a comment
         Ok(())
     }
 
-    // <block name="mdx-section-tests" affects="docs/symbols.md:markdown-paths, src/skill.md#/blockwatch/Symbols/Markdown">
+    // <block name="mdx-section-tests" affects="docs/symbols.md:markdown-paths">
     #[test]
     fn document_with_esm_and_jsx_parse_symbols_returns_its_sections() -> anyhow::Result<()> {
         let source = r"import {Badge} from './badge.js'

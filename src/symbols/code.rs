@@ -136,7 +136,7 @@ impl<L: CodeLanguage> SymbolsParser for CodeSymbolsParser<L> {
 ///
 /// A definition with a problem of its own gives no symbol. Another definition at the same path
 /// keeps its symbol, and so does a clean definition whose name a skipped span holds.
-// <block name="code-symbol-rules" affects="docs/symbols.md:code-files, src/skill.md#/blockwatch/Symbols/Code files">
+// <block name="code-symbol-rules" affects="docs/symbols.md:code-files">
 pub(crate) fn symbols(
     tree: &Tree,
     source: &str,

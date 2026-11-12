@@ -357,7 +357,7 @@ resource "aws_instance" web {
         let aws = text_of(source, "aws = {", "\n    }")?;
         let tags = r#"{ Team = "core", "cost center" = 42 }"#;
 
-        // <block affects="docs/symbols.md:hcl-paths, src/skill.md#/blockwatch/Symbols/HCL">
+        // <block affects="docs/symbols.md:hcl-paths">
         assert_eq!(
             symbols(&hcl(source)?, source),
             vec![

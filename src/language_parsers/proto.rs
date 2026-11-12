@@ -203,7 +203,7 @@ service Orders {
 }
 "#;
 
-        // <block affects="docs/symbols.md:proto-paths, src/skill.md#/blockwatch/Symbols/Protocol Buffers">
+        // <block affects="docs/symbols.md:proto-paths">
         assert_eq!(
             symbols(&proto(source)?, source),
             vec![

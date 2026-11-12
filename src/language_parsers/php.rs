@@ -623,7 +623,7 @@ enum Suit
 }
 "#;
 
-        // <block affects="docs/symbols.md:php-paths, src/skill.md#/blockwatch/Symbols/PHP">
+        // <block affects="docs/symbols.md:php-paths">
         assert_eq!(
             symbols(&php(source)?, source),
             vec![
