@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.19.0] - 2026-11-12
+
 ### Added
 
 - Recognize more variants of Dockerfiles, Jenkinsfiles and Makefiles:
