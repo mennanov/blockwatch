@@ -315,11 +315,11 @@ of each, such as `Gemfile` for Ruby. It also says how variants such as `Dockerfi
 
 <!-- </block> -->
 
-A file whose name has no language, such as `.ino` or `.cu`, is skipped. To check it too, map it to a supported
+A file whose name has no language, such as `.cu` or `.cuh`, is skipped. To check it too, map it to a supported
 extension with `-E` or in the `extensions` table of `blockwatch.toml`:
 
 ```shell
-blockwatch -E ino=cpp -E cu=cpp
+blockwatch -E cu=cpp -E cuh=cpp
 ```
 
 ## Known Limitations

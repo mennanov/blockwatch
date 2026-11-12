@@ -85,7 +85,7 @@ You can put project-wide settings (--ignore, -E, --enable, --disable, --only-blo
     git diff --patch | blockwatch --diff --only-changed 'src/**/*.rs'
 
     # Map an extension or a whole file name to a supported one
-    blockwatch -E ino=cpp -E cu=cpp
+    blockwatch -E cu=cpp -E cuh=cpp
 
     # Disable specific validators
     blockwatch -d keep-sorted -d line-count
@@ -129,7 +129,7 @@ pub(crate) struct Args {
     #[arg(long = "only-changed", requires = "diff", global = true)]
     pub(crate) only_changed: bool,
 
-    /// Map an extension or a whole file name to a supported one, e.g. -E ino=cpp -E Buildfile=dockerfile
+    /// Map an extension or a whole file name to a supported one, e.g. -E cu=cpp -E Earthfile=dockerfile
     #[arg(
         short = 'E',
         long = "extension",

@@ -846,14 +846,17 @@ mod tests {
     use crate::symbol_path::SymbolPath;
 
     #[test]
-    fn extensions_with_symbols_match_the_documented_list() -> anyhow::Result<()> {
-        let mut extensions_with_symbols = Vec::new();
+    fn languages_with_symbols_match_the_documented_list() {
         let parsers = LanguageParsers::new();
-        for &(name, language) in crate::language_resolver::NAMES {
-            let parser = parsers.parser(language);
+        let mut with_symbols = Vec::new();
+        for &(_, language) in crate::language_resolver::NAMES {
+            if with_symbols.contains(&language) {
+                continue;
+            }
             // A parser without symbols refuses every source with the same error, so an empty
             // source is enough to tell. A parser with symbols may accept it or report it as broken.
-            let has_symbols = match parser
+            let has_symbols = match parsers
+                .parser(language)
                 .lock()
                 .expect("a thread panicked while it held the parser")
                 .parse_symbols("")
@@ -862,100 +865,50 @@ mod tests {
                 Err(err) => err.to_string() != "symbols are not supported for this language",
             };
             if has_symbols {
-                extensions_with_symbols.push(name);
+                with_symbols.push(language);
             }
         }
-        extensions_with_symbols.sort();
 
-        /* <block name="extensions-with-symbols"
-        same-as="docs/symbols.md:extensions-with-symbols, src/skill.md:extensions-with-symbols"
+        // Each language with the name the docs give it. The docs list languages, not file names,
+        // so a new file name of a language with symbols needs no change here.
+        /* <block name="languages-with-symbols"
+        same-as="docs/symbols.md:languages-with-symbols, src/skill.md:languages-with-symbols"
         same-as-pattern='"(?P<value>[^"]+)"'> */
         let documented = [
-            "BUCK",
-            "BUILD",
-            "Containerfile",
-            "Dockerfile",
-            "GNUmakefile",
-            "Makefile",
-            "Pipfile",
-            "Tiltfile",
-            "WORKSPACE",
-            "bash",
-            "bash_profile",
-            "bashrc",
-            "bazel",
-            "bzl",
-            "bzlmod",
-            "c",
-            "cc",
-            "cff",
-            "cjs",
-            "containerfile",
-            "cpp",
-            "cs",
-            "csproj",
-            "css",
-            "cts",
-            "cxx",
-            "d.ts",
-            "dart",
-            "dockerfile",
-            "envrc",
-            "fsproj",
-            "go",
-            "h",
-            "hcl",
-            "hh",
-            "hpp",
-            "hxx",
-            "java",
-            "js",
-            "json",
-            "jsonc",
-            "jsx",
-            "kt",
-            "kts",
-            "mak",
-            "makefile",
-            "markdown",
-            "md",
-            "mdx",
-            "mjs",
-            "mk",
-            "mts",
-            "nomad",
-            "php",
-            "phtml",
-            "props",
-            "proto",
-            "py",
-            "pyi",
-            "pyw",
-            "rs",
-            "sh",
-            "star",
-            "swift",
-            "targets",
-            "tf",
-            "tfvars",
-            "tofu",
-            "toml",
-            "ts",
-            "tsx",
-            "vbproj",
-            "vcxproj",
-            "webmanifest",
-            "xaml",
-            "xml",
-            "xsd",
-            "xsl",
-            "xslt",
-            "yaml",
-            "yml",
+            (Language::Json, "JSON"),
+            (Language::Toml, "TOML"),
+            (Language::Yaml, "YAML"),
+            (Language::Markdown, "Markdown"),
+            (Language::Mdx, "MDX"),
+            (Language::Xml, "XML"),
+            (Language::Css, "CSS"),
+            (Language::Go, "Go"),
+            (Language::C, "C"),
+            (Language::Cpp, "C++"),
+            (Language::Python, "Python"),
+            (Language::Starlark, "Starlark"),
+            (Language::Rust, "Rust"),
+            (Language::TypeScript, "TypeScript"),
+            (Language::Tsx, "TypeScript"),
+            (Language::JavaScript, "JavaScript"),
+            (Language::Java, "Java"),
+            (Language::CSharp, "C#"),
+            (Language::Kotlin, "Kotlin"),
+            (Language::Swift, "Swift"),
+            (Language::Proto, "Protocol Buffers"),
+            (Language::Hcl, "HCL"),
+            (Language::Php, "PHP"),
+            (Language::Bash, "Bash"),
+            (Language::Makefile, "Makefile"),
+            (Language::Dart, "Dart"),
+            (Language::Dockerfile, "Dockerfile"),
         ];
         // </block>
-        assert_eq!(extensions_with_symbols, documented);
-        Ok(())
+        let mut documented: Vec<Language> =
+            documented.iter().map(|&(language, _)| language).collect();
+        with_symbols.sort_by_key(|language| format!("{language:?}"));
+        documented.sort_by_key(|language| format!("{language:?}"));
+        assert_eq!(with_symbols, documented);
     }
 
     #[test]

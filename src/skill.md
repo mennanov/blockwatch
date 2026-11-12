@@ -155,16 +155,37 @@ the file cannot hold a comment. To put rules on the value itself, wrap it in a `
 
 ### Files with symbols
 
-Only these files have symbols: JSON (`.json`, `.jsonc`, `.webmanifest`), TOML (`.toml`, `Pipfile`), YAML (`.yaml`,
-`.yml`, `.cff`), Markdown (`.md`, `.markdown`, `.mdx`), XML (`.xml`, `.csproj`, `.fsproj`, `.vbproj`, `.vcxproj`,
-`.props`, `.targets`, `.xaml`, `.xsd`, `.xsl`, `.xslt`), CSS (`.css`), Go (`.go`), C and C++ (`.c`, `.h`, `.cc`,
-`.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx`), Python (`.py`, `.pyi`, `.pyw`), Starlark (`.bzl`, `.bazel`, `.bzlmod`,
-`.star`, `BUILD`, `BUCK`, `WORKSPACE`, `Tiltfile`), Rust (`.rs`), TypeScript (`.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`),
-JavaScript (`.js`, `.mjs`, `.cjs`, `.jsx`), Java (`.java`), C# (`.cs`), Kotlin (`.kt`, `.kts`), Swift (`.swift`),
-Protocol Buffers (`.proto`), HCL (`.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`), PHP (`.php`, `.phtml`), shell (`.sh`,
-`.bash`, `.bashrc`, `.bash_profile`, `.envrc`), Makefile (`Makefile`, `GNUmakefile`, `makefile`, `.mk`, `.mak`), Dart
-(`.dart`), and Dockerfile (`Dockerfile`, `Containerfile`, `.dockerfile`, `.containerfile`). A path into any other file
-fails the run, except a variant or a copy of one of these files.
+Only files in these languages have symbols. The names are examples: every file that blockwatch reads as one of these
+languages has them too. `*.json` is an extension, and a name without `*`, such as `.babelrc`, is a whole file name.
+
+- JSON: `*.json`, `*.jsonc`, `*.json5`, `*.webmanifest`, `.babelrc`
+- TOML: `*.toml`, `Pipfile`, `Cargo.lock`
+- YAML: `*.yaml`, `*.yml`, `*.cff`
+- Markdown: `*.md`, `*.markdown`
+- MDX: `*.mdx`
+- XML: `*.xml`, `*.csproj`, `*.props`, `*.xaml`, `*.xsd`, `*.xslt`
+- CSS: `*.css`
+- Go: `*.go`, but not `go.mod`, `go.sum`, `go.work` or `go.work.sum`
+- C: `*.c`
+- C++: `*.cpp`, `*.cc`, `*.h`, `*.hpp`, `*.ino`
+- Python: `*.py`, `*.pyi`, `*.pyw`
+- Starlark: `*.bzl`, `*.bazel`, `*.star`, `BUILD`, `BUCK`, `WORKSPACE`, `Tiltfile`
+- Rust: `*.rs`
+- TypeScript: `*.ts`, `*.mts`, `*.cts`, `*.d.ts`, `*.tsx`
+- JavaScript: `*.js`, `*.mjs`, `*.cjs`, `*.jsx`
+- Java: `*.java`
+- C#: `*.cs`
+- Kotlin: `*.kt`, `*.kts`
+- Swift: `*.swift`
+- Protocol Buffers: `*.proto`
+- HCL: `*.tf` (Terraform), `*.tofu`, `*.tfvars`, `*.hcl`, `*.nomad`
+- PHP: `*.php`, `*.phtml`
+- Bash: `*.sh`, `*.bash`, `*.bashrc`, `*.envrc`, but not Zsh files such as `*.zshrc`
+- Makefile: `Makefile`, `GNUmakefile`, `*.makefile`, `*.mk`, `*.mak`
+- Dart: `*.dart`
+- Dockerfile: `Dockerfile`, `Containerfile`, `*.dockerfile`
+
+A path into any other file fails the run, except a variant or a copy of one of these files.
 
 ### Variants and copies
 
@@ -195,6 +216,8 @@ Every key and every array item is a symbol.
 
 - A comment is not an array item, so it does not shift the positions after it.
 - A trailing comma breaks the file, even in `.jsonc`.
+- Some JSON files allow more than JSON, such as trailing commas in `*.code-workspace` and `*.sublime-settings`, or
+  JSON5 syntax in `*.json5` and `.babelrc`. A path into one stops the run once the file uses that syntax.
 - A key written twice is a violation, because blockwatch can't tell which copy you mean.
 
 ### TOML
@@ -527,7 +550,7 @@ ignore = ['**/generated/**', 'vendor/**'] # like --ignore
 disable = ['check-ai']                    # like --disable; `enable` is like --enable, never set both
 
 [extensions]
-ino = 'cpp'                               # like -E ino=cpp
+cu = 'cpp'                                # like -E cu=cpp
 ```
 
 - Write globs and regexes in single quotes. TOML then takes them as written, backslashes included.

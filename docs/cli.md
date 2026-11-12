@@ -18,7 +18,7 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
   validators read, as JSON. See [The `explain` Command](#the-explain-command).
 - **Print the Agent Skill**: `blockwatch skill` prints the [skill for AI agents](#the-skill-command), as a `SKILL.md`
 - **Config File**: `blockwatch --config FILE` reads the project's settings from FILE instead of `blockwatch.toml`
-- **Custom Extensions**: Map an extension or a whole file name to a supported one: `blockwatch -E ino=cpp` (config
+- **Custom Extensions**: Map an extension or a whole file name to a supported one: `blockwatch -E cu=cpp` (config
   key: `extensions`)
 - **Disable Validators**: `blockwatch -d check-ai` (config key: `disable`)
 - **Run Only Some Validators**: `blockwatch -e keep-sorted` runs only `keep-sorted` (config key: `enable`)
@@ -212,51 +212,54 @@ Matching is case-sensitive, and the directories don't count. A file that matches
 
 <!-- </block> -->
 
-These are the endings and names that have a language:
+These are the endings and names that have a language. `*.json` is an extension: `package.json` is JSON. A name
+without `*`, such as `.babelrc` or `Cargo.lock`, is a whole file name.
 
 <!-- <block name="language-table" same-as="src/language_resolver.rs:language-names" same-as-mode="set"
-     same-as-pattern="`\.?(?P<value>[^`]+)`"> -->
+     same-as-pattern="`(?:\*\.)?(?P<value>[^`]+)`"> -->
 
-| Language         | Names                                                                                                                                           |
-|------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
-| Bash and Zsh     | `.bash`, `.bash_profile`, `.bashrc`, `.envrc`, `.sh`, `.zsh`, `.zshrc`                                                                          |
-| C                | `.c`                                                                                                                                            |
-| C#               | `.cs`                                                                                                                                           |
-| C++              | `.cc`, `.cpp`, `.cxx`, `.h`, `.hh`, `.hpp`, `.hxx`                                                                                              |
-| CMake            | `CMakeLists.txt`, `.cmake`                                                                                                                      |
-| CSS              | `.css`                                                                                                                                          |
-| Dart             | `.dart`                                                                                                                                         |
-| Dockerfile       | `Containerfile`, `Dockerfile`, `.containerfile`, `.dockerfile`                                                                                  |
-| Elixir           | `.ex`, `.exs`                                                                                                                                   |
-| Go               | `go.mod`, `go.sum`, `go.work`, `.go`                                                                                                            |
-| GraphQL          | `.gql`, `.graphql`, `.graphqls`                                                                                                                 |
-| Groovy           | `Jenkinsfile`, `.gradle`, `.groovy`, `.jenkinsfile`                                                                                             |
-| HCL              | `.hcl`, `.nomad`, `.tf`, `.tfvars`, `.tofu`                                                                                                     |
-| HTML             | `.htm`, `.html`, `.xhtml`                                                                                                                       |
-| Java             | `.java`                                                                                                                                         |
-| JavaScript       | `.cjs`, `.js`, `.jsx`, `.mjs`                                                                                                                   |
-| JSON             | `.json`, `.jsonc`, `.webmanifest`                                                                                                               |
-| Kotlin           | `.kt`, `.kts`                                                                                                                                   |
-| Lean             | `.lean`                                                                                                                                         |
-| Lua              | `.lua`, `.rockspec`                                                                                                                             |
-| Makefile         | `GNUmakefile`, `Makefile`, `.mak`, `.makefile`, `.mk`                                                                                           |
-| Markdown         | `.markdown`, `.md`                                                                                                                              |
-| MDX              | `.mdx`                                                                                                                                          |
-| Nix              | `.nix`                                                                                                                                          |
-| OCaml            | `.ml`, `.mli`                                                                                                                                   |
-| PHP              | `.php`, `.phtml`                                                                                                                                |
-| Protocol Buffers | `.proto`                                                                                                                                        |
-| Python           | `.py`, `.pyi`, `.pyw`                                                                                                                           |
-| Ruby             | `Brewfile`, `Fastfile`, `Gemfile`, `Podfile`, `Rakefile`, `Vagrantfile`, `.builder`, `.gemspec`, `.jbuilder`, `.podspec`, `.rake`, `.rb`, `.ru` |
-| Rust             | `.rs`                                                                                                                                           |
-| Scala            | `.sbt`, `.scala`                                                                                                                                |
-| SQL              | `.sql`                                                                                                                                          |
-| Starlark         | `BUCK`, `BUILD`, `Tiltfile`, `WORKSPACE`, `.bazel`, `.bzl`, `.bzlmod`, `.star`                                                                  |
-| Swift            | `.swift`                                                                                                                                        |
-| TOML             | `Pipfile`, `.toml`                                                                                                                              |
-| TypeScript       | `.cts`, `.d.ts`, `.mts`, `.ts`, `.tsx`                                                                                                          |
-| XML              | `.csproj`, `.fsproj`, `.props`, `.targets`, `.vbproj`, `.vcxproj`, `.xaml`, `.xml`, `.xsd`, `.xsl`, `.xslt`                                     |
-| YAML             | `.cff`, `.yaml`, `.yml`                                                                                                                         |
+| Language | Names |
+| -------- | ----- |
+| Bash | `.bash_aliases`, `.bash_functions`, `.bash_logout`, `.flaskenv`, `.kshrc`, `.profile`, `.xinitrc`, `.xsession`, `PKGBUILD`, `gradlew`, `mvnw`, `*.bash`, `*.bash_profile`, `*.bashrc`, `*.bats`, `*.envrc`, `*.ksh`, `*.pacscript`, `*.sbatch`, `*.sh`, `*.slurm` |
+| C | `*.c`, `*.cats`, `*.idc` |
+| C# | `*.cs`, `*.cs.pp`, `*.csx`, `*.linq` |
+| C++ | `*.c++`, `*.cc`, `*.cpp`, `*.cppm`, `*.cxx`, `*.h`, `*.h++`, `*.hh`, `*.hpp`, `*.hxx`, `*.inl`, `*.ino`, `*.ipp`, `*.ixx`, `*.tcc`, `*.tpp`, `*.txx` |
+| CMake | `CMakeLists.txt`, `*.cmake` |
+| CSS | `*.css` |
+| Dart | `*.dart` |
+| Dockerfile | `Containerfile`, `Dockerfile`, `*.containerfile`, `*.dockerfile` |
+| Elixir | `mix.lock`, `*.ex`, `*.exs` |
+| Go | `*.go` |
+| Go modules | `go.mod`, `go.sum`, `go.work`, `go.work.sum` |
+| GraphQL | `*.gql`, `*.graphql`, `*.graphqls` |
+| Groovy | `Jenkinsfile`, `*.gradle`, `*.groovy`, `*.grt`, `*.gtpl`, `*.gvy`, `*.jenkinsfile` |
+| HCL | `*.hcl`, `*.nomad`, `*.tf`, `*.tfvars`, `*.tofu` |
+| HTML | `*.hta`, `*.htm`, `*.html`, `*.html.hl`, `*.xht`, `*.xhtml` |
+| Java | `*.jav`, `*.java`, `*.jsh` |
+| JavaScript | `Jakefile`, `*._js`, `*.bones`, `*.cjs`, `*.es6`, `*.jake`, `*.javascript`, `*.js`, `*.jsb`, `*.jscad`, `*.jsfl`, `*.jslib`, `*.jsm`, `*.jspre`, `*.jss`, `*.jsx`, `*.mjs`, `*.njs`, `*.pac`, `*.sjs`, `*.ssjs`, `*.xsjs`, `*.xsjslib` |
+| JSON | `.all-contributorsrc`, `.arcconfig`, `.auto-changelog`, `.autorc`, `.babelrc`, `.c8rc`, `.htmlhintrc`, `.imgbotconfig`, `.jscsrc`, `.jshintrc`, `.jslintrc`, `.nycrc`, `.secrets.baseline`, `.swcrc`, `.tern-config`, `.tern-project`, `.watchmanconfig`, `MODULE.bazel.lock`, `Package.resolved`, `Pipfile.lock`, `composer.lock`, `deno.lock`, `flake.lock`, `mcmod.info`, `*.4DForm`, `*.4DProject`, `*.avsc`, `*.code-snippets`, `*.code-workspace`, `*.hujson`, `*.json`, `*.JSON-tmLanguage`, `*.json5`, `*.jsonc`, `*.mcmeta`, `*.slnlaunch`, `*.sublime-build`, `*.sublime-color-scheme`, `*.sublime-commands`, `*.sublime-completions`, `*.sublime-keymap`, `*.sublime-macro`, `*.sublime-menu`, `*.sublime-mousemap`, `*.sublime-project`, `*.sublime-settings`, `*.sublime-theme`, `*.sublime-workspace`, `*.sublime_metrics`, `*.sublime_session`, `*.webapp`, `*.webmanifest`, `*.yyp` |
+| Kotlin | `*.kt`, `*.ktm`, `*.kts` |
+| Lean | `*.hlean`, `*.lean` |
+| Lua | `.luacheckrc`, `*.lua`, `*.nse`, `*.p8`, `*.pd_lua`, `*.rbxs`, `*.rockspec`, `*.wlua` |
+| Makefile | `BSDmakefile`, `GNUmakefile`, `Kbuild`, `Makefile`, `mkfile`, `*.mak`, `*.makefile`, `*.mk` |
+| Markdown | `contents.lr`, `*.livemd`, `*.markdown`, `*.md`, `*.mdown`, `*.mdwn`, `*.mkd`, `*.mkdn`, `*.mkdown`, `*.ronn` |
+| MDX | `*.mdx` |
+| Nix | `*.nix` |
+| OCaml | `*.eliom`, `*.eliomi`, `*.ml`, `*.ml4`, `*.mli` |
+| PHP | `.php_cs`, `.php_cs.dist`, `Phakefile`, `*.aw`, `*.ctp`, `*.php`, `*.php3`, `*.php4`, `*.php5`, `*.phps`, `*.phpt`, `*.phtml` |
+| Protocol Buffers | `*.proto` |
+| Python | `.gclient`, `DEPS`, `SConscript`, `SConstruct`, `wscript`, `*.gyp`, `*.gypi`, `*.lmi`, `*.py`, `*.py3`, `*.pyde`, `*.pyi`, `*.pyp`, `*.pyt`, `*.pyw`, `*.tac`, `*.vpy`, `*.wsgi`, `*.xpy` |
+| Ruby | `.irbrc`, `.pryrc`, `.simplecov`, `Appraisals`, `Berksfile`, `Brewfile`, `Buildfile`, `Capfile`, `Dangerfile`, `Deliverfile`, `Fastfile`, `Gemfile`, `Guardfile`, `Jarfile`, `Mavenfile`, `Podfile`, `Puppetfile`, `Rakefile`, `Snapfile`, `Steepfile`, `Thorfile`, `Vagrantfile`, `buildfile`, `*.builder`, `*.eye`, `*.gemspec`, `*.god`, `*.jbuilder`, `*.mspec`, `*.podspec`, `*.prawn`, `*.rabl`, `*.rake`, `*.rb`, `*.rbi`, `*.rbuild`, `*.rbw`, `*.rbx`, `*.ru`, `*.ruby`, `*.thor`, `*.watchr` |
+| Rust | `*.rs` |
+| Scala | `*.kojo`, `*.sbt`, `*.scala` |
+| SQL | `*.mysql`, `*.sql`, `*.udf`, `*.viw` |
+| Starlark | `BUCK`, `BUILD`, `Tiltfile`, `WORKSPACE`, `*.bazel`, `*.bzl`, `*.bzlmod`, `*.star` |
+| Swift | `*.swift` |
+| TOML | `Cargo.lock`, `Cargo.toml.orig`, `Gopkg.lock`, `Pipfile`, `mise.local.lock`, `mise.lock`, `pdm.lock`, `poetry.lock`, `uv.lock`, `*.toml` |
+| TypeScript | `*.cts`, `*.d.ts`, `*.mts`, `*.ts`, `*.tsx` |
+| XML | `.classpath`, `.project`, `App.config`, `NuGet.config`, `Settings.StyleCop`, `Web.Debug.config`, `Web.Release.config`, `Web.config`, `packages.config`, `*.adml`, `*.admx`, `*.axaml`, `*.axml`, `*.ccproj`, `*.ccxml`, `*.clixml`, `*.cproject`, `*.cscfg`, `*.csdef`, `*.csproj`, `*.ct`, `*.depproj`, `*.dita`, `*.ditamap`, `*.ditaval`, `*.dll.config`, `*.dotsettings`, `*.fsproj`, `*.fxml`, `*.glade`, `*.gmx`, `*.grxml`, `*.hzp`, `*.icls`, `*.iml`, `*.ivy`, `*.jelly`, `*.jsproj`, `*.mdpolicy`, `*.meta4`, `*.mjml`, `*.mxml`, `*.natvis`, `*.ndproj`, `*.nproj`, `*.nuspec`, `*.odd`, `*.pkgproj`, `*.props`, `*.ps1xml`, `*.psc1`, `*.pubxml`, `*.qhelp`, `*.rbxmx`, `*.rdf`, `*.resx`, `*.rss`, `*.scxml`, `*.sfproj`, `*.shproj`, `*.slnx`, `*.srdf`, `*.storyboard`, `*.stTheme`, `*.sublime-snippet`, `*.targets`, `*.tmCommand`, `*.tml`, `*.tmLanguage`, `*.tmPreferences`, `*.tmSnippet`, `*.tmTheme`, `*.urdf`, `*.ux`, `*.vbproj`, `*.vcxproj`, `*.vsixmanifest`, `*.vssettings`, `*.vstemplate`, `*.vxml`, `*.wixproj`, `*.wsdl`, `*.wsf`, `*.wxi`, `*.wxl`, `*.wxs`, `*.x3d`, `*.xacro`, `*.xaml`, `*.xib`, `*.xlf`, `*.xliff`, `*.xmi`, `*.xml`, `*.xproj`, `*.xsd`, `*.xsl`, `*.xslt`, `*.xspec`, `*.xul`, `*.zcml` |
+| YAML | `.clang-format`, `.clang-tidy`, `.clangd`, `.gemrc`, `glide.lock`, `pixi.lock`, `*.cff`, `*.mir`, `*.reek`, `*.rviz`, `*.sublime-syntax`, `*.yaml`, `*.yaml-tmlanguage`, `*.yml` |
+| Zsh | `.zlogin`, `.zlogout`, `.zprofile`, `.zshenv`, `*.zsh`, `*.zsh-theme`, `*.zshrc` |
 
 <!-- </block> -->
 
@@ -265,18 +268,18 @@ These are the endings and names that have a language:
 Use `-E` to give an extension or a whole file name the language of a supported one:
 
 ```shell
-blockwatch -E ino=cpp -E cu=cpp
+blockwatch -E cu=cpp -E cuh=cpp
 ```
 
 The `extensions` table of the [config file](#config-file) holds the mappings a project always needs.
 
-A key can be an extension, an ending with dots, such as `y.rs`, or a whole file name, such as `Buildfile`. A mapping
+A key can be an extension, an ending with dots, such as `y.rs`, or a whole file name, such as `Earthfile`. A mapping
 takes part in rules 1 and 2, and wins over the language its key has without it. The longest ending still wins:
 
 - A mapped extension doesn't reach a longer name in the table. With `-E txt=md`, `notes.txt` is Markdown, but
   `CMakeLists.txt` stays CMake. To change it too, map the whole name: `-E CMakeLists.txt=md`.
-- A mapping of a name doesn't reach its variants. With `-E Buildfile=Dockerfile`, `Buildfile` is a Dockerfile but
-  `Buildfile.ci` is skipped. Map the variant's whole name too: `-E Buildfile.ci=Dockerfile`.
+- A mapping of a name doesn't reach its variants. With `-E Earthfile=Dockerfile`, `Earthfile` is a Dockerfile but
+  `Earthfile.ci` is skipped. Map the variant's whole name too: `-E Earthfile.ci=Dockerfile`.
 
 ## Enabling and Disabling Validators
 
@@ -342,8 +345,8 @@ ignore = ['**/generated/**', 'tests/testdata/**']
 disable = ['check-ai']
 
 [extensions]
-ino = 'cpp'
-avsc = 'json'
+cu = 'cpp'
+sarif = 'json'
 ```
 
 - The file is read from the repository root, whichever directory you run from.

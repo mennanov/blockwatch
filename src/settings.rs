@@ -143,8 +143,8 @@ impl Settings {
         &self.ignored_globs
     }
 
-    /// Maps an extension or a whole file name to a language. For example, `ino` to
-    /// `Language::Cpp` makes `.ino` files parse as C++.
+    /// Maps an extension or a whole file name to a language. For example, `cu` to
+    /// `Language::Cpp` makes `.cu` files parse as C++.
     pub(crate) fn extensions(&self) -> &HashMap<OsString, Language> {
         &self.extensions
     }

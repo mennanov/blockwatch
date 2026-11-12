@@ -21,42 +21,46 @@ declares, instead of tags in a comment.
 
 ## Files with symbols
 
-<!-- <block name="extensions-with-symbols" same-as="src/language_parsers/mod.rs:extensions-with-symbols"
-     same-as-pattern="`\.?(?P<value>[A-Za-z._]+)`"> -->
+<!-- <block name="languages-with-symbols" same-as="src/language_parsers/mod.rs:languages-with-symbols"
+     same-as-pattern="^\| (?P<value>[^|]+?) +\|.*\]\(#"> -->
 
-| Language         | Files                                                                                                       | Paths                                                   |
-|------------------|-------------------------------------------------------------------------------------------------------------|---------------------------------------------------------|
-| JSON             | `.json`, `.jsonc`, `.webmanifest`                                                                           | [JSON](#json)                                           |
-| TOML             | `.toml`, `Pipfile`                                                                                          | [TOML](#toml)                                           |
-| YAML             | `.yaml`, `.yml`, `.cff`                                                                                     | [YAML](#yaml)                                           |
-| Markdown         | `.md`, `.markdown`, `.mdx`                                                                                  | [Markdown](#markdown)                                   |
-| XML              | `.xml`, `.csproj`, `.fsproj`, `.vbproj`, `.vcxproj`, `.props`, `.targets`, `.xaml`, `.xsd`, `.xsl`, `.xslt` | [XML](#xml)                                             |
-| CSS              | `.css`                                                                                                      | [CSS](#css)                                             |
-| Go               | `.go`                                                                                                       | [Go](#go)                                               |
-| C, C++           | `.c`, `.h`, `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx`                                                    | [C and C++](#c-and-c)                                   |
-| Python           | `.py`, `.pyi`, `.pyw`                                                                                       | [Python and Starlark](#python-and-starlark)             |
-| Starlark         | `.bzl`, `.bazel`, `.bzlmod`, `.star`, `BUILD`, `BUCK`, `WORKSPACE`, `Tiltfile`                              | [Python and Starlark](#python-and-starlark)             |
-| Rust             | `.rs`                                                                                                       | [Rust](#rust)                                           |
-| TypeScript       | `.ts`, `.mts`, `.cts`, `.d.ts`, `.tsx`                                                                      | [TypeScript and JavaScript](#typescript-and-javascript) |
-| JavaScript       | `.js`, `.mjs`, `.cjs`, `.jsx`                                                                               | [TypeScript and JavaScript](#typescript-and-javascript) |
-| Java             | `.java`                                                                                                     | [Java](#java)                                           |
-| C#               | `.cs`                                                                                                       | [C#](#c)                                                |
-| Kotlin           | `.kt`, `.kts`                                                                                               | [Kotlin](#kotlin)                                       |
-| Swift            | `.swift`                                                                                                    | [Swift](#swift)                                         |
-| Protocol Buffers | `.proto`                                                                                                    | [Protocol Buffers](#protocol-buffers)                   |
-| HCL (Terraform)  | `.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`                                                                 | [HCL](#hcl)                                             |
-| PHP              | `.php`, `.phtml`                                                                                            | [PHP](#php)                                             |
-| Shell            | `.sh`, `.bash`, `.bashrc`, `.bash_profile`, `.envrc`                                                        | [Shell](#shell)                                         |
-| Makefile         | `Makefile`, `GNUmakefile`, `makefile`, `.mk`, `.mak`                                                        | [Makefile](#makefile)                                   |
-| Dart             | `.dart`                                                                                                     | [Dart](#dart)                                           |
-| Dockerfile       | `Dockerfile`, `Containerfile`, `.dockerfile`, `.containerfile`                                              | [Dockerfile](#dockerfile)                               |
+| Language         | Files, for example                                                     | Paths                                                   |
+|------------------|------------------------------------------------------------------------|---------------------------------------------------------|
+| JSON             | `*.json`, `*.jsonc`, `*.json5`, `*.webmanifest`, `.babelrc`            | [JSON](#json)                                           |
+| TOML             | `*.toml`, `Pipfile`, `Cargo.lock`                                      | [TOML](#toml)                                           |
+| YAML             | `*.yaml`, `*.yml`, `*.cff`                                             | [YAML](#yaml)                                           |
+| Markdown         | `*.md`, `*.markdown`                                                   | [Markdown](#markdown)                                   |
+| MDX              | `*.mdx`                                                                | [Markdown](#markdown)                                   |
+| XML              | `*.xml`, `*.csproj`, `*.props`, `*.xaml`, `*.xsd`, `*.xslt`            | [XML](#xml)                                             |
+| CSS              | `*.css`                                                                | [CSS](#css)                                             |
+| Go               | `*.go`                                                                 | [Go](#go)                                               |
+| C                | `*.c`                                                                  | [C and C++](#c-and-c)                                   |
+| C++              | `*.cpp`, `*.cc`, `*.h`, `*.hpp`, `*.ino`                               | [C and C++](#c-and-c)                                   |
+| Python           | `*.py`, `*.pyi`, `*.pyw`                                               | [Python and Starlark](#python-and-starlark)             |
+| Starlark         | `*.bzl`, `*.bazel`, `*.star`, `BUILD`, `BUCK`, `WORKSPACE`, `Tiltfile` | [Python and Starlark](#python-and-starlark)             |
+| Rust             | `*.rs`                                                                 | [Rust](#rust)                                           |
+| TypeScript       | `*.ts`, `*.mts`, `*.cts`, `*.d.ts`, `*.tsx`                            | [TypeScript and JavaScript](#typescript-and-javascript) |
+| JavaScript       | `*.js`, `*.mjs`, `*.cjs`, `*.jsx`                                      | [TypeScript and JavaScript](#typescript-and-javascript) |
+| Java             | `*.java`                                                               | [Java](#java)                                           |
+| C#               | `*.cs`                                                                 | [C#](#c)                                                |
+| Kotlin           | `*.kt`, `*.kts`                                                        | [Kotlin](#kotlin)                                       |
+| Swift            | `*.swift`                                                              | [Swift](#swift)                                         |
+| Protocol Buffers | `*.proto`                                                              | [Protocol Buffers](#protocol-buffers)                   |
+| HCL              | `*.tf` (Terraform), `*.tofu`, `*.tfvars`, `*.hcl`, `*.nomad`           | [HCL](#hcl)                                             |
+| PHP              | `*.php`, `*.phtml`                                                     | [PHP](#php)                                             |
+| Bash             | `*.sh`, `*.bash`, `*.bashrc`, `*.envrc`                                | [Shell](#shell)                                         |
+| Makefile         | `Makefile`, `GNUmakefile`, `*.makefile`, `*.mk`, `*.mak`               | [Makefile](#makefile)                                   |
+| Dart             | `*.dart`                                                               | [Dart](#dart)                                           |
+| Dockerfile       | `Dockerfile`, `Containerfile`, `*.dockerfile`                          | [Dockerfile](#dockerfile)                               |
 
 <!-- </block> -->
+
+Every other name in the same row of the table in [Language detection](cli.md#language-detection) has symbols too.
 
 Other files have no symbols yet. blockwatch still reads their blocks: see
 [Language detection](cli.md#language-detection). A path into one of them stops the run.
 
-A file you map to a language with `-E` gets that language's symbols. With `-E avsc=json`, `user.avsc#/name` works.
+A file you map to a language with `-E` gets that language's symbols. With `-E sarif=json`, `report.sarif#/version` works.
 
 A variant or a copy of a file in the table has the same symbols, such as `Makefile.am#/CFLAGS`,
 `Dockerfile-dev#/GO_VERSION` or `config.toml.example#/server/port`. [Language detection](cli.md#language-detection)
@@ -153,6 +157,9 @@ Every key and every array item is a symbol:
 - **A file can be an array.** Then `#/0` is its first item.
 - **A comment is not an array item.** It does not shift the positions of the items after it.
 - **Comments are allowed** in `.json` and `.jsonc` alike. A trailing comma is an error in both, so it stops the run.
+- **Some JSON files allow more than JSON**, such as trailing commas in `*.code-workspace`, `*.sublime-settings` and
+  `*.hujson`, or JSON5 syntax, such as unquoted keys, in `*.json5` and `.babelrc`. Blocks in them work. A path into
+  one stops the run once the file uses that syntax.
 - **A key written twice is a violation**, because blockwatch can't tell which copy you mean. The message shows where
   each copy is: `ambiguous symbol, defined at 2:3, 5:3`.
 

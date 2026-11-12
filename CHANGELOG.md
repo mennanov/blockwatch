@@ -25,6 +25,13 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - Read a copy of a file in the language of the file it copies. A copy ends in `.example`, `.sample`, `.dist`,
   `.template` or `.in`: `config.toml.example` is TOML, and `config.h.in` is C++. Template languages such as `.j2`
   are not stripped.
+- Recognize 305 more extensions and file names of the languages blockwatch reads, such as `.babelrc`, `.json5`,
+  `Cargo.lock`, `Jakefile`, `.cppm`, `.ino` and `.zshenv`. The list comes from
+  [GitHub Linguist](https://github.com/github-linguist/linguist). A name that Linguist gives to several languages,
+  such as `.inc` or `.spec`, is still skipped. See [Language detection](docs/cli.md#language-detection).
+
+  A new name of a language with symbols has them too: `.babelrc#/presets` works. A path into a JSON file stops the run
+  once the file uses more than JSON, such as trailing commas in `.code-workspace` or JSON5 syntax in `.json5`.
 
 Files that these names match were skipped before, and are now checked. To skip them, add them to `ignore` in the
 config file, or pass `--ignore`.
@@ -32,8 +39,8 @@ config file, or pass `--ignore`.
 ### Changed
 
 - An extension mapping no longer applies to the variants of a name, such as `Dockerfile.ci` or `Containerfile.prod`:
-  - With `-E Buildfile=Dockerfile`, `Buildfile` is still a Dockerfile, but `Buildfile.ci` is not. Map the whole name
-    instead: `-E Buildfile.ci=Dockerfile`.
+  - With `-E Earthfile=Dockerfile`, `Earthfile` is still a Dockerfile, but `Earthfile.ci` is not. Map the whole name
+    instead: `-E Earthfile.ci=Dockerfile`.
   - With `-E Dockerfile=sh`, `Dockerfile` is still read as a shell script, but `Dockerfile.ci` is now read as a
     Dockerfile. Before, it was skipped.
 - The longest ending of a file name now picks its language, mapped or not, and the whole name is the longest. Before,
