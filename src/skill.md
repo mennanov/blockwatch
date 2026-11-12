@@ -164,7 +164,18 @@ JavaScript (`.js`, `.mjs`, `.cjs`, `.jsx`), Java (`.java`), C# (`.cs`), Kotlin (
 Protocol Buffers (`.proto`), HCL (`.tf`, `.tofu`, `.tfvars`, `.hcl`, `.nomad`), PHP (`.php`, `.phtml`), shell (`.sh`,
 `.bash`, `.bashrc`, `.bash_profile`, `.envrc`), Makefile (`Makefile`, `GNUmakefile`, `makefile`, `.mk`, `.mak`), Dart
 (`.dart`), and Dockerfile (`Dockerfile`, `Containerfile`, `.dockerfile`, `.containerfile`). A path into any other file
-fails the run.
+fails the run, except a variant or a copy of one of these files.
+
+### Variants and copies
+
+A variant or a copy of a file with symbols has the same symbols:
+
+- A variant is a Dockerfile, Containerfile or Makefile name, such as `Dockerfile` or `makefile`, followed by `.`, `-`
+  or `_`, such as `Dockerfile.ci`, `Dockerfile-dev` or `Makefile.am`. `Makefile.am#/CFLAGS` works. After `-` or `_`,
+  no `.` may follow. `Dockerfile.dockerignore`, `Makefile.PL`, `Makefile.SH`, `Makefile.bat` and `Makefile.cmd` are
+  not variants.
+- A copy ends in `.example`, `.sample`, `.dist`, `.template` or `.in`, and has the symbols of the rest of its name.
+  `config.toml.example#/server/port` works like `config.toml#/server/port`.
 
 ### Writing a path
 

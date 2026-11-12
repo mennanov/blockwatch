@@ -54,9 +54,13 @@ declares, instead of tags in a comment.
 <!-- </block> -->
 
 Other files have no symbols yet. blockwatch still reads their blocks: see
-[Supported Languages](../README.md#supported-languages). A path into one of them stops the run.
+[Language detection](cli.md#language-detection). A path into one of them stops the run.
 
 A file you map to a language with `-E` gets that language's symbols. With `-E avsc=json`, `user.avsc#/name` works.
+
+A variant or a copy of a file in the table has the same symbols, such as `Makefile.am#/CFLAGS`,
+`Dockerfile-dev#/GO_VERSION` or `config.toml.example#/server/port`. [Language detection](cli.md#language-detection)
+says which names are variants and copies.
 
 ## Writing a path
 

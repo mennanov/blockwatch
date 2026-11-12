@@ -9,7 +9,7 @@ use std::sync::LazyLock;
 ///
 /// Two names that need different parsers are two variants, even when people call them one
 /// language: `Bash` and `Zsh`, `TypeScript` and `Tsx`, `Go` and `GoModule`.
-// <block name="languages" affects="src/blocks.rs:supported-extensions">
+// <block name="languages" affects="src/blocks.rs:supported-extensions, README.md:supported-grammar">
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Language {
     Bash,
@@ -74,8 +74,8 @@ pub(crate) const NAMES: &[(&str, Language)] = {
     use Language::*;
     &[
         /* <block name="language-names"
-        affects="README.md:supported-grammar, src/language_resolver.rs:language-name-rows"
-        keep-sorted keep-unique='\("(?P<value>[^"]+)"'> */
+        affects="src/language_resolver.rs:language-name-rows"
+        keep-sorted keep-unique='\("(?P<value>[^"]+)"' same-as-pattern='\("(?P<value>[^"]+)"'> */
         ("BUCK", Starlark),
         ("BUILD", Starlark),
         ("Brewfile", Ruby),
@@ -202,6 +202,8 @@ pub(crate) const NAMES: &[(&str, Language)] = {
     ]
 };
 
+/* <block name="detection-code"
+affects="docs/cli.md:detection-rules, src/skill.md#/blockwatch/Symbols/Variants and copies"> */
 /// The suffixes that mark a copy of another file in the same language, such as
 /// `config.toml.example`. `.in` is the input that autoconf or CMake turns into the file.
 const COPY_SUFFIXES: &[&str] = &[".dist", ".example", ".in", ".sample", ".template"];
@@ -322,6 +324,7 @@ fn variant<'f>(file_name: &'f str, name: &str) -> Option<&'f str> {
         Some(variant)
     }
 }
+// </block>
 
 #[cfg(test)]
 mod tests {

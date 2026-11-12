@@ -18,7 +18,8 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
   validators read, as JSON. See [The `explain` Command](#the-explain-command).
 - **Print the Agent Skill**: `blockwatch skill` prints the [skill for AI agents](#the-skill-command), as a `SKILL.md`
 - **Config File**: `blockwatch --config FILE` reads the project's settings from FILE instead of `blockwatch.toml`
-- **Custom Extensions**: Map custom file extensions: `blockwatch -E ino=cpp` (config key: `extensions`)
+- **Custom Extensions**: Map an extension or a whole file name to a supported one: `blockwatch -E ino=cpp` (config
+  key: `extensions`)
 - **Disable Validators**: `blockwatch -d check-ai` (config key: `disable`)
 - **Run Only Some Validators**: `blockwatch -e keep-sorted` runs only `keep-sorted` (config key: `enable`)
 - **Check Only Some Blocks**: `blockwatch --only-block FILE:BLOCK_NAME` checks only that block (config key:
@@ -72,9 +73,9 @@ Paths and globs start from the repository root, whichever directory you run from
 not `main.rs`. An absolute path works too.
 
 An argument that selects no file to check fails the run. A file is not checked if `.gitignore`, `--ignore` or the
-`ignore` key in the config file leaves it out, or if its extension is not supported and the config file has no
-[`[[block]]` entry](#blocks-in-the-config-file) for it. With `--only-changed`, an argument only has to select a file in
-the repository, not a changed one.
+`ignore` key in the config file leaves it out, or if its name has no [language](#language-detection) and the config
+file has no [`[[block]]` entry](#blocks-in-the-config-file) for it. With `--only-changed`, an argument only has to
+select a file in the repository, not a changed one.
 
 Exclusions that hold for the whole project belong in the `ignore` key of the [config file](#config-file).
 
@@ -164,8 +165,8 @@ rather than stripped. An added file is the exception: its source is `/dev/null`,
 readings are checked against the working tree and a target where both name a real file is reported as ambiguous.
 
 A diff with a file that does not exist in the repository is an error too — but only for files blockwatch would parse.
-Entries whose extension maps to no language, such as binary assets or lockfiles, contribute no blocks and are passed
-over, so a diff carrying them alongside source changes still validates normally.
+Entries whose name has no [language](#language-detection), such as images, contribute no blocks and are passed over,
+so a diff carrying them alongside source changes still validates normally.
 
 <!-- </block> -->
 
@@ -187,17 +188,95 @@ git diff --patch --default-prefix --no-relative | blockwatch --diff
 `--default-prefix` requires Git 2.41 or newer. On older versions, use
 `git -c diff.mnemonicPrefix=false -c diff.noprefix=false diff --patch`.
 
-## Custom File Extension Mappings
+## Language detection
 
-Language detection relies on file extensions. Use `-E` to map unrecognized or custom extensions to a supported grammar:
+blockwatch picks a file's language by its name, never by its content. The first of these rules that matches wins:
+
+<!-- <block name="detection-rules"> -->
+
+1. **An ending.** The extension picks the language: `main.rs` is Rust. The whole name and each part after a `.`
+   are endings, and the longest one with a language wins, because it is the most exact: `CMakeLists.txt` is CMake,
+   and `index.d.ts` is TypeScript. A shorter ending counts when no longer one has a language: `Dockerfile.ci.yml` is
+   YAML. An extension in the middle doesn't count: `a.rs.unknown` has no language.
+2. **A copy.** A name that ends in `.example`, `.sample`, `.dist`, `.template` or `.in` is a copy of another file,
+   and is read by the rest of its name: `config.toml.example` is TOML, and `config.h.in` is C++. Template languages,
+   such as `.j2` and `.tmpl`, are not stripped.
+3. **A variant.** `Dockerfile`, `dockerfile`, `Containerfile`, `containerfile`, `Jenkinsfile`, `jenkinsfile`,
+   `Makefile`, `makefile` and `GNUmakefile` can be followed by `.`, `-` or `_` and more: `Dockerfile.ci`,
+   `Dockerfile-dev` and `Makefile.am` keep the name's language. After `-` or `_`, no `.` may follow, so
+   `Dockerfile-logo.png` is not a Dockerfile. Some variants are other kinds of files and are skipped:
+   - a Dockerfile variant with the part `dockerignore`, such as `Dockerfile.dockerignore`;
+   - a Makefile variant with the part `PL`, `SH`, `bat` or `cmd`, such as `Makefile.PL`.
+
+Matching is case-sensitive, and the directories don't count. A file that matches no rule is skipped.
+
+<!-- </block> -->
+
+These are the endings and names that have a language:
+
+<!-- <block name="language-table" same-as="src/language_resolver.rs:language-names" same-as-mode="set"
+     same-as-pattern="`\.?(?P<value>[^`]+)`"> -->
+
+| Language         | Names                                                                                                                                           |
+|------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| Bash and Zsh     | `.bash`, `.bash_profile`, `.bashrc`, `.envrc`, `.sh`, `.zsh`, `.zshrc`                                                                          |
+| C                | `.c`                                                                                                                                            |
+| C#               | `.cs`                                                                                                                                           |
+| C++              | `.cc`, `.cpp`, `.cxx`, `.h`, `.hh`, `.hpp`, `.hxx`                                                                                              |
+| CMake            | `CMakeLists.txt`, `.cmake`                                                                                                                      |
+| CSS              | `.css`                                                                                                                                          |
+| Dart             | `.dart`                                                                                                                                         |
+| Dockerfile       | `Containerfile`, `Dockerfile`, `.containerfile`, `.dockerfile`                                                                                  |
+| Elixir           | `.ex`, `.exs`                                                                                                                                   |
+| Go               | `go.mod`, `go.sum`, `go.work`, `.go`                                                                                                            |
+| GraphQL          | `.gql`, `.graphql`, `.graphqls`                                                                                                                 |
+| Groovy           | `Jenkinsfile`, `.gradle`, `.groovy`, `.jenkinsfile`                                                                                             |
+| HCL              | `.hcl`, `.nomad`, `.tf`, `.tfvars`, `.tofu`                                                                                                     |
+| HTML             | `.htm`, `.html`, `.xhtml`                                                                                                                       |
+| Java             | `.java`                                                                                                                                         |
+| JavaScript       | `.cjs`, `.js`, `.jsx`, `.mjs`                                                                                                                   |
+| JSON             | `.json`, `.jsonc`, `.webmanifest`                                                                                                               |
+| Kotlin           | `.kt`, `.kts`                                                                                                                                   |
+| Lean             | `.lean`                                                                                                                                         |
+| Lua              | `.lua`, `.rockspec`                                                                                                                             |
+| Makefile         | `GNUmakefile`, `Makefile`, `.mak`, `.makefile`, `.mk`                                                                                           |
+| Markdown         | `.markdown`, `.md`                                                                                                                              |
+| MDX              | `.mdx`                                                                                                                                          |
+| Nix              | `.nix`                                                                                                                                          |
+| OCaml            | `.ml`, `.mli`                                                                                                                                   |
+| PHP              | `.php`, `.phtml`                                                                                                                                |
+| Protocol Buffers | `.proto`                                                                                                                                        |
+| Python           | `.py`, `.pyi`, `.pyw`                                                                                                                           |
+| Ruby             | `Brewfile`, `Fastfile`, `Gemfile`, `Podfile`, `Rakefile`, `Vagrantfile`, `.builder`, `.gemspec`, `.jbuilder`, `.podspec`, `.rake`, `.rb`, `.ru` |
+| Rust             | `.rs`                                                                                                                                           |
+| Scala            | `.sbt`, `.scala`                                                                                                                                |
+| SQL              | `.sql`                                                                                                                                          |
+| Starlark         | `BUCK`, `BUILD`, `Tiltfile`, `WORKSPACE`, `.bazel`, `.bzl`, `.bzlmod`, `.star`                                                                  |
+| Swift            | `.swift`                                                                                                                                        |
+| TOML             | `Pipfile`, `.toml`                                                                                                                              |
+| TypeScript       | `.cts`, `.d.ts`, `.mts`, `.ts`, `.tsx`                                                                                                          |
+| XML              | `.csproj`, `.fsproj`, `.props`, `.targets`, `.vbproj`, `.vcxproj`, `.xaml`, `.xml`, `.xsd`, `.xsl`, `.xslt`                                     |
+| YAML             | `.cff`, `.yaml`, `.yml`                                                                                                                         |
+
+<!-- </block> -->
+
+### Extension mappings
+
+Use `-E` to give an extension or a whole file name the language of a supported one:
 
 ```shell
 blockwatch -E ino=cpp -E cu=cpp
 ```
 
-Files with extensions that do not map to any supported grammar are ignored.
-
 The `extensions` table of the [config file](#config-file) holds the mappings a project always needs.
+
+A key can be an extension, an ending with dots, such as `y.rs`, or a whole file name, such as `Buildfile`. A mapping
+takes part in rules 1 and 2, and wins over the language its key has without it. The longest ending still wins:
+
+- A mapped extension doesn't reach a longer name in the table. With `-E txt=md`, `notes.txt` is Markdown, but
+  `CMakeLists.txt` stays CMake. To change it too, map the whole name: `-E CMakeLists.txt=md`.
+- A mapping of a name doesn't reach its variants. With `-E Buildfile=Dockerfile`, `Buildfile` is a Dockerfile but
+  `Buildfile.ci` is skipped. Map the variant's whole name too: `-E Buildfile.ci=Dockerfile`.
 
 ## Enabling and Disabling Validators
 

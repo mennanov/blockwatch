@@ -84,7 +84,7 @@ You can put project-wide settings (--ignore, -E, --enable, --disable, --only-blo
     # Narrow a diff-driven run further with glob patterns
     git diff --patch | blockwatch --diff --only-changed 'src/**/*.rs'
 
-    # Provide extra extension mappings (map unknown extensions to supported grammars)
+    # Map an extension or a whole file name to a supported one
     blockwatch -E ino=cpp -E cu=cpp
 
     # Disable specific validators
@@ -129,7 +129,7 @@ pub(crate) struct Args {
     #[arg(long = "only-changed", requires = "diff", global = true)]
     pub(crate) only_changed: bool,
 
-    /// Additional file extension mappings, e.g. -E ino=cpp -E cu=cpp
+    /// Map an extension or a whole file name to a supported one, e.g. -E ino=cpp -E Buildfile=dockerfile
     #[arg(
         short = 'E',
         long = "extension",

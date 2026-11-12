@@ -10,7 +10,7 @@ Some parts of a codebase have to change together: a function and its docs, or a 
 blockwatch lets you write those rules in comments, right next to the code, or in `blockwatch.toml`. If they fall out of
 sync, your pre-commit hook or CI run fails.
 
-Supports [37 languages](#supported-languages) and their common file names, such as `Gemfile` or `.mjs`.
+Supports [37 languages](#supported-languages).
 
 [//]: # (</block>)
 
@@ -268,53 +268,55 @@ For plain git hooks, local pre-commit setups, and sandboxing untrusted Lua scrip
 
 ## Supported Languages
 
+blockwatch reads blocks in these languages. [Language detection](docs/cli.md#language-detection) lists the file names
+of each, such as `Gemfile` for Ruby. It also says how variants such as `Dockerfile.ci` are read, and copies such as
+`config.toml.example`.
+
 <!-- <block name="supported-grammar" keep-sorted="asc" keep-sorted-pattern="^- (?P<value>.+)" affects=":pitch"
      check-lua="scripts/check_language_count.lua" check-lua-pattern="(?m)^- (?P<value>.+)"> -->
 
-- Bash (with `.zsh`, `.bashrc`, `.bash_profile`, `.zshrc` and `.envrc` support)
+- Bash (with Zsh)
 - C#
-- C/C++ (`.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hh`, `.hpp`, `.hxx`)
-- CMake (`CMakeLists.txt`, `.cmake`)
+- C/C++
+- CMake
 - CSS
 - Dart
-- Dockerfile (with `Containerfile` and `.dockerfile` support)
-- Elixir (`.ex`, `.exs`)
-- Go (with `go.mod`, `go.sum` and `go.work` support)
-- GraphQL (`.graphql`, `.graphqls`, `.gql`)
-- Groovy (with `.gradle` and `Jenkinsfile` support)
-- HCL (Terraform and OpenTofu: `.tf`, `.tfvars`, `.tofu`, `.hcl`; Nomad: `.nomad`)
-- HTML (with `.xhtml` support; comments inside `<script>` and `<style>` are not read)
-- JSON (`.json`, `.jsonc`, `.webmanifest`)
+- Dockerfile
+- Elixir
+- Go
+- GraphQL
+- Groovy
+- HCL (Terraform, OpenTofu and Nomad)
+- HTML (comments inside `<script>` and `<style>` are not read)
+- JSON
 - Java
-- JavaScript (with `.mjs` and `.cjs` support)
+- JavaScript
 - Kotlin
 - Lean
-- Lua (with `.rockspec` support)
+- Lua
 - MDX
-- Makefile (with `GNUmakefile` and `.mak` support)
+- Makefile
 - Markdown
 - Nix
-- OCaml (`.ml`, `.mli`)
+- OCaml
 - PHP (comments inside `<script>` and `<style>` are not read)
-- Protocol Buffers (`.proto`)
-- Python (with `.pyi` and `.pyw` support)
-- Ruby (with `Gemfile`, `Rakefile`, `Podfile`, `Brewfile`, `Fastfile`, `Vagrantfile`, `.gemspec`, `.podspec`, `.rake`,
-  `.ru`, `.builder` and `.jbuilder` support)
+- Protocol Buffers
+- Python
+- Ruby
 - Rust
 - SQL
-- Scala (with `.sbt` support)
-- Starlark (Bazel: `BUILD`, `WORKSPACE`, `MODULE.bazel`, `.bzl`, `.bzlmod`, `.star`; Buck: `BUCK`; Tilt: `Tiltfile`)
+- Scala
+- Starlark (Bazel, Buck and Tilt)
 - Swift
-- TOML (with `Pipfile` support)
-- TypeScript (with `.mts` and `.cts` support)
-- XML (with `.csproj`, `.fsproj`, `.vbproj`, `.vcxproj`, `.props`, `.targets`, `.xaml`, `.xsd`, `.xsl` and `.xslt`
-  support)
-- YAML (with `.cff` support)
+- TOML
+- TypeScript
+- XML
+- YAML
 
 <!-- </block> -->
 
-blockwatch only inspects files with the extensions listed above and skips everything else, such as `.ino` or `.cu`.
-To check those too, map them to a supported extension with `-E` or in the `extensions` table of `blockwatch.toml`:
+A file whose name has no language, such as `.ino` or `.cu`, is skipped. To check it too, map it to a supported
+extension with `-E` or in the `extensions` table of `blockwatch.toml`:
 
 ```shell
 blockwatch -E ino=cpp -E cu=cpp
