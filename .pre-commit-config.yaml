@@ -81,3 +81,4 @@ repos:
     rev: v1.32.0
     hooks:
       - id: zizmor
+        stages: [ pre-commit ]
