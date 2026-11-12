@@ -2,15 +2,14 @@ use crate::language_parsers;
 use crate::language_parsers::{CommentsParser, LanguageParser, LanguageParserImpl};
 
 /// Returns a [`LanguageParser`] for Nix.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?))
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser())
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let nix_language = tree_sitter_nix::LANGUAGE.into();
     // `//` is the attrset-merge operator in Nix, not a comment.
-    let parser = language_parsers::c_style_comments_parser(&nix_language, &["comment"], &["#"])?;
-    Ok(parser)
+    language_parsers::c_style_comments_parser(&nix_language, &["comment"], &["#"])
 }
 
 #[cfg(test)]
@@ -20,7 +19,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
             .parse(

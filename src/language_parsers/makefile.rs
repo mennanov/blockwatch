@@ -18,8 +18,8 @@ use makefile_lossless::{
 use std::ops::Range;
 
 /// Returns a [`LanguageParser`] for Makefile.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(MakefileCommentsParser).with_symbols(MakefileSymbolsParser))
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(MakefileCommentsParser).with_symbols(MakefileSymbolsParser)
 }
 
 /// Finds the comments in a Makefile, where makefile-lossless finds them.

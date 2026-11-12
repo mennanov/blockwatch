@@ -54,6 +54,9 @@ pub use cli::run;
 /// It is `pub` because a fuzz target is a separate crate, and a separate crate can only call `pub`
 /// functions.
 ///
+/// # Panics
+/// Panics if the tree-sitter crate can't load the Rust grammar, which is a build bug.
+///
 /// # Examples
 ///
 /// ```
@@ -62,12 +65,8 @@ pub use cli::run;
 /// # Ok::<(), anyhow::Error>(())
 /// ```
 pub fn count_rust_blocks(source: &str) -> anyhow::Result<usize> {
-    let parsers = language_parsers::language_parsers()?;
-    parsers
-        .parser(language_resolver::Language::Rust)
-        .lock()
-        .expect("a thread panicked while it held the parser")
-        .parse_blocks(source)
+    let mut parser = language_parsers::rust::parser();
+    language_parsers::LanguageParser::parse_blocks(&mut parser, source)
         .try_fold(0, |count, block| block.map(|_| count + 1))
 }
 
@@ -234,7 +233,7 @@ mod test_utils {
         )]));
         let line_changes_by_file =
             diff_changes([(RepoPath::from_reference(file_name).unwrap(), line_changes)]);
-        let parsers = language_parsers::language_parsers().unwrap();
+        let parsers = language_parsers::LanguageParsers::new();
         Arc::new(ValidationContext::new(
             Scan::new(&file_system, &PathFilter::allow_all(), &parsers, &[])
                 .parse_blocks(&line_changes_by_file, ScanMode::OnlyChanged)

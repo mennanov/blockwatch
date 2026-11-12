@@ -19,8 +19,8 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 /// Returns a [`LanguageParser`] for CSS.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(CssCommentsParser).with_symbols(CssSymbolsParser))
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(CssCommentsParser).with_symbols(CssSymbolsParser)
 }
 
 /// Finds the `/* */` comments in a CSS file, where cssparser finds them. A comment left open at

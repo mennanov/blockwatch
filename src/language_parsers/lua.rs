@@ -5,13 +5,13 @@ use crate::language_parsers::{
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Lua.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?))
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser())
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let lua_language = tree_sitter_lua::LANGUAGE.into();
-    let parser = TreeSitterCommentsParser::new(
+    TreeSitterCommentsParser::new(
         &lua_language,
         comment_visitor(|node, source_code| {
             if node.kind() != "comment" {
@@ -19,8 +19,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
             }
             Some(lua_comment_text(node, node_text(node, source_code)))
         }),
-    )?;
-    Ok(parser)
+    )
 }
 
 /// `comment`, the text of `node`, with its markers blanked, so it keeps its length: the `--` of a
@@ -47,7 +46,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
             .parse(

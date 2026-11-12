@@ -6,13 +6,11 @@ use std::str::Chars;
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for HCL (Terraform), with its symbols.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
-            &tree_sitter_hcl::LANGUAGE.into(),
-            Hcl,
-        )?),
-    )
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser()).with_symbols(CodeSymbolsParser::new(
+        &tree_sitter_hcl::LANGUAGE.into(),
+        Hcl,
+    ))
 }
 
 /// HCL, whose files hold attributes and blocks, and whose blocks hold their own attributes and
@@ -295,14 +293,13 @@ fn escaped(characters: &mut Chars) -> anyhow::Result<char> {
     })
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let hcl_language = tree_sitter_hcl::LANGUAGE.into();
-    let parser = language_parsers::c_style_comments_parser(
+    language_parsers::c_style_comments_parser(
         &hcl_language,
         &["comment"],
         language_parsers::SLASH_AND_HASH_MARKERS,
-    )?;
-    Ok(parser)
+    )
 }
 
 #[cfg(test)]
@@ -315,7 +312,7 @@ mod symbols_tests {
 
     /// The symbols of `source`, an HCL file.
     fn hcl(source: &str) -> anyhow::Result<Symbols> {
-        CodeSymbolsParser::new(&tree_sitter_hcl::LANGUAGE.into(), Hcl)?.parse(source)
+        CodeSymbolsParser::new(&tree_sitter_hcl::LANGUAGE.into(), Hcl).parse(source)
     }
 
     #[test]
@@ -862,7 +859,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
             .parse(

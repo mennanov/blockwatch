@@ -5,21 +5,20 @@ use crate::language_parsers::{
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for CMake.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?))
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser())
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let cmake_language = tree_sitter_cmake::LANGUAGE.into();
-    let parser = TreeSitterCommentsParser::new(
+    TreeSitterCommentsParser::new(
         &cmake_language,
         comment_visitor(|node, source_code| match node.kind() {
             "line_comment" => blank_line_marker(node_text(node, source_code), &["#"]),
             "bracket_comment" => Some(bracket_comment_text(node, node_text(node, source_code))),
             _ => None,
         }),
-    )?;
-    Ok(parser)
+    )
 }
 
 /// Blanks out the bracket comment delimiters (`#[=*[`, `]=*]`) around the
@@ -41,7 +40,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
             .parse(

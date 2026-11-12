@@ -23,8 +23,8 @@ use winnow::stream::{LocatingSlice, Stream};
 use winnow::token::{any, one_of, rest, take_till, take_until, take_while};
 
 /// Returns a [`LanguageParser`] for Lean 4.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(LeanCommentsParser))
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(LeanCommentsParser)
 }
 
 /// Finds the comments in Lean 4 source by Lean's own lexical rules.

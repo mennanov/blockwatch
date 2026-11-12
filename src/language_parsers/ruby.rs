@@ -4,13 +4,13 @@ use crate::language_parsers::{
 };
 
 /// Returns a [`LanguageParser`] for Ruby.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?))
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser())
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let ruby_language = tree_sitter_ruby::LANGUAGE.into();
-    let parser = TreeSitterCommentsParser::new(
+    TreeSitterCommentsParser::new(
         &ruby_language,
         comment_visitor(|node, source_code| {
             if node.kind() != "comment" {
@@ -22,8 +22,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
                     .unwrap_or_else(|| multiline_comment_processor(comment)),
             )
         }),
-    )?;
-    Ok(parser)
+    )
 }
 
 /// Replaces the `=begin` and `=end` markers of a Ruby multiline comment with the corresponding
@@ -56,7 +55,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(
@@ -121,7 +120,7 @@ value = 42  # Comment after code
 
     #[test]
     fn preserves_content_of_multiline_comments() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         // The `=begin`/`=end` markers are blanked; everything else — including a `#` and the
         // text after `=begin` — is content and must be preserved.

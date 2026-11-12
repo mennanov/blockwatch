@@ -47,7 +47,6 @@ use crate::blocks::Block;
 use crate::language_resolver::{Language, LanguageResolver};
 use crate::symbols::{Symbols, SymbolsParser};
 use crate::{Position, character_column_at};
-use anyhow::Context;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::ops::Range;
@@ -174,6 +173,62 @@ pub(crate) struct LanguageParsers {
 }
 
 impl LanguageParsers {
+    /// Builds every language parser, with no extension mappings.
+    ///
+    /// # Panics
+    /// Panics if the tree-sitter crate doesn't support a grammar's ABI version, or if the PHP
+    /// grammar lacks the nodes its comments query reads. Either is a build bug.
+    pub(crate) fn new() -> Self {
+        fn parser<P: LanguageParser + 'static>(p: P) -> SharedLanguageParser {
+            Mutex::new(Box::new(p))
+        }
+
+        Self {
+            resolver: LanguageResolver::new(HashMap::new()),
+            bash: parser(bash::parser()),
+            c: parser(c::parser()),
+            cmake: parser(cmake::parser()),
+            c_sharp: parser(c_sharp::parser()),
+            cpp: parser(cpp::parser()),
+            css: parser(css::parser()),
+            dart: parser(dart::parser()),
+            dockerfile: parser(dockerfile::parser()),
+            elixir: parser(elixir::parser()),
+            go: parser(go::parser()),
+            go_module: parser(go::module_files_parser()),
+            graphql: parser(graphql::parser()),
+            groovy: parser(groovy::parser()),
+            hcl: parser(hcl::parser()),
+            html: parser(html::parser()),
+            java: parser(java::parser()),
+            javascript: parser(javascript::parser()),
+            json: parser(json::parser()),
+            kotlin: parser(kotlin::parser()),
+            lean: parser(lean::parser()),
+            lua: parser(lua::parser()),
+            makefile: parser(makefile::parser()),
+            markdown: parser(markdown::parser()),
+            mdx: parser(mdx::parser()),
+            nix: parser(nix::parser()),
+            ocaml: parser(ocaml::parser()),
+            php: parser(php::parser()),
+            proto: parser(proto::parser()),
+            python: parser(python::parser()),
+            ruby: parser(ruby::parser()),
+            rust: parser(rust::parser()),
+            scala: parser(scala::parser()),
+            sql: parser(sql::parser()),
+            starlark: parser(starlark::parser()),
+            swift: parser(swift::parser()),
+            toml: parser(toml::parser()),
+            tsx: parser(tsx::parser()),
+            typescript: parser(typescript::parser()),
+            xml: parser(xml::parser()),
+            yaml: parser(yaml::parser()),
+            zsh: parser(bash::zsh_parser()),
+        }
+    }
+
     /// Uses `extension_mappings` to select a parser for the extensions and file names they map.
     pub(crate) fn with_extension_mappings(
         self,
@@ -240,60 +295,6 @@ impl LanguageParsers {
     }
 }
 
-/// Builds every language parser, with no extension mappings.
-///
-/// Returns an error if a grammar fails to load.
-pub(crate) fn language_parsers() -> anyhow::Result<LanguageParsers> {
-    fn parser<P: LanguageParser + 'static>(p: P) -> SharedLanguageParser {
-        Mutex::new(Box::new(p))
-    }
-
-    Ok(LanguageParsers {
-        resolver: LanguageResolver::new(HashMap::new()),
-        bash: parser(bash::parser()?),
-        c: parser(c::parser()?),
-        cmake: parser(cmake::parser()?),
-        c_sharp: parser(c_sharp::parser()?),
-        cpp: parser(cpp::parser()?),
-        css: parser(css::parser()?),
-        dart: parser(dart::parser()?),
-        dockerfile: parser(dockerfile::parser()?),
-        elixir: parser(elixir::parser()?),
-        go: parser(go::parser()?),
-        go_module: parser(go::module_files_parser()?),
-        graphql: parser(graphql::parser()?),
-        groovy: parser(groovy::parser()?),
-        hcl: parser(hcl::parser()?),
-        html: parser(html::parser()?),
-        java: parser(java::parser()?),
-        javascript: parser(javascript::parser()?),
-        json: parser(json::parser()?),
-        kotlin: parser(kotlin::parser()?),
-        lean: parser(lean::parser()?),
-        lua: parser(lua::parser()?),
-        makefile: parser(makefile::parser()?),
-        markdown: parser(markdown::parser()?),
-        mdx: parser(mdx::parser()?),
-        nix: parser(nix::parser()?),
-        ocaml: parser(ocaml::parser()?),
-        php: parser(php::parser()?),
-        proto: parser(proto::parser()?),
-        python: parser(python::parser()?),
-        ruby: parser(ruby::parser()?),
-        rust: parser(rust::parser()?),
-        scala: parser(scala::parser()?),
-        sql: parser(sql::parser()?),
-        starlark: parser(starlark::parser()?),
-        swift: parser(swift::parser()?),
-        toml: parser(toml::parser()?),
-        tsx: parser(tsx::parser()?),
-        typescript: parser(typescript::parser()?),
-        xml: parser(xml::parser()?),
-        yaml: parser(yaml::parser()?),
-        zsh: parser(bash::zsh_parser()?),
-    })
-}
-
 /// Parses comment string from a source code by returning an iterator of `Comment`s.
 pub(crate) trait CommentsParser: Send + Sync {
     /// Returns an iterator of `Comment`s from the source code.
@@ -317,14 +318,20 @@ type NodeVisitor = Box<dyn Fn(&Node, &str) -> Visit + Send + Sync>;
 
 /// Creates a Tree-sitter [`Parser`] configured for `language`.
 ///
-/// # Errors
-/// Returns an error if the language cannot be set on the parser.
-pub(crate) fn tree_sitter_parser(language: &tree_sitter::Language) -> anyhow::Result<Parser> {
+/// # Panics
+/// Panics if the tree-sitter crate doesn't support the grammar's ABI version.
+pub(crate) fn tree_sitter_parser(language: &tree_sitter::Language) -> Parser {
     let mut parser = Parser::new();
+    // The grammars are compiled into the binary, so this fails on every run or on none. Each
+    // grammar is checked on its own, and every test that calls `LanguageParsers::new` loads them
+    // all, so a bad grammar fails the tests before a release.
+    if let Err(error) = parser.set_language(language) {
+        panic!(
+            "the tree-sitter crate can't load the {} grammar: {error}",
+            language.name().unwrap_or("unnamed")
+        );
+    }
     parser
-        .set_language(language)
-        .context("failed to set tree-sitter language")?;
-    Ok(parser)
 }
 
 struct TreeSitterCommentsParser {
@@ -334,13 +341,13 @@ struct TreeSitterCommentsParser {
 }
 
 impl TreeSitterCommentsParser {
-    fn new(language: &tree_sitter::Language, node_visitor: NodeVisitor) -> anyhow::Result<Self> {
-        let parser = tree_sitter_parser(language)?;
-        Ok(Self {
+    fn new(language: &tree_sitter::Language, node_visitor: NodeVisitor) -> Self {
+        let parser = tree_sitter_parser(language);
+        Self {
             parser,
             node_visitor,
             tree: None,
-        })
+        }
     }
 
     /// Stops the walk at nodes of `kinds` without reading a comment out of them.
@@ -679,7 +686,7 @@ fn c_style_comments_parser(
     language: &tree_sitter::Language,
     comment_node_kinds: &'static [&'static str],
     line_markers: &'static [&'static str],
-) -> anyhow::Result<TreeSitterCommentsParser> {
+) -> TreeSitterCommentsParser {
     TreeSitterCommentsParser::new(
         language,
         comment_visitor(move |node, source_code| {
@@ -703,9 +710,7 @@ fn c_style_comment_text(comment: &str, line_markers: &[&str]) -> String {
 
 /// Comments parser shared by the ECMAScript-family grammars (JavaScript, TypeScript, TSX). All
 /// three use the same node kinds for comments, so they differ only in which grammar is loaded.
-fn ecmascript_comments_parser(
-    language: &tree_sitter::Language,
-) -> anyhow::Result<TreeSitterCommentsParser> {
+fn ecmascript_comments_parser(language: &tree_sitter::Language) -> TreeSitterCommentsParser {
     TreeSitterCommentsParser::new(language, comment_visitor(ecmascript_comment_text))
 }
 
@@ -766,7 +771,7 @@ fn python_style_comments_parser(
     language: &tree_sitter::Language,
     comment_node_kind: &'static str,
     line_markers: &'static [&'static str],
-) -> anyhow::Result<TreeSitterCommentsParser> {
+) -> TreeSitterCommentsParser {
     TreeSitterCommentsParser::new(
         language,
         comment_visitor(move |node, source_code| {
@@ -785,7 +790,7 @@ fn python_style_comments_parser(
 fn xml_style_comments_parser(
     language: &tree_sitter::Language,
     comment_node_kind: &'static str,
-) -> anyhow::Result<TreeSitterCommentsParser> {
+) -> TreeSitterCommentsParser {
     TreeSitterCommentsParser::new(
         language,
         comment_visitor(move |node, source_code| {
@@ -843,7 +848,7 @@ mod tests {
     #[test]
     fn extensions_with_symbols_match_the_documented_list() -> anyhow::Result<()> {
         let mut extensions_with_symbols = Vec::new();
-        let parsers = language_parsers()?;
+        let parsers = LanguageParsers::new();
         for &(name, language) in crate::language_resolver::NAMES {
             let parser = parsers.parser(language);
             // A parser without symbols refuses every source with the same error, so an empty
@@ -955,7 +960,7 @@ mod tests {
 
     #[test]
     fn language_without_symbols_parse_symbols_returns_error() -> anyhow::Result<()> {
-        let mut parser = ruby::parser()?;
+        let mut parser = ruby::parser();
 
         let err = parser.parse_symbols("def main; end").unwrap_err();
 
@@ -969,7 +974,7 @@ mod tests {
 
     #[test]
     fn typescript_file_with_type_assertion_resolves_its_symbols() -> anyhow::Result<()> {
-        let parsers = language_parsers()?;
+        let parsers = LanguageParsers::new();
         let path = SymbolPath::parse("/a")?;
         let resolves = |parser: &SharedLanguageParser| -> anyhow::Result<bool> {
             let symbols = parser

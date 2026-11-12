@@ -556,7 +556,7 @@ mod parse_blocks_tests {
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::PathFilter;
     use crate::fs::test_utils::FakeFileSystem;
-    use crate::language_parsers::language_parsers;
+    use crate::language_parsers::LanguageParsers;
     use crate::language_resolver::Language;
     use crate::test_utils::{self, diff_changes};
     use std::collections::HashSet;
@@ -604,7 +604,7 @@ mod parse_blocks_tests {
             ("without_blocks.py".to_string(), "x = 1\n".to_string()),
             ("notes.unknown".to_string(), "not a language\n".to_string()),
         ]));
-        let parsers = language_parsers()?;
+        let parsers = LanguageParsers::new();
 
         let parsed = Scan::new(&file_system, &PathFilter::allow_all(), &parsers, &[])
             .parse_blocks(&DiffChanges::default(), ScanMode::All)?;
@@ -626,7 +626,7 @@ mod parse_blocks_tests {
         ]));
         let path_filter = PathFilter::with_ignored_paths(HashSet::from(["ignored.py".to_string()]));
 
-        let files = Scan::new(&file_system, &path_filter, &language_parsers()?, &[])
+        let files = Scan::new(&file_system, &path_filter, &LanguageParsers::new(), &[])
             .checkable_files()
             .collect::<anyhow::Result<Vec<_>>>()?;
 
@@ -645,7 +645,7 @@ mod parse_blocks_tests {
         let files = Scan::new(
             &file_system,
             &PathFilter::allow_all(),
-            &language_parsers()?,
+            &LanguageParsers::new(),
             &[],
         )
         .checkable_files()
@@ -816,7 +816,7 @@ mod parse_blocks_tests {
                 }],
             ),
         ]);
-        let parsers = language_parsers()?;
+        let parsers = LanguageParsers::new();
 
         let blocks_by_file = Scan::new(&file_system, &PathFilter::allow_all(), &parsers, &[])
             .parse_blocks(&line_changes, ScanMode::OnlyChanged)?
@@ -883,7 +883,7 @@ mod parse_blocks_tests {
         let mut blocks_by_file = Scan::new(
             &file_system,
             &PathFilter::allow_all(),
-            &language_parsers()?,
+            &LanguageParsers::new(),
             &[],
         )
         .parse_blocks(&line_changes, ScanMode::All)?
@@ -1153,7 +1153,7 @@ mod parse_blocks_tests {
                 .to_string(),
             ),
         ]));
-        let parsers = language_parsers()?;
+        let parsers = LanguageParsers::new();
 
         let line_changes = diff_changes([
             (
@@ -1226,7 +1226,7 @@ mod parse_blocks_tests {
                 .to_string(),
             ),
         ]));
-        let parsers = language_parsers()?;
+        let parsers = LanguageParsers::new();
 
         let blocks_by_file = Scan::new(&file_system, &PathFilter::allow_all(), &parsers, &[])
             .parse_blocks(&DiffChanges::default(), ScanMode::All)?
@@ -1268,7 +1268,7 @@ mod parse_blocks_tests {
             "a.rs".to_string(),
             file_a_contents.to_string(),
         )]));
-        let parsers = language_parsers()?;
+        let parsers = LanguageParsers::new();
 
         let blocks_by_file = Scan::new(&file_system, &PathFilter::allow_all(), &parsers, &[])
             .parse_blocks(&DiffChanges::default(), ScanMode::All)?
@@ -1289,7 +1289,7 @@ mod parse_blocks_tests {
         // </block>"#
                 .to_string(),
         )]));
-        let parsers = language_parsers()?
+        let parsers = LanguageParsers::new()
             .with_extension_mappings(HashMap::from([("rust".into(), Language::Rust)]));
 
         let blocks_by_file = Scan::new(&file_system, &PathFilter::allow_all(), &parsers, &[])
@@ -1313,7 +1313,7 @@ mod parse_blocks_tests {
         let blocks = Scan::new(
             &FakeFileSystem::new(files),
             &PathFilter::allow_all(),
-            &language_parsers()?,
+            &LanguageParsers::new(),
             &[],
         )
         .parse_blocks(&DiffChanges::default(), ScanMode::All)?
@@ -1348,7 +1348,7 @@ mod parse_blocks_tests {
         ]));
         let path_filter = PathFilter::with_ignored_paths(HashSet::from(["ignored.rs".to_string()]));
 
-        let blocks = Scan::new(&file_system, &path_filter, &language_parsers()?, &[])
+        let blocks = Scan::new(&file_system, &path_filter, &LanguageParsers::new(), &[])
             .parse_blocks(&DiffChanges::default(), ScanMode::All)?
             .blocks;
 
@@ -1381,7 +1381,7 @@ mod parse_blocks_tests {
         let blocks = Scan::new(
             &file_system,
             &PathFilter::allow_only("src/**"),
-            &language_parsers()?,
+            &LanguageParsers::new(),
             &[],
         )
         .parse_blocks(&line_changes, ScanMode::OnlyChanged)?
@@ -1408,7 +1408,7 @@ mod parse_blocks_tests {
         let parsed = Scan::new(
             &file_system,
             &PathFilter::allow_all(),
-            &language_parsers()?,
+            &LanguageParsers::new(),
             &[],
         )
         .parse_blocks(&line_changes, ScanMode::All)?;
@@ -1436,7 +1436,7 @@ mod parse_blocks_tests {
         let error = Scan::new(
             &FakeFileSystem::new(HashMap::from([("src/rules.py".to_string(), String::new())])),
             &PathFilter::allow_all(),
-            &language_parsers()?,
+            &LanguageParsers::new(),
             &[],
         )
         .parse_blocks(&line_changes, ScanMode::OnlyChanged)
@@ -1457,7 +1457,7 @@ mod parse_blocks_tests {
         let error = Scan::new(
             &FakeFileSystem::new(HashMap::from([("src/rules.py".to_string(), String::new())])),
             &PathFilter::allow_all(),
-            &language_parsers()?,
+            &LanguageParsers::new(),
             &[],
         )
         .parse_blocks(&line_changes, ScanMode::All)
@@ -1481,7 +1481,7 @@ mod parse_blocks_tests {
         let error = Scan::new(
             &FakeFileSystem::new(HashMap::new()),
             &PathFilter::allow_all(),
-            &language_parsers()?,
+            &LanguageParsers::new(),
             &[],
         )
         .parse_blocks(&line_changes, ScanMode::All)
@@ -1506,7 +1506,7 @@ mod parse_blocks_tests {
         let error = Scan::new(
             &FakeFileSystem::new(HashMap::from([("present.py".to_string(), String::new())])),
             &PathFilter::allow_all(),
-            &language_parsers()?,
+            &LanguageParsers::new(),
             &[],
         )
         .parse_blocks(&line_changes, ScanMode::OnlyChanged)
@@ -1531,7 +1531,7 @@ mod parse_blocks_tests {
                 "# <block name=\"open\">\nx = 1\n".to_string(),
             )])),
             &PathFilter::allow_all(),
-            &language_parsers()?,
+            &LanguageParsers::new(),
             &[],
         )
         .parse_blocks(&line_changes, ScanMode::OnlyChanged)
@@ -1560,7 +1560,7 @@ mod parse_blocks_tests {
                 "# <block name=\"present\">\nx = 1\n# </block>\n".to_string(),
             )])),
             &PathFilter::allow_only("src/**"),
-            &language_parsers()?,
+            &LanguageParsers::new(),
             &[],
         )
         .parse_blocks(&line_changes, ScanMode::All)?
@@ -1584,7 +1584,7 @@ mod parse_blocks_tests {
         let blocks = Scan::new(
             &FakeFileSystem::new(HashMap::new()),
             &PathFilter::with_ignored_paths(HashSet::from(["vendor/gone.py".to_string()])),
-            &language_parsers()?,
+            &LanguageParsers::new(),
             &[],
         )
         .parse_blocks(&line_changes, ScanMode::OnlyChanged)?
@@ -1607,7 +1607,7 @@ mod parse_blocks_tests {
         let blocks = Scan::new(
             &FakeFileSystem::new(HashMap::new()),
             &PathFilter::allow_all(),
-            &language_parsers()?,
+            &LanguageParsers::new(),
             &[],
         )
         .parse_blocks(&line_changes, ScanMode::OnlyChanged)?
@@ -1622,7 +1622,7 @@ mod parse_blocks_tests {
         let blocks = Scan::new(
             &FakeFileSystem::new(HashMap::default()),
             &PathFilter::allow_all(),
-            &language_parsers()?,
+            &LanguageParsers::new(),
             &[],
         )
         .parse_blocks(&line_changes, ScanMode::All)?
@@ -1638,7 +1638,7 @@ mod parse_blocks_tests {
             "a.py".to_string(),
             "# <block name=\"x\">\n1\n# </block>\n# <block name=\"y\">\n2\n# </block>".to_string(),
         )]));
-        let parsers = language_parsers()?;
+        let parsers = LanguageParsers::new();
         let file_blocks = parse_file(
             &file_system,
             Path::new("a.py"),
@@ -1658,7 +1658,7 @@ mod parse_blocks_tests {
             "a.py".to_string(),
             "# <block name=\"x\" unknown-attr=\"value\">\n1\n# </block>".to_string(),
         )]));
-        let parsers = language_parsers()?;
+        let parsers = LanguageParsers::new();
         let file_blocks = parse_file(
             &file_system,
             Path::new("a.py"),
@@ -1682,7 +1682,7 @@ mod parse_blocks_tests {
             "a.py".to_string(),
             "# <block severity=\"invalid-severity\">\n1\n# </block>".to_string(),
         )]));
-        let parsers = language_parsers()?;
+        let parsers = LanguageParsers::new();
         let file_blocks = parse_file(
             &file_system,
             Path::new("a.py"),
@@ -1706,7 +1706,7 @@ mod parse_blocks_tests {
             "a.py".to_string(),
             "# <block name=\"x\">\n1\n# </block>\n# <block name=\"x\">\n2\n# </block>".to_string(),
         )]));
-        let parsers = language_parsers()?;
+        let parsers = LanguageParsers::new();
         let file_blocks = parse_file(
             &file_system,
             Path::new("a.py"),
@@ -1731,7 +1731,7 @@ mod parse_blocks_tests {
             "a.py".to_string(),
             "1\n# </block>".to_string(),
         )]));
-        let parsers = language_parsers()?;
+        let parsers = LanguageParsers::new();
         let file_blocks = parse_file(
             &file_system,
             Path::new("a.py"),
@@ -1756,7 +1756,7 @@ mod parse_blocks_tests {
             "a.py".to_string(),
             "# <block>\n1".to_string(),
         )]));
-        let parsers = language_parsers()?;
+        let parsers = LanguageParsers::new();
         let file_blocks = parse_file(
             &file_system,
             Path::new("a.py"),
@@ -1786,7 +1786,7 @@ mod parse_blocks_tests {
                 "# <block name=\"x\">\n2\n# </block>".to_string(),
             ),
         ]));
-        let parsers = language_parsers()?;
+        let parsers = LanguageParsers::new();
 
         let blocks = Scan::new(&file_system, &PathFilter::allow_all(), &parsers, &[])
             .parse_blocks(&DiffChanges::default(), ScanMode::All)?
@@ -1810,7 +1810,7 @@ mod parse_blocks_tests {
         Ok(Scan::new(
             &FakeFileSystem::new(files),
             path_filter,
-            &language_parsers()?,
+            &LanguageParsers::new(),
             virtual_blocks,
         )
         .parse_blocks(&DiffChanges::default(), ScanMode::All)?
@@ -1865,7 +1865,7 @@ mod parse_blocks_tests {
         let blocks = Scan::new(
             &file_system,
             &PathFilter::allow_all(),
-            &language_parsers()?,
+            &LanguageParsers::new(),
             &virtual_blocks,
         )
         .parse_blocks(&line_changes, ScanMode::OnlyChanged)?
@@ -1912,7 +1912,7 @@ mod parse_blocks_tests {
         let parsed = Scan::new(
             &file_system,
             &PathFilter::allow_only("{a,b}.json"),
-            &language_parsers()?,
+            &LanguageParsers::new(),
             &virtual_blocks,
         )
         .parse_blocks(&line_changes, ScanMode::OnlyChanged)?;
@@ -1940,7 +1940,7 @@ mod parse_blocks_tests {
         let error = Scan::new(
             &FakeFileSystem::new(HashMap::new()),
             &PathFilter::allow_all(),
-            &language_parsers()?,
+            &LanguageParsers::new(),
             &[virtual_block],
         )
         .parse_blocks(&DiffChanges::default(), ScanMode::OnlyChanged)

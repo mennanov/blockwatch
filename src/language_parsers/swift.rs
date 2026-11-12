@@ -8,13 +8,11 @@ use std::ops::Range;
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Swift, with its symbols.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
-            &tree_sitter_swift::LANGUAGE.into(),
-            Swift,
-        )?),
-    )
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser()).with_symbols(CodeSymbolsParser::new(
+        &tree_sitter_swift::LANGUAGE.into(),
+        Swift,
+    ))
 }
 
 /// Swift, whose files hold properties, functions and types, and whose types and extensions hold
@@ -363,14 +361,13 @@ fn computed_value(property: Node<'_>) -> Option<Node<'_>> {
     }
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let swift_language = tree_sitter_swift::LANGUAGE.into();
-    let parser = c_style_comments_parser(
+    c_style_comments_parser(
         &swift_language,
         &["comment", "multiline_comment"],
         SLASH_MARKERS,
-    )?;
-    Ok(parser)
+    )
 }
 
 #[cfg(test)]
@@ -383,7 +380,7 @@ mod symbols_tests {
 
     /// The symbols of `source`, a Swift file.
     fn swift(source: &str) -> anyhow::Result<Symbols> {
-        CodeSymbolsParser::new(&tree_sitter_swift::LANGUAGE.into(), Swift)?.parse(source)
+        CodeSymbolsParser::new(&tree_sitter_swift::LANGUAGE.into(), Swift).parse(source)
     }
 
     #[test]
@@ -1098,7 +1095,7 @@ mod tests {
 
     #[test]
     fn parses_swift_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(

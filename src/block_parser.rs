@@ -369,7 +369,7 @@ mod tests {
 
     fn create_parser() -> impl LanguageParser {
         // Reuse existing real blocks parser.
-        language_parsers::rust::parser().unwrap()
+        language_parsers::rust::parser()
     }
 
     /// Drains the parser into a `Vec`, failing on the first parse error.

@@ -2,18 +2,17 @@ use crate::language_parsers;
 use crate::language_parsers::{CommentsParser, LanguageParser, LanguageParserImpl};
 
 /// Returns a [`LanguageParser`] for Scala.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?))
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser())
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let scala_language = tree_sitter_scala::LANGUAGE.into();
-    let parser = language_parsers::c_style_comments_parser(
+    language_parsers::c_style_comments_parser(
         &scala_language,
         &["comment", "block_comment"],
         language_parsers::SLASH_MARKERS,
-    )?;
-    Ok(parser)
+    )
 }
 
 #[cfg(test)]
@@ -30,7 +29,7 @@ mod tests {
 val value = 1
 // </block>
 "#;
-        let blocks = parser()?
+        let blocks = parser()
             .parse_blocks(contents)
             .collect::<anyhow::Result<Vec<_>>>()?;
         assert_eq!(blocks.len(), 1);
@@ -40,7 +39,7 @@ val value = 1
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         // The grammar reads the shebang, which must start the file, as a comment with no marker
         // to blank. So its text stays as written.
@@ -115,7 +114,7 @@ object Main {
 val value = 1
 /*/ </block>
 "#;
-        let blocks = parser()?
+        let blocks = parser()
             .parse_blocks(contents)
             .collect::<anyhow::Result<Vec<_>>>()?;
         assert_eq!(blocks.len(), 1);

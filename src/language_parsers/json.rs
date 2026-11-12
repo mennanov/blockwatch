@@ -8,13 +8,13 @@ use anyhow::{Context, bail};
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for JSON.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
+pub(super) fn parser() -> impl LanguageParser {
     let comments_parser = c_style_comments_parser(
         &tree_sitter_json::LANGUAGE.into(),
         &["comment"],
         SLASH_MARKERS,
-    )?;
-    Ok(LanguageParserImpl::new(comments_parser).with_symbols(JsonSymbolsParser::new()?))
+    );
+    LanguageParserImpl::new(comments_parser).with_symbols(JsonSymbolsParser::new())
 }
 
 /// Finds the symbols of a JSON file by walking its syntax tree.
@@ -26,11 +26,9 @@ struct JsonSymbolsParser {
 }
 
 impl JsonSymbolsParser {
-    /// # Errors
-    /// Returns an error if the JSON grammar cannot be loaded.
-    fn new() -> anyhow::Result<Self> {
-        let parser = tree_sitter_parser(&tree_sitter_json::LANGUAGE.into())?;
-        Ok(Self { parser })
+    fn new() -> Self {
+        let parser = tree_sitter_parser(&tree_sitter_json::LANGUAGE.into());
+        Self { parser }
     }
 }
 
@@ -183,7 +181,7 @@ mod tests {
 
     /// The symbols `source` derives, as `(path, value)` pairs in the order they were derived.
     fn derived_symbols(source: &str) -> anyhow::Result<Vec<(String, Option<String>)>> {
-        Ok(parser()?
+        Ok(parser()
             .parse_symbols(source)?
             .symbols
             .into_iter()
@@ -206,7 +204,7 @@ mod tests {
 
     #[test]
     fn source_with_block_tags_parse_blocks_returns_blocks() -> anyhow::Result<()> {
-        let mut parser = parser()?;
+        let mut parser = parser();
 
         let blocks: Vec<Block> = parser
             .parse_blocks(
@@ -226,7 +224,7 @@ mod tests {
 
     #[test]
     fn start_tag_wrapped_over_longer_markers_parse_blocks_returns_block() -> anyhow::Result<()> {
-        let mut parser = parser()?;
+        let mut parser = parser();
 
         let blocks: Vec<Block> = parser
             .parse_blocks(
@@ -331,7 +329,7 @@ mod tests {
     fn scalar_values_parse_symbols_returns_correct_byte_range() -> anyhow::Result<()> {
         let source = r#"{"string": "a\nb", "number": 42, "array": ["item"]}"#;
 
-        let byte_range: Vec<(String, Option<&str>)> = parser()?
+        let byte_range: Vec<(String, Option<&str>)> = parser()
             .parse_symbols(source)?
             .symbols
             .into_iter()
@@ -363,7 +361,7 @@ mod tests {
 }"#;
 
         type PathAndRanges = (String, Vec<Range<usize>>, Vec<Range<Position>>);
-        let ranges: Vec<PathAndRanges> = parser()?
+        let ranges: Vec<PathAndRanges> = parser()
             .parse_symbols(source)?
             .symbols
             .iter()
@@ -416,7 +414,7 @@ mod tests {
         let depth = 1_000;
         let source = format!("{}1{}", r#"{"a": ["#.repeat(depth), "]}".repeat(depth));
 
-        let symbols = parser()?.parse_symbols(&source)?;
+        let symbols = parser().parse_symbols(&source)?;
 
         assert_eq!(symbols.symbols.len(), 2 * depth);
         Ok(())

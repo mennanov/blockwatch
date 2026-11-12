@@ -9,13 +9,11 @@ use std::str::Chars;
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Java, with its symbols.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
-            &tree_sitter_java::LANGUAGE.into(),
-            Java,
-        )?),
-    )
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser()).with_symbols(CodeSymbolsParser::new(
+        &tree_sitter_java::LANGUAGE.into(),
+        Java,
+    ))
 }
 
 /// Java, whose types hold its fields, methods and nested types.
@@ -222,17 +220,16 @@ fn push_fields<'tree>(
     }
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let java_language = tree_sitter_java::LANGUAGE.into();
     // A text block (`"""..."""`) is a `string_literal`, and tree-sitter can nest a comment-shaped
     // node inside it. Its text is string content, not a source comment.
-    let parser = c_style_comments_parser(
+    c_style_comments_parser(
         &java_language,
         &["line_comment", "block_comment"],
         SLASH_MARKERS,
-    )?
-    .with_break_at_node_kinds(&["string_literal"]);
-    Ok(parser)
+    )
+    .with_break_at_node_kinds(&["string_literal"])
 }
 
 #[cfg(test)]
@@ -245,7 +242,7 @@ mod symbols_tests {
 
     /// The symbols of `source`, a Java file.
     fn java(source: &str) -> anyhow::Result<Symbols> {
-        CodeSymbolsParser::new(&tree_sitter_java::LANGUAGE.into(), Java)?.parse(source)
+        CodeSymbolsParser::new(&tree_sitter_java::LANGUAGE.into(), Java).parse(source)
     }
 
     #[test]
@@ -756,7 +753,7 @@ mod tests {
         """;
 }
 "#;
-        let blocks = parser()?
+        let blocks = parser()
             .parse_blocks(contents)
             .collect::<anyhow::Result<Vec<_>>>()?;
         let names: Vec<&str> = blocks
@@ -769,7 +766,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(

@@ -9,19 +9,17 @@ use std::ops::Range;
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Bash, with its symbols.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
-            &tree_sitter_bash::LANGUAGE.into(),
-            Bash,
-        )?),
-    )
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser()).with_symbols(CodeSymbolsParser::new(
+        &tree_sitter_bash::LANGUAGE.into(),
+        Bash,
+    ))
 }
 
 /// Returns a [`LanguageParser`] for zsh, with Bash's comments and no symbols. The Bash grammar
 /// misreads much of zsh's syntax, so a path into a zsh file could resolve to the wrong value.
-pub(super) fn zsh_parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?))
+pub(super) fn zsh_parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser())
 }
 
 /// Bash, whose top-level names are variables and functions.
@@ -183,9 +181,9 @@ fn declarations<'tree>(declaration: Node<'tree>, source: &str) -> Vec<Definition
         .collect()
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let bash_language = tree_sitter_bash::LANGUAGE.into();
-    let parser = TreeSitterCommentsParser::new(
+    TreeSitterCommentsParser::new(
         &bash_language,
         comment_visitor(|node, source| {
             if node.kind() != "comment" {
@@ -199,8 +197,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
                 blank_line_marker(comment, &["#"])
             }
         }),
-    )?;
-    Ok(parser)
+    )
 }
 
 #[cfg(test)]
@@ -213,7 +210,7 @@ mod symbols_tests {
 
     /// The symbols of `source`, a Bash file.
     fn bash(source: &str) -> anyhow::Result<Symbols> {
-        CodeSymbolsParser::new(&tree_sitter_bash::LANGUAGE.into(), Bash)?.parse(source)
+        CodeSymbolsParser::new(&tree_sitter_bash::LANGUAGE.into(), Bash).parse(source)
     }
 
     #[test]
@@ -486,7 +483,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(
@@ -556,7 +553,7 @@ VALUE=42  # Comment after code
 
     #[test]
     fn comment_at_the_start_that_is_not_a_shebang_parse_returns_it() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         // Only a `#!` at the first byte of the file is a shebang.
         for (source, expected) in [

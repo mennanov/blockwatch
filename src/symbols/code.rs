@@ -92,14 +92,11 @@ pub(crate) struct CodeSymbolsParser<L> {
 
 impl<L: CodeLanguage> CodeSymbolsParser<L> {
     /// A parser for files written in `grammar`, a tree-sitter grammar of `language`.
-    ///
-    /// # Errors
-    /// Returns an error if the grammar cannot be loaded.
-    pub(crate) fn new(grammar: &Language, language: L) -> anyhow::Result<Self> {
-        Ok(Self {
-            parser: tree_sitter_parser(grammar)?,
+    pub(crate) fn new(grammar: &Language, language: L) -> Self {
+        Self {
+            parser: tree_sitter_parser(grammar),
             language,
-        })
+        }
     }
 }
 
@@ -754,7 +751,7 @@ mod tests {
 
     /// The symbols of `source`, a Python file, with the definitions of [`python_definitions`].
     fn symbols_of(source: &str) -> anyhow::Result<Symbols> {
-        let tree = tree_sitter_parser(&tree_sitter_python::LANGUAGE.into())?
+        let tree = tree_sitter_parser(&tree_sitter_python::LANGUAGE.into())
             .parse(source, None)
             .context("failed to parse syntax tree")?;
         let definitions = python_definitions(&tree);

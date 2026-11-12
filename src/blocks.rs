@@ -727,13 +727,13 @@ mod supported_languages_tests {
     use crate::diff_parser::DiffChanges;
     use crate::fs::PathFilter;
     use crate::fs::test_utils::FakeFileSystem;
-    use crate::language_parsers::language_parsers;
+    use crate::language_parsers::LanguageParsers;
     use crate::scan::{Scan, ScanMode};
 
     // <block name="supported-extensions">
     #[test]
     fn all_language_extensions_are_supported() -> anyhow::Result<()> {
-        let parsers = language_parsers()?;
+        let parsers = LanguageParsers::new();
         let files = HashMap::from([
             (
                 "BUILD".to_string(),

@@ -10,9 +10,9 @@ use std::borrow::Cow;
 use tree_sitter::{Language, Node};
 
 /// Returns a [`LanguageParser`] for C, with its symbols.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?)
-        .with_symbols(CSymbolsParser::new(&tree_sitter_c::LANGUAGE.into())?))
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser())
+        .with_symbols(CSymbolsParser::new(&tree_sitter_c::LANGUAGE.into()))
 }
 
 /// Finds the top-level names of a C or C++ file: macros, variables, functions, types, and the
@@ -23,12 +23,9 @@ pub(super) struct CSymbolsParser {
 
 impl CSymbolsParser {
     /// A parser for files in `language`, the C or the C++ grammar.
-    ///
-    /// # Errors
-    /// Returns an error if the grammar cannot be loaded.
-    pub(super) fn new(language: &Language) -> anyhow::Result<Self> {
-        let parser = tree_sitter_parser(language)?;
-        Ok(Self { parser })
+    pub(super) fn new(language: &Language) -> Self {
+        let parser = tree_sitter_parser(language);
+        Self { parser }
     }
 }
 
@@ -526,14 +523,13 @@ fn push_escape(escape: &str, bytes: &mut Vec<u8>) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let cpp_language = tree_sitter_c::LANGUAGE.into();
-    let parser = language_parsers::c_style_comments_parser(
+    language_parsers::c_style_comments_parser(
         &cpp_language,
         &["comment"],
         language_parsers::DOXYGEN_MARKERS,
-    )?;
-    Ok(parser)
+    )
 }
 
 #[cfg(test)]
@@ -547,12 +543,12 @@ mod symbols_tests {
 
     /// The symbols of `source`, a C file.
     fn c(source: &str) -> anyhow::Result<Symbols> {
-        CSymbolsParser::new(&tree_sitter_c::LANGUAGE.into())?.parse(source)
+        CSymbolsParser::new(&tree_sitter_c::LANGUAGE.into()).parse(source)
     }
 
     /// The symbols of `source`, a C++ file.
     fn cpp(source: &str) -> anyhow::Result<Symbols> {
-        CSymbolsParser::new(&tree_sitter_cpp::LANGUAGE.into())?.parse(source)
+        CSymbolsParser::new(&tree_sitter_cpp::LANGUAGE.into()).parse(source)
     }
 
     #[test]
@@ -1135,7 +1131,7 @@ mod tests {
 
     #[test]
     fn parses_c_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(

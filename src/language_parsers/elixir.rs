@@ -3,14 +3,13 @@ use crate::language_parsers::{
 };
 
 /// Returns a [`LanguageParser`] for Elixir.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?))
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser())
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let elixir_language = tree_sitter_elixir::LANGUAGE.into();
-    let parser = python_style_comments_parser(&elixir_language, "comment", &["#"])?;
-    Ok(parser)
+    python_style_comments_parser(&elixir_language, "comment", &["#"])
 }
 
 #[cfg(test)]
@@ -20,7 +19,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
             .parse(

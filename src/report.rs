@@ -161,7 +161,7 @@ mod tests {
     use crate::diff_parser::DiffChanges;
     use crate::fs::PathFilter;
     use crate::fs::test_utils::FakeFileSystem;
-    use crate::language_parsers::language_parsers;
+    use crate::language_parsers::LanguageParsers;
     use crate::repo_path::RepoPath;
     use crate::scan::{Scan, ScanMode};
     use crate::test_utils::{validation_context, virtual_block};
@@ -395,13 +395,13 @@ mod tests {
                 "a.b = 1\n".to_string(),
             )])),
             &PathFilter::allow_all(),
-            &language_parsers()?,
+            &LanguageParsers::new(),
             &[virtual_block("a.toml#/a", &[])?, inner],
         )
         .parse_blocks(&DiffChanges::default(), ScanMode::All)?;
         let context = ValidationContext::new(
             parsed.blocks,
-            language_parsers()?,
+            LanguageParsers::new(),
             DiffChanges::default(),
             Vec::new(),
         );

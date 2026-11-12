@@ -10,8 +10,8 @@ use markdown::{Constructs, ParseOptions};
 use std::ops::Range;
 
 /// Returns a [`LanguageParser`] for Markdown. Its symbols are the sections of a file.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(MdCommentsParser::new()?).with_symbols(SectionsParser))
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(MdCommentsParser::new()).with_symbols(SectionsParser)
 }
 
 /// A [`SymbolsParser`] whose symbols are the sections of a Markdown file, in the order of their
@@ -224,11 +224,11 @@ struct MdCommentsParser {
 }
 
 impl MdCommentsParser {
-    fn new() -> anyhow::Result<Self> {
+    fn new() -> Self {
         let html_lang = tree_sitter_html::LANGUAGE.into();
-        Ok(Self {
-            html_comments_parser: xml_style_comments_parser(&html_lang, "comment")?,
-        })
+        Self {
+            html_comments_parser: xml_style_comments_parser(&html_lang, "comment"),
+        }
     }
 
     /// Returns the comments in `source`, in source order.
@@ -368,7 +368,7 @@ mod tests {
 
     /// The symbols `source` derives, as `(path, value)` pairs in the order they were derived.
     fn derived_symbols(source: &str) -> anyhow::Result<Vec<(SymbolPath, String)>> {
-        Ok(parser()?
+        Ok(parser()
             .parse_symbols(source)?
             .symbols
             .into_iter()
@@ -389,7 +389,7 @@ mod tests {
 
     /// The `name` of each block in `content`, in the order of their start tags.
     fn block_names(content: &str) -> anyhow::Result<Vec<String>> {
-        let mut parser = parser()?;
+        let mut parser = parser();
         parser
             .parse_blocks(content)
             .map(|block| Ok(block?.name_display().to_string()))
@@ -476,7 +476,7 @@ Crème.
 # Tea
 ";
 
-        let symbols = parser()?.parse_symbols(source)?.symbols;
+        let symbols = parser().parse_symbols(source)?.symbols;
 
         assert_eq!(
             symbols[0].def_byte_ranges,
@@ -621,7 +621,7 @@ Two.
 
     #[test]
     fn parses_markdown_blocks_correctly() -> anyhow::Result<()> {
-        let mut parser = parser()?;
+        let mut parser = parser();
 
         let content = r#"
 # Header
@@ -689,7 +689,7 @@ Some text here 3
 
     #[test]
     fn parses_link_reference_comment_with_non_ascii_destination() -> anyhow::Result<()> {
-        let mut parser = parser()?;
+        let mut parser = parser();
         let content = "\
 [//]: /café (<block name=\"unicode_title\">)
 Text
@@ -709,7 +709,7 @@ Text
 
     #[test]
     fn link_reference_comment_with_quote_in_destination_reads_title() -> anyhow::Result<()> {
-        let mut parser = parser()?;
+        let mut parser = parser();
         let content = r#"[//]: it's (<block name="a">)
 Text
 
@@ -727,7 +727,7 @@ Text
 
     #[test]
     fn link_reference_comment_with_title_on_next_line_reports_tag_line() -> anyhow::Result<()> {
-        let mut parser = parser()?;
+        let mut parser = parser();
         let content = r#"[//]: #
 (<block name="a">)
 Text
@@ -747,7 +747,7 @@ Text
 
     #[test]
     fn link_reference_without_title_or_with_another_label_is_ignored() -> anyhow::Result<()> {
-        let mut parser = parser()?;
+        let mut parser = parser();
         let content = r#"<!-- <block name="a"> -->
 Text
 
@@ -786,7 +786,7 @@ Text
     #[test]
     fn start_tag_wrapped_over_link_reference_comments_parse_blocks_reads_whole_tag()
     -> anyhow::Result<()> {
-        let mut parser = parser()?;
+        let mut parser = parser();
         let content = r#"[//]: # (<block name="a")
 [//]: # (keep-sorted="asc">)
 [//]: # '<block name="b"'
@@ -835,7 +835,7 @@ Text
     fn link_reference_comment_with_each_line_ending_parse_blocks_returns_content_from_next_line()
     -> anyhow::Result<()> {
         for line_ending in ["\n", "\r\n", "\r"] {
-            let mut parser = parser()?;
+            let mut parser = parser();
             let content = format!(
                 r#"[//]: # (<block name="a">){line_ending}Text{line_ending}{line_ending}[//]: # (</block>){line_ending}"#
             );
@@ -856,7 +856,7 @@ Text
     #[test]
     fn inline_comment_after_a_code_span_holding_non_ascii_reports_a_character_column()
     -> anyhow::Result<()> {
-        let mut parser = parser()?;
+        let mut parser = parser();
         // Code spans are blanked byte by byte before the HTML pass, which turns one multi-byte
         // character into several spaces; the column must still count the source's characters.
         let content = "`café` <!-- <block name=\"x\"> -->\nText\n\n<!-- </block> -->\n";
@@ -874,7 +874,7 @@ Text
 
     #[test]
     fn parses_inline_html_comments_correctly() -> anyhow::Result<()> {
-        let mut parser = parser()?;
+        let mut parser = parser();
 
         // An HTML comment with other text before it on the same line is inline HTML, not an
         // `html_block`. A `<!--` inside inline code is literal text, not a comment.
@@ -910,7 +910,7 @@ Inline code `<!-- <block name="ignored"> -->` is not a comment.
 
     #[test]
     fn parses_blocks_spanning_block_level_and_inline_html_comments() -> anyhow::Result<()> {
-        let mut parser = parser()?;
+        let mut parser = parser();
 
         let content = r#"
 <!-- <block name="mixed"> -->
@@ -929,7 +929,7 @@ Closing text <!-- </block> --> tail.
 
     #[test]
     fn parses_blocks_opened_and_closed_inside_table_cells() -> anyhow::Result<()> {
-        let mut parser = parser()?;
+        let mut parser = parser();
 
         // GitHub-flavored Markdown renders HTML comments inside table cells, so a table is a
         // place a reader can reasonably put a marker and a table of values is exactly the
@@ -956,7 +956,7 @@ Closing text <!-- </block> --> tail.
 
     #[test]
     fn comments_in_block_quote_parse_blocks_returns_the_text_between_them() -> anyhow::Result<()> {
-        let mut parser = parser()?;
+        let mut parser = parser();
         let content = r#"> <!-- <block name="a"> -->
 > Text
 > <!-- </block> -->
@@ -972,7 +972,7 @@ Closing text <!-- </block> --> tail.
 
     #[test]
     fn parses_blocks_spanning_link_reference_and_html_comment_syntaxes() -> anyhow::Result<()> {
-        let mut parser = parser()?;
+        let mut parser = parser();
 
         // The `[//]:` and `<!--` comments are merged into one source-ordered stream, so a block
         // can open in one syntax and close in the other, in either direction.
@@ -1014,7 +1014,7 @@ Second block content.
 
     #[test]
     fn parses_html_blocks_correctly() -> anyhow::Result<()> {
-        let mut parser = parser()?;
+        let mut parser = parser();
 
         let content = r#"
 # Header

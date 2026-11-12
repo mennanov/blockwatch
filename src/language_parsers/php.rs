@@ -4,23 +4,20 @@ use crate::language_parsers::{
     node_text,
 };
 use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition, NestedWalk, child};
-use anyhow::Context;
 use std::iter::Peekable;
 use std::str::Chars;
 use tree_sitter::{Node, StreamingIterator};
 
 /// Returns a [`LanguageParser`] for PHP, with its symbols.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
+pub(super) fn parser() -> impl LanguageParser {
     // `LANGUAGE_PHP` reads the HTML of a template as text, so a template parses without errors.
-    Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
-            &tree_sitter_php::LANGUAGE_PHP.into(),
-            Php,
-        )?),
-    )
+    LanguageParserImpl::new(comments_parser()).with_symbols(CodeSymbolsParser::new(
+        &tree_sitter_php::LANGUAGE_PHP.into(),
+        Php,
+    ))
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     PhpCommentsParser::new()
 }
 
@@ -36,21 +33,21 @@ struct PhpCommentsParser {
 }
 
 impl PhpCommentsParser {
-    fn new() -> anyhow::Result<Self> {
+    fn new() -> Self {
         let php_language: tree_sitter::Language = tree_sitter_php::LANGUAGE_PHP.into();
-        let php_tree_sitter_parser = language_parsers::tree_sitter_parser(&php_language)?;
+        let php_tree_sitter_parser = language_parsers::tree_sitter_parser(&php_language);
         let regions_query =
             tree_sitter::Query::new(&php_language, "(comment) @comment (text) @text")
-                .context("failed to compile tree-sitter php regions query")?;
+                .expect("the PHP grammar has `comment` and `text` nodes");
         let html_comments_parser = language_parsers::xml_style_comments_parser(
             &tree_sitter_html::LANGUAGE.into(),
             "comment",
-        )?;
-        Ok(Self {
+        );
+        Self {
             php_tree_sitter_parser,
             regions_query,
             html_comments_parser,
-        })
+        }
     }
 }
 
@@ -552,7 +549,7 @@ mod symbols_tests {
 
     /// The symbols of `source`, a PHP file.
     fn php(source: &str) -> anyhow::Result<Symbols> {
-        CodeSymbolsParser::new(&tree_sitter_php::LANGUAGE_PHP.into(), Php)?.parse(source)
+        CodeSymbolsParser::new(&tree_sitter_php::LANGUAGE_PHP.into(), Php).parse(source)
     }
 
     #[test]
@@ -1224,7 +1221,7 @@ mod tests {
 
     #[test]
     fn parses_html_comments_in_template_sections_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(
@@ -1280,7 +1277,7 @@ spanning two lines -->
     #[test]
     fn html_comment_after_a_php_island_holding_non_ascii_reports_a_character_column()
     -> anyhow::Result<()> {
-        let mut parser = parser()?;
+        let mut parser = parser();
         // PHP regions are blanked byte by byte to build the HTML view, which turns one multi-byte
         // character into several spaces; the column must still count the source's characters.
         let content =
@@ -1299,7 +1296,7 @@ spanning two lines -->
 
     #[test]
     fn extracts_html_comment_split_by_a_php_island() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
             .parse("<ul>\n<!-- <block name=\"x\"> <?php echo 1; ?> </block>-->\n</ul>\n")
@@ -1319,7 +1316,7 @@ spanning two lines -->
 
     #[test]
     fn parses_php_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(

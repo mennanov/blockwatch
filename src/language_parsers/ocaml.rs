@@ -4,13 +4,13 @@ use crate::language_parsers::{
 };
 
 /// Returns a [`LanguageParser`] for OCaml.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?))
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser())
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let ocaml_language = tree_sitter_ocaml::LANGUAGE_OCAML.into();
-    let parser = TreeSitterCommentsParser::new(
+    TreeSitterCommentsParser::new(
         &ocaml_language,
         comment_visitor(|node, source_code| {
             if node.kind() != "comment" {
@@ -18,8 +18,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
             }
             Some(comment_text(node_text(node, source_code)))
         }),
-    )?;
-    Ok(parser)
+    )
 }
 
 /// Blanks the `(*` and `*)` around an OCaml comment, and the decorative `*` at the start of each
@@ -44,7 +43,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
             .parse(
@@ -102,7 +101,7 @@ let s = "(* not a comment *)" ^ {|(* not a comment *)|}
 
     #[test]
     fn nested_comment_is_one_comment() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
             .parse(
@@ -126,7 +125,7 @@ let x = 1
 
     #[test]
     fn unclosed_comment_end_is_kept() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         // In `(*)`, the `*` belongs to the opener, so the `)` does not close the comment, and the
         // comment runs to the end of the file.

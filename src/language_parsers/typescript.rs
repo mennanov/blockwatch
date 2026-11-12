@@ -6,16 +6,14 @@ use std::ops::Range;
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for TypeScript, with its symbols.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
-            &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-            EcmaScript,
-        )?),
-    )
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser()).with_symbols(CodeSymbolsParser::new(
+        &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        EcmaScript,
+    ))
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     language_parsers::ecmascript_comments_parser(
         &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
     )
@@ -229,19 +227,19 @@ mod symbols_tests {
         CodeSymbolsParser::new(
             &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             EcmaScript,
-        )?
+        )
         .parse(source)
     }
 
     /// The symbols of `source`, a TSX file.
     fn tsx(source: &str) -> anyhow::Result<Symbols> {
-        CodeSymbolsParser::new(&tree_sitter_typescript::LANGUAGE_TSX.into(), EcmaScript)?
+        CodeSymbolsParser::new(&tree_sitter_typescript::LANGUAGE_TSX.into(), EcmaScript)
             .parse(source)
     }
 
     /// The symbols of `source`, a JavaScript file.
     fn javascript(source: &str) -> anyhow::Result<Symbols> {
-        CodeSymbolsParser::new(&tree_sitter_javascript::LANGUAGE.into(), EcmaScript)?.parse(source)
+        CodeSymbolsParser::new(&tree_sitter_javascript::LANGUAGE.into(), EcmaScript).parse(source)
     }
 
     #[test]
@@ -597,7 +595,7 @@ mod tests {
 
     #[test]
     fn parses_typescript_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         // The HTML-like comments are single-line: the statement between the `<!--` and `-->`
         // lines is code, not comment content.

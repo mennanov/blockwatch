@@ -298,7 +298,7 @@ mod tests {
     use super::*;
     use crate::Position;
     use crate::diff_parser::{LineChange, LineChangeKind};
-    use crate::language_parsers::language_parsers;
+    use crate::language_parsers::LanguageParsers;
     use crate::test_utils::virtual_block;
     use std::path::Path;
 
@@ -310,7 +310,7 @@ mod tests {
         source: &str,
         line_changes: &[LineChange],
     ) -> anyhow::Result<BlockWithContext> {
-        let symbols = language_parsers()?
+        let symbols = LanguageParsers::new()
             .parser_for(Path::new(file))
             .expect("the file has a parser")
             .lock()

@@ -6,13 +6,11 @@ use crate::symbols::code::{self, CodeLanguage, CodeSymbolsParser, Definition};
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Rust, with its symbols.
-pub(crate) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
-            &tree_sitter_rust::LANGUAGE.into(),
-            Rust,
-        )?),
-    )
+pub(crate) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser()).with_symbols(CodeSymbolsParser::new(
+        &tree_sitter_rust::LANGUAGE.into(),
+        Rust,
+    ))
 }
 
 /// Rust, whose top-level items are constants, statics, functions, types, traits, macros and
@@ -123,14 +121,13 @@ fn escaped_character(escape: &str) -> anyhow::Result<char> {
     }
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let rust_language = tree_sitter_rust::LANGUAGE.into();
-    let parser = c_style_comments_parser(
+    c_style_comments_parser(
         &rust_language,
         &["line_comment", "block_comment"],
         SLASH_MARKERS,
-    )?;
-    Ok(parser)
+    )
 }
 
 #[cfg(test)]
@@ -143,7 +140,7 @@ mod symbols_tests {
 
     /// The symbols of `source`, a Rust file.
     fn rust(source: &str) -> anyhow::Result<Symbols> {
-        CodeSymbolsParser::new(&tree_sitter_rust::LANGUAGE.into(), Rust)?.parse(source)
+        CodeSymbolsParser::new(&tree_sitter_rust::LANGUAGE.into(), Rust).parse(source)
     }
 
     #[test]
@@ -426,7 +423,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(

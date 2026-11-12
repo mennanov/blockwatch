@@ -6,19 +6,15 @@ use std::ops::Range;
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Go source files, with their symbols.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
-            &tree_sitter_go::LANGUAGE.into(),
-            Go,
-        )?),
-    )
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser())
+        .with_symbols(CodeSymbolsParser::new(&tree_sitter_go::LANGUAGE.into(), Go))
 }
 
 /// Returns a [`LanguageParser`] for `go.mod`, `go.sum` and `go.work`. They have Go's comments,
 /// but not its declarations, so they have no symbols.
-pub(super) fn module_files_parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?))
+pub(super) fn module_files_parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser())
 }
 
 /// Go, whose top-level names are constants, variables, types and functions.
@@ -189,14 +185,13 @@ fn push_escape(escape: &str, bytes: &mut Vec<u8>) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let go_language = tree_sitter_go::LANGUAGE.into();
-    let parser = language_parsers::c_style_comments_parser(
+    language_parsers::c_style_comments_parser(
         &go_language,
         &["comment"],
         language_parsers::SLASH_MARKERS,
-    )?;
-    Ok(parser)
+    )
 }
 
 #[cfg(test)]
@@ -209,7 +204,7 @@ mod symbols_tests {
 
     /// The symbols of `source`, a Go file.
     fn go(source: &str) -> anyhow::Result<Symbols> {
-        CodeSymbolsParser::new(&tree_sitter_go::LANGUAGE.into(), Go)?.parse(source)
+        CodeSymbolsParser::new(&tree_sitter_go::LANGUAGE.into(), Go).parse(source)
     }
 
     #[test]
@@ -419,7 +414,7 @@ mod tests {
 
     #[test]
     fn parses_go_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(
@@ -493,7 +488,7 @@ func main() {
 
     #[test]
     fn parses_go_mod_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(
@@ -548,7 +543,7 @@ exclude github.com/bad/dependency v0.0.0
 
     #[test]
     fn parses_go_work_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(
@@ -602,7 +597,7 @@ use ./module3
 
     #[test]
     fn parses_go_sum_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(

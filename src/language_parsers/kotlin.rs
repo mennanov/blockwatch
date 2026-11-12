@@ -9,13 +9,11 @@ use std::str::Chars;
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Kotlin, with its symbols.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
-            &tree_sitter_kotlin_ng::LANGUAGE.into(),
-            Kotlin,
-        )?),
-    )
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser()).with_symbols(CodeSymbolsParser::new(
+        &tree_sitter_kotlin_ng::LANGUAGE.into(),
+        Kotlin,
+    ))
 }
 
 /// Kotlin, whose files hold properties, functions and types, and whose types hold their members.
@@ -219,14 +217,13 @@ fn push_property<'tree>(
     walk.add_definition(parents, name, declaration.byte_range(), value);
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let kotlin_language = tree_sitter_kotlin_ng::LANGUAGE.into();
-    let parser = c_style_comments_parser(
+    c_style_comments_parser(
         &kotlin_language,
         &["line_comment", "block_comment"],
         SLASH_MARKERS,
-    )?;
-    Ok(parser)
+    )
 }
 
 #[cfg(test)]
@@ -239,7 +236,7 @@ mod symbols_tests {
 
     /// The symbols of `source`, a Kotlin file.
     fn kotlin(source: &str) -> anyhow::Result<Symbols> {
-        CodeSymbolsParser::new(&tree_sitter_kotlin_ng::LANGUAGE.into(), Kotlin)?.parse(source)
+        CodeSymbolsParser::new(&tree_sitter_kotlin_ng::LANGUAGE.into(), Kotlin).parse(source)
     }
 
     #[test]
@@ -718,7 +715,7 @@ mod tests {
 
     #[test]
     fn parses_kotlin_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(

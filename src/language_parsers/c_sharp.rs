@@ -8,13 +8,11 @@ use std::str::Chars;
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for C#, with its symbols.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
-            &tree_sitter_c_sharp::LANGUAGE.into(),
-            CSharp,
-        )?),
-    )
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser()).with_symbols(CodeSymbolsParser::new(
+        &tree_sitter_c_sharp::LANGUAGE.into(),
+        CSharp,
+    ))
 }
 
 /// C#, whose namespaces hold its types, and whose types hold its fields, properties, methods and
@@ -294,14 +292,13 @@ fn push_fields<'tree>(
     }
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let c_sharp = tree_sitter_c_sharp::LANGUAGE.into();
-    let parser = language_parsers::c_style_comments_parser(
+    language_parsers::c_style_comments_parser(
         &c_sharp,
         &["comment"],
         language_parsers::SLASH_MARKERS,
-    )?;
-    Ok(parser)
+    )
 }
 
 #[cfg(test)]
@@ -314,7 +311,7 @@ mod symbols_tests {
 
     /// The symbols of `source`, a C# file.
     fn c_sharp(source: &str) -> anyhow::Result<Symbols> {
-        CodeSymbolsParser::new(&tree_sitter_c_sharp::LANGUAGE.into(), CSharp)?.parse(source)
+        CodeSymbolsParser::new(&tree_sitter_c_sharp::LANGUAGE.into(), CSharp).parse(source)
     }
 
     #[test]
@@ -939,7 +936,7 @@ mod tests {
 
     #[test]
     fn parses_c_sharp_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let code = r#"
 // Single line comment

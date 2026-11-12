@@ -202,7 +202,7 @@ fn create_violation(
 mod validate_tests {
     use super::*;
     use crate::diff_parser::DiffChanges;
-    use crate::language_parsers::language_parsers;
+    use crate::language_parsers::LanguageParsers;
     use crate::repo_path::RepoPath;
     use crate::test_utils::validation_context;
     use crate::validators::test_utils::{checked_lines, violation_count};
@@ -531,7 +531,7 @@ C
         let validator = KeepUniqueValidator;
         let context = Arc::new(validators::ValidationContext::new(
             HashMap::new(),
-            language_parsers()?,
+            LanguageParsers::new(),
             DiffChanges::default(),
             Vec::new(),
         ));

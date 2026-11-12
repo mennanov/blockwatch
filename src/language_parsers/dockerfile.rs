@@ -353,28 +353,24 @@ fn unescape(text: &str, escape_char: char, is_escaped: impl Fn(char) -> bool) ->
 }
 
 /// Returns a [`LanguageParser`] for Dockerfile (Containerfile).
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
-            &tree_sitter_containerfile::LANGUAGE.into(),
-            Dockerfile,
-        )?),
-    )
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser()).with_symbols(CodeSymbolsParser::new(
+        &tree_sitter_containerfile::LANGUAGE.into(),
+        Dockerfile,
+    ))
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let containerfile_language = tree_sitter_containerfile::LANGUAGE.into();
-    let parser =
-        language_parsers::python_style_comments_parser(&containerfile_language, "comment", &["#"])?
-            .with_break_at_node_kinds(&["double_quoted_string", "single_quoted_string"])
-            // Because of the bug in the Dockerfile tree-sitter grammar, the strings like
-            // "# not a comment" are lexed as a comment. This is a workaround to ignore them.
-            .with_break_when(|node, source_code| {
-                node.kind() == "comment"
-                    && node.start_byte() > 0
-                    && source_code.as_bytes()[node.start_byte() - 1] == b'"'
-            });
-    Ok(parser)
+    language_parsers::python_style_comments_parser(&containerfile_language, "comment", &["#"])
+        .with_break_at_node_kinds(&["double_quoted_string", "single_quoted_string"])
+        // Because of the bug in the Dockerfile tree-sitter grammar, the strings like
+        // "# not a comment" are lexed as a comment. This is a workaround to ignore them.
+        .with_break_when(|node, source_code| {
+            node.kind() == "comment"
+                && node.start_byte() > 0
+                && source_code.as_bytes()[node.start_byte() - 1] == b'"'
+        })
 }
 
 #[cfg(test)]
@@ -384,7 +380,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         // The `#` in the `RUN` instruction belongs to the shell command and must not be
         // extracted as a comment. Note that the grammar includes the trailing newline in
@@ -436,7 +432,7 @@ COPY . /app
 
     #[test]
     fn hash_inside_a_double_quoted_argument_is_not_a_comment() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let comments: Vec<String> = comments_parser
             .parse(
@@ -457,7 +453,7 @@ COPY . /app
 
     #[test]
     fn hash_inside_a_single_quoted_argument_is_not_a_comment() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let comments: Vec<String> = comments_parser
             .parse(
@@ -478,7 +474,7 @@ COPY . /app
 
     #[test]
     fn hash_opening_a_json_array_argument_is_not_a_comment() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let comments: Vec<String> = comments_parser
             .parse(
@@ -505,7 +501,7 @@ CMD ["sh", "-c", "# <block name='fake'> x # </block>"]
 COPY . /app
 # </block>
 "##;
-        let blocks = parser()?
+        let blocks = parser()
             .parse_blocks(contents)
             .collect::<anyhow::Result<Vec<_>>>()?;
         let names: Vec<&str> = blocks
@@ -528,7 +524,7 @@ mod symbols_tests {
 
     /// The symbols of `source`, a Dockerfile.
     fn dockerfile(source: &str) -> anyhow::Result<Symbols> {
-        CodeSymbolsParser::new(&tree_sitter_containerfile::LANGUAGE.into(), Dockerfile)?
+        CodeSymbolsParser::new(&tree_sitter_containerfile::LANGUAGE.into(), Dockerfile)
             .parse(source)
     }
 

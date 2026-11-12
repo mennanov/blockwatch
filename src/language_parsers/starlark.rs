@@ -5,19 +5,16 @@ use crate::language_parsers::{
 use crate::symbols::code::CodeSymbolsParser;
 
 /// Returns a [`LanguageParser`] for Starlark (Bazel), with its symbols.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
-            &tree_sitter_starlark::LANGUAGE.into(),
-            Python,
-        )?),
-    )
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser()).with_symbols(CodeSymbolsParser::new(
+        &tree_sitter_starlark::LANGUAGE.into(),
+        Python,
+    ))
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let starlark_language = tree_sitter_starlark::LANGUAGE.into();
-    let parser = python_style_comments_parser(&starlark_language, "comment", &["#"])?;
-    Ok(parser)
+    python_style_comments_parser(&starlark_language, "comment", &["#"])
 }
 
 #[cfg(test)]
@@ -27,7 +24,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
             .parse(

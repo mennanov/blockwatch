@@ -22,7 +22,7 @@ use markdown::{Constructs, MdxSignal, ParseOptions};
 use std::ops::Range;
 
 /// Returns a [`LanguageParser`] for MDX. Its symbols are the sections of a file, as in Markdown.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
+pub(super) fn parser() -> impl LanguageParser {
     MdxParser::new()
 }
 
@@ -38,15 +38,15 @@ struct MdxParser {
 }
 
 impl MdxParser {
-    fn new() -> anyhow::Result<Self> {
-        Ok(Self {
+    fn new() -> Self {
+        Self {
             // MDX compiles to an ES module, where `<!--` doesn't start a comment.
             js_comments_parser: c_style_comments_parser(
                 &tree_sitter_javascript::LANGUAGE.into(),
                 &["comment"],
                 SLASH_MARKERS,
-            )?,
-        })
+            ),
+        }
     }
 
     /// Returns the comments in `source`, in source order.
@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn invalid_mdx_is_an_error() -> anyhow::Result<()> {
-        let mut parser = parser()?;
+        let mut parser = parser();
 
         // MDX 2 and later have no HTML comments.
         let error = parser
@@ -255,7 +255,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let comments = MdxParser::new()?.comments(
+        let comments = MdxParser::new().comments(
             r#"import {Chart} from './chart.js' // after an import
 export const meta = {
   /* in an export */
@@ -338,7 +338,7 @@ Text é {/* in text */} and `{/* code span */}`.
 
     #[test]
     fn block_content_leaves_out_the_braces_around_its_tags() -> anyhow::Result<()> {
-        let mut parser = parser()?;
+        let mut parser = parser();
         let content = "{/* <block> */}\n- blue\n- red\n{/* </block> */}\n";
 
         let blocks = parser
@@ -353,7 +353,7 @@ Text é {/* in text */} and `{/* code span */}`.
 
     #[test]
     fn comment_in_jsx_attribute_is_found() -> anyhow::Result<()> {
-        let comments = MdxParser::new()?.comments(
+        let comments = MdxParser::new().comments(
             r#"<Items
   values={[
     // a
@@ -394,7 +394,7 @@ Text <Badge value={/* c */ 1} />
 
     #[test]
     fn comment_in_list_item_spans_its_indented_lines() -> anyhow::Result<()> {
-        let comments = MdxParser::new()?.comments(
+        let comments = MdxParser::new().comments(
             "- {/* a
   b */}
 ",
@@ -415,7 +415,7 @@ Text <Badge value={/* c */ 1} />
     #[test]
     fn frontmatter_is_skipped() -> anyhow::Result<()> {
         // Frontmatter is YAML, where `<3` is plain text. Read as MDX, it would open a JSX tag.
-        let comments = MdxParser::new()?.comments(
+        let comments = MdxParser::new().comments(
             "---
 title: <3 # not a comment
 ---
@@ -452,7 +452,7 @@ title: <3 # not a comment
 Warm.
 ";
 
-        let paths: Vec<String> = parser()?
+        let paths: Vec<String> = parser()
             .parse_symbols(source)?
             .symbols
             .iter()
@@ -466,7 +466,7 @@ Warm.
     #[test]
     fn invalid_mdx_parse_symbols_returns_error() -> anyhow::Result<()> {
         // MDX 2 and later have no HTML comments.
-        let error = parser()?
+        let error = parser()
             .parse_symbols("# Colors\n\n<!-- a comment -->\n")
             .unwrap_err();
 

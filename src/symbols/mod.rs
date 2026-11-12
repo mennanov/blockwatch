@@ -1416,7 +1416,7 @@ mod syntax_error_tests {
 
     /// What [`ensure_no_syntax_error`] gives for `source`, a JSON file.
     fn ensure_no_syntax_error_in_json(source: &str) -> anyhow::Result<()> {
-        let tree = tree_sitter_parser(&tree_sitter_json::LANGUAGE.into())?
+        let tree = tree_sitter_parser(&tree_sitter_json::LANGUAGE.into())
             .parse(source, None)
             .context("failed to parse syntax tree")?;
         ensure_no_syntax_error(&tree, source)

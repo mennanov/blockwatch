@@ -12,14 +12,13 @@ use std::ops::Range;
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Yaml.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?).with_symbols(YamlSymbolsParser::new()?))
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser()).with_symbols(YamlSymbolsParser::new())
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let yaml_language = tree_sitter_yaml::LANGUAGE.into();
-    let parser = python_style_comments_parser(&yaml_language, "comment", &["#"])?;
-    Ok(parser)
+    python_style_comments_parser(&yaml_language, "comment", &["#"])
 }
 
 /// Finds the symbols of a YAML file by walking its syntax tree.
@@ -31,11 +30,9 @@ struct YamlSymbolsParser {
 }
 
 impl YamlSymbolsParser {
-    /// # Errors
-    /// Returns an error if the YAML grammar cannot be loaded.
-    fn new() -> anyhow::Result<Self> {
-        let parser = tree_sitter_parser(&tree_sitter_yaml::LANGUAGE.into())?;
-        Ok(Self { parser })
+    fn new() -> Self {
+        let parser = tree_sitter_parser(&tree_sitter_yaml::LANGUAGE.into());
+        Self { parser }
     }
 }
 
@@ -662,7 +659,7 @@ mod tests {
 
     #[test]
     fn source_with_comments_parse_returns_every_comment() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(
@@ -726,7 +723,7 @@ list:
 
     /// The symbols `source` derives, in order.
     fn derived_symbols(source: &str) -> anyhow::Result<Vec<DerivedSymbol>> {
-        Ok(parser()?
+        Ok(parser()
             .parse_symbols(source)?
             .symbols
             .into_iter()
@@ -771,7 +768,7 @@ list:
 
     /// Where `source` writes the value of each symbol it derives, in order.
     fn value_ranges(source: &str) -> anyhow::Result<Vec<(String, Option<Range<usize>>)>> {
-        Ok(parser()?
+        Ok(parser()
             .parse_symbols(source)?
             .symbols
             .into_iter()
@@ -1039,7 +1036,7 @@ list:
         let depth = 1_000;
         let source = format!("{}1{}", "{a: [".repeat(depth), "]}".repeat(depth));
 
-        let symbols = parser()?.parse_symbols(&source)?;
+        let symbols = parser().parse_symbols(&source)?;
 
         assert_eq!(symbols.symbols.len(), 2 * depth);
         Ok(())
@@ -1047,7 +1044,7 @@ list:
 
     #[test]
     fn several_documents_parse_symbols_returns_error() -> anyhow::Result<()> {
-        let err = parser()?.parse_symbols("v: 1\n---\nv: 2\n").unwrap_err();
+        let err = parser().parse_symbols("v: 1\n---\nv: 2\n").unwrap_err();
 
         assert_eq!(
             err.to_string(),
@@ -1058,7 +1055,7 @@ list:
 
     #[test]
     fn syntax_error_parse_symbols_returns_error_with_its_position() -> anyhow::Result<()> {
-        let err = parser()?.parse_symbols("v: [1, 2\nw: 3\n").unwrap_err();
+        let err = parser().parse_symbols("v: [1, 2\nw: 3\n").unwrap_err();
 
         assert!(
             err.to_string()
@@ -1071,7 +1068,7 @@ list:
     #[test]
     fn escape_for_no_character_parse_symbols_returns_error_with_its_position() -> anyhow::Result<()>
     {
-        let err = parser()?.parse_symbols("v: \"\\ud800\"\n").unwrap_err();
+        let err = parser().parse_symbols("v: \"\\ud800\"\n").unwrap_err();
 
         assert_eq!(
             format!("{err:#}"),
@@ -1087,7 +1084,7 @@ list:
 c: "\U00110000"
 "#;
 
-        let err = parser()?.parse_symbols(source).unwrap_err();
+        let err = parser().parse_symbols(source).unwrap_err();
 
         assert_eq!(
             format!("{err:#}"),

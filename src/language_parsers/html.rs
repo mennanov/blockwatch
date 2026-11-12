@@ -3,15 +3,14 @@ use crate::language_parsers::{
 };
 
 /// Returns a [`LanguageParser`] for HTML.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?))
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser())
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let html_language = tree_sitter_html::LANGUAGE.into();
-    let parser = xml_style_comments_parser(&html_language, "comment")?
-        .with_break_at_node_kinds(&["quoted_attribute_value"]);
-    Ok(parser)
+    xml_style_comments_parser(&html_language, "comment")
+        .with_break_at_node_kinds(&["quoted_attribute_value"])
 }
 
 #[cfg(test)]
@@ -21,7 +20,7 @@ mod tests {
 
     #[test]
     fn parses_html_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(
@@ -71,7 +70,7 @@ mod tests {
 
     #[test]
     fn comment_syntax_inside_an_attribute_value_is_not_a_comment() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let comments: Vec<String> = comments_parser
             .parse(

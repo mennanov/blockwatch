@@ -4,13 +4,13 @@ use crate::language_parsers::{
 };
 
 /// Returns a [`LanguageParser`] for SQL.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?))
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser())
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let sql_language = tree_sitter_sequel::LANGUAGE.into();
-    let parser = TreeSitterCommentsParser::new(
+    TreeSitterCommentsParser::new(
         &sql_language,
         comment_visitor(|node, source_code| match node.kind() {
             "comment" => blank_line_marker(node_text(node, source_code), &["--"]),
@@ -20,8 +20,7 @@ fn comments_parser() -> anyhow::Result<impl CommentsParser> {
             ))),
             _ => None,
         }),
-    )?;
-    Ok(parser)
+    )
 }
 
 #[cfg(test)]
@@ -31,7 +30,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(

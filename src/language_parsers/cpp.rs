@@ -3,19 +3,18 @@ use crate::language_parsers::c::CSymbolsParser;
 use crate::language_parsers::{CommentsParser, LanguageParser, LanguageParserImpl};
 
 /// Returns a [`LanguageParser`] for C++, with its symbols.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?)
-        .with_symbols(CSymbolsParser::new(&tree_sitter_cpp::LANGUAGE.into())?))
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser())
+        .with_symbols(CSymbolsParser::new(&tree_sitter_cpp::LANGUAGE.into()))
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let cpp_language = tree_sitter_cpp::LANGUAGE.into();
-    let parser = language_parsers::c_style_comments_parser(
+    language_parsers::c_style_comments_parser(
         &cpp_language,
         &["comment"],
         language_parsers::DOXYGEN_MARKERS,
-    )?;
-    Ok(parser)
+    )
 }
 
 #[cfg(test)]
@@ -25,7 +24,7 @@ mod tests {
 
     #[test]
     fn parses_cpp_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(

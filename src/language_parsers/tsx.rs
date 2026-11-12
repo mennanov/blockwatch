@@ -4,16 +4,14 @@ use crate::language_parsers::{CommentsParser, LanguageParser, LanguageParserImpl
 use crate::symbols::code::CodeSymbolsParser;
 
 /// Returns a [`LanguageParser`] for TypeScript TSX, with its symbols.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
-            &tree_sitter_typescript::LANGUAGE_TSX.into(),
-            EcmaScript,
-        )?),
-    )
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser()).with_symbols(CodeSymbolsParser::new(
+        &tree_sitter_typescript::LANGUAGE_TSX.into(),
+        EcmaScript,
+    ))
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     language_parsers::ecmascript_comments_parser(&tree_sitter_typescript::LANGUAGE_TSX.into())
 }
 
@@ -24,7 +22,7 @@ mod tests {
 
     #[test]
     fn parses_tsx_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         // The HTML-like comments are single-line: the statement between the `<!--` and `-->`
         // lines is code, not comment content.

@@ -9,8 +9,8 @@ use std::ops::Range;
 use toml_edit::{InlineTable, Item, Key, Table, Value};
 
 /// Returns a [`LanguageParser`] for Toml.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?).with_symbols(TomlSymbolsParser))
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser()).with_symbols(TomlSymbolsParser)
 }
 
 /// The symbols of `source`, a TOML document, in document order.
@@ -21,10 +21,9 @@ pub(crate) fn parse_symbols(source: &str) -> anyhow::Result<Symbols> {
     TomlSymbolsParser.parse(source)
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let toml_language = tree_sitter_toml_ng::LANGUAGE.into();
-    let parser = python_style_comments_parser(&toml_language, "comment", &["#"])?;
-    Ok(parser)
+    python_style_comments_parser(&toml_language, "comment", &["#"])
 }
 
 /// A [`SymbolsParser`] that derives the symbols of a TOML file from TOML's own data model, at the
@@ -305,7 +304,7 @@ mod tests {
 
     #[test]
     fn source_with_comments_parse_returns_every_comment() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(
@@ -371,7 +370,7 @@ dob = 1979-05-27T07:32:00-08:00 # Date of birth with comment
 
     /// The symbols `source` derives, in the order they were derived.
     fn derived_symbols(source: &str) -> anyhow::Result<Vec<DerivedSymbol>> {
-        Ok(parser()?
+        Ok(parser()
             .parse_symbols(source)?
             .symbols
             .into_iter()
@@ -656,7 +655,7 @@ raw \n'''
 integer = 1_000
 "#;
 
-        let byte_range: Vec<(String, Option<&str>)> = parser()?
+        let byte_range: Vec<(String, Option<&str>)> = parser()
             .parse_symbols(source)?
             .symbols
             .into_iter()
@@ -678,7 +677,7 @@ integer = 1_000
 
     #[test]
     fn duplicate_key_parse_symbols_returns_error_with_its_position() -> anyhow::Result<()> {
-        let err = parser()?.parse_symbols("v = 1\nv = 2\n").unwrap_err();
+        let err = parser().parse_symbols("v = 1\nv = 2\n").unwrap_err();
 
         assert_eq!(
             err.to_string(),

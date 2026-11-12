@@ -7,13 +7,11 @@ use anyhow::{anyhow, bail};
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Python, with its symbols.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
-            &tree_sitter_python::LANGUAGE.into(),
-            Python,
-        )?),
-    )
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser()).with_symbols(CodeSymbolsParser::new(
+        &tree_sitter_python::LANGUAGE.into(),
+        Python,
+    ))
 }
 
 /// Python or Starlark, whose top-level names are variables, functions, classes and type aliases.
@@ -245,11 +243,10 @@ fn push_escape(escape: &str, text: &mut String) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let python_language = tree_sitter_python::LANGUAGE.into();
     // Sphinx reads a comment that starts with `#:` as the doc of the attribute below it.
-    let parser = python_style_comments_parser(&python_language, "comment", &["#:", "#"])?;
-    Ok(parser)
+    python_style_comments_parser(&python_language, "comment", &["#:", "#"])
 }
 
 #[cfg(test)]
@@ -262,12 +259,12 @@ mod symbols_tests {
 
     /// The symbols of `source`, a Python file.
     fn python(source: &str) -> anyhow::Result<Symbols> {
-        CodeSymbolsParser::new(&tree_sitter_python::LANGUAGE.into(), Python)?.parse(source)
+        CodeSymbolsParser::new(&tree_sitter_python::LANGUAGE.into(), Python).parse(source)
     }
 
     /// The symbols of `source`, a Starlark file.
     fn starlark(source: &str) -> anyhow::Result<Symbols> {
-        CodeSymbolsParser::new(&tree_sitter_starlark::LANGUAGE.into(), Python)?.parse(source)
+        CodeSymbolsParser::new(&tree_sitter_starlark::LANGUAGE.into(), Python).parse(source)
     }
 
     #[test]
@@ -656,7 +653,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(

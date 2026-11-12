@@ -7,13 +7,11 @@ use crate::symbols::code::{
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Protocol Buffers, with its symbols.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
-            &tree_sitter_proto::LANGUAGE.into(),
-            Proto,
-        )?),
-    )
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser()).with_symbols(CodeSymbolsParser::new(
+        &tree_sitter_proto::LANGUAGE.into(),
+        Proto,
+    ))
 }
 
 /// Protocol Buffers, whose files hold messages, enums and services, and whose messages hold their
@@ -134,14 +132,13 @@ fn enum_value<'tree>(
     })
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let proto_language = tree_sitter_proto::LANGUAGE.into();
-    let parser = language_parsers::c_style_comments_parser(
+    language_parsers::c_style_comments_parser(
         &proto_language,
         &["comment"],
         language_parsers::SLASH_MARKERS,
-    )?;
-    Ok(parser)
+    )
 }
 
 #[cfg(test)]
@@ -154,7 +151,7 @@ mod symbols_tests {
 
     /// The symbols of `source`, a Protocol Buffers file.
     fn proto(source: &str) -> anyhow::Result<Symbols> {
-        CodeSymbolsParser::new(&tree_sitter_proto::LANGUAGE.into(), Proto)?.parse(source)
+        CodeSymbolsParser::new(&tree_sitter_proto::LANGUAGE.into(), Proto).parse(source)
     }
 
     #[test]
@@ -357,7 +354,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
             .parse(

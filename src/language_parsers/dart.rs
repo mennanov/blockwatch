@@ -8,13 +8,11 @@ use std::str::Chars;
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Dart, with its symbols.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(
-        LanguageParserImpl::new(comments_parser()?).with_symbols(CodeSymbolsParser::new(
-            &tree_sitter_dart::LANGUAGE.into(),
-            Dart,
-        )?),
-    )
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser()).with_symbols(CodeSymbolsParser::new(
+        &tree_sitter_dart::LANGUAGE.into(),
+        Dart,
+    ))
 }
 
 /// Dart, whose files hold variables, functions and types, and whose types and named extensions
@@ -481,15 +479,14 @@ fn push_representation_field<'tree>(
     walk.add_definition(parents, field, start..field.end_byte(), None);
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let dart_language = tree_sitter_dart::LANGUAGE.into();
     // The grammar gives `///` and `/** */` comments a node kind of their own.
-    let parser = language_parsers::c_style_comments_parser(
+    language_parsers::c_style_comments_parser(
         &dart_language,
         &["comment", "documentation_comment"],
         language_parsers::SLASH_MARKERS,
-    )?;
-    Ok(parser)
+    )
 }
 
 #[cfg(test)]
@@ -502,7 +499,7 @@ mod symbols_tests {
 
     /// The symbols of `source`, a Dart file.
     fn dart(source: &str) -> anyhow::Result<Symbols> {
-        CodeSymbolsParser::new(&tree_sitter_dart::LANGUAGE.into(), Dart)?.parse(source)
+        CodeSymbolsParser::new(&tree_sitter_dart::LANGUAGE.into(), Dart).parse(source)
     }
 
     #[test]
@@ -1147,7 +1144,7 @@ mod tests {
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
             .parse(

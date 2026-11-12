@@ -232,10 +232,11 @@ The main modules:
 - `src/language_parsers/` — one parser for each language, most of them a tree-sitter grammar. Markdown and MDX use
   the `markdown` crate, Makefile uses the `makefile-lossless` crate, and Lean has its own scanner. Each language has
   a `parser()` that returns a `LanguageParser`, which knows which syntax nodes are comments. `src/block_parser.rs`
-  turns those comments into blocks. `language_parsers()` in `language_parsers/mod.rs` builds `LanguageParsers`: one
-  parser for each `Language`. Its `parser_for` asks the resolver for a file's `Language`, then returns its parser.
+  turns those comments into blocks. `LanguageParsers::new` in `language_parsers/mod.rs` builds one parser for each
+  `Language`. A grammar that tree-sitter can't load is a build bug, so it panics. `parser_for` asks the resolver for a
+  file's `Language`, then returns its parser.
   **To add a language, add a module here. Then add a `Language` variant, its rows in `NAMES`, a field in
-  `LanguageParsers`, its arm in `LanguageParsers::parser`, and its parser in `language_parsers()`.**
+  `LanguageParsers`, its arm in `LanguageParsers::parser`, and its parser in `LanguageParsers::new`.**
 
   Some languages also have symbols. Such a language has a `SymbolsParser`, which its `parser()` passes to
   `.with_symbols(...)`:

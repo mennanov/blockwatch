@@ -14,14 +14,13 @@ use tree_sitter::Node;
 const WHITE_SPACE: [char; 4] = [' ', '\t', '\r', '\n'];
 
 /// Returns a [`LanguageParser`] for Xml.
-pub(super) fn parser() -> anyhow::Result<impl LanguageParser> {
-    Ok(LanguageParserImpl::new(comments_parser()?).with_symbols(XmlSymbolsParser::new()?))
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser()).with_symbols(XmlSymbolsParser::new())
 }
 
-fn comments_parser() -> anyhow::Result<impl CommentsParser> {
+fn comments_parser() -> impl CommentsParser {
     let xml_language = tree_sitter_xml::LANGUAGE_XML.into();
-    let parser = xml_style_comments_parser(&xml_language, "Comment")?;
-    Ok(parser)
+    xml_style_comments_parser(&xml_language, "Comment")
 }
 
 /// Finds the symbols of an XML file by walking its syntax tree.
@@ -35,11 +34,9 @@ struct XmlSymbolsParser {
 }
 
 impl XmlSymbolsParser {
-    /// # Errors
-    /// Returns an error if the XML grammar cannot be loaded.
-    fn new() -> anyhow::Result<Self> {
-        let parser = tree_sitter_parser(&tree_sitter_xml::LANGUAGE_XML.into())?;
-        Ok(Self { parser })
+    fn new() -> Self {
+        let parser = tree_sitter_parser(&tree_sitter_xml::LANGUAGE_XML.into());
+        Self { parser }
     }
 }
 
@@ -347,7 +344,7 @@ mod tests {
 
     #[test]
     fn parses_xml_comments_correctly() -> anyhow::Result<()> {
-        let mut comments_parser = comments_parser()?;
+        let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(
@@ -405,7 +402,7 @@ mod symbols_tests {
 
     /// The symbols of `source`, an XML file.
     fn xml(source: &str) -> anyhow::Result<Symbols> {
-        XmlSymbolsParser::new()?.parse(source)
+        XmlSymbolsParser::new().parse(source)
     }
 
     /// The definition of each of `symbols`, the symbols of `source`, that has a value, with `[`

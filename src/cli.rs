@@ -174,7 +174,7 @@ struct Prepared {
 fn prepare(args: &flags::Args) -> anyhow::Result<Prepared> {
     let file_system = Arc::new(crate::fs::FileSystemImpl::new(&repository_root()?)?);
     let (scan_mode, line_changes) = run_inputs(args, file_system.as_ref())?;
-    let language_parsers = language_parsers::language_parsers()?;
+    let language_parsers = language_parsers::LanguageParsers::new();
     let (settings, virtual_blocks) = read_config(args, file_system.as_ref(), &line_changes)?;
     let (context, scan_stats) = build_context(
         args,
