@@ -147,6 +147,37 @@ jobs:
 The action checks every block, and passes the diff of the pull request or the push. Its `only_changed: 'true'` input
 adds `--only-changed`.
 
+### Pinning the action
+
+The `v1` tag moves to each new release of the action, so a workflow that uses it runs new code without a review. Pin
+the action to a commit in one of two ways.
+
+**A lockfile** (recommended). Keep the example above as it is, then run these commands from the repository root:
+
+```shell
+gh extension install github/gh-actions-lock
+gh actions-lock
+```
+
+`gh actions-lock` changes `@v1` to the exact release, such as `@v1.1.39`. It writes the release's commit to
+`.github/workflows/actions.lock`, and GitHub runs that commit. It also pins the actions that blockwatch-action uses,
+such as `actions/checkout`. Commit both files. Dependabot updates the workflow and the lockfile in the same pull
+request. See GitHub's [Workflow dependency lockfiles](https://docs.github.com/en/actions/concepts/security/workflow-dependency-lockfiles).
+
+**A commit SHA**, for a workflow without a lockfile. Put the version in a comment after it:
+
+```yaml
+- uses: mennanov/blockwatch-action@<commit SHA> # v1.1.39
+```
+
+To find the commit of a release, run:
+
+```shell
+git ls-remote https://github.com/mennanov/blockwatch-action refs/tags/v1.1.39
+```
+
+Dependabot and Renovate read the comment, and update the SHA and the version together.
+
 ## Diff Input
 
 Under `--diff` the piped diff must carry Git's path prefixes and be repository-relative. A normal `git diff`

@@ -256,6 +256,9 @@ exclusions, and custom extension mappings.
 - uses: mennanov/blockwatch-action@v1
 ```
 
+The `v1` tag moves to each new release of the action. To run only a release you chose, pin the action to a commit. See
+[Pinning the action](docs/ci.md#pinning-the-action).
+
 blockwatch exits with `1` when it finds at least one `error` violation, and with `2` when it can't finish the run, such
 as for a malformed tag. Otherwise it exits with `0`. Warnings, info, and hints are printed, but won't fail the run. See
 [Exit Codes](docs/cli.md#exit-codes).
