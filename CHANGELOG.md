@@ -12,10 +12,20 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- Recognize more variants of Dockerfiles, Jenkinsfiles and Makefiles:
+  - after a `-` or `_`, when no `.` follows: `Dockerfile-dev`, `Dockerfile_prod`. `Dockerfile-logo.png` is not a
+    Dockerfile;
+  - of more names: `Jenkinsfile.release`, `Makefile.am`, `GNUmakefile-local`;
+  - of the lowercase spellings: `dockerfile.ci`, `makefile.inc`.
+
+  `Makefile.PL`, `Makefile.SH`, `Makefile.bat` and `Makefile.cmd` are other languages, so they are not read as
+  Makefiles.
+
 ### Changed
 
-- An extension mapping no longer applies to the variants of `Dockerfile` and `Containerfile`, such as
-  `Dockerfile.ci`:
+- An extension mapping no longer applies to the variants of a name, such as `Dockerfile.ci` or `Containerfile.prod`:
   - With `-E Buildfile=Dockerfile`, `Buildfile` is still a Dockerfile, but `Buildfile.ci` is not. Map the whole name
     instead: `-E Buildfile.ci=Dockerfile`.
   - With `-E Dockerfile=sh`, `Dockerfile` is still read as a shell script, but `Dockerfile.ci` is now read as a
