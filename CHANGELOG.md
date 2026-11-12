@@ -36,6 +36,10 @@ config file, or pass `--ignore`.
     instead: `-E Buildfile.ci=Dockerfile`.
   - With `-E Dockerfile=sh`, `Dockerfile` is still read as a shell script, but `Dockerfile.ci` is now read as a
     Dockerfile. Before, it was skipped.
+- The longest ending of a file name now picks its language, mapped or not, and the whole name is the longest. Before,
+  the shortest ending won. Without mappings, no file changes language. With one, a name in the list keeps its
+  language: `-E txt=md` no longer turns `CMakeLists.txt` into Markdown, `-E ts=js` no longer reaches `.d.ts` files,
+  and `-E mod=...` no longer reaches `go.mod`. A longer mapping now wins too: `-E y.rs=py` makes `a.y.rs` Python.
 
 ## [0.18.1] - 2026-11-11
 

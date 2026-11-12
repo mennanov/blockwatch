@@ -243,7 +243,7 @@ impl LanguageResolver {
     /// The language of the file at `path`, or `None` when no parser reads it. Only the file name
     /// counts, not the directories or the content. The first of these that gives a language wins:
     ///
-    /// 1. the endings of the name, the shortest first, with the extension mappings;
+    /// 1. the endings of the name, the longest first, with the extension mappings;
     /// 2. the rest of the name before a copy suffix, by its endings and then its variant rule;
     /// 3. the variant rule of the name.
     pub(crate) fn resolve(&self, path: &Path) -> Option<Language> {
@@ -261,18 +261,23 @@ impl LanguageResolver {
             .or_else(|| name_rule_language(file_name))
     }
 
-    /// The language of the shortest ending of `name` that has one, where an ending is what follows
-    /// a `.`, or the whole name. Returns `None` when no ending has a language.
+    /// The language of the longest ending of `name` that has one, where an ending is the whole name
+    /// or what follows one of its `.`. Returns `None` when no ending has a language.
     fn language_of_ending(&self, name: &str) -> Option<Language> {
-        // The last extension says what the file is now, so `Dockerfile.ci.yml` is YAML.
-        for (i, _) in name.rmatch_indices('.') {
+        // A longer ending is the more exact rule: `d.ts` over `ts`, and the name `CMakeLists.txt`
+        // over a mapped `txt`. A shorter one only counts when no longer one has a language, as in
+        // `Dockerfile.ci.yml`.
+        if let Some(language) = self.language_of(name) {
+            return Some(language);
+        }
+        for (i, _) in name.match_indices('.') {
             #[expect(clippy::string_slice, reason = "`i` is the index of a `.`")]
-            let extension = &name[i + 1..];
-            if let Some(language) = self.language_of(extension) {
+            let ending = &name[i + 1..];
+            if let Some(language) = self.language_of(ending) {
                 return Some(language);
             }
         }
-        self.language_of(name)
+        None
     }
 
     /// The language of `key`, an extension or a whole file name, with the mappings applied.
@@ -382,10 +387,10 @@ mod tests {
         ]);
     }
 
-    /// The language comes from the end of the name. The shortest ending with a language wins,
-    /// because the last extension says what the file is now. The whole name is the longest ending.
+    /// The language comes from the end of the name. The longest ending with a language wins,
+    /// because it is the most exact. The whole name is the longest ending.
     #[test]
-    fn name_with_several_endings_resolves_by_the_shortest_known_one() {
+    fn name_with_several_endings_resolves_by_the_longest_known_one() {
         assert_resolves(&[
             ("Dockerfile.ci.yml", Yaml),
             ("Dockerfile-dev.yml", Yaml),
@@ -398,8 +403,24 @@ mod tests {
             &[("ino", Cpp)],
             &[("a.rs.ino", Some(Cpp)), ("a.ino.rs", Some(Rust))],
         );
-        assert_resolves_with(&[("y.rs", Python)], &[("a.y.rs", Some(Rust))]);
-        assert_resolves_with(&[("txt", Toml)], &[("CMakeLists.txt", Some(Toml))]);
+        assert_resolves_with(&[("y.rs", Python)], &[("a.y.rs", Some(Python))]);
+        assert_resolves_with(
+            &[("ts", JavaScript)],
+            &[
+                ("index.d.ts", Some(TypeScript)),
+                ("index.ts", Some(JavaScript)),
+            ],
+        );
+        assert_resolves_with(&[("data.json", Yaml)], &[("data.json", Some(Yaml))]);
+        // A mapped extension doesn't reach a name in the list.
+        assert_resolves_with(
+            &[("txt", Markdown)],
+            &[
+                ("CMakeLists.txt", Some(CMake)),
+                ("CMakeLists.txt.in", Some(CMake)),
+                ("notes.txt", Some(Markdown)),
+            ],
+        );
         // An ending with a language wins over stripping a copy suffix.
         assert_resolves_with(&[("in", Cpp)], &[("a.rs.in", Some(Cpp))]);
     }
