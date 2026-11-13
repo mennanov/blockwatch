@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.19.1] - 2026-11-13
+
 ### Added
 
 - Filter glob targets in `blockwatch.toml` with `target-if = { symbols = ['#/path'], patterns = ['^regex'] }`. Only
