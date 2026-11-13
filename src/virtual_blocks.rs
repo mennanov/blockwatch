@@ -381,7 +381,7 @@ mod tests {
     use crate::Position;
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::language_parsers::LanguageParsers;
-    use crate::test_utils::virtual_block;
+    use crate::test_utils::{virtual_block, virtual_block_with_target_if};
     use std::path::Path;
 
     /// The block that a [`virtual_block`] around `path` in `file` declares in `source`, the text of
@@ -410,28 +410,7 @@ mod tests {
             .parse_symbols(source)
     }
 
-    /// A [`virtual_block`] around `target` whose `target-if` lists `target_if_symbols` and
-    /// `target_if_patterns`.
-    fn block_with_target_if(
-        target: &str,
-        target_if_symbols: &[&str],
-        target_if_patterns: &[&str],
-    ) -> anyhow::Result<VirtualBlock> {
-        let mut block = virtual_block(target, &[])?;
-        block.target_if = Some(TargetIf {
-            symbols: target_if_symbols
-                .iter()
-                .map(|path| SymbolPath::parse(path))
-                .collect::<anyhow::Result<_>>()?,
-            patterns: target_if_patterns
-                .iter()
-                .map(|pattern| TargetPattern::new(pattern))
-                .collect::<anyhow::Result<_>>()?,
-        });
-        Ok(block)
-    }
-
-    /// Whether `source`, the text of `file`, gets a block from a [`block_with_target_if`] that
+    /// Whether `source`, the text of `file`, gets a block from a [`virtual_block_with_target_if`] that
     /// lists `target_if_symbols` and `target_if_patterns`.
     fn gets_block(
         file: &str,
@@ -439,11 +418,8 @@ mod tests {
         target_if_symbols: &[&str],
         target_if_patterns: &[&str],
     ) -> anyhow::Result<bool> {
-        let block = block_with_target_if(file, target_if_symbols, target_if_patterns)?.resolve(
-            &symbols_of(file, source)?,
-            source,
-            &LineChanges::default(),
-        )?;
+        let block = virtual_block_with_target_if(file, &[], target_if_symbols, target_if_patterns)?
+            .resolve(&symbols_of(file, source)?, source, &LineChanges::default())?;
         Ok(block.is_some())
     }
 
@@ -884,7 +860,7 @@ MODELS = [
             HashMap::from([(SymbolPath::parse("/flag")?, "cannot read".to_string())]),
         );
 
-        let error = block_with_target_if("a.yml", &["#/flag"], &[])?
+        let error = virtual_block_with_target_if("a.yml", &[], &["#/flag"], &[])?
             .resolve(&symbols, "flag: true\n", &LineChanges::default())
             .unwrap_err();
 
@@ -908,7 +884,7 @@ MODELS = [
                     line: line_changed,
                     kind: LineChangeKind::Added,
                 };
-                let block = block_with_target_if(target, &[target_if_symbol], &[])?
+                let block = virtual_block_with_target_if(target, &[], &[target_if_symbol], &[])?
                     .resolve(
                         &symbols_of(file, source)?,
                         source,
@@ -956,7 +932,7 @@ MODELS = [
         // away, so it counts like a change to the entry. The content stays unchanged.
         let source = "mode = on\nother = 1\nvalue = 2\nmode = on\n";
         let block_for = |line_changed: usize| {
-            let mut block = block_with_target_if("notes.txt", &[], &["^mode = on$"])?;
+            let mut block = virtual_block_with_target_if("notes.txt", &[], &[], &["^mode = on$"])?;
             block.locator = pattern("^value = .*");
             let line_change = LineChange {
                 line: line_changed,

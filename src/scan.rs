@@ -610,7 +610,7 @@ mod parse_blocks_tests {
     use crate::fs::test_utils::FakeFileSystem;
     use crate::language_parsers::LanguageParsers;
     use crate::language_resolver::Language;
-    use crate::test_utils::{self, diff_changes};
+    use crate::test_utils::{self, diff_changes, virtual_block_with_target_if};
     use std::collections::HashSet;
     use std::ops::Range;
 
@@ -2181,28 +2181,6 @@ mod parse_blocks_tests {
              line 3"
         );
         Ok(())
-    }
-
-    /// A virtual block around `target` (`file#/symbol` or `file`), whose `target-if` lists
-    /// `target_if_symbols` and `target_if_patterns`.
-    fn virtual_block_with_target_if(
-        target: &str,
-        attributes: &[(&str, &str)],
-        target_if_symbols: &[&str],
-        target_if_patterns: &[&str],
-    ) -> anyhow::Result<VirtualBlock> {
-        let mut block = test_utils::virtual_block(target, attributes)?;
-        block.target_if = Some(crate::virtual_blocks::TargetIf {
-            symbols: target_if_symbols
-                .iter()
-                .map(|path| crate::symbol_path::SymbolPath::parse(path))
-                .collect::<anyhow::Result<Vec<_>>>()?,
-            patterns: target_if_patterns
-                .iter()
-                .map(|pattern| crate::virtual_blocks::TargetPattern::new(pattern))
-                .collect::<anyhow::Result<Vec<_>>>()?,
-        });
-        Ok(block)
     }
 
     #[test]

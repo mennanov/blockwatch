@@ -172,7 +172,7 @@ mod test_utils {
     use crate::scan::{Scan, ScanMode};
     use crate::symbol_path::SymbolPath;
     use crate::validators::ValidationContext;
-    use crate::virtual_blocks::{ConfigEntry, Locator, VirtualBlock};
+    use crate::virtual_blocks::{ConfigEntry, Locator, TargetIf, TargetPattern, VirtualBlock};
     use std::collections::HashMap;
     use std::ops::Range;
     use std::path::PathBuf;
@@ -273,5 +273,27 @@ mod test_utils {
             is_entry_modified: false,
             target_if: None,
         })
+    }
+
+    /// A [`virtual_block`] around `target`, with `attributes`, whose `target-if` lists
+    /// `target_if_symbols` and `target_if_patterns`.
+    pub(crate) fn virtual_block_with_target_if(
+        target: &str,
+        attributes: &[(&str, &str)],
+        target_if_symbols: &[&str],
+        target_if_patterns: &[&str],
+    ) -> anyhow::Result<VirtualBlock> {
+        let mut block = virtual_block(target, attributes)?;
+        block.target_if = Some(TargetIf {
+            symbols: target_if_symbols
+                .iter()
+                .map(|path| SymbolPath::parse(path))
+                .collect::<anyhow::Result<_>>()?,
+            patterns: target_if_patterns
+                .iter()
+                .map(|pattern| TargetPattern::new(pattern))
+                .collect::<anyhow::Result<_>>()?,
+        });
+        Ok(block)
     }
 }
