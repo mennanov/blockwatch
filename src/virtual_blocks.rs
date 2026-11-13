@@ -6,7 +6,7 @@ use crate::diff_parser::LineChanges;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{ResolveError, Symbols};
-use anyhow::{Context, anyhow, bail};
+use anyhow::{anyhow, bail};
 use regex::{Captures, Regex, RegexBuilder};
 use std::collections::HashMap;
 use std::fmt;
@@ -39,6 +39,8 @@ pub(crate) struct VirtualBlock {
 pub(crate) struct TargetIf {
     /// Symbol paths that must resolve in the file.
     pub(crate) symbols: Vec<SymbolPath>,
+    /// Regexes that must each match the file at least once.
+    pub(crate) patterns: Vec<TargetPattern>,
 }
 
 /// How to find a [`VirtualBlock`] in its file.
@@ -52,24 +54,31 @@ pub(crate) enum Locator {
     File,
 }
 
-/// The compiled `target-pattern` of a config entry. Two are equal when their regexes are written
-/// the same.
+/// A compiled regex of a config entry that runs on the whole file: its `target-pattern`, or an
+/// item of its `target-if.patterns`. Two are equal when their regexes are written the same.
 #[derive(Clone, Debug)]
 pub(crate) struct TargetPattern(Regex);
 
 impl TargetPattern {
-    /// Compiles `pattern`, the `target-pattern` of a config entry.
+    /// Compiles `pattern`.
     ///
     /// # Errors
     /// Returns an error if `pattern` is not a valid regex.
     pub(crate) fn new(pattern: &str) -> anyhow::Result<Self> {
         // Every other pattern runs on one line at a time, so its `^` and `$` match at the ends of
         // a line. They keep that meaning here, where the pattern runs on the whole file.
-        let regex = RegexBuilder::new(pattern)
-            .multi_line(true)
-            .build()
-            .context("invalid `target-pattern`")?;
+        let regex = RegexBuilder::new(pattern).multi_line(true).build()?;
         Ok(Self(regex))
+    }
+
+    /// Whether the pattern has a group named `value`.
+    pub(crate) fn has_value_group(&self) -> bool {
+        self.0.capture_names().any(|name| name == Some("value"))
+    }
+
+    /// The byte ranges of every match of the pattern in `source`, in order.
+    fn matches<'a>(&'a self, source: &'a str) -> impl Iterator<Item = Range<usize>> + 'a {
+        self.0.find_iter(source).map(|found| found.range())
     }
 
     /// Finds the one place in `source` that the pattern matches. Returns the byte range of the
@@ -112,7 +121,7 @@ impl TargetPattern {
         // match without the group, but this match is the block, so it can't be skipped.
         let value = match captures.name("value") {
             Some(value) => value.range(),
-            None if self.0.capture_names().any(|name| name == Some("value")) => bail!(
+            None if self.has_value_group() => bail!(
                 "target-pattern matches at line {}, but its value group does not",
                 LineIndex::new(source).position(whole_match.start).line
             ),
@@ -170,18 +179,19 @@ impl fmt::Display for ConfigEntry {
 
 impl VirtualBlock {
     /// Finds the part of the file this entry wraps, and returns the block for it. Returns `None`
-    /// when the file fails the block's `target-if`: a symbol it lists is missing. A symbol that
-    /// matches several elements still counts as present.
+    /// when the file fails the block's `target-if`: a symbol it lists is missing, or a pattern it
+    /// lists matches no text. A symbol that matches several elements still counts as present.
     ///
-    /// - `symbols` are all the symbols of the file. Only a block that wraps a symbol, or that has
-    ///   `target-if`, reads them.
+    /// - `symbols` are all the symbols of the file. Only a block that wraps a symbol, or whose
+    ///   `target-if` lists symbols, reads them.
     /// - `source` is the text of the file, such as `package.json`.
     /// - `line_changes` are the diff's changes to that file.
     ///
     /// The block's content counts as changed when the diff touches the symbol with its key, or
     /// the text that the pattern matches, or any part of a whole file. A change elsewhere in the
     /// file does not count. Its start tag counts as changed when the diff touches its entry in the
-    /// config file, or the definition of a `target-if` symbol.
+    /// config file, the definition of a `target-if` symbol, or the text a `target-if` pattern
+    /// matches.
     ///
     /// # Errors
     /// Returns an error when:
@@ -199,8 +209,8 @@ impl VirtualBlock {
         line_changes: &LineChanges,
     ) -> anyhow::Result<Option<BlockWithContext>> {
         // A file that fails `target-if` may lack the target, so `target-if` is checked first.
-        let target_if_definitions = match self.target_if_definitions(symbols)? {
-            Some(definitions) => definitions,
+        let target_if_ranges = match self.target_if_ranges(symbols, source)? {
+            Some(ranges) => ranges,
             None => return Ok(None),
         };
         let lines = LineIndex::new(source);
@@ -239,12 +249,12 @@ impl VirtualBlock {
                 Locator::File => !line_changes.is_empty(),
             },
             // The block's attributes are written in its entry in the config file, so the entry
-            // plays the part of the start tag. A `target-if` symbol decides whether the file gets
-            // the block at all, so a change to one counts the same.
+            // plays the part of the start tag. What `target-if` checks decides whether the file
+            // gets the block at all, so a change to it counts the same.
             is_start_tag_modified: self.is_entry_modified
-                || target_if_definitions
+                || target_if_ranges
                     .iter()
-                    .any(|definition| line_changes.touches(&lines.range(definition))),
+                    .any(|range| line_changes.touches(&lines.range(range))),
         }))
     }
 
@@ -307,21 +317,30 @@ impl VirtualBlock {
             .context(self.entry.error_context())
     }
 
-    /// The byte ranges where the file with `symbols` defines the block's `target-if` symbols.
-    /// Returns `None` when the file fails `target-if`, and no ranges for a block without
-    /// `target-if`. A symbol that matches several elements gives the range of each one.
+    /// The byte ranges in `source`, with `symbols`, of what the block's `target-if` checks: the
+    /// definition of each symbol, and each match of each pattern. Returns `None` when the file
+    /// fails `target-if`, and no ranges for a block without `target-if`. A symbol that matches
+    /// several elements gives the range of each one.
     ///
     /// # Errors
     /// Returns an error if a symbol's definition can't be read.
-    fn target_if_definitions<'a>(
+    fn target_if_ranges(
         &self,
-        symbols: &'a Symbols,
-    ) -> anyhow::Result<Option<Vec<&'a Range<usize>>>> {
+        symbols: &Symbols,
+        source: &str,
+    ) -> anyhow::Result<Option<Vec<Range<usize>>>> {
         let target_if = match &self.target_if {
             Some(target_if) => target_if,
             None => return Ok(Some(Vec::new())),
         };
-        let mut definitions = Vec::new();
+        let mut ranges = Vec::new();
+        for pattern in &target_if.patterns {
+            let len = ranges.len();
+            ranges.extend(pattern.matches(source));
+            if ranges.len() == len {
+                return Ok(None);
+            }
+        }
         for path in &target_if.symbols {
             let matches = match symbols.resolve(path) {
                 Ok(symbol) => vec![symbol],
@@ -332,9 +351,13 @@ impl VirtualBlock {
                     return Err(self.unresolved(anyhow!("{reason}")));
                 }
             };
-            definitions.extend(matches.iter().flat_map(|symbol| &symbol.def_byte_ranges));
+            ranges.extend(
+                matches
+                    .iter()
+                    .flat_map(|symbol| symbol.def_byte_ranges.iter().cloned()),
+            );
         }
-        Ok(Some(definitions))
+        Ok(Some(ranges))
     }
 
     /// The block's target, as the config file writes it: `file#/path`, or `file` when the block
@@ -383,10 +406,12 @@ mod tests {
             .parse_symbols(source)
     }
 
-    /// A [`virtual_block`] around `target` whose `target-if` lists `target_if_symbols`.
+    /// A [`virtual_block`] around `target` whose `target-if` lists `target_if_symbols` and
+    /// `target_if_patterns`.
     fn block_with_target_if(
         target: &str,
         target_if_symbols: &[&str],
+        target_if_patterns: &[&str],
     ) -> anyhow::Result<VirtualBlock> {
         let mut block = virtual_block(target, &[])?;
         block.target_if = Some(TargetIf {
@@ -394,14 +419,23 @@ mod tests {
                 .iter()
                 .map(|path| SymbolPath::parse(path))
                 .collect::<anyhow::Result<_>>()?,
+            patterns: target_if_patterns
+                .iter()
+                .map(|pattern| TargetPattern::new(pattern))
+                .collect::<anyhow::Result<_>>()?,
         });
         Ok(block)
     }
 
     /// Whether `source`, the text of `file`, gets a block from a [`block_with_target_if`] that
-    /// lists `target_if_symbols`.
-    fn gets_block(file: &str, source: &str, target_if_symbols: &[&str]) -> anyhow::Result<bool> {
-        let block = block_with_target_if(file, target_if_symbols)?.resolve(
+    /// lists `target_if_symbols` and `target_if_patterns`.
+    fn gets_block(
+        file: &str,
+        source: &str,
+        target_if_symbols: &[&str],
+        target_if_patterns: &[&str],
+    ) -> anyhow::Result<bool> {
+        let block = block_with_target_if(file, target_if_symbols, target_if_patterns)?.resolve(
             &symbols_of(file, source)?,
             source,
             &LineChanges::default(),
@@ -764,8 +798,8 @@ MODELS = [
     fn target_if_with_present_symbols_resolve_returns_a_block() -> anyhow::Result<()> {
         let yaml = "flag: true\nextra: 1\n";
 
-        assert!(gets_block("a.yml", yaml, &["#/flag"])?);
-        assert!(gets_block("a.yml", yaml, &["#/flag", "#/extra"])?);
+        assert!(gets_block("a.yml", yaml, &["#/flag"], &[])?);
+        assert!(gets_block("a.yml", yaml, &["#/flag", "#/extra"], &[])?);
         Ok(())
     }
 
@@ -773,8 +807,36 @@ MODELS = [
     fn target_if_with_a_missing_symbol_resolve_returns_no_block() -> anyhow::Result<()> {
         let yaml = "extra: 1\n";
 
-        assert!(!gets_block("a.yml", yaml, &["#/flag"])?);
-        assert!(!gets_block("a.yml", yaml, &["#/extra", "#/flag"])?);
+        assert!(!gets_block("a.yml", yaml, &["#/flag"], &[])?);
+        assert!(!gets_block("a.yml", yaml, &["#/extra", "#/flag"], &[])?);
+        Ok(())
+    }
+
+    #[test]
+    fn target_if_with_patterns_resolve_returns_a_block_only_when_each_one_matches()
+    -> anyhow::Result<()> {
+        // `^` and `$` match at the ends of each line, so a pattern can match a line in the middle.
+        let yaml = "name: a\ndriver: postgres\nport: 1\n";
+        let rows: [(&[&str], &[&str], bool); 8] = [
+            (&[], &["^driver: postgres$"], true),
+            (&[], &["^driver: mysql$"], false),
+            (&[], &["^name: a$", "^driver: postgres$"], true),
+            (&[], &["^name: a$", "^driver: mysql$"], false),
+            // A pattern that matches several times still passes.
+            (&[], &["^[a-z]+:"], true),
+            // A file must pass both `symbols` and `patterns`.
+            (&["#/name"], &["^driver: postgres$"], true),
+            (&["#/name"], &["^driver: mysql$"], false),
+            (&["#/missing"], &["^driver: postgres$"], false),
+        ];
+
+        for (target_if_symbols, target_if_patterns, expected) in rows {
+            assert_eq!(
+                gets_block("a.yml", yaml, target_if_symbols, target_if_patterns)?,
+                expected,
+                "{target_if_symbols:?} {target_if_patterns:?}"
+            );
+        }
         Ok(())
     }
 
@@ -786,7 +848,7 @@ MODELS = [
             Err(ResolveError::AmbiguousSymbol { .. }) => {}
             other => panic!("expected AmbiguousSymbol, got {other:?}"),
         }
-        assert!(gets_block("doc.md", markdown, &["#/A"])?);
+        assert!(gets_block("doc.md", markdown, &["#/A"], &[])?);
 
         // Two items with the same `name` make `~[name=a]` resolve to `AmbiguousFilter`.
         let yaml = "items:\n  - name: a\n  - name: a\n";
@@ -794,7 +856,7 @@ MODELS = [
             Err(ResolveError::AmbiguousFilter { .. }) => {}
             other => panic!("expected AmbiguousFilter, got {other:?}"),
         }
-        assert!(gets_block("a.yml", yaml, &["#/items/~[name=a]"])?);
+        assert!(gets_block("a.yml", yaml, &["#/items/~[name=a]"], &[])?);
         Ok(())
     }
 
@@ -805,7 +867,7 @@ MODELS = [
             HashMap::from([(SymbolPath::parse("/flag")?, "cannot read".to_string())]),
         );
 
-        let error = block_with_target_if("a.yml", &["#/flag"])?
+        let error = block_with_target_if("a.yml", &["#/flag"], &[])?
             .resolve(&symbols, "flag: true\n", &LineChanges::default())
             .unwrap_err();
 
@@ -829,7 +891,7 @@ MODELS = [
                     line: line_changed,
                     kind: LineChangeKind::Added,
                 };
-                let block = block_with_target_if(target, &[target_if_symbol])?
+                let block = block_with_target_if(target, &[target_if_symbol], &[])?
                     .resolve(
                         &symbols_of(file, source)?,
                         source,
@@ -864,6 +926,46 @@ MODELS = [
         ] {
             let block = block_for(target, target_if_symbol, source, line_changed)?;
             let row = format!("{target} with {target_if_symbol}, line {line_changed}");
+            assert_eq!(block.is_start_tag_modified, start_tag_modified, "{row}");
+            assert_eq!(block.is_content_modified, content_modified, "{row}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn diff_touching_a_target_if_pattern_match_resolve_marks_the_start_tag_modified()
+    -> anyhow::Result<()> {
+        // A change to the text a `target-if` pattern matches can give a file the block or take it
+        // away, so it counts like a change to the entry. The content stays unchanged.
+        let source = "mode = on\nother = 1\nvalue = 2\nmode = on\n";
+        let block_for = |line_changed: usize| {
+            let mut block = block_with_target_if("notes.txt", &[], &["^mode = on$"])?;
+            block.locator = pattern("^value = .*");
+            let line_change = LineChange {
+                line: line_changed,
+                kind: LineChangeKind::Added,
+            };
+            let block = block
+                .resolve(
+                    &Symbols::default(),
+                    source,
+                    &[line_change].into_iter().collect(),
+                )?
+                .expect("the file passes target-if");
+            anyhow::Ok(block)
+        };
+
+        // Each row: the line the diff adds, and whether the start tag and the content count as
+        // changed.
+        for (line_changed, (start_tag_modified, content_modified)) in [
+            (1, (true, false)),
+            (2, (false, false)),
+            (3, (false, true)),
+            // Every match counts, not only the first.
+            (4, (true, false)),
+        ] {
+            let block = block_for(line_changed)?;
+            let row = format!("line {line_changed}");
             assert_eq!(block.is_start_tag_modified, start_tag_modified, "{row}");
             assert_eq!(block.is_content_modified, content_modified, "{row}");
         }

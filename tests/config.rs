@@ -669,24 +669,19 @@ Caused by:
     Ok(())
 }
 
+/// The config file of the `target_if_symbol_change` fixture. Its block wraps `x` in each YAML
+/// file that has `flag`, and `x` in `a.yml` breaks its `line-count`.
+const TARGET_IF_SYMBOL_CHANGE_CONFIG: &str =
+    "tests/testdata/config/target_if_symbol_change/config.toml";
+
 #[test]
 fn only_changed_runs_check_a_block_whose_target_if_symbol_the_diff_touches() -> anyhow::Result<()> {
-    let temp = tempfile::tempdir()?;
-    let root = repo_with_yaml_files(temp.path(), "  one: 1\n  two: 2\n")?;
-    std::fs::write(
-        root.join("blockwatch.toml"),
-        r"[[block]]
-target = '*.yml#/x'
-line-count = '<=1'
-target-if = { symbols = ['#/flag'] }
-",
-    )?;
     // The diff adds the `target-if` symbol, and leaves the target as it was.
     let target_if_symbol_diff = "\
-diff --git a/b.yml b/b.yml
+diff --git a/tests/testdata/config/target_if_symbol_change/a.yml b/tests/testdata/config/target_if_symbol_change/a.yml
 index 1111111..2222222 100644
---- a/b.yml
-+++ b/b.yml
+--- a/tests/testdata/config/target_if_symbol_change/a.yml
++++ b/tests/testdata/config/target_if_symbol_change/a.yml
 @@ -1,2 +1,3 @@
 +flag: true
  x:
@@ -694,15 +689,49 @@ index 1111111..2222222 100644
 ";
 
     cargo_bin_cmd!()
-        .current_dir(&root)
-        .args(["--diff", "--only-changed"])
+        .args([
+            "--config",
+            TARGET_IF_SYMBOL_CHANGE_CONFIG,
+            "--diff",
+            "--only-changed",
+        ])
         .write_stdin(target_if_symbol_diff)
         .output()?
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            r#"Block b.yml:(unnamed) at line 1 of \"blockwatch.toml\" has 3 lines, which does not satisfy <=1"#,
+            r#"Block tests/testdata/config/target_if_symbol_change/a.yml:(unnamed) at line 1 of \"tests/testdata/config/target_if_symbol_change/config.toml\" has 3 lines, which does not satisfy <=1"#,
         ));
+    Ok(())
+}
+
+/// The config file of the `target_if_patterns` fixture. Its block wraps `DB_URL` in each
+/// service's `.env` file that sets `DB_DRIVER=postgres`, and requires a `postgres://` URL.
+/// `services/a` breaks the rule. `services/b` fails `target-if` and has no `DB_URL`, so without
+/// `target-if` its `target-pattern` would match no text and stop the run.
+const TARGET_IF_PATTERNS_CONFIG: &str = "tests/testdata/config/target_if_patterns/config.toml";
+
+#[test]
+fn glob_target_if_patterns_check_only_matching_files() -> anyhow::Result<()> {
+    let output = cargo_bin_cmd!()
+        .args([
+            "--config",
+            TARGET_IF_PATTERNS_CONFIG,
+            "tests/testdata/config/target_if_patterns",
+        ])
+        .output()?;
+
+    output.clone().assert().failure();
+    let violations: serde_json::Value = serde_json::from_slice(&output.stderr)?;
+    let files: Vec<&String> = violations
+        .as_object()
+        .expect("violations by file")
+        .keys()
+        .collect();
+    assert_eq!(
+        files,
+        ["tests/testdata/config/target_if_patterns/services/a/.env"]
+    );
     Ok(())
 }
 

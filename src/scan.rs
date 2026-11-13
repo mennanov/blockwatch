@@ -533,7 +533,10 @@ fn virtual_blocks_in_file(
     // Only a block that wraps or checks a symbol needs the file's symbols. A language without
     // symbols must not fail the other blocks.
     let first_symbol_block = virtual_blocks.iter().find(|virtual_block| {
-        virtual_block.target_if.is_some()
+        virtual_block
+            .target_if
+            .as_ref()
+            .is_some_and(|target_if| !target_if.symbols.is_empty())
             || match virtual_block.locator {
                 Locator::Symbol(_) => true,
                 Locator::Pattern(_) | Locator::File => false,
@@ -2181,17 +2184,22 @@ mod parse_blocks_tests {
     }
 
     /// A virtual block around `target` (`file#/symbol` or `file`), whose `target-if` lists
-    /// `target_if_symbols`.
+    /// `target_if_symbols` and `target_if_patterns`.
     fn virtual_block_with_target_if(
         target: &str,
         attributes: &[(&str, &str)],
         target_if_symbols: &[&str],
+        target_if_patterns: &[&str],
     ) -> anyhow::Result<VirtualBlock> {
         let mut block = test_utils::virtual_block(target, attributes)?;
         block.target_if = Some(crate::virtual_blocks::TargetIf {
             symbols: target_if_symbols
                 .iter()
                 .map(|path| crate::symbol_path::SymbolPath::parse(path))
+                .collect::<anyhow::Result<Vec<_>>>()?,
+            patterns: target_if_patterns
+                .iter()
+                .map(|pattern| crate::virtual_blocks::TargetPattern::new(pattern))
                 .collect::<anyhow::Result<Vec<_>>>()?,
         });
         Ok(block)
@@ -2200,8 +2208,8 @@ mod parse_blocks_tests {
     #[test]
     fn target_if_parse_blocks_skips_uncovered_files_and_keeps_covered_ones() -> anyhow::Result<()> {
         let virtual_blocks = [
-            virtual_block_with_target_if("a.yml#/x", &[("name", "x")], &["#/flag"])?,
-            virtual_block_with_target_if("b.yml#/x", &[("name", "x")], &["#/flag"])?,
+            virtual_block_with_target_if("a.yml#/x", &[("name", "x")], &["#/flag"], &[])?,
+            virtual_block_with_target_if("b.yml#/x", &[("name", "x")], &["#/flag"], &[])?,
         ];
 
         let blocks = parse_with_virtual_blocks(
@@ -2227,7 +2235,12 @@ mod parse_blocks_tests {
     #[test]
     fn target_if_covering_file_whose_target_does_not_resolve_parse_blocks_returns_error()
     -> anyhow::Result<()> {
-        let virtual_blocks = [virtual_block_with_target_if("a.yml#/x", &[], &["#/flag"])?];
+        let virtual_blocks = [virtual_block_with_target_if(
+            "a.yml#/x",
+            &[],
+            &["#/flag"],
+            &[],
+        )?];
 
         let error = parse_with_virtual_blocks(
             &[("a.yml", "flag: true\n")],
@@ -2248,8 +2261,8 @@ mod parse_blocks_tests {
     fn target_if_on_uncovered_file_with_duplicate_tag_name_parse_blocks_skips_virtual_block()
     -> anyhow::Result<()> {
         let virtual_blocks = [
-            virtual_block_with_target_if("a.yml", &[("name", "x")], &["#/flag"])?,
-            virtual_block_with_target_if("b.yml", &[("name", "x")], &["#/flag"])?,
+            virtual_block_with_target_if("a.yml", &[("name", "x")], &["#/flag"], &[])?,
+            virtual_block_with_target_if("b.yml", &[("name", "x")], &["#/flag"], &[])?,
         ];
         // `a.yml` has a tag named `x`, but `target-if` skips the virtual block there.
         let a_source = "other: true\n# <block name=\"x\">\nx: 1\n# </block>\n";
@@ -2278,8 +2291,8 @@ mod parse_blocks_tests {
     #[test]
     fn target_if_on_file_with_syntax_error_parse_blocks_returns_error() -> anyhow::Result<()> {
         let virtual_blocks = [
-            virtual_block_with_target_if("bad.json", &[], &["#/a"])?,
-            virtual_block_with_target_if("good.json", &[], &["#/a"])?,
+            virtual_block_with_target_if("bad.json", &[], &["#/a"], &[])?,
+            virtual_block_with_target_if("good.json", &[], &["#/a"], &[])?,
         ];
 
         let error = parse_with_virtual_blocks(
@@ -2299,21 +2312,49 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn target_if_on_file_without_symbols_parse_blocks_returns_error() -> anyhow::Result<()> {
-        let txt_block = virtual_block_with_target_if("notes.txt", &[], &["#/x"])?;
-        let error = parse_with_virtual_blocks(
-            &[("notes.txt", "hello\n")],
-            &PathFilter::allow_all(),
-            &[txt_block],
-        )
-        .unwrap_err();
-        assert_eq!(
-            format!("{error:#}"),
-            "invalid block at line 7 of \"blockwatch.toml\": target notes.txt does not resolve: \
-             file format is unsupported"
-        );
+    fn target_if_with_only_patterns_parse_blocks_keeps_matching_files_without_symbols()
+    -> anyhow::Result<()> {
+        let virtual_blocks = [
+            virtual_block_with_target_if("a.txt", &[], &[], &["^mode = on$"])?,
+            virtual_block_with_target_if("b.txt", &[], &[], &["^mode = on$"])?,
+        ];
 
-        let ruby_block = virtual_block_with_target_if("a.rb", &[], &["#/x"])?;
+        let blocks = parse_with_virtual_blocks(
+            &[("a.txt", "mode = on\n"), ("b.txt", "mode = off\n")],
+            &PathFilter::allow_all(),
+            &virtual_blocks,
+        )?;
+
+        assert_eq!(
+            blocks[&RepoPath::from_reference("a.txt")?]
+                .blocks_with_context
+                .len(),
+            1
+        );
+        assert!(!blocks.contains_key(&RepoPath::from_reference("b.txt")?));
+        Ok(())
+    }
+
+    #[test]
+    fn target_if_on_file_without_symbols_parse_blocks_returns_error() -> anyhow::Result<()> {
+        // A file needs symbols for `target-if.symbols` even when a `target-if` pattern fails.
+        for patterns in [&[][..], &["^nothing$"]] {
+            let txt_block = virtual_block_with_target_if("notes.txt", &[], &["#/x"], patterns)?;
+            let error = parse_with_virtual_blocks(
+                &[("notes.txt", "hello\n")],
+                &PathFilter::allow_all(),
+                &[txt_block],
+            )
+            .unwrap_err();
+            assert_eq!(
+                format!("{error:#}"),
+                "invalid block at line 7 of \"blockwatch.toml\": target notes.txt does not \
+                 resolve: file format is unsupported",
+                "{patterns:?}"
+            );
+        }
+
+        let ruby_block = virtual_block_with_target_if("a.rb", &[], &["#/x"], &[])?;
         let error = parse_with_virtual_blocks(
             &[("a.rb", "x = 1\n")],
             &PathFilter::allow_all(),
@@ -2330,7 +2371,7 @@ mod parse_blocks_tests {
 
     #[test]
     fn target_if_with_unreadable_symbol_parse_blocks_returns_error() -> anyhow::Result<()> {
-        let block = virtual_block_with_target_if("a.xml", &[], &["#/t"])?;
+        let block = virtual_block_with_target_if("a.xml", &[], &["#/t"], &[])?;
         let source = "<t>&#0;</t>";
 
         let error =
@@ -2375,8 +2416,8 @@ mod parse_blocks_tests {
     fn target_if_covering_no_file_in_full_run_ensure_covered_targets_returns_error()
     -> anyhow::Result<()> {
         let virtual_blocks = [
-            virtual_block_with_target_if("a.yml#/x", &[], &["#/flag"])?,
-            virtual_block_with_target_if("b.yml#/x", &[], &["#/flag"])?,
+            virtual_block_with_target_if("a.yml#/x", &[], &["#/flag"], &[])?,
+            virtual_block_with_target_if("b.yml#/x", &[], &["#/flag"], &[])?,
         ];
 
         let error = scan_and_ensure_covered_targets(
@@ -2400,8 +2441,8 @@ mod parse_blocks_tests {
     fn target_if_covering_only_ignored_files_in_full_run_ensure_covered_targets_returns_error()
     -> anyhow::Result<()> {
         let virtual_blocks = [
-            virtual_block_with_target_if("a.yml#/x", &[], &["#/flag"])?,
-            virtual_block_with_target_if("b.yml#/x", &[], &["#/flag"])?,
+            virtual_block_with_target_if("a.yml#/x", &[], &["#/flag"], &[])?,
+            virtual_block_with_target_if("b.yml#/x", &[], &["#/flag"], &[])?,
         ];
         // Config `ignore` skips the only covered file (`b.yml`), so a full run must fail.
         let path_filter = PathFilter::with_ignored_paths(HashSet::from(["b.yml".to_string()]));
@@ -2426,7 +2467,7 @@ mod parse_blocks_tests {
     #[test]
     fn only_changed_target_if_ensure_covered_targets_checks_only_modified_entry()
     -> anyhow::Result<()> {
-        let unmodified = virtual_block_with_target_if("a.yml#/x", &[], &["#/flag"])?;
+        let unmodified = virtual_block_with_target_if("a.yml#/x", &[], &["#/flag"], &[])?;
         let mut modified = unmodified.clone();
         modified.is_entry_modified = true;
         let uncovered = [("a.yml", "other: true\n")];

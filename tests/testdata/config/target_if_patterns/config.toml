@@ -1,0 +1,5 @@
+[[block]]
+target = 'tests/testdata/config/target_if_patterns/services/*/.env'
+target-pattern = '^DB_URL=(?P<value>.+)$'
+target-if = { patterns = ['^DB_DRIVER=postgres$'] }
+line-pattern = '^postgres://'

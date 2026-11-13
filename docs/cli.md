@@ -552,9 +552,15 @@ same-as = 'go.mod:go-version'
 - **A path that exists is never a glob.** `app/[id]/meta.json` is that one file. A path that doesn't exist is a glob
   only when it has `*`, `?`, `[`, `{` or `\`.
 - **A glob that matches no file stops every run**, so a typo can't turn the rule off.
-- **Add `target-if` to check only the matching files that also pass a condition.** List the symbol paths that each
-  file needs in `target-if.symbols`, written like `#/path`. Only files with every listed symbol get the block. The rest
-  are skipped.
+- **Add `target-if` to check only the matching files that also pass a condition.** It takes two lists, and a file
+  must pass every item of both:
+
+  | Key        | Each item                            | A file passes when                       |
+  |------------|--------------------------------------|------------------------------------------|
+  | `symbols`  | A symbol path, written like `#/path` | the file has that symbol                 |
+  | `patterns` | A regex                              | the regex matches the file at least once |
+
+  The other files are skipped.
 
   ```toml
   # Check PR path filters on workflows that filter push paths and also run on pull_request.
@@ -562,13 +568,23 @@ same-as = 'go.mod:go-version'
   target = '.github/workflows/*.yml#/on/push/paths'
   target-if = { symbols = ['#/on/push/paths', '#/on/pull_request'] }
   same-as = '#/on/pull_request/paths'
+
+  # Check the database URL only in the services that use Postgres.
+  [[block]]
+  target = 'services/*/.env'
+  target-pattern = '^DB_URL=(?P<value>.+)$'
+  target-if = { patterns = ['^DB_DRIVER=postgres$'] }
+  line-pattern = '^postgres://'
   ```
 
-  - Each file the glob matches must use a language with [symbols](symbols.md) and have no syntax error.
+  - With `symbols`, each file the glob matches must use a language with [symbols](symbols.md) and have no syntax
+    error, even a file that fails `patterns`.
   - A symbol counts as present even when it matches more than one item, such as duplicate headings in Markdown.
+  - A pattern runs on the whole file, and its `^` and `$` match at the ends of each line, as in `target-pattern`. It
+    can't have a `value` group, because `target-if` reads no text.
   - When a file passes, its `target` must still resolve. If not, the run stops.
-  - A diff that touches a listed symbol counts as a change to the entry. So `--diff --only-changed` checks the block,
-    and `affects` does not fire, since the content did not change.
+  - A diff that touches a listed symbol, or the text a pattern matches, counts as a change to the entry. So
+    `--diff --only-changed` checks the block, and `affects` does not fire, since the content did not change.
   - If no file the glob matches passes `target-if`, the run stops. So a typo in a symbol can't turn the rule off.
     Runs that don't read every matched file skip this check:
     - runs with path arguments, `--ignore` or `explain`;

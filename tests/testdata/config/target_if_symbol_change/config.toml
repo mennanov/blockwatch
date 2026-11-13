@@ -1,0 +1,4 @@
+[[block]]
+target = 'tests/testdata/config/target_if_symbol_change/*.yml#/x'
+line-count = '<=1'
+target-if = { symbols = ['#/flag'] }

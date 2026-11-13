@@ -14,10 +14,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Added
 
-- Filter glob targets in `blockwatch.toml` with `target-if = { symbols = ['#/path'] }`. Only the matched files that
-  have every listed symbol get the block. Such a file must still have the `target`. A run that reads every matched
-  file fails when none of them passes. A diff that touches a listed symbol counts as a change to the entry, so
-  `--diff --only-changed` checks the block. See [Glob targets](docs/cli.md#glob-targets).
+- Filter glob targets in `blockwatch.toml` with `target-if = { symbols = ['#/path'], patterns = ['^regex'] }`. Only
+  the matched files that have every listed symbol, and that every pattern matches, get the block. Such a file must
+  still have the `target`. A run that reads every matched file fails when none of them passes. A diff that touches a
+  listed symbol or a pattern's match counts as a change to the entry, so `--diff --only-changed` checks the block. See
+  [Glob targets](docs/cli.md#glob-targets).
 
 ## [0.19.0] - 2026-11-12
 

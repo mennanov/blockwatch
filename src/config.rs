@@ -88,6 +88,8 @@ struct BlockEntry {
 struct RawTargetIf {
     /// Symbol paths that must resolve in a matched file, each written as `#/...`.
     symbols: Option<Vec<String>>,
+    /// Regexes that must each match a matched file at least once.
+    patterns: Option<Vec<String>>,
 }
 
 /// The value of an attribute, as written.
@@ -326,8 +328,9 @@ fn entry_blocks(
 /// Validates and turns a `target-if` table into a [`TargetIf`], when present.
 ///
 /// # Errors
-/// Returns an error if `target_file` is not a glob, the table has no keys, `symbols` is empty, or
-/// a symbol path is not written like `#/flag`.
+/// Returns an error if `target_file` is not a glob, the table has no keys, a list is empty, a
+/// symbol path is not written like `#/flag`, or a pattern is not a valid regex or has a `value`
+/// group.
 fn parse_target_if(
     raw: Option<RawTargetIf>,
     target_file: &TargetFile,
@@ -341,17 +344,33 @@ fn parse_target_if(
             bail!("`target-if` requires a glob target");
         }
     }
-    let Some(symbols) = raw.symbols else {
+    if raw.symbols.is_none() && raw.patterns.is_none() {
         bail!("`target-if` must not be empty");
-    };
-    if symbols.is_empty() {
-        bail!("`target-if.symbols` must not be empty");
     }
-    let symbols = symbols
-        .into_iter()
-        .map(|symbol| parse_target_if_symbol(&symbol))
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    Ok(Some(TargetIf { symbols }))
+    Ok(Some(TargetIf {
+        symbols: parse_target_if_list(raw.symbols, "symbols", parse_target_if_symbol)?,
+        patterns: parse_target_if_list(raw.patterns, "patterns", parse_target_if_pattern)?,
+    }))
+}
+
+/// Parses each item of `raw`, the `target-if` list `key`, with `parse`. A list that is not
+/// written gives no items.
+///
+/// # Errors
+/// Returns an error if the list is written but empty, or if `parse` fails on an item.
+fn parse_target_if_list<T>(
+    raw: Option<Vec<String>>,
+    key: &str,
+    parse: impl Fn(&str) -> anyhow::Result<T>,
+) -> anyhow::Result<Vec<T>> {
+    let items = match raw {
+        Some(items) => items,
+        None => return Ok(Vec::new()),
+    };
+    if items.is_empty() {
+        bail!("`target-if.{key}` must not be empty");
+    }
+    items.iter().map(|item| parse(item)).collect()
 }
 
 /// Parses one entry of `target-if.symbols`, a symbol path written like `#/flag`.
@@ -363,6 +382,22 @@ fn parse_target_if_symbol(raw: &str) -> anyhow::Result<SymbolPath> {
         bail!("invalid `target-if.symbols` entry `{raw}`: expected a symbol such as `#/flag`");
     }
     SymbolPath::parse(raw).with_context(|| format!("invalid `target-if.symbols` entry `{raw}`"))
+}
+
+/// Compiles one entry of `target-if.patterns`.
+///
+/// # Errors
+/// Returns an error if `raw` is not a valid regex, or has a `value` group.
+fn parse_target_if_pattern(raw: &str) -> anyhow::Result<TargetPattern> {
+    let context = || format!("invalid `target-if.patterns` entry `{raw}`");
+    let pattern = TargetPattern::new(raw).with_context(context)?;
+    // A `value` group picks the text that a pattern reads, but `target-if` reads no text.
+    if pattern.has_value_group() {
+        return Err(
+            anyhow!("a `target-if` pattern must not have a `value` group").context(context()),
+        );
+    }
+    Ok(pattern)
 }
 
 /// What the file of a target refers to.
@@ -425,9 +460,10 @@ fn parse_target(
         (TargetReference::File(file), None) => (file, Locator::File),
         // The block is found only when its file is read. A bad regex fails here, so that it fails
         // every run.
-        (TargetReference::File(file), Some(pattern)) => {
-            (file, Locator::Pattern(TargetPattern::new(&pattern)?))
-        }
+        (TargetReference::File(file), Some(pattern)) => (
+            file,
+            Locator::Pattern(TargetPattern::new(&pattern).context("invalid `target-pattern`")?),
+        ),
         (TargetReference::Symbol { file: Some(_), .. }, Some(_)) => {
             bail!("`target-pattern` needs a whole file as `target`, such as `settings.py`")
         }
@@ -664,6 +700,7 @@ target-if = { symbols = ['#/flag'] }
 
         let expected = TargetIf {
             symbols: vec![SymbolPath::parse("/flag")?],
+            patterns: Vec::new(),
         };
         assert_eq!(config.blocks.len(), 2);
         for block in &config.blocks {
@@ -690,8 +727,45 @@ symbols = ['#/flag', '#/extra']
             config.blocks[0].target_if,
             Some(TargetIf {
                 symbols: vec![SymbolPath::parse("/flag")?, SymbolPath::parse("/extra")?],
+                patterns: Vec::new(),
             })
         );
+        Ok(())
+    }
+
+    #[test]
+    fn glob_entry_with_target_if_patterns_reads_patterns_condition() -> anyhow::Result<()> {
+        let patterns_only = r"[[block]]
+target = '*.yml'
+target-if = { patterns = ['^driver: postgres$', '^url:'] }
+";
+        let patterns_and_symbols = r"[[block]]
+target = '*.yml'
+
+[block.target-if]
+symbols = ['#/flag']
+patterns = ['^driver: postgres$', '^url:']
+";
+        let patterns = vec![
+            TargetPattern::new("^driver: postgres$")?,
+            TargetPattern::new("^url:")?,
+        ];
+
+        for (text, symbols) in [
+            (patterns_only, vec![]),
+            (patterns_and_symbols, vec![SymbolPath::parse("/flag")?]),
+        ] {
+            let config = read_in_repository(text, &["a.yml"], &[])?;
+
+            assert_eq!(
+                config.blocks[0].target_if,
+                Some(TargetIf {
+                    symbols,
+                    patterns: patterns.clone(),
+                }),
+                "{text}"
+            );
+        }
         Ok(())
     }
 
@@ -1074,16 +1148,24 @@ target = '*.yml#/x'
     }
 
     #[test]
-    fn empty_target_if_symbols_list_is_rejected() {
-        let text = r"[[block]]
-target = '*.yml#/x'
-target-if = { symbols = [] }
-";
+    fn empty_target_if_list_is_rejected() {
+        for (target_if, key) in [
+            ("{ symbols = [] }", "symbols"),
+            ("{ patterns = [] }", "patterns"),
+            ("{ symbols = ['#/flag'], patterns = [] }", "patterns"),
+            ("{ symbols = [], patterns = ['^a'] }", "symbols"),
+        ] {
+            let text = format!("[[block]]\ntarget = '*.yml#/x'\ntarget-if = {target_if}\n");
 
-        assert_eq!(
-            read_error(text),
-            "invalid block at line 1 of \"blockwatch.toml\": `target-if.symbols` must not be empty"
-        );
+            assert_eq!(
+                read_error(&text),
+                format!(
+                    "invalid block at line 1 of \"blockwatch.toml\": `target-if.{key}` must not be \
+                     empty"
+                ),
+                "{text}"
+            );
+        }
     }
 
     #[test]
@@ -1100,6 +1182,10 @@ target-if = '#/flag'
 target = '*.yml#/x'
 target-if = { symbols = '#/flag' }
 ";
+        let non_list_patterns = r"[[block]]
+target = '*.yml#/x'
+target-if = { patterns = '^a' }
+";
         let array_of_tables = r"[[block]]
 target = '*.yml#/x'
 
@@ -1107,7 +1193,13 @@ target = '*.yml#/x'
 symbols = ['#/flag']
 ";
 
-        for text in [unknown_key, non_table, non_list, array_of_tables] {
+        for text in [
+            unknown_key,
+            non_table,
+            non_list,
+            non_list_patterns,
+            array_of_tables,
+        ] {
             let error = read_error(text);
             assert!(
                 error.starts_with("invalid config file \"blockwatch.toml\": TOML parse error"),
@@ -1146,6 +1238,30 @@ target-if = {{ symbols = ['{item}'] }}
                 ),
             );
         }
+    }
+
+    #[test]
+    fn target_if_pattern_that_is_invalid_or_has_a_value_group_is_rejected() {
+        let error_of = |pattern: &str| {
+            read_error(&format!(
+                "[[block]]\ntarget = '*.yml'\ntarget-if = {{ patterns = ['{pattern}'] }}\n"
+            ))
+        };
+
+        let invalid = error_of("(");
+        assert!(
+            invalid.starts_with(
+                "invalid block at line 1 of \"blockwatch.toml\": invalid `target-if.patterns` \
+                 entry `(`: regex parse error"
+            ),
+            "{invalid}"
+        );
+        // A `value` group picks the text a pattern reads, but `target-if` reads no text.
+        assert_eq!(
+            error_of("^url: (?P<value>.+)$"),
+            "invalid block at line 1 of \"blockwatch.toml\": invalid `target-if.patterns` entry \
+             `^url: (?P<value>.+)$`: a `target-if` pattern must not have a `value` group"
+        );
     }
 
     #[test]
