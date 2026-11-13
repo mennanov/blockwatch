@@ -554,10 +554,10 @@ fn virtual_blocks_in_file(
     };
     let mut blocks_with_context = Vec::new();
     for virtual_block in virtual_blocks {
-        if !virtual_block.passes_target_if(&symbols)? {
-            continue;
-        }
-        let block_with_context = virtual_block.resolve(&symbols, source, line_changes)?;
+        let block_with_context = match virtual_block.resolve(&symbols, source, line_changes)? {
+            Some(block_with_context) => block_with_context,
+            None => continue,
+        };
         reject_duplicate_name(&block_with_context.block, file_path, names_seen)?;
         if scan_mode.keeps(&block_with_context) {
             blocks_with_context.push(block_with_context);

@@ -169,9 +169,12 @@ impl fmt::Display for ConfigEntry {
 }
 
 impl VirtualBlock {
-    /// Finds the part of the file this entry wraps, and returns the block for it.
+    /// Finds the part of the file this entry wraps, and returns the block for it. Returns `None`
+    /// when the file fails the block's `target-if`: a symbol it lists is missing. A symbol that
+    /// matches several elements still counts as present.
     ///
-    /// - `symbols` are all the symbols of the file. Only a block that wraps a symbol reads them.
+    /// - `symbols` are all the symbols of the file. Only a block that wraps a symbol, or that has
+    ///   `target-if`, reads them.
     /// - `source` is the text of the file, such as `package.json`.
     /// - `line_changes` are the diff's changes to that file.
     ///
@@ -185,7 +188,8 @@ impl VirtualBlock {
     /// - the file has no symbol with this path, or two of them;
     /// - the symbol is a TOML table written in several places, such as `[package]` and
     ///   `[package.metadata]`;
-    /// - the pattern matches no text, or more than once.
+    /// - the pattern matches no text, or more than once;
+    /// - a `target-if` symbol can't be read.
     ///
     /// The error shows the line of the entry in the config file.
     pub(crate) fn resolve(
@@ -193,7 +197,11 @@ impl VirtualBlock {
         symbols: &Symbols,
         source: &str,
         line_changes: &LineChanges,
-    ) -> anyhow::Result<BlockWithContext> {
+    ) -> anyhow::Result<Option<BlockWithContext>> {
+        // A file that fails `target-if` may lack the target, so the guard comes first.
+        if !self.passes_target_if(symbols)? {
+            return Ok(None);
+        }
         let lines = LineIndex::new(source);
         let (definition, content) = match &self.locator {
             Locator::Symbol(path) => self.symbol_definition(path, symbols, source, &lines)?,
@@ -215,7 +223,7 @@ impl VirtualBlock {
             .find('\n')
             .map_or(definition.end, |offset| definition.start + offset);
         let start_tag_position_range = definition_positions.start..lines.position(first_line_end);
-        Ok(BlockWithContext {
+        Ok(Some(BlockWithContext {
             block: Block {
                 attributes: self.attributes.clone(),
                 start_tag_position_range,
@@ -232,7 +240,7 @@ impl VirtualBlock {
             // The block's attributes are written in its entry in the config file, so the entry
             // plays the part of the start tag.
             is_start_tag_modified: self.is_entry_modified,
-        })
+        }))
     }
 
     /// Finds the symbol at `path` among `symbols`, the symbols of `source`, which `lines` indexes.
@@ -295,12 +303,11 @@ impl VirtualBlock {
     }
 
     /// Whether the file with `symbols` passes the block's `target-if`. A block without
-    /// `target-if` passes. A missing symbol fails it. A symbol that matches several elements
-    /// still counts as present.
+    /// `target-if` passes.
     ///
     /// # Errors
     /// Returns an error if a symbol's definition can't be read.
-    pub(crate) fn passes_target_if(&self, symbols: &Symbols) -> anyhow::Result<bool> {
+    fn passes_target_if(&self, symbols: &Symbols) -> anyhow::Result<bool> {
         let target_if = match &self.target_if {
             Some(target_if) => target_if,
             None => return Ok(true),
@@ -348,11 +355,12 @@ mod tests {
         source: &str,
         line_changes: &[LineChange],
     ) -> anyhow::Result<BlockWithContext> {
-        virtual_block(&format!("{file}#{path}"), &[])?.resolve(
+        let block = virtual_block(&format!("{file}#{path}"), &[])?.resolve(
             &symbols_of(file, source)?,
             source,
             &line_changes.iter().cloned().collect(),
-        )
+        )?;
+        Ok(block.expect("a block without target-if is always found"))
     }
 
     /// The symbols of `source`, the text of `file`.
@@ -380,9 +388,15 @@ mod tests {
         Ok(block)
     }
 
-    /// Whether `source`, the text of `file`, passes a `target-if` that lists `condition_symbols`.
-    fn passes(file: &str, source: &str, condition_symbols: &[&str]) -> anyhow::Result<bool> {
-        block_with_target_if(file, condition_symbols)?.passes_target_if(&symbols_of(file, source)?)
+    /// Whether `source`, the text of `file`, gets a block from a [`block_with_target_if`] that
+    /// lists `condition_symbols`.
+    fn gets_block(file: &str, source: &str, condition_symbols: &[&str]) -> anyhow::Result<bool> {
+        let block = block_with_target_if(file, condition_symbols)?.resolve(
+            &symbols_of(file, source)?,
+            source,
+            &LineChanges::default(),
+        )?;
+        Ok(block.is_some())
     }
 
     /// The block that a [`virtual_block`] in `notes.txt`, found by `locator`, declares in
@@ -394,11 +408,12 @@ mod tests {
     ) -> anyhow::Result<BlockWithContext> {
         let mut block = virtual_block("notes.txt", &[])?;
         block.locator = locator;
-        block.resolve(
+        let block = block.resolve(
             &Symbols::default(),
             source,
             &line_changes.iter().cloned().collect(),
-        )
+        )?;
+        Ok(block.expect("a block without target-if is always found"))
     }
 
     /// What a `target-pattern` of `pattern` wraps.
@@ -547,6 +562,7 @@ CREATE TABLE b (
     fn severity_attribute_resolve_returns_a_block_with_that_severity() -> anyhow::Result<()> {
         let block = virtual_block("notes.txt", &[("severity", "warning")])?
             .resolve(&Symbols::default(), "a\n", &LineChanges::default())?
+            .expect("a block without target-if is always found")
             .block;
 
         assert_eq!(block.severity, BlockSeverity::Warning);
@@ -735,33 +751,32 @@ MODELS = [
     }
 
     #[test]
-    fn target_if_with_present_symbols_passes_target_if_returns_true() -> anyhow::Result<()> {
+    fn target_if_with_present_symbols_resolve_returns_a_block() -> anyhow::Result<()> {
         let yaml = "flag: true\nextra: 1\n";
 
-        assert!(passes("a.yml", yaml, &["#/flag"])?);
-        assert!(passes("a.yml", yaml, &["#/flag", "#/extra"])?);
+        assert!(gets_block("a.yml", yaml, &["#/flag"])?);
+        assert!(gets_block("a.yml", yaml, &["#/flag", "#/extra"])?);
         Ok(())
     }
 
     #[test]
-    fn target_if_with_a_missing_symbol_passes_target_if_returns_false() -> anyhow::Result<()> {
+    fn target_if_with_a_missing_symbol_resolve_returns_no_block() -> anyhow::Result<()> {
         let yaml = "extra: 1\n";
 
-        assert!(!passes("a.yml", yaml, &["#/flag"])?);
-        assert!(!passes("a.yml", yaml, &["#/extra", "#/flag"])?);
+        assert!(!gets_block("a.yml", yaml, &["#/flag"])?);
+        assert!(!gets_block("a.yml", yaml, &["#/extra", "#/flag"])?);
         Ok(())
     }
 
     #[test]
-    fn target_if_with_ambiguous_symbol_or_filter_passes_target_if_returns_true()
-    -> anyhow::Result<()> {
+    fn target_if_with_ambiguous_symbol_or_filter_resolve_returns_a_block() -> anyhow::Result<()> {
         // Markdown lets a heading appear twice, so `/A` resolves to `AmbiguousSymbol`.
         let markdown = "# A\none\n# A\ntwo\n";
         match symbols_of("doc.md", markdown)?.resolve(&SymbolPath::parse("/A")?) {
             Err(ResolveError::AmbiguousSymbol { .. }) => {}
             other => panic!("expected AmbiguousSymbol, got {other:?}"),
         }
-        assert!(passes("doc.md", markdown, &["#/A"])?);
+        assert!(gets_block("doc.md", markdown, &["#/A"])?);
 
         // Two items with the same `name` make `~[name=a]` resolve to `AmbiguousFilter`.
         let yaml = "items:\n  - name: a\n  - name: a\n";
@@ -769,19 +784,19 @@ MODELS = [
             Err(ResolveError::AmbiguousFilter { .. }) => {}
             other => panic!("expected AmbiguousFilter, got {other:?}"),
         }
-        assert!(passes("a.yml", yaml, &["#/items/~[name=a]"])?);
+        assert!(gets_block("a.yml", yaml, &["#/items/~[name=a]"])?);
         Ok(())
     }
 
     #[test]
-    fn target_if_with_unreadable_symbol_passes_target_if_returns_error() -> anyhow::Result<()> {
+    fn target_if_with_unreadable_symbol_resolve_returns_error() -> anyhow::Result<()> {
         let symbols = Symbols::with_unreadable(
             Vec::new(),
             HashMap::from([(SymbolPath::parse("/flag")?, "cannot read".to_string())]),
         );
 
         let error = block_with_target_if("a.yml", &["#/flag"])?
-            .passes_target_if(&symbols)
+            .resolve(&symbols, "flag: true\n", &LineChanges::default())
             .unwrap_err();
 
         assert_eq!(
