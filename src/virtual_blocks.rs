@@ -80,9 +80,15 @@ impl TargetPattern {
         self.0.capture_names().any(|name| name == Some("value"))
     }
 
-    /// The byte ranges of every match of the pattern in `source`, in order.
+    /// The byte ranges of every match of the pattern in `source` that has at least one character,
+    /// in order.
     fn matches<'a>(&'a self, source: &'a str) -> impl Iterator<Item = Range<usize>> + 'a {
-        self.0.find_iter(source).map(|found| found.range())
+        // A pattern such as `x*` or `^$` matches no characters in every file. Such a match would
+        // let every file pass.
+        self.0
+            .find_iter(source)
+            .map(|found| found.range())
+            .filter(|range| !range.is_empty())
     }
 
     /// Finds the one place in `source` that the pattern matches. Returns the byte range of the
@@ -322,7 +328,7 @@ impl VirtualBlock {
     }
 
     /// The byte ranges in `source`, with `symbols`, of what the block's `target-if` checks: the
-    /// definition of each symbol, and each match of each pattern. Returns `None` when the file
+    /// definition of each symbol, and each match of each pattern that has at least one character. Returns `None` when the file
     /// fails `target-if`, and no ranges for a block without `target-if`. A symbol that matches
     /// several elements gives the range of each one.
     ///
@@ -346,22 +352,56 @@ impl VirtualBlock {
             }
         }
         for path in &target_if.symbols {
-            let matches = match symbols.resolve(path) {
-                Ok(symbol) => vec![symbol],
-                Err(ResolveError::AmbiguousSymbol { candidates }) => candidates,
-                Err(ResolveError::AmbiguousFilter { keys, .. }) => keys,
-                Err(ResolveError::NotFound { .. }) => return Ok(None),
-                Err(ResolveError::Unreadable { reason }) => {
-                    return Err(self.unresolved(anyhow!("{reason}")));
-                }
-            };
-            ranges.extend(
-                matches
-                    .iter()
-                    .flat_map(|symbol| symbol.def_byte_ranges.iter().cloned()),
-            );
+            match self.target_if_symbol_ranges(symbols, path)? {
+                Some(definitions) => ranges.extend(definitions),
+                None => return Ok(None),
+            }
         }
         Ok(Some(ranges))
+    }
+
+    /// The byte ranges of the definitions of the symbols at `path` among `symbols`, or `None` when
+    /// there are none. A path that several symbols have gives each of them. A filter that matches
+    /// several items, such as `~[name=a]` in `/items/~[name=a]/enabled`, gives the symbols at the
+    /// rest of the path under each of those items.
+    ///
+    /// # Errors
+    /// Returns an error if a symbol's definition can't be read.
+    fn target_if_symbol_ranges(
+        &self,
+        symbols: &Symbols,
+        path: &SymbolPath,
+    ) -> anyhow::Result<Option<Vec<Range<usize>>>> {
+        let found = match symbols.resolve(path) {
+            Ok(symbol) => vec![symbol],
+            Err(ResolveError::AmbiguousSymbol { candidates }) => candidates,
+            Err(ResolveError::AmbiguousFilter { keys, .. }) => {
+                // The filter stops the search, so the rest of the path is looked up under each
+                // item it matches. A key such as `/items/1/name` is right under its item.
+                let mut ranges = Vec::new();
+                for key in keys {
+                    let index = key.path.segments().len() - 2;
+                    let item_path = path
+                        .clone()
+                        .with_segment(index, key.path.segments()[index].clone());
+                    ranges.extend(
+                        self.target_if_symbol_ranges(symbols, &item_path)?
+                            .unwrap_or_default(),
+                    );
+                }
+                return Ok(Some(ranges).filter(|ranges| !ranges.is_empty()));
+            }
+            Err(ResolveError::NotFound { .. }) => return Ok(None),
+            Err(ResolveError::Unreadable { reason }) => {
+                return Err(self.unresolved(anyhow!("{reason}")));
+            }
+        };
+        Ok(Some(
+            found
+                .iter()
+                .flat_map(|symbol| symbol.def_byte_ranges.iter().cloned())
+                .collect(),
+        ))
     }
 
     /// The block's target, as the config file writes it: `file#/path`, or `file` when the block
@@ -810,13 +850,18 @@ MODELS = [
     -> anyhow::Result<()> {
         // `^` and `$` match at the ends of each line, so a pattern can match a line in the middle.
         let yaml = "name: a\ndriver: postgres\nport: 1\n";
-        let rows: [(&[&str], &[&str], bool); 8] = [
+        let rows: [(&[&str], &[&str], bool); 11] = [
             (&[], &["^driver: postgres$"], true),
             (&[], &["^driver: mysql$"], false),
             (&[], &["^name: a$", "^driver: postgres$"], true),
             (&[], &["^name: a$", "^driver: mysql$"], false),
             // A pattern that matches several times still passes.
             (&[], &["^[a-z]+:"], true),
+            // Only a match of at least one character counts. `^$` matches no character, at the
+            // end of the file.
+            (&[], &["r*"], true),
+            (&[], &["x*"], false),
+            (&[], &["^$"], false),
             // A file must pass both `symbols` and `patterns`.
             (&["#/name"], &["^driver: postgres$"], true),
             (&["#/name"], &["^driver: mysql$"], false),
@@ -850,6 +895,22 @@ MODELS = [
             other => panic!("expected AmbiguousFilter, got {other:?}"),
         }
         assert!(gets_block("a.yml", yaml, &["#/items/~[name=a]"], &[])?);
+        Ok(())
+    }
+
+    #[test]
+    fn target_if_with_a_filter_matching_several_items_resolve_looks_for_the_rest_in_each_item()
+    -> anyhow::Result<()> {
+        let path = "#/items/~[name=a]/enabled";
+        let one_item_enabled = "items:\n  - name: a\n  - name: a\n    enabled: true\n";
+        let no_item_enabled = "items:\n  - name: a\n  - name: a\n";
+        // `enabled` is under an item that the filter doesn't match.
+        let other_item_enabled =
+            "items:\n  - name: a\n  - name: a\n  - name: b\n    enabled: true\n";
+
+        assert!(gets_block("a.yml", one_item_enabled, &[path], &[])?);
+        assert!(!gets_block("a.yml", no_item_enabled, &[path], &[])?);
+        assert!(!gets_block("a.yml", other_item_enabled, &[path], &[])?);
         Ok(())
     }
 
@@ -898,6 +959,8 @@ MODELS = [
         let markdown = "# A\none\n# A\ntwo\n# B\nthree\n";
         // `~[name=a]` matches both items.
         let items = "items:\n  - name: a\n  - name: a\nvalue: 1\n";
+        // Only the second item has `enabled`.
+        let one_item_enabled = "items:\n  - name: a\n  - name: a\n    enabled: true\nvalue: 1\n";
         // `[package]` is written in two places.
         let toml = "[package]\nname = \"a\"\n\n[other]\nx = 1\n\n[package.metadata]\ny = 2\n";
 
@@ -915,6 +978,21 @@ MODELS = [
             ("a.yml#/value", "#/flag", yaml, 3, (false, true)),
             ("doc.md#/B", "#/A", markdown, 3, (true, false)),
             ("a.yml#/value", "#/items/~[name=a]", items, 3, (true, false)),
+            (
+                "a.yml#/value",
+                "#/items/~[name=a]/enabled",
+                one_item_enabled,
+                4,
+                (true, false),
+            ),
+            // The first item has no `enabled`, so it doesn't decide whether the file passes.
+            (
+                "a.yml#/value",
+                "#/items/~[name=a]/enabled",
+                one_item_enabled,
+                2,
+                (false, false),
+            ),
             ("Cargo.toml#/other/x", "#/package", toml, 7, (true, false)),
         ] {
             let block = block_for(target, target_if_symbol, source, line_changed)?;

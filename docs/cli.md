@@ -579,9 +579,11 @@ same-as = 'go.mod:go-version'
 
   - With `symbols`, or with a symbol as `target`, each file the glob matches must use a language with
     [symbols](symbols.md) and have no syntax error, even a file that fails `patterns`.
-  - A symbol counts as present even when it matches more than one item, such as duplicate headings in Markdown.
-  - A pattern runs on the whole file, and its `^` and `$` match at the ends of each line, as in `target-pattern`. It
-    can't have a `value` group, because `target-if` reads no text.
+  - A symbol counts as present even when it matches more than one item, such as duplicate headings in Markdown. When
+    a filter such as `~[name=a]` matches several items, the rest of the path must be under one of them.
+  - A pattern runs on the whole file, and its `^` and `$` match at the ends of each line, as in `target-pattern`. Only
+    a match of at least one character counts, so `x*` or `^$` never passes. A pattern can't have a `value` group,
+    because `target-if` reads no text.
   - When a file passes, its `target` must still resolve. If not, the run stops.
   - A diff that touches a listed symbol, or the text a pattern matches, counts as a change to the entry. So
     `--diff --only-changed` checks the block, and `affects` does not fire, since the content did not change.
