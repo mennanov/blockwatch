@@ -41,29 +41,6 @@ pub(crate) struct TargetIf {
     pub(crate) symbols: Vec<SymbolPath>,
 }
 
-impl TargetIf {
-    /// Whether a file with `symbols` passes this condition.
-    ///
-    /// A missing symbol means the file does not pass, and returns `Ok(false)`. A symbol that
-    /// matches several elements still counts as present.
-    ///
-    /// # Errors
-    /// Returns an error if resolving a symbol fails because its definition can't be read.
-    pub(crate) fn covers(&self, symbols: &Symbols) -> anyhow::Result<bool> {
-        for path in &self.symbols {
-            match symbols.resolve(path) {
-                Ok(_)
-                | Err(
-                    ResolveError::AmbiguousSymbol { .. } | ResolveError::AmbiguousFilter { .. },
-                ) => {}
-                Err(ResolveError::NotFound { .. }) => return Ok(false),
-                Err(ResolveError::Unreadable { reason }) => return Err(anyhow!("{reason}")),
-            }
-        }
-        Ok(true)
-    }
-}
-
 /// How to find a [`VirtualBlock`] in its file.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Locator {
@@ -167,6 +144,9 @@ pub(crate) struct ConfigEntry {
     pub(crate) file: PathBuf,
     /// The line of the entry's `[[block]]` header.
     pub(crate) line: usize,
+    /// The entry's position in the config file's `block` array, starting at 0. Inline tables can
+    /// put two entries on one line, so only this tells them apart.
+    pub(crate) index: usize,
 }
 
 impl ConfigEntry {
@@ -314,6 +294,32 @@ impl VirtualBlock {
             .context(self.entry.error_context())
     }
 
+    /// Whether the file with `symbols` passes the block's `target-if`. A block without
+    /// `target-if` passes. A missing symbol fails it. A symbol that matches several elements
+    /// still counts as present.
+    ///
+    /// # Errors
+    /// Returns an error if a symbol's definition can't be read.
+    pub(crate) fn passes_target_if(&self, symbols: &Symbols) -> anyhow::Result<bool> {
+        let target_if = match &self.target_if {
+            Some(target_if) => target_if,
+            None => return Ok(true),
+        };
+        for path in &target_if.symbols {
+            match symbols.resolve(path) {
+                Ok(_)
+                | Err(
+                    ResolveError::AmbiguousSymbol { .. } | ResolveError::AmbiguousFilter { .. },
+                ) => {}
+                Err(ResolveError::NotFound { .. }) => return Ok(false),
+                Err(ResolveError::Unreadable { reason }) => {
+                    return Err(self.unresolved(anyhow!("{reason}")));
+                }
+            }
+        }
+        Ok(true)
+    }
+
     /// The block's target, as the config file writes it: `file#/path`, or `file` when the block
     /// wraps a pattern or the whole file.
     pub(crate) fn target(&self) -> String {
@@ -342,17 +348,41 @@ mod tests {
         source: &str,
         line_changes: &[LineChange],
     ) -> anyhow::Result<BlockWithContext> {
-        let symbols = LanguageParsers::new()
+        virtual_block(&format!("{file}#{path}"), &[])?.resolve(
+            &symbols_of(file, source)?,
+            source,
+            &line_changes.iter().cloned().collect(),
+        )
+    }
+
+    /// The symbols of `source`, the text of `file`.
+    fn symbols_of(file: &str, source: &str) -> anyhow::Result<Symbols> {
+        LanguageParsers::new()
             .parser_for(Path::new(file))
             .expect("the file has a parser")
             .lock()
             .expect("a thread panicked while it held the parser")
-            .parse_symbols(source)?;
-        virtual_block(&format!("{file}#{path}"), &[])?.resolve(
-            &symbols,
-            source,
-            &line_changes.iter().cloned().collect(),
-        )
+            .parse_symbols(source)
+    }
+
+    /// A [`virtual_block`] around `file` whose `target-if` lists `condition_symbols`.
+    fn block_with_target_if(
+        file: &str,
+        condition_symbols: &[&str],
+    ) -> anyhow::Result<VirtualBlock> {
+        let mut block = virtual_block(file, &[])?;
+        block.target_if = Some(TargetIf {
+            symbols: condition_symbols
+                .iter()
+                .map(|path| SymbolPath::parse(path))
+                .collect::<anyhow::Result<_>>()?,
+        });
+        Ok(block)
+    }
+
+    /// Whether `source`, the text of `file`, passes a `target-if` that lists `condition_symbols`.
+    fn passes(file: &str, source: &str, condition_symbols: &[&str]) -> anyhow::Result<bool> {
+        block_with_target_if(file, condition_symbols)?.passes_target_if(&symbols_of(file, source)?)
     }
 
     /// The block that a [`virtual_block`] in `notes.txt`, found by `locator`, declares in
@@ -705,100 +735,60 @@ MODELS = [
     }
 
     #[test]
-    fn target_if_with_present_symbols_covers_returns_true() -> anyhow::Result<()> {
+    fn target_if_with_present_symbols_passes_target_if_returns_true() -> anyhow::Result<()> {
         let yaml = "flag: true\nextra: 1\n";
-        let symbols = LanguageParsers::new()
-            .parser_for(Path::new("a.yml"))
-            .expect("YAML has a parser")
-            .lock()
-            .expect("a thread panicked while it held the parser")
-            .parse_symbols(yaml)?;
 
-        let single = TargetIf {
-            symbols: vec![SymbolPath::parse("/flag")?],
-        };
-        let multiple = TargetIf {
-            symbols: vec![SymbolPath::parse("/flag")?, SymbolPath::parse("/extra")?],
-        };
-
-        assert!(single.covers(&symbols)?);
-        assert!(multiple.covers(&symbols)?);
+        assert!(passes("a.yml", yaml, &["#/flag"])?);
+        assert!(passes("a.yml", yaml, &["#/flag", "#/extra"])?);
         Ok(())
     }
 
     #[test]
-    fn target_if_with_a_missing_symbol_covers_returns_false() -> anyhow::Result<()> {
+    fn target_if_with_a_missing_symbol_passes_target_if_returns_false() -> anyhow::Result<()> {
         let yaml = "extra: 1\n";
-        let symbols = LanguageParsers::new()
-            .parser_for(Path::new("a.yml"))
-            .expect("YAML has a parser")
-            .lock()
-            .expect("a thread panicked while it held the parser")
-            .parse_symbols(yaml)?;
 
-        let missing = TargetIf {
-            symbols: vec![SymbolPath::parse("/flag")?],
-        };
-        let one_missing = TargetIf {
-            symbols: vec![SymbolPath::parse("/extra")?, SymbolPath::parse("/flag")?],
-        };
-
-        assert!(!missing.covers(&symbols)?);
-        assert!(!one_missing.covers(&symbols)?);
+        assert!(!passes("a.yml", yaml, &["#/flag"])?);
+        assert!(!passes("a.yml", yaml, &["#/extra", "#/flag"])?);
         Ok(())
     }
 
     #[test]
-    fn target_if_with_ambiguous_symbol_or_filter_covers_returns_true() -> anyhow::Result<()> {
+    fn target_if_with_ambiguous_symbol_or_filter_passes_target_if_returns_true()
+    -> anyhow::Result<()> {
         // Markdown lets a heading appear twice, so `/A` resolves to `AmbiguousSymbol`.
-        let md_symbols = LanguageParsers::new()
-            .parser_for(Path::new("doc.md"))
-            .expect("Markdown has a parser")
-            .lock()
-            .expect("a thread panicked while it held the parser")
-            .parse_symbols("# A\none\n# A\ntwo\n")?;
-        let ambiguous_symbol_path = SymbolPath::parse("/A")?;
-        match md_symbols.resolve(&ambiguous_symbol_path) {
+        let markdown = "# A\none\n# A\ntwo\n";
+        match symbols_of("doc.md", markdown)?.resolve(&SymbolPath::parse("/A")?) {
             Err(ResolveError::AmbiguousSymbol { .. }) => {}
             other => panic!("expected AmbiguousSymbol, got {other:?}"),
         }
-        let ambiguous_symbol = TargetIf {
-            symbols: vec![ambiguous_symbol_path],
-        };
-        assert!(ambiguous_symbol.covers(&md_symbols)?);
+        assert!(passes("doc.md", markdown, &["#/A"])?);
 
         // Two items with the same `name` make `~[name=a]` resolve to `AmbiguousFilter`.
-        let yaml_symbols = LanguageParsers::new()
-            .parser_for(Path::new("a.yml"))
-            .expect("YAML has a parser")
-            .lock()
-            .expect("a thread panicked while it held the parser")
-            .parse_symbols("items:\n  - name: a\n  - name: a\n")?;
-        let ambiguous_filter_path = SymbolPath::parse("/items/~[name=a]")?;
-        match yaml_symbols.resolve(&ambiguous_filter_path) {
+        let yaml = "items:\n  - name: a\n  - name: a\n";
+        match symbols_of("a.yml", yaml)?.resolve(&SymbolPath::parse("/items/~[name=a]")?) {
             Err(ResolveError::AmbiguousFilter { .. }) => {}
             other => panic!("expected AmbiguousFilter, got {other:?}"),
         }
-        let ambiguous_filter = TargetIf {
-            symbols: vec![ambiguous_filter_path],
-        };
-        assert!(ambiguous_filter.covers(&yaml_symbols)?);
+        assert!(passes("a.yml", yaml, &["#/items/~[name=a]"])?);
         Ok(())
     }
 
     #[test]
-    fn target_if_with_unreadable_symbol_covers_returns_error() -> anyhow::Result<()> {
-        let path = SymbolPath::parse("/flag")?;
+    fn target_if_with_unreadable_symbol_passes_target_if_returns_error() -> anyhow::Result<()> {
         let symbols = Symbols::with_unreadable(
             Vec::new(),
-            HashMap::from([(path.clone(), "cannot read".to_string())]),
+            HashMap::from([(SymbolPath::parse("/flag")?, "cannot read".to_string())]),
         );
-        let condition = TargetIf {
-            symbols: vec![path],
-        };
 
-        let error = condition.covers(&symbols).unwrap_err();
-        assert!(error.to_string().contains("cannot read"), "{error}");
+        let error = block_with_target_if("a.yml", &["#/flag"])?
+            .passes_target_if(&symbols)
+            .unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "invalid block at line 7 of \"blockwatch.toml\": target a.yml does not resolve: \
+             cannot read"
+        );
         Ok(())
     }
 }

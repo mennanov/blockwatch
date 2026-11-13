@@ -567,9 +567,10 @@ same-as = 'go.mod:go-version'
   - Each file the glob matches must use a language with [symbols](symbols.md) and have no syntax error.
   - A symbol counts as present even when it matches more than one item, such as duplicate headings in Markdown.
   - When a file passes, its `target` must still resolve. If not, the run stops.
-  - If no file the glob matches passes `target-if`, a full run stops. A run limited by path arguments, `--ignore`,
-    `explain`, or `--diff --only-changed` allows zero matches, unless `--diff --only-changed` also changed that
-    `[[block]]` entry.
+  - If no file the glob matches passes `target-if`, the run stops. So a typo in a symbol can't turn the rule off.
+    Runs that don't read every matched file skip this check:
+    - runs with path arguments, `--ignore` or `explain`;
+    - `--diff --only-changed`, unless the diff changes the `[[block]]` entry.
 
 ## Suppressing a Violation
 

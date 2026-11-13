@@ -211,6 +211,7 @@ fn virtual_blocks(
             let entry = ConfigEntry {
                 file: path.to_path_buf(),
                 line: lines.position(block_entry.span().start).line,
+                index,
             };
             let context = entry.error_context();
             let is_entry_modified = is_entry_modified(text, &lines, &symbols, index, line_changes)?;
@@ -276,7 +277,7 @@ fn is_entry_modified(
 }
 
 /// The virtual blocks that `block_entry`, written as `entry` of the config file, declares: one in
-/// each file of [`target_files`], in that order. `is_entry_modified` tells whether the diff
+/// each file of [`TargetFile::files`], in that order. `is_entry_modified` tells whether the diff
 /// touches the entry.
 ///
 /// # Errors
@@ -297,13 +298,12 @@ fn entry_blocks(
     file_system: &impl FileSystem,
 ) -> anyhow::Result<Vec<VirtualBlock>> {
     let (file, locator) = parse_target(&block_entry.target, block_entry.target_pattern)?;
-    let existing_file = file_system.repo_path(file.as_path());
-    let is_glob = existing_file.is_none() && file.as_str().contains(GLOB_CHARACTERS);
-    let target_if = parse_target_if(block_entry.target_if, is_glob)?;
+    let target_file = TargetFile::new(file, file_system);
+    let target_if = parse_target_if(block_entry.target_if, &target_file)?;
     let attributes = attributes_as_text(block_entry.attributes)?;
     validate_attributes(&attributes)?;
     let severity = BlockSeverity::from_attributes(&attributes)?;
-    let files = target_files(file, existing_file, is_glob, file_system)?;
+    let files = target_file.files(file_system)?;
     if files.is_empty() {
         // Without this error, a typo in the glob would turn the rules off without a word.
         return Err(anyhow!("no file matches the glob")
@@ -326,14 +326,20 @@ fn entry_blocks(
 /// Validates and turns a `target-if` table into a [`TargetIf`], when present.
 ///
 /// # Errors
-/// Returns an error if `is_glob` is false, the table has no keys, `symbols` is empty, or a
-/// symbol path is not written like `#/flag`.
-fn parse_target_if(raw: Option<RawTargetIf>, is_glob: bool) -> anyhow::Result<Option<TargetIf>> {
+/// Returns an error if `target_file` is not a glob, the table has no keys, `symbols` is empty, or
+/// a symbol path is not written like `#/flag`.
+fn parse_target_if(
+    raw: Option<RawTargetIf>,
+    target_file: &TargetFile,
+) -> anyhow::Result<Option<TargetIf>> {
     let Some(raw) = raw else {
         return Ok(None);
     };
-    if !is_glob {
-        bail!("`target-if` requires a glob target");
+    match target_file {
+        TargetFile::Glob(_) => {}
+        TargetFile::Existing(_) | TargetFile::Missing(_) => {
+            bail!("`target-if` requires a glob target");
+        }
     }
     let Some(symbols) = raw.symbols else {
         bail!("`target-if` must not be empty");
@@ -348,45 +354,54 @@ fn parse_target_if(raw: Option<RawTargetIf>, is_glob: bool) -> anyhow::Result<Op
     Ok(Some(TargetIf { symbols }))
 }
 
-/// Parses one entry of `target-if.symbols`, which must name a symbol without a file (`#/path`).
+/// Parses one entry of `target-if.symbols`, a symbol path written like `#/flag`.
 ///
 /// # Errors
-/// Returns an error if `raw` is malformed or names a file or block.
+/// Returns an error if `raw` does not start with `#`, or is not a valid symbol path.
 fn parse_target_if_symbol(raw: &str) -> anyhow::Result<SymbolPath> {
-    match TargetReference::parse(raw)? {
-        TargetReference::Symbol { file: None, path } => Ok(path),
-        TargetReference::Symbol { file: Some(_), .. }
-        | TargetReference::File(_)
-        | TargetReference::Block { .. } => {
-            bail!("invalid `target-if.symbols` entry `{raw}`: expected a symbol such as `#/flag`")
-        }
+    if !raw.starts_with('#') {
+        bail!("invalid `target-if.symbols` entry `{raw}`: expected a symbol such as `#/flag`");
     }
+    SymbolPath::parse(raw).with_context(|| format!("invalid `target-if.symbols` entry `{raw}`"))
 }
 
-/// The files that `file`, the file of a target, refers to:
-///
-/// - When `existing_file` is `Some`, it is that one file (with a symlink turned into the file it
-///   points at), even when `file` has a glob character, such as `app/[id]/meta.json`.
-/// - When `is_glob` is true, every file that matches `file`, sorted. It can match none.
-/// - Otherwise, `file` itself as one path.
-///
-/// # Errors
-/// Returns an error if the glob is not valid, or if the repository can't be walked.
-fn target_files(
-    file: RepoPath,
-    existing_file: Option<RepoPath>,
-    is_glob: bool,
-    file_system: &impl FileSystem,
-) -> anyhow::Result<Vec<RepoPath>> {
-    // The walk skips a symlink, so a block on one would never be checked.
-    if let Some(file) = existing_file {
-        return Ok(vec![file]);
+/// What the file of a target refers to.
+enum TargetFile {
+    /// A file that exists. A symlink is turned into the file it points at.
+    Existing(RepoPath),
+    /// A glob, such as `plugins/*/package.json`.
+    Glob(RepoPath),
+    /// A path that has no glob character and no file.
+    Missing(RepoPath),
+}
+
+impl TargetFile {
+    /// Finds what `file`, the file of a target, refers to. An existing file comes first, even when
+    /// its path has a glob character, such as `app/[id]/meta.json`.
+    fn new(file: RepoPath, file_system: &impl FileSystem) -> Self {
+        // The walk skips a symlink, so a block on one would never be checked.
+        if let Some(existing) = file_system.repo_path(file.as_path()) {
+            Self::Existing(existing)
+        } else if file.as_str().contains(GLOB_CHARACTERS) {
+            Self::Glob(file)
+        } else {
+            Self::Missing(file)
+        }
     }
-    if is_glob {
-        return PathsGlob::new(file.as_str())?.matching_files(file_system);
+
+    /// The files it refers to. A glob gives every file it matches, sorted, and can give none. The
+    /// other variants give their one path.
+    ///
+    /// # Errors
+    /// Returns an error if the glob is not valid, or if the repository can't be walked.
+    fn files(self, file_system: &impl FileSystem) -> anyhow::Result<Vec<RepoPath>> {
+        match self {
+            Self::Existing(file) => Ok(vec![file]),
+            Self::Glob(glob) => PathsGlob::new(glob.as_str())?.matching_files(file_system),
+            // The error about the missing file shows the path from the config.
+            Self::Missing(file) => Ok(vec![file]),
+        }
     }
-    // The error about the missing file shows the path from the config.
-    Ok(vec![file])
 }
 
 /// Returns the file that `target` refers to, and how to find the block in it: the symbol of
@@ -522,6 +537,7 @@ target = 'a.yaml#/b'
                     entry: ConfigEntry {
                         file: PathBuf::from(DEFAULT_FILE),
                         line: 3,
+                        index: 0,
                     },
                     is_entry_modified: false,
                     severity: BlockSeverity::Error,
@@ -534,6 +550,7 @@ target = 'a.yaml#/b'
                     entry: ConfigEntry {
                         file: PathBuf::from(DEFAULT_FILE),
                         line: 10,
+                        index: 1,
                     },
                     is_entry_modified: false,
                     severity: BlockSeverity::Error,
@@ -598,6 +615,7 @@ name = 'version'
                 entry: ConfigEntry {
                     file: PathBuf::from(DEFAULT_FILE),
                     line: 1,
+                    index: 0,
                 },
                 is_entry_modified: false,
                 severity: BlockSeverity::Error,
@@ -1100,7 +1118,19 @@ symbols = ['#/flag']
 
     #[test]
     fn target_if_symbol_without_hash_slash_prefix_is_rejected() {
-        for item in ["a.yml#/x", "a.yml", "a.yml:name", "/x", "#", ""] {
+        let expected_a_symbol = "expected a symbol such as `#/flag`";
+        for (item, reason) in [
+            ("a.yml#/x", expected_a_symbol),
+            ("a.yml", expected_a_symbol),
+            ("a.yml:name", expected_a_symbol),
+            ("/x", expected_a_symbol),
+            ("", expected_a_symbol),
+            (
+                "#",
+                "symbol path cannot be empty; it must start with '/' (e.g. \"/\")",
+            ),
+            ("#x", "symbol path must start with '/' (e.g. \"/x\")"),
+        ] {
             let text = format!(
                 r"[[block]]
 target = '*.yml#/x'
@@ -1108,10 +1138,12 @@ target-if = {{ symbols = ['{item}'] }}
 "
             );
 
-            let error = read_error(&text);
-            assert!(
-                error.starts_with("invalid block at line 1 of \"blockwatch.toml\": "),
-                "{item:?}: {error}"
+            assert_eq!(
+                read_error(&text),
+                format!(
+                    "invalid block at line 1 of \"blockwatch.toml\": invalid `target-if.symbols` \
+                     entry `{item}`: {reason}"
+                ),
             );
         }
     }

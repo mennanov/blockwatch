@@ -268,6 +268,7 @@ mod test_utils {
             entry: ConfigEntry {
                 file: PathBuf::from("blockwatch.toml"),
                 line: 7,
+                index: 0,
             },
             is_entry_modified: false,
             target_if: None,

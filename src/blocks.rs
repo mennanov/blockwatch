@@ -695,6 +695,7 @@ mod block_listing_tests {
             Declaration::ConfigEntry(ConfigEntry {
                 file: PathBuf::from("blockwatch.toml"),
                 line: 7,
+                index: 0,
             }),
         );
         let mut listing = BlockListing::from(&block);

@@ -1,6 +1,6 @@
 //! The repository scan that turns source files into the blocks to validate.
 
-use crate::blocks::{Block, BlockWithContext, FileBlocks};
+use crate::blocks::{Block, BlockWithContext, Declaration, FileBlocks};
 use crate::diff_parser::{DiffChanges, LineChanges};
 use crate::fs::{FileSystem, PathFilter};
 use crate::language_parsers::{LanguageParsers, SharedLanguageParser};
@@ -90,9 +90,6 @@ pub(crate) struct Scan<'a, F: FileSystem> {
     /// whose file is missing, and a hash map has no stable order.
     virtual_blocks: &'a [VirtualBlock],
     virtual_blocks_by_file: HashMap<&'a RepoPath, Vec<&'a VirtualBlock>>,
-    /// Fails the scan when a `[[block]]` entry with `target-if` covers no file, so a condition
-    /// that matches nothing is caught. Disabled when a scan only checks part of the repository.
-    require_covered_targets: bool,
 }
 
 impl<'a, F: FileSystem> Scan<'a, F> {
@@ -117,15 +114,7 @@ impl<'a, F: FileSystem> Scan<'a, F> {
             parsers,
             virtual_blocks,
             virtual_blocks_by_file,
-            require_covered_targets: true,
         }
-    }
-
-    /// Sets whether [`Self::parse_blocks`] fails if a `[[block]]` entry with `target-if` covers no
-    /// file in the run.
-    pub(crate) fn require_covered_targets(mut self, require: bool) -> Self {
-        self.require_covered_targets = require;
-        self
     }
 
     /// Parses source files into the blocks a run should consider, together with the counts of
@@ -138,20 +127,18 @@ impl<'a, F: FileSystem> Scan<'a, F> {
     ///
     /// Fails if `line_changes_by_file` is invalid, e.g. it refers to files that do not exist. Also
     /// fails if a virtual block's target does not resolve in a file that is read, or if its file
-    /// passes the filters but does not exist. When `require_covered_targets` is true, fails if a
-    /// `target-if` entry covers no scanned file; in [`ScanMode::OnlyChanged`], that check and the
-    /// missing-file check only apply to an entry the diff modified.
+    /// passes the filters but does not exist. In [`ScanMode::OnlyChanged`], only a virtual block
+    /// whose entry the diff modified fails for a missing file.
     pub(crate) fn parse_blocks(
         &self,
         line_changes_by_file: &DiffChanges,
         scan_mode: ScanMode,
     ) -> anyhow::Result<ParsedBlocks> {
         self.ensure_diff_has_valid_paths(line_changes_by_file)?;
-        let mut covered_entries = HashSet::new();
-        let parsed = match scan_mode {
+        match scan_mode {
             ScanMode::All => {
                 self.ensure_target_files_exist(self.virtual_blocks.iter())?;
-                self.parse_all_files(line_changes_by_file, &mut covered_entries)?
+                self.parse_all_files(line_changes_by_file)
             }
             ScanMode::OnlyChanged => {
                 self.ensure_target_files_exist(
@@ -159,21 +146,36 @@ impl<'a, F: FileSystem> Scan<'a, F> {
                         .iter()
                         .filter(|virtual_block| virtual_block.is_entry_modified),
                 )?;
-                self.parse_changed_files(line_changes_by_file, &mut covered_entries)?
+                self.parse_changed_files(line_changes_by_file)
             }
-        };
-        if self.require_covered_targets {
-            self.ensure_covered_targets(&covered_entries, scan_mode)?;
         }
-        Ok(parsed)
     }
 
-    /// Fails if any `[[block]]` entry with `target-if` covered no scanned file in this run.
-    fn ensure_covered_targets(
+    /// Fails if a `[[block]]` entry with `target-if` has no block in `parsed`, the result of
+    /// [`Self::parse_blocks`] in `scan_mode`. That means no file its glob matches passed
+    /// `target-if`. In [`ScanMode::OnlyChanged`], only an entry the diff modified is checked.
+    ///
+    /// The result is only right when the path filter skips no file other than those the config's
+    /// `ignore` skips.
+    pub(crate) fn ensure_covered_targets(
         &self,
-        covered_entries: &HashSet<&'a ConfigEntry>,
+        parsed: &ParsedBlocks,
         scan_mode: ScanMode,
     ) -> anyhow::Result<()> {
+        // A file that passes `target-if` always gives a block, or the scan fails because the
+        // target does not resolve. In `OnlyChanged`, an entry checked below was modified, so its
+        // blocks count as changed and the scan keeps them.
+        let covered_entries: HashSet<&ConfigEntry> = parsed
+            .blocks
+            .values()
+            .flat_map(|file_blocks| &file_blocks.blocks_with_context)
+            .filter_map(
+                |block_with_context| match &block_with_context.block.declaration {
+                    Declaration::ConfigEntry(entry) => Some(entry),
+                    Declaration::Tags => None,
+                },
+            )
+            .collect();
         for virtual_block in self.virtual_blocks {
             if virtual_block.target_if.is_none() {
                 continue;
@@ -259,11 +261,7 @@ impl<'a, F: FileSystem> Scan<'a, F> {
     /// Parses every block in every file of the repository, marking the ones the line changes
     /// touched. Line changes for files the walk did not reach contribute nothing to the result;
     /// the walk defines the scope, and the diff only says which of the blocks it found had changed.
-    fn parse_all_files(
-        &self,
-        line_changes_by_file: &DiffChanges,
-        covered_entries: &mut HashSet<&'a ConfigEntry>,
-    ) -> anyhow::Result<ParsedBlocks> {
+    fn parse_all_files(&self, line_changes_by_file: &DiffChanges) -> anyhow::Result<ParsedBlocks> {
         let mut parsed = ParsedBlocks::default();
         for repo_path_result in self.file_system.walk(None) {
             let file_path =
@@ -271,7 +269,7 @@ impl<'a, F: FileSystem> Scan<'a, F> {
             if !self.path_filter.is_selected(file_path.as_path()) {
                 continue;
             }
-            let (file_blocks, covered) = parse_file_with_coverage(
+            let file_blocks = parse_file(
                 self.file_system,
                 file_path.as_path(),
                 line_changes_by_file.for_file(&file_path),
@@ -279,7 +277,6 @@ impl<'a, F: FileSystem> Scan<'a, F> {
                 self.parsers,
                 self.virtual_blocks_of(&file_path),
             )?;
-            covered_entries.extend(covered);
             parsed.record(file_path, file_blocks);
         }
         Ok(parsed)
@@ -290,7 +287,6 @@ impl<'a, F: FileSystem> Scan<'a, F> {
     fn parse_changed_files(
         &self,
         line_changes_by_file: &DiffChanges,
-        covered_entries: &mut HashSet<&'a ConfigEntry>,
     ) -> anyhow::Result<ParsedBlocks> {
         // A changed entry in the config file changes the rules of its block, as a changed tag
         // does. So the block is checked even when the diff does not touch its file.
@@ -309,7 +305,7 @@ impl<'a, F: FileSystem> Scan<'a, F> {
             if !self.path_filter.is_selected(file_path.as_path()) {
                 continue;
             }
-            let (file_blocks, covered) = parse_file_with_coverage(
+            let file_blocks = parse_file(
                 self.file_system,
                 file_path.as_path(),
                 line_changes_by_file.for_file(file_path),
@@ -327,7 +323,6 @@ impl<'a, F: FileSystem> Scan<'a, F> {
                     error.context(invalid_diff_target_message(file_path))
                 }
             })?;
-            covered_entries.extend(covered);
             parsed.record(file_path.clone(), file_blocks);
         }
         Ok(parsed)
@@ -363,33 +358,9 @@ pub(crate) fn parse_file(
     parsers: &LanguageParsers,
     virtual_blocks: &[&VirtualBlock],
 ) -> anyhow::Result<Option<FileBlocks>> {
-    Ok(parse_file_with_coverage(
-        file_system,
-        file_path,
-        line_changes,
-        scan_mode,
-        parsers,
-        virtual_blocks,
-    )?
-    .0)
-}
-
-/// Parses the blocks of one file and also returns every virtual block entry whose `target-if`
-/// condition passed on the file.
-///
-/// # Errors
-/// Same as [`parse_file`].
-fn parse_file_with_coverage<'v>(
-    file_system: &impl FileSystem,
-    file_path: &Path,
-    line_changes: &LineChanges,
-    scan_mode: ScanMode,
-    parsers: &LanguageParsers,
-    virtual_blocks: &[&'v VirtualBlock],
-) -> anyhow::Result<(Option<FileBlocks>, Vec<&'v ConfigEntry>)> {
     let parser = parsers.parser_for(file_path);
     if parser.is_none() && virtual_blocks.is_empty() {
-        return Ok((None, Vec::new()));
+        return Ok(None);
     }
     let source_code = match String::from_utf8(file_system.read(file_path)?) {
         Ok(source_code) => source_code,
@@ -405,24 +376,21 @@ fn parse_file_with_coverage<'v>(
         }
         // No block refers into a file without blocks, so its text is not kept.
         Err(_) => {
-            return Ok((
-                Some(FileBlocks {
-                    file_content: String::new(),
-                    blocks_with_context: Vec::new(),
-                }),
-                Vec::new(),
-            ));
+            return Ok(Some(FileBlocks {
+                file_content: String::new(),
+                blocks_with_context: Vec::new(),
+            }));
         }
     };
-    let (file_blocks, covered_entries) = parse_source(
+    parse_source(
         parser,
         file_path,
         source_code,
         line_changes,
         scan_mode,
         virtual_blocks,
-    )?;
-    Ok((Some(file_blocks), covered_entries))
+    )
+    .map(Some)
 }
 
 /// Whether a file that is not valid UTF-8 has blocks: one of its `virtual_blocks`, or a tag in
@@ -453,20 +421,19 @@ fn non_utf8_file_has_blocks(
 
 /// Parses the blocks of `source_code`, the text of `file_path`: its tags and its
 /// `virtual_blocks`. Marks the ones `line_changes` touched and keeps those `scan_mode` keeps, in
-/// source order, and also returns each `target-if` entry that passed on `source_code`. Without a
-/// `parser`, the file has no tags.
+/// source order. Without a `parser`, the file has no tags.
 ///
 /// # Errors
 /// Returns an error if a tag is malformed or a name is used twice, or if a virtual block's target
 /// does not resolve in the file.
-fn parse_source<'v>(
+fn parse_source(
     parser: Option<&SharedLanguageParser>,
     file_path: &Path,
     source_code: String,
     line_changes: &LineChanges,
     scan_mode: ScanMode,
-    virtual_blocks: &[&'v VirtualBlock],
-) -> anyhow::Result<(FileBlocks, Vec<&'v ConfigEntry>)> {
+    virtual_blocks: &[&VirtualBlock],
+) -> anyhow::Result<FileBlocks> {
     // Tracks where each name in this file is first declared, to reject duplicate blocks.
     let mut names_seen = HashMap::new();
     let mut blocks_with_context = match parser {
@@ -481,7 +448,7 @@ fn parse_source<'v>(
         // Tags are found in the file's comments, and only a parser knows how a comment is written.
         None => Vec::new(),
     };
-    let (virtual_blocks, covered_entries) = virtual_blocks_in_file(
+    blocks_with_context.extend(virtual_blocks_in_file(
         virtual_blocks,
         parser,
         file_path,
@@ -489,17 +456,13 @@ fn parse_source<'v>(
         line_changes,
         scan_mode,
         &mut names_seen,
-    )?;
-    blocks_with_context.extend(virtual_blocks);
+    )?);
     // The tags come in source order. The virtual blocks join them there.
     blocks_with_context.sort_by(|a, b| a.block.cmp(&b.block));
-    Ok((
-        FileBlocks {
-            file_content: source_code,
-            blocks_with_context,
-        },
-        covered_entries,
-    ))
+    Ok(FileBlocks {
+        file_content: source_code,
+        blocks_with_context,
+    })
 }
 
 /// The blocks that tags declare in `source`, the text of `file_path`, with what `line_changes`
@@ -550,23 +513,23 @@ fn tag_blocks(
 }
 
 /// The blocks that `virtual_blocks` declare in `source`, the text of `file_path`, with what
-/// `line_changes` touched in each, and each `[[block]]` entry whose `target-if` condition passed.
-/// Keeps the blocks `scan_mode` keeps, in the order of `virtual_blocks`, and records every
-/// block's name in `names_seen`.
+/// `line_changes` touched in each. Leaves out a block whose `target-if` the file fails. Keeps the
+/// blocks `scan_mode` keeps, in the order of `virtual_blocks`, and records every block's name in
+/// `names_seen`.
 ///
 /// # Errors
 /// Returns an error if a block wraps or checks a symbol and the file has no parser, no symbols or
 /// a syntax error, if `target-if` can't read a symbol, if a target does not resolve, or if a
 /// block has a name that `names_seen` already holds.
-fn virtual_blocks_in_file<'v>(
-    virtual_blocks: &[&'v VirtualBlock],
+fn virtual_blocks_in_file(
+    virtual_blocks: &[&VirtualBlock],
     parser: Option<&SharedLanguageParser>,
     file_path: &Path,
     source: &str,
     line_changes: &LineChanges,
     scan_mode: ScanMode,
     names_seen: &mut HashMap<String, String>,
-) -> anyhow::Result<(Vec<BlockWithContext>, Vec<&'v ConfigEntry>)> {
+) -> anyhow::Result<Vec<BlockWithContext>> {
     // Only a block that wraps or checks a symbol needs the file's symbols. A language without
     // symbols must not fail the other blocks.
     let first_symbol_block = virtual_blocks.iter().find(|virtual_block| {
@@ -590,16 +553,9 @@ fn virtual_blocks_in_file<'v>(
         }
     };
     let mut blocks_with_context = Vec::new();
-    let mut covered_entries = Vec::new();
     for virtual_block in virtual_blocks {
-        if let Some(target_if) = &virtual_block.target_if {
-            let covers = target_if
-                .covers(&symbols)
-                .map_err(|error| virtual_block.unresolved(error))?;
-            if !covers {
-                continue;
-            }
-            covered_entries.push(&virtual_block.entry);
+        if !virtual_block.passes_target_if(&symbols)? {
+            continue;
         }
         let block_with_context = virtual_block.resolve(&symbols, source, line_changes)?;
         reject_duplicate_name(&block_with_context.block, file_path, names_seen)?;
@@ -607,7 +563,7 @@ fn virtual_blocks_in_file<'v>(
             blocks_with_context.push(block_with_context);
         }
     }
-    Ok((blocks_with_context, covered_entries))
+    Ok(blocks_with_context)
 }
 
 /// Rejects a block whose `name` was already used earlier in the same file. Otherwise records in
@@ -2395,17 +2351,40 @@ mod parse_blocks_tests {
         Ok(())
     }
 
+    /// Scans `files` in `scan_mode`, then checks that each `target-if` entry has a block.
+    fn scan_and_ensure_covered_targets(
+        files: &[(&str, &str)],
+        path_filter: &PathFilter,
+        virtual_blocks: &[VirtualBlock],
+        line_changes_by_file: &DiffChanges,
+        scan_mode: ScanMode,
+    ) -> anyhow::Result<()> {
+        let file_system = FakeFileSystem::new(
+            files
+                .iter()
+                .map(|(path, content)| (path.to_string(), content.to_string()))
+                .collect(),
+        );
+        let parsers = LanguageParsers::new();
+        let scan = Scan::new(&file_system, path_filter, &parsers, virtual_blocks);
+        let parsed = scan.parse_blocks(line_changes_by_file, scan_mode)?;
+        scan.ensure_covered_targets(&parsed, scan_mode)
+    }
+
     #[test]
-    fn target_if_covering_no_file_in_full_run_parse_blocks_returns_error() -> anyhow::Result<()> {
+    fn target_if_covering_no_file_in_full_run_ensure_covered_targets_returns_error()
+    -> anyhow::Result<()> {
         let virtual_blocks = [
             virtual_block_with_target_if("a.yml#/x", &[], &["#/flag"])?,
             virtual_block_with_target_if("b.yml#/x", &[], &["#/flag"])?,
         ];
 
-        let error = parse_with_virtual_blocks(
+        let error = scan_and_ensure_covered_targets(
             &[("a.yml", "other: 1\n"), ("b.yml", "other: 2\n")],
             &PathFilter::allow_all(),
             &virtual_blocks,
+            &DiffChanges::default(),
+            ScanMode::All,
         )
         .unwrap_err();
 
@@ -2418,7 +2397,7 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn target_if_covering_only_ignored_files_in_full_run_parse_blocks_returns_error()
+    fn target_if_covering_only_ignored_files_in_full_run_ensure_covered_targets_returns_error()
     -> anyhow::Result<()> {
         let virtual_blocks = [
             virtual_block_with_target_if("a.yml#/x", &[], &["#/flag"])?,
@@ -2427,10 +2406,12 @@ mod parse_blocks_tests {
         // Config `ignore` skips the only covered file (`b.yml`), so a full run must fail.
         let path_filter = PathFilter::with_ignored_paths(HashSet::from(["b.yml".to_string()]));
 
-        let error = parse_with_virtual_blocks(
+        let error = scan_and_ensure_covered_targets(
             &[("a.yml", "other: true\n"), ("b.yml", "flag: true\nx: 1\n")],
             &path_filter,
             &virtual_blocks,
+            &DiffChanges::default(),
+            ScanMode::All,
         )
         .unwrap_err();
 
@@ -2443,57 +2424,46 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn target_if_covering_no_file_when_uncovered_allowed_parse_blocks_succeeds()
-    -> anyhow::Result<()> {
-        let virtual_blocks = [virtual_block_with_target_if("a.yml#/x", &[], &["#/flag"])?];
-        let files = HashMap::from([("a.yml".to_string(), "other: true\n".to_string())]);
-
-        let parsed = Scan::new(
-            &FakeFileSystem::new(files),
-            &PathFilter::allow_all(),
-            &LanguageParsers::new(),
-            &virtual_blocks,
-        )
-        .require_covered_targets(false)
-        .parse_blocks(&DiffChanges::default(), ScanMode::All)?;
-
-        assert!(parsed.blocks.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn only_changed_target_if_covering_no_file_parse_blocks_checks_only_modified_entry()
+    fn only_changed_target_if_ensure_covered_targets_checks_only_modified_entry()
     -> anyhow::Result<()> {
         let unmodified = virtual_block_with_target_if("a.yml#/x", &[], &["#/flag"])?;
-        let files = HashMap::from([("a.yml".to_string(), "other: true\n".to_string())]);
+        let mut modified = unmodified.clone();
+        modified.is_entry_modified = true;
+        let uncovered = [("a.yml", "other: true\n")];
         let file_diff = diff_changes([(RepoPath::from_reference("a.yml")?, vec![added(1)])]);
 
         // Unmodified entry: checking an uncovered file in the diff succeeds.
-        let parsed = Scan::new(
-            &FakeFileSystem::new(files.clone()),
+        scan_and_ensure_covered_targets(
+            &uncovered,
             &PathFilter::allow_all(),
-            &LanguageParsers::new(),
             std::slice::from_ref(&unmodified),
-        )
-        .parse_blocks(&file_diff, ScanMode::OnlyChanged)?;
-        assert!(parsed.blocks.is_empty());
+            &file_diff,
+            ScanMode::OnlyChanged,
+        )?;
 
         // Modified entry whose files fail `target-if`: must fail.
-        let mut modified = unmodified;
-        modified.is_entry_modified = true;
-        let error = Scan::new(
-            &FakeFileSystem::new(files),
+        let error = scan_and_ensure_covered_targets(
+            &uncovered,
             &PathFilter::allow_all(),
-            &LanguageParsers::new(),
-            &[modified],
+            std::slice::from_ref(&modified),
+            &DiffChanges::default(),
+            ScanMode::OnlyChanged,
         )
-        .parse_blocks(&DiffChanges::default(), ScanMode::OnlyChanged)
         .unwrap_err();
         assert_eq!(
             format!("{error:#}"),
             "invalid block at line 7 of \"blockwatch.toml\": no file the glob matches passes \
              target-if"
         );
+
+        // Modified entry with a covered file that the diff doesn't touch: succeeds.
+        scan_and_ensure_covered_targets(
+            &[("a.yml", "flag: true\nx: 1\n")],
+            &PathFilter::allow_all(),
+            &[modified],
+            &DiffChanges::default(),
+            ScanMode::OnlyChanged,
+        )?;
         Ok(())
     }
 }

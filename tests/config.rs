@@ -517,14 +517,18 @@ target-if = { symbols = ['#/flag'] }
         .args(["--only-block", "a.yml:x"])
         .output()?
         .assert()
-        .failure();
+        .failure()
+        .stderr(predicate::str::contains(r#"no block matches "a.yml:x""#));
 
     cargo_bin_cmd!()
         .current_dir(&root)
         .arg("README.md")
         .output()?
         .assert()
-        .failure();
+        .failure()
+        .stderr(predicate::str::contains(
+            "disagrees with a.yml:x: target block not found",
+        ));
     Ok(())
 }
 
@@ -627,6 +631,41 @@ index 1111111..2222222 100644
         .stderr(predicate::str::contains(
             "no file the glob matches passes target-if",
         ));
+    Ok(())
+}
+
+#[test]
+fn full_runs_fail_when_one_of_two_target_if_entries_covers_no_file() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = repo_with_yaml_files(temp.path(), "  one: 1\n")?;
+    let separate_entries = r"[[block]]
+target = '*.yml#/x'
+target-if = { symbols = ['#/flag'] }
+
+[[block]]
+target = '*.yml#/flag'
+target-if = { symbols = ['#/missing'] }
+";
+    // Both entries start on line 1, so the line alone doesn't tell them apart.
+    let entries_on_one_line = r"block = [
+  { target = '*.yml#/x', target-if = { symbols = ['#/flag'] } }, { target = '*.yml#/flag', target-if = { symbols = ['#/missing'] } },
+]
+";
+
+    for (config, entry_line) in [(separate_entries, 5), (entries_on_one_line, 2)] {
+        std::fs::write(root.join("blockwatch.toml"), config)?;
+        cargo_bin_cmd!()
+            .current_dir(&root)
+            .output()?
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(format!(
+                "Error: invalid block at line {entry_line} of \"blockwatch.toml\"
+
+Caused by:
+    no file the glob matches passes target-if"
+            )));
+    }
     Ok(())
 }
 

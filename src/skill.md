@@ -210,7 +210,8 @@ same-as = 'config/models.json#/default'
 - One entry per target. Use `true` for valueless attributes (`keep-unique = true`) and integers for
   `check-lua-timeout`.
 - A missing target, a `target-pattern` without a unique match, or an empty target glob stops the run.
-- Use `target-if = { symbols = ['#/path'] }` on a glob to skip files lacking them; full runs fail if none match.
+- `target-if = { symbols = ['#/a', '#/b'] }` on a glob target skips each matched file without all those symbols. A
+  file that passes must still have the target. A full run fails when no matched file passes.
 - Counts as changed when the diff touches either the wrapped content or the `[[block]]` entry.
 
 ## Running and verifying

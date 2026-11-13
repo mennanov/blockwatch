@@ -351,6 +351,12 @@ impl Args {
         Ok(addresses)
     }
 
+    /// Whether the flags leave out files that the config file alone would read: with a path or
+    /// glob argument, `explain`, or `--ignore`.
+    pub(crate) fn limits_files(&self) -> bool {
+        !self.path_arguments().is_empty() || !self.ignore.is_empty()
+    }
+
     /// The path and glob arguments as written: those before `list`, then those after it. For
     /// `explain`, the file of its address.
     pub(crate) fn path_arguments(&self) -> Vec<String> {
