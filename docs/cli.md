@@ -475,8 +475,8 @@ same-as-pattern = 'os\.environ\["(?P<value>[A-Z_]+)"\]'
 
 - **It must match exactly once.** The pattern runs on the whole file. No match, or more than one, stops the run. The
   error shows the lines where the matches start.
-- **`^` and `$` match at the start and the end of each line**, as in the other patterns. `.` does not match a line
-  break, so a match stays on one line.
+- **`^` and `$` match at the start and the end of each line**, as in the other patterns. A `\r\n` counts as one line
+  end, so `$` matches before the `\r`. `.` does not match a line break, so a match stays on one line.
 - **A match can span lines with `(?s)`.** `(?s)^CREATE TABLE users \(.*?^\);` matches the whole statement. Write
   `.*?`, not `.*`. A `.*` runs to the last `);` in the file, and that still counts as one match.
 - **A `value` group picks the content**, as in the `*-pattern` attributes. Without one, the content is the whole match.
@@ -577,8 +577,8 @@ same-as = 'go.mod:go-version'
   line-pattern = '^postgres://'
   ```
 
-  - With `symbols`, each file the glob matches must use a language with [symbols](symbols.md) and have no syntax
-    error, even a file that fails `patterns`.
+  - With `symbols`, or with a symbol as `target`, each file the glob matches must use a language with
+    [symbols](symbols.md) and have no syntax error, even a file that fails `patterns`.
   - A symbol counts as present even when it matches more than one item, such as duplicate headings in Markdown.
   - A pattern runs on the whole file, and its `^` and `$` match at the ends of each line, as in `target-pattern`. It
     can't have a `value` group, because `target-if` reads no text.

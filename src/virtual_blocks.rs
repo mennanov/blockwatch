@@ -65,9 +65,13 @@ impl TargetPattern {
     /// # Errors
     /// Returns an error if `pattern` is not a valid regex.
     pub(crate) fn new(pattern: &str) -> anyhow::Result<Self> {
-        // Every other pattern runs on one line at a time, so its `^` and `$` match at the ends of
-        // a line. They keep that meaning here, where the pattern runs on the whole file.
-        let regex = RegexBuilder::new(pattern).multi_line(true).build()?;
+        // Every other pattern runs on one line at a time, without its line end, so its `^` and `$`
+        // match at the ends of a line, and `\r\n` counts as one line end. They keep that meaning
+        // here, where the pattern runs on the whole file.
+        let regex = RegexBuilder::new(pattern)
+            .multi_line(true)
+            .crlf(true)
+            .build()?;
         Ok(Self(regex))
     }
 
@@ -568,6 +572,19 @@ CREATE TABLE b (
             block.start_tag_position_range,
             Position::new(4, 1)..Position::new(4, 17)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn crlf_line_end_resolve_counts_as_one_line_end() -> anyhow::Result<()> {
+        // `$` matches before the `\r`, as in the patterns that run on one line at a time.
+        let source = "TIMEOUT = 5\r\nMODEL = a\r\n";
+
+        let block = resolved_in_text(pattern("^MODEL = .*$"), source, &[])?.block;
+        assert_eq!(block.content.text(source), "MODEL = a");
+
+        let yaml = "name: a\r\ndriver: postgres\r\n";
+        assert!(gets_block("a.yml", yaml, &[], &["^driver: postgres$"])?);
         Ok(())
     }
 

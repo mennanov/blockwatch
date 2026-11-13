@@ -20,6 +20,12 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   listed symbol or a pattern's match counts as a change to the entry, so `--diff --only-changed` checks the block. See
   [Glob targets](docs/cli.md#glob-targets).
 
+### Fixed
+
+- A `target-pattern` in `blockwatch.toml` now reads CRLF line ends the way the other patterns do: `$` matches before
+  the `\r`. Before, `^MODEL = "a"$` matched no text in such a file and stopped the run, and `^MODEL = .*$` kept the
+  `\r` in the block.
+
 ## [0.19.0] - 2026-11-12
 
 ### Added
