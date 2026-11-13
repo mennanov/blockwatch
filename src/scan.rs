@@ -2180,16 +2180,16 @@ mod parse_blocks_tests {
         Ok(())
     }
 
-    /// A virtual block around `target` (`file#/symbol` or `file`), conditional on
-    /// `condition_symbols` via `target-if`.
+    /// A virtual block around `target` (`file#/symbol` or `file`), whose `target-if` lists
+    /// `target_if_symbols`.
     fn virtual_block_with_target_if(
         target: &str,
         attributes: &[(&str, &str)],
-        condition_symbols: &[&str],
+        target_if_symbols: &[&str],
     ) -> anyhow::Result<VirtualBlock> {
         let mut block = test_utils::virtual_block(target, attributes)?;
         block.target_if = Some(crate::virtual_blocks::TargetIf {
-            symbols: condition_symbols
+            symbols: target_if_symbols
                 .iter()
                 .map(|path| crate::symbol_path::SymbolPath::parse(path))
                 .collect::<anyhow::Result<Vec<_>>>()?,

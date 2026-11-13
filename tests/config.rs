@@ -670,6 +670,43 @@ Caused by:
 }
 
 #[test]
+fn only_changed_runs_check_a_block_whose_target_if_symbol_the_diff_touches() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = repo_with_yaml_files(temp.path(), "  one: 1\n  two: 2\n")?;
+    std::fs::write(
+        root.join("blockwatch.toml"),
+        r"[[block]]
+target = '*.yml#/x'
+line-count = '<=1'
+target-if = { symbols = ['#/flag'] }
+",
+    )?;
+    // The diff adds the `target-if` symbol, and leaves the target as it was.
+    let target_if_symbol_diff = "\
+diff --git a/b.yml b/b.yml
+index 1111111..2222222 100644
+--- a/b.yml
++++ b/b.yml
+@@ -1,2 +1,3 @@
++flag: true
+ x:
+   one: 1
+";
+
+    cargo_bin_cmd!()
+        .current_dir(&root)
+        .args(["--diff", "--only-changed"])
+        .write_stdin(target_if_symbol_diff)
+        .output()?
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            r#"Block b.yml:(unnamed) at line 1 of \"blockwatch.toml\" has 3 lines, which does not satisfy <=1"#,
+        ));
+    Ok(())
+}
+
+#[test]
 fn scoped_runs_succeed_when_no_checked_file_matches_target_if() -> anyhow::Result<()> {
     let temp = tempfile::tempdir()?;
     let root = temp.path().join("repo");

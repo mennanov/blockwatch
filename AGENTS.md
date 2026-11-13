@@ -273,7 +273,7 @@ rule didn't fire, check whether the diff actually touched the block's lines. The
 is a symbol, and for a virtual block. They count as changed only when the diff touches the symbol's definition, or the
 whole match of a `target-pattern`, not anything else in its file. A virtual block around a whole file counts as
 changed when the diff touches any part of the file. A virtual block also counts as changed when the diff touches its
-`[[block]]` entry, which plays the part of its start tag.
+`[[block]]` entry, which plays the part of its start tag, or the definition of one of its `target-if` symbols.
 
 The `check-ai` validator calls an OpenAI-compatible API. It is configured with `BLOCKWATCH_AI_API_KEY`,
 `BLOCKWATCH_AI_MODEL` and `BLOCKWATCH_AI_API_URL`. The `check-lua` validator embeds Lua 5.4 through `mlua`. The
