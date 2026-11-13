@@ -316,8 +316,10 @@ only `v*` tags can use. The public key is in `Cargo.toml`, where `cargo binstall
 signing fails, no GitHub release is created, but the crate is already on crates.io. Fix the cause and release a new
 patch version.
 
-Each action in a workflow is pinned to a full commit, with its version in a comment. Dependabot bumps both, except
-in `release.yml`, whose pins are in `dist-workspace.toml`. The one exception is `mennanov/blockwatch-action@v1`.
+Each workflow uses an action by its exact tag, such as `actions/checkout@v7.0.1`. `.github/workflows/actions.lock`
+pins each tag to a commit. GitHub refuses to start a workflow that uses an action the lockfile doesn't list, so run
+`gh actions-lock` after changing a workflow. Dependabot bumps the workflows and the lockfile, except in `release.yml`,
+whose tags are in `dist-workspace.toml`.
 
 `pypi.yml` builds the same tag for PyPI, as `blockwatch-cli`. The pre-commit hooks install that package through the
 root `setup.py`. So if the upload for a tag fails, the hooks at that tag can't install.

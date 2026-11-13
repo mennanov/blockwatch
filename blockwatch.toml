@@ -40,15 +40,34 @@ same-as = '''docs/ci.md,
 # The pattern reads both the target's value, `v1`, and each `mennanov/blockwatch-action@v1` in the other files.
 same-as-pattern = '(?:mennanov/blockwatch-action@|^)(?P<value>v\d+)\b'
 
-# Dependabot updates actions/checkout in the workflows and in actions.lock, but not this pin, which dist copies
-# into release.yml. The workflows name the action by tag, so only the lockfile and release.yml hold its commit.
-# The pattern reads both the pin, a commit, and the commit after each `actions/checkout@`. The lockfile has that
-# form where a composite action uses checkout.
+# Dependabot updates these actions in the workflows and in actions.lock, but not these pins, which dist copies into
+# release.yml. Each pattern reads both the pin, such as `v7.0.1`, and the tag after each use of the action. The
+# lockfile lists that tag once for each workflow that uses the action, so every workflow must use the pinned tag.
+# A forgotten `dist generate` leaves the old tag in release.yml, and a forgotten `gh actions-lock` leaves it in the
+# lockfile. Either one fails here.
 [[block]]
 target = 'dist-workspace.toml#/dist/github-action-commits/actions~1checkout'
 same-as = '''.github/workflows/actions.lock,
     .github/workflows/release.yml'''
-same-as-pattern = '(?:actions/checkout@|^)(?P<value>[0-9a-f]{40})\b'
+same-as-pattern = '(?:actions/checkout@|^)(?P<value>v\d+(?:\.\d+)*)\b'
+
+[[block]]
+target = 'dist-workspace.toml#/dist/github-action-commits/actions~1upload-artifact'
+same-as = '''.github/workflows/actions.lock,
+    .github/workflows/release.yml'''
+same-as-pattern = '(?:actions/upload-artifact@|^)(?P<value>v\d+(?:\.\d+)*)\b'
+
+[[block]]
+target = 'dist-workspace.toml#/dist/github-action-commits/actions~1download-artifact'
+same-as = '''.github/workflows/actions.lock,
+    .github/workflows/release.yml'''
+same-as-pattern = '(?:actions/download-artifact@|^)(?P<value>v\d+(?:\.\d+)*)\b'
+
+[[block]]
+target = 'dist-workspace.toml#/dist/github-action-commits/actions~1attest'
+same-as = '''.github/workflows/actions.lock,
+    .github/workflows/release.yml'''
+same-as-pattern = '(?:actions/attest@|^)(?P<value>v\d+(?:\.\d+)*)\b'
 
 # SECURITY.md shows the public key that signs the release archives, for people who check a download by hand. A new
 # key must reach it.
