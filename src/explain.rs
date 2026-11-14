@@ -58,7 +58,7 @@ impl<'a> Explanation<'a> {
             content: block.content.listing(&file_blocks.file_content),
             disabled: Validator::iter()
                 .filter(|validator| {
-                    block.attributes.contains_key(validator.as_str())
+                    validator.is_turned_on_by(&block.attributes)
                         && !settings.validator_selection().includes(*validator)
                 })
                 .collect(),

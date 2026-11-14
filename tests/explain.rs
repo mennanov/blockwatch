@@ -16,12 +16,12 @@ const FIXTURE: &str = "tests/testdata/explain/a.py";
 /// The text of [`FIXTURE`], for a repository that a test creates.
 const FIXTURE_TEXT: &str = include_str!("testdata/explain/a.py");
 
-/// Creates a repository in `parent` with [`FIXTURE_TEXT`] in `a.py`, and `config` in
-/// `blockwatch.toml`. Returns the repository root.
-fn repo_with_config(parent: &Path, config: &str) -> anyhow::Result<PathBuf> {
+/// Creates a repository in `parent` with `source` in `a.py`, and `config` in `blockwatch.toml`.
+/// Returns the repository root.
+fn repo_with_config(parent: &Path, source: &str, config: &str) -> anyhow::Result<PathBuf> {
     let root = parent.join("repo");
     std::fs::create_dir_all(root.join(".git"))?;
-    std::fs::write(root.join("a.py"), FIXTURE_TEXT)?;
+    std::fs::write(root.join("a.py"), source)?;
     std::fs::write(root.join("blockwatch.toml"), config)?;
     Ok(root)
 }
@@ -197,7 +197,11 @@ fn with_diff_is_recorded_and_marks_the_block_as_changed() -> anyhow::Result<()> 
 fn validator_that_the_config_disables_is_listed_as_disabled_and_not_run() -> anyhow::Result<()> {
     let temp = tempfile::tempdir()?;
     // `line-count` is off too, but the block doesn't ask for it, so it isn't listed.
-    let root = repo_with_config(temp.path(), "disable = ['keep-sorted', 'line-count']\n")?;
+    let root = repo_with_config(
+        temp.path(),
+        FIXTURE_TEXT,
+        "disable = ['keep-sorted', 'line-count']\n",
+    )?;
 
     let output = assert_cmd::cargo_bin_cmd!()
         .current_dir(&root)
@@ -214,9 +218,80 @@ fn validator_that_the_config_disables_is_listed_as_disabled_and_not_run() -> any
 
 #[test]
 #[allow(clippy::disallowed_macros)]
+fn validator_turned_on_by_any_of_its_attributes_is_listed_as_disabled() -> anyhow::Result<()> {
+    // Each block has one attribute that turns a validator on, and the config turns every
+    // validator off.
+    let source = r#"# <block name="affects" affects=":keep-sorted">
+apple
+# </block>
+# <block name="check-ai" check-ai="Lists fruits">
+apple
+# </block>
+# <block name="check-lua" check-lua="check.lua">
+apple
+# </block>
+# <block name="keep-sorted" keep-sorted="asc">
+apple
+# </block>
+# <block name="keep-unique" keep-unique="">
+apple
+# </block>
+# <block name="line-count" line-count="<5">
+apple
+# </block>
+# <block name="line-pattern" line-pattern="[a-z]+">
+apple
+# </block>
+# <block name="line-pattern-forbidden" line-pattern-forbidden="TODO">
+apple
+# </block>
+# <block name="same-as" same-as=":keep-sorted">
+apple
+# </block>
+# <block name="same-as-paths" same-as-paths="*.py">
+a.py
+# </block>
+"#;
+    let temp = tempfile::tempdir()?;
+    let root = repo_with_config(
+        temp.path(),
+        source,
+        "disable = ['affects', 'check-ai', 'check-lua', 'keep-sorted', 'keep-unique', 'line-count', \
+         'line-pattern', 'same-as']\n",
+    )?;
+
+    for (block, disabled) in [
+        ("affects", "affects"),
+        ("check-ai", "check-ai"),
+        ("check-lua", "check-lua"),
+        ("keep-sorted", "keep-sorted"),
+        ("keep-unique", "keep-unique"),
+        ("line-count", "line-count"),
+        ("line-pattern", "line-pattern"),
+        ("line-pattern-forbidden", "line-pattern"),
+        ("same-as", "same-as"),
+        ("same-as-paths", "same-as"),
+    ] {
+        let output = assert_cmd::cargo_bin_cmd!()
+            .current_dir(&root)
+            .args(["explain", &format!("a.py:{block}")])
+            .output()?;
+
+        output.clone().assert().success().stderr("");
+        assert_eq!(
+            json_from(&output.stdout)?["disabled"],
+            json!([disabled]),
+            "{block}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+#[allow(clippy::disallowed_macros)]
 fn block_that_the_config_skips_is_still_checked() -> anyhow::Result<()> {
     let temp = tempfile::tempdir()?;
-    let root = repo_with_config(temp.path(), "skip-blocks = ['a.py:colors']\n")?;
+    let root = repo_with_config(temp.path(), FIXTURE_TEXT, "skip-blocks = ['a.py:colors']\n")?;
 
     let output = assert_cmd::cargo_bin_cmd!()
         .current_dir(&root)

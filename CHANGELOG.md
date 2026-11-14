@@ -20,6 +20,12 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   and `blockwatch explain` show such a list as a JSON array, and `check-lua` scripts get it as an array of strings in
   `ctx.attrs`.
 
+### Fixed
+
+- `blockwatch explain` now lists a validator that the settings turn off under `disabled` when the block has only
+  `line-pattern-forbidden` or `same-as-paths`. Before, it listed `line-pattern` or `same-as` only for a block with an
+  attribute of that exact name.
+
 ## [0.19.1] - 2026-11-13
 
 ### Added

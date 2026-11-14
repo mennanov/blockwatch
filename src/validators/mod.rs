@@ -120,6 +120,22 @@ impl Validator {
         }
     }
 
+    /// Whether `attributes` has one of the attributes that turn this validator on, such as
+    /// `line-pattern-forbidden` for `line-pattern`.
+    pub(crate) fn is_turned_on_by(self, attributes: &Attributes) -> bool {
+        let names: &[&str] = match self {
+            Validator::Affects => &["affects"],
+            Validator::CheckAi => &["check-ai"],
+            Validator::CheckLua => &["check-lua"],
+            Validator::KeepSorted => &["keep-sorted"],
+            Validator::KeepUnique => &["keep-unique"],
+            Validator::LineCount => &["line-count"],
+            Validator::LinePattern => &["line-pattern", "line-pattern-forbidden"],
+            Validator::SameAs => &["same-as", "same-as-paths"],
+        };
+        names.iter().any(|name| attributes.contains_key(*name))
+    }
+
     /// Creates this validator if `block_with_context` carries one of its attributes. Returns
     /// `None` otherwise.
     ///
@@ -715,18 +731,17 @@ pub(crate) fn diff_gated_block_count(
     context: &ValidationContext,
     selection: &ValidatorSelection,
 ) -> usize {
-    let attributes: Vec<&str> = Validator::iter()
+    let validators: Vec<Validator> = Validator::iter()
         .filter(|validator| validator.needs_diff() && selection.includes(*validator))
-        .map(|validator| validator.as_str())
         .collect();
     context
         .blocks
         .values()
         .flat_map(|file_blocks| &file_blocks.blocks_with_context)
         .filter(|block_with_context| {
-            attributes
+            validators
                 .iter()
-                .any(|attribute| block_with_context.block.attributes.contains_key(*attribute))
+                .any(|validator| validator.is_turned_on_by(&block_with_context.block.attributes))
         })
         .count()
 }
