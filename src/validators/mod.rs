@@ -1201,7 +1201,7 @@ mod tests {
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
     use crate::settings::{BlockSelection, ValidatorSelection};
-    use crate::test_utils::{validation_context, virtual_block};
+    use crate::test_utils::{text_attributes, validation_context, virtual_block};
     use crate::validators::test_utils::{merge_validation_contexts, with_virtual_blocks};
     use crate::validators::{
         AsyncValidator, SyncValidator, ValidationContext, ValidationReport, Validator,
@@ -1211,6 +1211,7 @@ mod tests {
     use async_trait::async_trait;
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
+    use strum::IntoEnumIterator;
 
     fn empty_testing_block() -> Block {
         Block {
@@ -1729,6 +1730,32 @@ print("target")
 # </block>
 "#,
         )
+    }
+
+    #[test]
+    fn validator_is_turned_on_by_each_of_its_attributes_and_no_other() {
+        // `explain` and the diff-gated count must find a validator from any attribute that makes
+        // the run check it, not only from the validator's own name.
+        for (attribute, validator) in [
+            ("affects", Validator::Affects),
+            ("check-ai", Validator::CheckAi),
+            ("check-lua", Validator::CheckLua),
+            ("keep-sorted", Validator::KeepSorted),
+            ("keep-unique", Validator::KeepUnique),
+            ("line-count", Validator::LineCount),
+            ("line-pattern", Validator::LinePattern),
+            ("line-pattern-forbidden", Validator::LinePattern),
+            ("same-as", Validator::SameAs),
+            ("same-as-paths", Validator::SameAs),
+        ] {
+            let attributes = text_attributes(&[(attribute, "")]);
+
+            let turned_on: Vec<Validator> = Validator::iter()
+                .filter(|validator| validator.is_turned_on_by(&attributes))
+                .collect();
+
+            assert_eq!(turned_on, [validator], "{attribute}");
+        }
     }
 
     #[test]

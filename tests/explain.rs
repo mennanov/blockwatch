@@ -219,71 +219,24 @@ fn validator_that_the_config_disables_is_listed_as_disabled_and_not_run() -> any
 #[test]
 #[allow(clippy::disallowed_macros)]
 fn validator_turned_on_by_any_of_its_attributes_is_listed_as_disabled() -> anyhow::Result<()> {
-    // Each block has one attribute that turns a validator on, and the config turns every
-    // validator off.
-    let source = r#"# <block name="affects" affects=":keep-sorted">
+    // `line-pattern-forbidden` turns `line-pattern` on, though it isn't the validator's own name.
+    let source = r#"# <block name="no-todo" line-pattern-forbidden="TODO">
 apple
-# </block>
-# <block name="check-ai" check-ai="Lists fruits">
-apple
-# </block>
-# <block name="check-lua" check-lua="check.lua">
-apple
-# </block>
-# <block name="keep-sorted" keep-sorted="asc">
-apple
-# </block>
-# <block name="keep-unique" keep-unique="">
-apple
-# </block>
-# <block name="line-count" line-count="<5">
-apple
-# </block>
-# <block name="line-pattern" line-pattern="[a-z]+">
-apple
-# </block>
-# <block name="line-pattern-forbidden" line-pattern-forbidden="TODO">
-apple
-# </block>
-# <block name="same-as" same-as=":keep-sorted">
-apple
-# </block>
-# <block name="same-as-paths" same-as-paths="*.py">
-a.py
 # </block>
 "#;
     let temp = tempfile::tempdir()?;
-    let root = repo_with_config(
-        temp.path(),
-        source,
-        "disable = ['affects', 'check-ai', 'check-lua', 'keep-sorted', 'keep-unique', 'line-count', \
-         'line-pattern', 'same-as']\n",
-    )?;
+    let root = repo_with_config(temp.path(), source, "disable = ['line-pattern']\n")?;
 
-    for (block, disabled) in [
-        ("affects", "affects"),
-        ("check-ai", "check-ai"),
-        ("check-lua", "check-lua"),
-        ("keep-sorted", "keep-sorted"),
-        ("keep-unique", "keep-unique"),
-        ("line-count", "line-count"),
-        ("line-pattern", "line-pattern"),
-        ("line-pattern-forbidden", "line-pattern"),
-        ("same-as", "same-as"),
-        ("same-as-paths", "same-as"),
-    ] {
-        let output = assert_cmd::cargo_bin_cmd!()
-            .current_dir(&root)
-            .args(["explain", &format!("a.py:{block}")])
-            .output()?;
+    let output = assert_cmd::cargo_bin_cmd!()
+        .current_dir(&root)
+        .args(["explain", "a.py:no-todo"])
+        .output()?;
 
-        output.clone().assert().success().stderr("");
-        assert_eq!(
-            json_from(&output.stdout)?["disabled"],
-            json!([disabled]),
-            "{block}"
-        );
-    }
+    output.clone().assert().success().stderr("");
+    assert_eq!(
+        json_from(&output.stdout)?["disabled"],
+        json!(["line-pattern"])
+    );
     Ok(())
 }
 
