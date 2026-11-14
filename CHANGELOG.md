@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.19.2] - 2026-11-14
+
 ### Added
 
 - In a `[[block]]` entry of `blockwatch.toml`, `affects` and `same-as` can now be TOML lists, such as
