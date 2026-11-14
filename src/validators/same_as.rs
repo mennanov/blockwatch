@@ -1,7 +1,6 @@
 use crate::LineIndex;
 use crate::blocks::{
-    AttributeName, AttributeValue, Attributes, Block, BlockWithContext, FileBlocks,
-    ReferenceAttribute, TextAttribute,
+    AttributeName, AttributeValue, Attributes, Block, BlockWithContext, FileBlocks, TextAttribute,
 };
 use crate::fs::FileSystem;
 use crate::paths_glob::PathsGlob;
@@ -963,10 +962,10 @@ pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
     require_main(
         attributes,
         &[
-            AttributeName::Reference(ReferenceAttribute::SameAs),
-            AttributeName::Text(TextAttribute::SameAsPaths),
-            AttributeName::Text(TextAttribute::Name),
-        ],
+            Validator::SameAs.attributes(),
+            &[AttributeName::Text(TextAttribute::Name)],
+        ]
+        .concat(),
         &[TextAttribute::SameAsPattern],
     )
 }

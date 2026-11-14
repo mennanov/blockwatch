@@ -1223,7 +1223,8 @@ mod target_files_tests {
 #[cfg(test)]
 mod tests {
     use crate::blocks::{
-        Block, BlockAddress, BlockSeverity, BlockWithContext, Content, Declaration,
+        AttributeName, Block, BlockAddress, BlockSeverity, BlockWithContext, Content, Declaration,
+        ReferenceAttribute, TextAttribute,
     };
     use crate::fs::FileSystem;
     use crate::fs::test_utils::FakeFileSystem;
@@ -1328,12 +1329,12 @@ mod tests {
     ) -> anyhow::Result<Option<ValidatorType>> {
         let attributes = &block_with_context.block.attributes;
         Ok(match validator {
-            Validator::KeepSorted => attributes.contains_key("keep-sorted").then(|| {
+            Validator::KeepSorted => validator.is_turned_on_by(attributes).then(|| {
                 ValidatorType::Sync(Box::new(FakeSyncValidator {
                     testing_block: Arc::new(empty_testing_block()),
                 }))
             }),
-            Validator::CheckAi => attributes.contains_key("check-ai").then(|| {
+            Validator::CheckAi => validator.is_turned_on_by(attributes).then(|| {
                 ValidatorType::Async(Box::new(FakeAsyncValidator {
                     testing_block: Arc::new(empty_testing_block()),
                 }))
@@ -1763,8 +1764,9 @@ print("target")
     #[test]
     fn validator_is_turned_on_by_each_of_its_attributes_and_no_other() {
         // `explain` and the diff-gated count must find a validator from any attribute that makes
-        // the run check it, not only from the validator's own name.
-        for (attribute, validator) in [
+        // the run check it, not only from the validator's own name. Any other attribute, such as
+        // `keep-sorted-pattern`, turns no validator on.
+        let turned_on_by = [
             ("affects", Validator::Affects),
             ("check-ai", Validator::CheckAi),
             ("check-lua", Validator::CheckLua),
@@ -1775,14 +1777,37 @@ print("target")
             ("line-pattern-forbidden", Validator::LinePattern),
             ("same-as", Validator::SameAs),
             ("same-as-paths", Validator::SameAs),
-        ] {
+        ];
+        let names = TextAttribute::iter()
+            .map(AttributeName::Text)
+            .chain(ReferenceAttribute::iter().map(AttributeName::Reference));
+        for name in names {
+            let attribute = name.as_str();
             let attributes = text_attributes(&[(attribute, "")]);
 
             let turned_on: Vec<Validator> = Validator::iter()
                 .filter(|validator| validator.is_turned_on_by(&attributes))
                 .collect();
 
-            assert_eq!(turned_on, [validator], "{attribute}");
+            let expected: Vec<Validator> = turned_on_by
+                .iter()
+                .filter(|(turning_on, _)| *turning_on == attribute)
+                .map(|(_, validator)| *validator)
+                .collect();
+            assert_eq!(turned_on, expected, "{attribute}");
+        }
+    }
+
+    #[test]
+    fn validator_lists_its_own_name_first() {
+        // An error such as "`keep-sorted-format` without `keep-sorted`" shows the validator's own
+        // name first.
+        for validator in Validator::iter() {
+            assert_eq!(
+                validator.attributes()[0].as_str(),
+                validator.as_str(),
+                "{validator}"
+            );
         }
     }
 

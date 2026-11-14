@@ -127,7 +127,7 @@ impl AttributeName {
     /// # Errors
     /// Returns an error that quotes `name` when no attribute has it, such as
     /// ``unrecognized attribute `keep-sortd` ``.
-    pub(crate) fn parse(name: &str) -> anyhow::Result<Self> {
+    fn parse(name: &str) -> anyhow::Result<Self> {
         if let Ok(text) = TextAttribute::from_str(name) {
             return Ok(Self::Text(text));
         }
@@ -653,7 +653,12 @@ mod validate_attributes_tests {
 
             let result = validate_attributes(&attributes);
 
-            assert_eq!(result.is_ok(), needs_no_other.contains(&name), "{name:?}");
+            assert_eq!(
+                result.is_ok(),
+                needs_no_other.contains(&name),
+                "{}",
+                name.as_str()
+            );
         }
     }
 }
