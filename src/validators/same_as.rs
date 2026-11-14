@@ -750,18 +750,16 @@ enum Mode {
 /// Reads a block's `same-as-mode` attribute. Without one, the mode is [`Mode::Sequence`] for a
 /// block without a `same-as-pattern`, and [`Mode::Set`] for a block with one.
 fn parse_mode(block: &Block) -> anyhow::Result<Mode> {
+    let has_pattern = block
+        .attributes
+        .text(TextAttribute::SameAsPattern)
+        .is_some();
     match block.attributes.text(TextAttribute::SameAsMode) {
         Some(value) => parse_keyword("same-as-mode", value),
         // Without a pattern, each line is a record. A block of plain lines is usually a copy of
         // its target, so each line must equal the target's line at the same place. A pattern finds
         // values, and the order of values rarely matters.
-        None if block
-            .attributes
-            .text(TextAttribute::SameAsPattern)
-            .is_some() =>
-        {
-            Ok(Mode::Set)
-        }
+        None if has_pattern => Ok(Mode::Set),
         None => Ok(Mode::Sequence),
     }
 }
