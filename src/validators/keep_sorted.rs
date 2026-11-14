@@ -1,4 +1,4 @@
-use crate::blocks::{Attributes, Block, BlockWithContext};
+use crate::blocks::{Attributes, Block, BlockWithContext, TextAttribute};
 use crate::repo_path::RepoPath;
 use crate::validators::{
     SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
@@ -221,17 +221,18 @@ struct KeepSortedLine {
 pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
     require_main(
         attributes,
-        &["keep-sorted"],
-        &["keep-sorted-pattern", "keep-sorted-format"],
+        Validator::KeepSorted.attributes(),
+        &[
+            TextAttribute::KeepSortedPattern,
+            TextAttribute::KeepSortedFormat,
+        ],
     )
 }
 
 /// Selects [`KeepSortedValidator`] for blocks carrying a `keep-sorted` attribute.
 pub(super) fn detect(block_with_context: &BlockWithContext) -> Option<ValidatorType> {
-    block_with_context
-        .block
-        .attributes
-        .contains_key("keep-sorted")
+    Validator::KeepSorted
+        .is_turned_on_by(&block_with_context.block.attributes)
         .then(|| ValidatorType::Sync(Box::new(KeepSortedValidator)))
 }
 

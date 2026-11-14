@@ -11,8 +11,8 @@ mod same_as;
 
 use crate::Position;
 use crate::blocks::{
-    Attributes, Block, BlockAddress, BlockKey, BlockListing, BlockSeverity, BlockWithContext,
-    FileBlocks,
+    AttributeName, Attributes, Block, BlockAddress, BlockKey, BlockListing, BlockSeverity,
+    BlockWithContext, FileBlocks, ReferenceAttribute, TextAttribute,
 };
 use crate::diff_parser::DiffChanges;
 use crate::fs::FileSystem;
@@ -120,20 +120,33 @@ impl Validator {
         }
     }
 
-    /// Whether `attributes` has one of the attributes that turn this validator on, such as
-    /// `line-pattern-forbidden` for `line-pattern`.
+    /// The attributes that turn this validator on, such as `line-pattern` and
+    /// `line-pattern-forbidden` for `line-pattern`. The validator's own name comes first.
+    pub(crate) fn attributes(self) -> &'static [AttributeName] {
+        match self {
+            Validator::Affects => &[AttributeName::Reference(ReferenceAttribute::Affects)],
+            Validator::CheckAi => &[AttributeName::Text(TextAttribute::CheckAi)],
+            Validator::CheckLua => &[AttributeName::Text(TextAttribute::CheckLua)],
+            Validator::KeepSorted => &[AttributeName::Text(TextAttribute::KeepSorted)],
+            Validator::KeepUnique => &[AttributeName::Text(TextAttribute::KeepUnique)],
+            Validator::LineCount => &[AttributeName::Text(TextAttribute::LineCount)],
+            Validator::LinePattern => &[
+                AttributeName::Text(TextAttribute::LinePattern),
+                AttributeName::Text(TextAttribute::LinePatternForbidden),
+            ],
+            Validator::SameAs => &[
+                AttributeName::Reference(ReferenceAttribute::SameAs),
+                AttributeName::Text(TextAttribute::SameAsPaths),
+            ],
+        }
+    }
+
+    /// Whether `attributes` has one of the [`attributes`](Self::attributes) that turn this
+    /// validator on.
     pub(crate) fn is_turned_on_by(self, attributes: &Attributes) -> bool {
-        let names: &[&str] = match self {
-            Validator::Affects => &["affects"],
-            Validator::CheckAi => &["check-ai"],
-            Validator::CheckLua => &["check-lua"],
-            Validator::KeepSorted => &["keep-sorted"],
-            Validator::KeepUnique => &["keep-unique"],
-            Validator::LineCount => &["line-count"],
-            Validator::LinePattern => &["line-pattern", "line-pattern-forbidden"],
-            Validator::SameAs => &["same-as", "same-as-paths"],
-        };
-        names.iter().any(|name| attributes.contains_key(*name))
+        self.attributes()
+            .iter()
+            .any(|name| attributes.contains_key(name.as_str()))
     }
 
     /// Creates this validator if `block_with_context` carries one of its attributes. Returns
@@ -1002,7 +1015,8 @@ fn block_content_for_pattern<'c>(
     ))
 }
 
-/// Checks that each attribute in `extras` comes with at least one attribute in `main`.
+/// Checks that each attribute in `extras` comes with at least one attribute in `main`, such as
+/// [`Validator::attributes`].
 ///
 /// # Errors
 /// Returns an error that quotes the first attribute in `extras` found without one in `main`, such
@@ -1010,14 +1024,28 @@ fn block_content_for_pattern<'c>(
 ///
 /// # Panics
 /// Panics if `main` is empty.
-fn require_main(attributes: &Attributes, main: &[&str], extras: &[&str]) -> anyhow::Result<()> {
+fn require_main(
+    attributes: &Attributes,
+    main: &[AttributeName],
+    extras: &[TextAttribute],
+) -> anyhow::Result<()> {
     // Without a main attribute, no validator reads the extra one, so the block would pass as if it
     // were not there.
-    if main.iter().any(|name| attributes.contains_key(*name)) {
+    if main
+        .iter()
+        .any(|name| attributes.contains_key(name.as_str()))
+    {
         return Ok(());
     }
-    if let Some(extra) = extras.iter().find(|name| attributes.contains_key(**name)) {
-        let main: Vec<String> = main.iter().map(|name| format!("`{name}`")).collect();
+    if let Some(extra) = extras
+        .iter()
+        .find(|name| attributes.contains_key(name.as_str()))
+    {
+        let extra = extra.as_str();
+        let main: Vec<String> = main
+            .iter()
+            .map(|name| format!("`{}`", name.as_str()))
+            .collect();
         let (last, others) = main.split_last().expect("a validator has a main attribute");
         if others.is_empty() {
             bail!("`{extra}` without {last}");

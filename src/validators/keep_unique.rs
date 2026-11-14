@@ -160,10 +160,8 @@ struct KeepUniqueLine {
 
 /// Selects [`KeepUniqueValidator`] for blocks carrying a `keep-unique` attribute.
 pub(super) fn detect(block_with_context: &BlockWithContext) -> Option<ValidatorType> {
-    block_with_context
-        .block
-        .attributes
-        .contains_key("keep-unique")
+    Validator::KeepUnique
+        .is_turned_on_by(&block_with_context.block.attributes)
         .then(|| ValidatorType::Sync(Box::new(KeepUniqueValidator)))
 }
 

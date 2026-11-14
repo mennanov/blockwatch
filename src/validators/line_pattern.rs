@@ -226,8 +226,8 @@ struct LinePatternLine {
 /// Selects [`LinePatternValidator`] for blocks carrying a `line-pattern` or a
 /// `line-pattern-forbidden` attribute.
 pub(super) fn detect(block_with_context: &BlockWithContext) -> Option<ValidatorType> {
-    let attributes = &block_with_context.block.attributes;
-    (attributes.contains_key("line-pattern") || attributes.contains_key("line-pattern-forbidden"))
+    Validator::LinePattern
+        .is_turned_on_by(&block_with_context.block.attributes)
         .then(|| ValidatorType::Sync(Box::new(LinePatternValidator)))
 }
 

@@ -1,4 +1,6 @@
-use crate::blocks::{AttributeValue, Attributes, Block, BlockWithContext, FileBlocks};
+use crate::blocks::{
+    AttributeValue, Attributes, Block, BlockWithContext, FileBlocks, TextAttribute,
+};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
@@ -633,8 +635,11 @@ fn symbol_content<Fs: FileSystem>(
 pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
     require_main(
         attributes,
-        &["check-lua"],
-        &["check-lua-pattern", "check-lua-timeout"],
+        Validator::CheckLua.attributes(),
+        &[
+            TextAttribute::CheckLuaPattern,
+            TextAttribute::CheckLuaTimeout,
+        ],
     )
 }
 
@@ -645,11 +650,7 @@ pub(super) fn detect<Fs: FileSystem + 'static>(
     block_with_context: &BlockWithContext,
     file_system: &Arc<Fs>,
 ) -> anyhow::Result<Option<ValidatorType>> {
-    if !block_with_context
-        .block
-        .attributes
-        .contains_key("check-lua")
-    {
+    if !Validator::CheckLua.is_turned_on_by(&block_with_context.block.attributes) {
         return Ok(None);
     }
     // Read here, not at startup, so a run without a check-lua block never fails over a

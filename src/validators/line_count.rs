@@ -1,4 +1,4 @@
-use crate::blocks::{Attributes, Block, BlockWithContext};
+use crate::blocks::{Attributes, Block, BlockWithContext, TextAttribute};
 use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{
@@ -187,15 +187,17 @@ struct LineCountLine {
 /// # Errors
 /// Returns an error that quotes `line-count-pattern` when it comes without `line-count`.
 pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
-    require_main(attributes, &["line-count"], &["line-count-pattern"])
+    require_main(
+        attributes,
+        Validator::LineCount.attributes(),
+        &[TextAttribute::LineCountPattern],
+    )
 }
 
 /// Selects [`LineCountValidator`] for blocks carrying a `line-count` attribute.
 pub(super) fn detect(block_with_context: &BlockWithContext) -> Option<ValidatorType> {
-    block_with_context
-        .block
-        .attributes
-        .contains_key("line-count")
+    Validator::LineCount
+        .is_turned_on_by(&block_with_context.block.attributes)
         .then(|| ValidatorType::Sync(Box::new(LineCountValidator)))
 }
 

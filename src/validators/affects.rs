@@ -304,10 +304,8 @@ pub(super) fn detect<Fs: FileSystem + 'static>(
     block_with_context: &BlockWithContext,
     file_system: &Arc<Fs>,
 ) -> Option<ValidatorType> {
-    block_with_context
-        .block
-        .attributes
-        .contains_key("affects")
+    Validator::Affects
+        .is_turned_on_by(&block_with_context.block.attributes)
         .then(|| ValidatorType::Sync(Box::new(AffectsValidator::new(Arc::clone(file_system)))))
 }
 

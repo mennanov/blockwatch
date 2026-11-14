@@ -1,4 +1,4 @@
-use crate::blocks::{Attributes, Block, BlockWithContext};
+use crate::blocks::{Attributes, Block, BlockWithContext, TextAttribute};
 use crate::repo_path::RepoPath;
 use crate::validators::{
     AsyncValidator, PatternContent, ValidationContext, ValidationReport, Validator, ValidatorTrace,
@@ -152,16 +152,18 @@ async fn check_block<C: AiClient>(
 /// # Errors
 /// Returns an error that quotes `check-ai-pattern` when it comes without `check-ai`.
 pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
-    require_main(attributes, &["check-ai"], &["check-ai-pattern"])
+    require_main(
+        attributes,
+        Validator::CheckAi.attributes(),
+        &[TextAttribute::CheckAiPattern],
+    )
 }
 
 /// Selects [`CheckAiValidator`] for blocks carrying a `check-ai` attribute, building a client from
 /// the `BLOCKWATCH_AI_*` environment variables.
 pub(super) fn detect(block_with_context: &BlockWithContext) -> Option<ValidatorType> {
-    block_with_context
-        .block
-        .attributes
-        .contains_key("check-ai")
+    Validator::CheckAi
+        .is_turned_on_by(&block_with_context.block.attributes)
         .then(|| {
             ValidatorType::Async(Box::new(CheckAiValidator::with_client(
                 OpenAiClient::from_env(),

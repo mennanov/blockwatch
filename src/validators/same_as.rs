@@ -1,5 +1,8 @@
 use crate::LineIndex;
-use crate::blocks::{AttributeValue, Attributes, Block, BlockWithContext, FileBlocks};
+use crate::blocks::{
+    AttributeName, AttributeValue, Attributes, Block, BlockWithContext, FileBlocks,
+    ReferenceAttribute, TextAttribute,
+};
 use crate::fs::FileSystem;
 use crate::paths_glob::PathsGlob;
 use crate::repo_path::RepoPath;
@@ -52,9 +55,7 @@ impl<Fs: FileSystem + 'static> SyncValidator for SameAsValidator<Fs> {
         let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
-                let attributes = &block_with_context.block.attributes;
-                if !attributes.contains_key("same-as") && !attributes.contains_key("same-as-paths")
-                {
+                if !Validator::SameAs.is_turned_on_by(&block_with_context.block.attributes) {
                     continue;
                 }
                 let (violations, trace) = block_violations(
@@ -955,14 +956,18 @@ struct PathsTrace {
 pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
     require_main(
         attributes,
-        &["same-as", "same-as-paths"],
-        &["same-as-mode", "same-as-format"],
+        Validator::SameAs.attributes(),
+        &[TextAttribute::SameAsMode, TextAttribute::SameAsFormat],
     )?;
     // A target's own pattern picks its values, but only a block with a name can be a target.
     require_main(
         attributes,
-        &["same-as", "same-as-paths", "name"],
-        &["same-as-pattern"],
+        &[
+            AttributeName::Reference(ReferenceAttribute::SameAs),
+            AttributeName::Text(TextAttribute::SameAsPaths),
+            AttributeName::Text(TextAttribute::Name),
+        ],
+        &[TextAttribute::SameAsPattern],
     )
 }
 
@@ -971,8 +976,8 @@ pub(super) fn detect<Fs: FileSystem + 'static>(
     block_with_context: &BlockWithContext,
     file_system: &Arc<Fs>,
 ) -> Option<ValidatorType> {
-    let attributes = &block_with_context.block.attributes;
-    (attributes.contains_key("same-as") || attributes.contains_key("same-as-paths"))
+    Validator::SameAs
+        .is_turned_on_by(&block_with_context.block.attributes)
         .then(|| ValidatorType::Sync(Box::new(SameAsValidator::new(Arc::clone(file_system)))))
 }
 

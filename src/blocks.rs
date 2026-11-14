@@ -14,7 +14,7 @@ use std::fmt;
 use std::ops::Range;
 use std::str::FromStr;
 use strum::IntoEnumIterator;
-use strum_macros::EnumString;
+use strum_macros::{EnumIter, EnumString, IntoStaticStr};
 
 const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
 
@@ -60,6 +60,91 @@ impl PartialEq<&str> for AttributeValue {
 /// The attributes whose value can be a list, in a `[[block]]` entry. A tag writes the list as one
 /// string, with a comma between the references.
 pub(crate) const LIST_ATTRIBUTES: [&str; 2] = ["affects", "same-as"];
+
+/* <block name="attribute-names" same-as="src/skill.md:validator-reference"
+same-as-format="identifier" same-as-pattern='^\s*(?P<value>[A-Za-z]+),'> */
+/// The name of an attribute whose value is text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumString, IntoStaticStr, EnumIter)]
+#[strum(serialize_all = "kebab-case")]
+pub(crate) enum TextAttribute {
+    // <block keep-sorted>
+    CheckAi,
+    CheckAiPattern,
+    CheckLua,
+    CheckLuaPattern,
+    CheckLuaTimeout,
+    KeepSorted,
+    KeepSortedFormat,
+    KeepSortedPattern,
+    KeepUnique,
+    LineCount,
+    LineCountPattern,
+    LinePattern,
+    LinePatternForbidden,
+    Name,
+    SameAsFormat,
+    SameAsMode,
+    SameAsPaths,
+    SameAsPattern,
+    Severity,
+    // </block>
+}
+
+/// The name of an attribute whose value lists references, as text with a comma between them or,
+/// in a `[[block]]` entry, as a list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumString, IntoStaticStr, EnumIter)]
+#[strum(serialize_all = "kebab-case")]
+pub(crate) enum ReferenceAttribute {
+    Affects,
+    SameAs,
+}
+// </block>
+
+impl TextAttribute {
+    /// The name as a tag writes it, such as `keep-sorted`.
+    pub(crate) fn as_str(self) -> &'static str {
+        self.into()
+    }
+}
+
+impl ReferenceAttribute {
+    /// The name as a tag writes it, such as `same-as`.
+    pub(crate) fn as_str(self) -> &'static str {
+        self.into()
+    }
+}
+
+/// The name of any attribute a block can have.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AttributeName {
+    Text(TextAttribute),
+    Reference(ReferenceAttribute),
+}
+
+impl AttributeName {
+    /// Looks up the attribute called `name`.
+    ///
+    /// # Errors
+    /// Returns an error that quotes `name` when no attribute has it, such as
+    /// ``unrecognized attribute `keep-sortd` ``.
+    pub(crate) fn parse(name: &str) -> anyhow::Result<Self> {
+        if let Ok(text) = TextAttribute::from_str(name) {
+            return Ok(Self::Text(text));
+        }
+        if let Ok(references) = ReferenceAttribute::from_str(name) {
+            return Ok(Self::Reference(references));
+        }
+        bail!("unrecognized attribute `{name}`")
+    }
+
+    /// The name as a tag writes it, such as `keep-sorted`.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Text(name) => name.as_str(),
+            Self::Reference(name) => name.as_str(),
+        }
+    }
+}
 
 /// A block: a part of a file that its attributes set rules for.
 ///
@@ -525,33 +610,6 @@ impl<'a> From<&'a BlockWithContext> for BlockListing<'a> {
     }
 }
 
-const RECOGNIZED_ATTRIBUTES: &[&str] = &[
-    /* <block keep-sorted same-as="src/skill.md:validator-reference"
-    same-as-pattern='"(?P<value>[a-z-]+)"'> */
-    "affects",
-    "check-ai",
-    "check-ai-pattern",
-    "check-lua",
-    "check-lua-pattern",
-    "check-lua-timeout",
-    "keep-sorted",
-    "keep-sorted-format",
-    "keep-sorted-pattern",
-    "keep-unique",
-    "line-count",
-    "line-count-pattern",
-    "line-pattern",
-    "line-pattern-forbidden",
-    "name",
-    "same-as",
-    "same-as-format",
-    "same-as-mode",
-    "same-as-paths",
-    "same-as-pattern",
-    "severity",
-    // </block>
-];
-
 /// Checks that each attribute of a block is recognized, and that each validator accepts the
 /// attributes it reads (see [`Validator::check_attributes`]). It does not check the values: see
 /// [`BlockSeverity::from_attributes`] for `severity`.
@@ -560,11 +618,8 @@ const RECOGNIZED_ATTRIBUTES: &[&str] = &[
 /// Returns an error that quotes the first attribute found to be wrong, such as
 /// ``unrecognized attribute `keep-sortd` ``.
 pub(crate) fn validate_attributes(attributes: &Attributes) -> anyhow::Result<()> {
-    if let Some(name) = attributes
-        .keys()
-        .find(|name| !RECOGNIZED_ATTRIBUTES.contains(&name.as_str()))
-    {
-        bail!("unrecognized attribute `{name}`");
+    for name in attributes.keys() {
+        AttributeName::parse(name)?;
     }
     // A block can be in a file that the run reads only to find a target, and no validator runs on
     // such a block. Every parsed block passes here.
@@ -573,7 +628,7 @@ pub(crate) fn validate_attributes(attributes: &Attributes) -> anyhow::Result<()>
 
 #[cfg(test)]
 mod validate_attributes_tests {
-    use crate::blocks::{RECOGNIZED_ATTRIBUTES, validate_attributes};
+    use crate::blocks::{AttributeName, ReferenceAttribute, TextAttribute, validate_attributes};
     use crate::test_utils::text_attributes;
     use crate::validators::Validator;
     use strum::IntoEnumIterator;
@@ -582,21 +637,23 @@ mod validate_attributes_tests {
     fn single_attribute_returns_an_error_only_when_it_needs_another() {
         // A new attribute must either work alone or stop the run alone. Otherwise a block with
         // only that attribute would pass without being checked.
-        let needs_no_other: Vec<&str> = Validator::iter()
-            .map(Validator::as_str)
+        let needs_no_other: Vec<AttributeName> = Validator::iter()
+            .flat_map(Validator::attributes)
+            .copied()
             .chain([
-                "line-pattern-forbidden",
-                "name",
-                "same-as-paths",
-                "severity",
+                AttributeName::Text(TextAttribute::Name),
+                AttributeName::Text(TextAttribute::Severity),
             ])
             .collect();
-        for name in RECOGNIZED_ATTRIBUTES {
-            let attributes = text_attributes(&[(name, "")]);
+        let names = TextAttribute::iter()
+            .map(AttributeName::Text)
+            .chain(ReferenceAttribute::iter().map(AttributeName::Reference));
+        for name in names {
+            let attributes = text_attributes(&[(name.as_str(), "")]);
 
             let result = validate_attributes(&attributes);
 
-            assert_eq!(result.is_ok(), needs_no_other.contains(name), "{name}");
+            assert_eq!(result.is_ok(), needs_no_other.contains(&name), "{name:?}");
         }
     }
 }
