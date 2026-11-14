@@ -1,5 +1,5 @@
 use crate::LineIndex;
-use crate::blocks::{Block, BlockWithContext, FileBlocks};
+use crate::blocks::{AttributeValue, Attributes, Block, BlockWithContext, FileBlocks};
 use crate::fs::FileSystem;
 use crate::paths_glob::PathsGlob;
 use crate::repo_path::RepoPath;
@@ -98,7 +98,7 @@ impl Comparison {
         Ok(Self {
             mode: parse_mode(block)?,
             source_records: canonicalize(extract_records(block, file_content)?, &formats),
-            pattern: block.attributes.get("same-as-pattern").cloned(),
+            pattern: block.attribute("same-as-pattern").map(str::to_string),
             formats,
         })
     }
@@ -160,7 +160,7 @@ fn block_violations<Fs: FileSystem>(
             violations.extend(violation);
         }
     }
-    if let Some(glob) = block.attributes.get("same-as-paths") {
+    if let Some(glob) = block.attribute("same-as-paths") {
         violations.extend(paths_violation(
             targets.file_system,
             &comparison,
@@ -244,7 +244,7 @@ fn paths_violation(
 fn parse_references(
     file_path: &RepoPath,
     block: &Block,
-    same_as: &str,
+    same_as: &AttributeValue,
 ) -> anyhow::Result<Vec<TargetReference>> {
     TargetReference::parse_list(same_as).with_context(|| {
         format!(
@@ -410,7 +410,7 @@ impl fmt::Display for Record {
 fn extract_records(block: &Block, file_content: &str) -> anyhow::Result<Vec<Record>> {
     extract_records_from(
         block.content.text(file_content),
-        block.attributes.get("same-as-pattern").map(String::as_str),
+        block.attribute("same-as-pattern"),
         |index| Some(block.content.position(index, 0).line),
     )
 }
@@ -651,13 +651,13 @@ impl Formats {
 /// Returns an error for an unknown format, for an attribute that mixes the two forms, and for a
 /// group that the block's `same-as-pattern` doesn't have.
 fn parse_formats(block: &Block) -> anyhow::Result<Formats> {
-    let Some(attribute) = block.attributes.get("same-as-format") else {
+    let Some(attribute) = block.attribute("same-as-format") else {
         return Ok(Formats::All(Format::Verbatim));
     };
     if !attribute.contains(':') {
         return Ok(Formats::All(parse_keyword("same-as-format", attribute)?));
     }
-    let groups = pattern_groups(block.attributes.get("same-as-pattern").map(String::as_str))?;
+    let groups = pattern_groups(block.attribute("same-as-pattern"))?;
     attribute
         .split(',')
         .map(|entry| {
@@ -746,7 +746,7 @@ enum Mode {
 /// Reads a block's `same-as-mode` attribute. Without one, the mode is [`Mode::Sequence`] for a
 /// block without a `same-as-pattern`, and [`Mode::Set`] for a block with one.
 fn parse_mode(block: &Block) -> anyhow::Result<Mode> {
-    match block.attributes.get("same-as-mode") {
+    match block.attribute("same-as-mode") {
         Some(value) => parse_keyword("same-as-mode", value),
         // Without a pattern, each line is a record. A block of plain lines is usually a copy of
         // its target, so each line must equal the target's line at the same place. A pattern finds
@@ -952,7 +952,7 @@ struct PathsTrace {
 ///
 /// # Errors
 /// Returns an error that quotes the first attribute found without them.
-pub(super) fn check_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<()> {
+pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
     require_main(
         attributes,
         &["same-as", "same-as-paths"],
@@ -2952,13 +2952,13 @@ ten
 
 #[cfg(test)]
 mod check_attributes_tests {
+    use crate::test_utils::text_attributes;
     use crate::validators::Validator;
-    use std::collections::HashMap;
 
     #[test]
     fn mode_or_format_without_same_as_returns_an_error() {
         for (name, value) in [("same-as-mode", "set"), ("same-as-format", "flat")] {
-            let attributes = HashMap::from([(name.to_string(), value.to_string())]);
+            let attributes = text_attributes(&[(name, value)]);
 
             let error = Validator::SameAs.check_attributes(&attributes).unwrap_err();
 
@@ -2971,7 +2971,7 @@ mod check_attributes_tests {
 
     #[test]
     fn pattern_without_same_as_or_name_returns_an_error() {
-        let attributes = HashMap::from([("same-as-pattern".to_string(), "\\d+".to_string())]);
+        let attributes = text_attributes(&[("same-as-pattern", "\\d+")]);
 
         let error = Validator::SameAs.check_attributes(&attributes).unwrap_err();
 

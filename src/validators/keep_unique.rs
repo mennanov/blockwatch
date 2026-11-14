@@ -32,14 +32,12 @@ impl SyncValidator for KeepUniqueValidator {
                 }
                 let pattern = block_with_context
                     .block
-                    .attributes
-                    .get("keep-unique")
-                    .cloned()
+                    .attribute("keep-unique")
                     .unwrap_or_default();
                 let re = if pattern.is_empty() {
                     None
                 } else {
-                    Some(compile_pattern(&pattern))
+                    Some(compile_pattern(pattern))
                 };
                 let mut trace = context
                     .traces_requested

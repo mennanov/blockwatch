@@ -85,7 +85,7 @@ type Other {
             .collect::<anyhow::Result<Vec<_>>>()?;
         let names: Vec<&str> = blocks
             .iter()
-            .map(|block| block.attributes["name"].as_str())
+            .map(|block| block.attributes["name"].text())
             .collect();
         assert_eq!(names, ["real"]);
         Ok(())

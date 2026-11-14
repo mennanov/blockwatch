@@ -1,4 +1,4 @@
-use crate::blocks::{Block, BlockWithContext};
+use crate::blocks::{Attributes, Block, BlockWithContext};
 use crate::repo_path::RepoPath;
 use crate::validators::{
     SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
@@ -9,7 +9,6 @@ use crate::{Position, validators};
 use anyhow::{Context, anyhow};
 use serde::Serialize;
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 use strum_macros::{Display, EnumIter, EnumString};
@@ -67,7 +66,7 @@ impl SyncValidator for KeepSortedValidator {
         let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
-                if let Some(keep_sorted) = block_with_context.block.attributes.get("keep-sorted") {
+                if let Some(keep_sorted) = block_with_context.block.attribute("keep-sorted") {
                     let located = |error: anyhow::Error| {
                         anyhow!("{error} in {}", block_with_context.block.label(file_path))
                     };
@@ -80,21 +79,18 @@ impl SyncValidator for KeepSortedValidator {
                     // Optional regex pattern similar to keep-unique: if provided, we compare extracted matches.
                     let pattern = block_with_context
                         .block
-                        .attributes
-                        .get("keep-sorted-pattern")
-                        .cloned()
+                        .attribute("keep-sorted-pattern")
                         .unwrap_or_default();
                     let re = if pattern.is_empty() {
                         None
                     } else {
-                        Some(compile_pattern(&pattern))
+                        Some(compile_pattern(pattern))
                     };
 
                     let format_raw = block_with_context
                         .block
-                        .attributes
-                        .get("keep-sorted-format")
-                        .map(|s| s.trim())
+                        .attribute("keep-sorted-format")
+                        .map(str::trim)
                         .unwrap_or_default();
                     let sort_format = if format_raw.is_empty() {
                         SortFormat::default()
@@ -222,7 +218,7 @@ struct KeepSortedLine {
 ///
 /// # Errors
 /// Returns an error that quotes the first of the two attributes found without it.
-pub(super) fn check_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<()> {
+pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
     require_main(
         attributes,
         &["keep-sorted"],
@@ -1220,8 +1216,8 @@ id: 3 green
 
 #[cfg(test)]
 mod check_attributes_tests {
+    use crate::test_utils::text_attributes;
     use crate::validators::Validator;
-    use std::collections::HashMap;
 
     #[test]
     fn pattern_or_format_without_keep_sorted_returns_an_error() {
@@ -1229,7 +1225,7 @@ mod check_attributes_tests {
             ("keep-sorted-pattern", "id: (?P<value>\\d+)"),
             ("keep-sorted-format", "numeric"),
         ] {
-            let attributes = HashMap::from([(name.to_string(), value.to_string())]);
+            let attributes = text_attributes(&[(name, value)]);
 
             let error = Validator::KeepSorted
                 .check_attributes(&attributes)

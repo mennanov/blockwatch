@@ -94,6 +94,40 @@ line-pattern = '^\d+\.\d+\.\d+$'
 }
 
 #[test]
+fn list_attribute_checks_the_block_against_each_reference() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = temp.path().join("repo");
+    std::fs::create_dir_all(root.join(".git"))?;
+    std::fs::write(root.join("colors.txt"), "red\nblue\n")?;
+    std::fs::write(root.join("red.txt"), "red\n")?;
+    std::fs::write(root.join("blue,green.txt"), "blue\n")?;
+    std::fs::write(
+        root.join("blockwatch.toml"),
+        r"[[block]]
+target = 'colors.txt'
+same-as = ['red.txt', 'blue,green.txt']
+",
+    )?;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.current_dir(&root);
+    let output = cmd.output()?;
+
+    output.clone().assert().failure();
+    let violations: serde_json::Value = serde_json::from_slice(&output.stderr)?;
+    let mut targets: Vec<&str> = violations["colors.txt"]
+        .as_array()
+        .expect("violations of colors.txt")
+        .iter()
+        .map(|violation| violation["data"]["target_file"].as_str().expect("a file"))
+        .collect();
+    // The violations are not in the order of the references.
+    targets.sort_unstable();
+    assert_eq!(targets, ["blue,green.txt", "red.txt"]);
+    Ok(())
+}
+
+#[test]
 fn pattern_block_in_a_file_without_a_grammar_reports_its_violation_there() -> anyhow::Result<()> {
     let temp = tempfile::tempdir()?;
     let root = temp.path().join("repo");

@@ -11,7 +11,8 @@ mod same_as;
 
 use crate::Position;
 use crate::blocks::{
-    Block, BlockAddress, BlockKey, BlockListing, BlockSeverity, BlockWithContext, FileBlocks,
+    Attributes, Block, BlockAddress, BlockKey, BlockListing, BlockSeverity, BlockWithContext,
+    FileBlocks,
 };
 use crate::diff_parser::DiffChanges;
 use crate::fs::FileSystem;
@@ -151,10 +152,7 @@ impl Validator {
     ///
     /// # Errors
     /// Returns an error that quotes the attribute that is wrong.
-    pub(crate) fn check_attributes(
-        self,
-        attributes: &HashMap<String, String>,
-    ) -> anyhow::Result<()> {
+    pub(crate) fn check_attributes(self, attributes: &Attributes) -> anyhow::Result<()> {
         match self {
             Validator::Affects | Validator::KeepUnique | Validator::LinePattern => Ok(()),
             Validator::CheckAi => check_ai::check_attributes(attributes),
@@ -976,7 +974,7 @@ fn block_content_for_pattern<'c>(
     pattern_attribute: &str,
 ) -> anyhow::Result<PatternContent<'c>> {
     let content = block_with_context.block.content.text(file_content);
-    let Some(pattern) = block_with_context.block.attributes.get(pattern_attribute) else {
+    let Some(pattern) = block_with_context.block.attribute(pattern_attribute) else {
         return Ok(PatternContent::Whole(content.trim()));
     };
     let re = compile_pattern(pattern)
@@ -997,11 +995,7 @@ fn block_content_for_pattern<'c>(
 ///
 /// # Panics
 /// Panics if `main` is empty.
-fn require_main(
-    attributes: &HashMap<String, String>,
-    main: &[&str],
-    extras: &[&str],
-) -> anyhow::Result<()> {
+fn require_main(attributes: &Attributes, main: &[&str], extras: &[&str]) -> anyhow::Result<()> {
     // Without a main attribute, no validator reads the extra one, so the block would pass as if it
     // were not there.
     if main.iter().any(|name| attributes.contains_key(*name)) {

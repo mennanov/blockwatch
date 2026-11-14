@@ -1,4 +1,4 @@
-use crate::blocks::{Block, BlockWithContext};
+use crate::blocks::{Attributes, Block, BlockWithContext};
 use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{
@@ -8,7 +8,6 @@ use crate::validators::{
 use anyhow::{Context, anyhow};
 use regex::Regex;
 use serde::Serialize;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Enforces `line-count="<N"` and friends: the number of non-empty lines in the block must satisfy
@@ -34,7 +33,7 @@ impl SyncValidator for LineCountValidator {
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
                 let block = &block_with_context.block;
-                let Some(expr) = block.attributes.get("line-count") else {
+                let Some(expr) = block.attribute("line-count") else {
                     continue;
                 };
                 let (op, expected) = parse_constraint(expr).map_err(|e| anyhow!(
@@ -79,8 +78,7 @@ impl SyncValidator for LineCountValidator {
 /// Returns an error when the pattern is not a valid regex or has a line break.
 fn compile_count_pattern(file_path: &RepoPath, block: &Block) -> anyhow::Result<Option<Regex>> {
     block
-        .attributes
-        .get("line-count-pattern")
+        .attribute("line-count-pattern")
         .map(|pattern| {
             compile_pattern(pattern).with_context(|| {
                 format!("invalid line-count-pattern in {}", block.label(file_path))
@@ -188,7 +186,7 @@ struct LineCountLine {
 ///
 /// # Errors
 /// Returns an error that quotes `line-count-pattern` when it comes without `line-count`.
-pub(super) fn check_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<()> {
+pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
     require_main(attributes, &["line-count"], &["line-count-pattern"])
 }
 
@@ -717,12 +715,12 @@ mod trace_tests {
 
 #[cfg(test)]
 mod check_attributes_tests {
+    use crate::test_utils::text_attributes;
     use crate::validators::Validator;
-    use std::collections::HashMap;
 
     #[test]
     fn pattern_without_line_count_returns_an_error() {
-        let attributes = HashMap::from([("line-count-pattern".to_string(), "\\w+".to_string())]);
+        let attributes = text_attributes(&[("line-count-pattern", "\\w+")]);
 
         let error = Validator::LineCount
             .check_attributes(&attributes)

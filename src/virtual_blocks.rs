@@ -1,14 +1,13 @@
 //! Blocks that the config file declares around a symbol, instead of tags in a comment.
 
 use crate::LineIndex;
-use crate::blocks::{Block, BlockSeverity, BlockWithContext, Content, Declaration};
+use crate::blocks::{Attributes, Block, BlockSeverity, BlockWithContext, Content, Declaration};
 use crate::diff_parser::LineChanges;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{ResolveError, Symbols};
 use anyhow::{anyhow, bail};
 use regex::{Captures, Regex, RegexBuilder};
-use std::collections::HashMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
@@ -23,7 +22,7 @@ pub(crate) struct VirtualBlock {
     /// How to find the block in `file`.
     pub(crate) locator: Locator,
     /// The attributes, with the same names and values a tag gives them.
-    pub(crate) attributes: HashMap<String, String>,
+    pub(crate) attributes: Attributes,
     /// The entry of the config file that declares the block.
     pub(crate) entry: ConfigEntry,
     /// Whether the diff touches `entry`.
@@ -422,6 +421,7 @@ mod tests {
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::language_parsers::LanguageParsers;
     use crate::test_utils::{virtual_block, virtual_block_with_target_if};
+    use std::collections::HashMap;
     use std::path::Path;
 
     /// The block that a [`virtual_block`] around `path` in `file` declares in `source`, the text of

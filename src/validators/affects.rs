@@ -1,4 +1,4 @@
-use crate::blocks::{Block, BlockWithContext, FileBlocks};
+use crate::blocks::{AttributeValue, Block, BlockWithContext, FileBlocks};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
@@ -198,7 +198,7 @@ fn reference_violations<Fs: FileSystem>(
     targets: &mut TargetIndex<'_, Fs>,
     file_path: &RepoPath,
     block_with_context: &BlockWithContext,
-    affects: &str,
+    affects: &AttributeValue,
     mut trace: Option<&mut Vec<AffectsTarget>>,
 ) -> anyhow::Result<Vec<Violation>> {
     let block = &block_with_context.block;
@@ -247,7 +247,7 @@ fn reference_violations<Fs: FileSystem>(
 fn parse_references(
     file_path: &RepoPath,
     block: &Block,
-    affects: &str,
+    affects: &AttributeValue,
 ) -> anyhow::Result<Vec<TargetReference>> {
     TargetReference::parse_list(affects).with_context(|| {
         format!(

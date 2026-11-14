@@ -218,7 +218,7 @@ mod tests {
             .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].attributes.get("name").unwrap(), "test");
+        assert_eq!(blocks[0].attribute("name"), Some("test"));
         Ok(())
     }
 
@@ -239,7 +239,7 @@ mod tests {
             .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].attributes.get("keep-sorted").unwrap(), "asc");
+        assert_eq!(blocks[0].attribute("keep-sorted"), Some("asc"));
         Ok(())
     }
 

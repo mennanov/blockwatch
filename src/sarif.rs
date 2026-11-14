@@ -373,10 +373,10 @@ mod tests {
     use super::*;
     use crate::Position;
     use crate::blocks::{Block, Content, Declaration};
+    use crate::test_utils::text_attributes;
     use crate::validators::ViolationRange;
     use assert_json_diff::assert_json_include;
     use serde_json::{Value, json};
-    use std::collections::HashMap;
     use std::path::Path;
     use strum::IntoEnumIterator;
 
@@ -386,9 +386,9 @@ mod tests {
 
     /// A block carrying the given `name` and `severity` attributes, and nothing else.
     fn block(name: Option<&str>, severity: &str) -> Block {
-        let mut attributes = HashMap::from([("severity".to_string(), severity.to_string())]);
+        let mut attributes = text_attributes(&[("severity", severity)]);
         if let Some(name) = name {
-            attributes.insert("name".to_string(), name.to_string());
+            attributes.extend(text_attributes(&[("name", name)]));
         }
         Block {
             severity: BlockSeverity::from_attributes(&attributes).expect("a valid severity"),

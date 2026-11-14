@@ -364,6 +364,7 @@ impl BlockEnd {
 mod tests {
     use crate::blocks::{Block, BlockSeverity, Content, Declaration};
     use crate::language_parsers::LanguageParser;
+    use crate::test_utils::text_attributes;
     use crate::{Position, language_parsers, test_utils};
     use std::collections::HashMap;
 
@@ -572,21 +573,21 @@ println!("hello2");
             blocks,
             vec![
                 Block {
-                    attributes: HashMap::from([("name".to_string(), "foo".to_string())]),
+                    attributes: text_attributes(&[("name", "foo")]),
                     start_tag_position_range: Position::new(2, 12)..Position::new(2, 30),
                     content: Content::source(30..620, Position::new(2, 30)..Position::new(25, 9),),
                     declaration: Declaration::Tags,
                     severity: BlockSeverity::Error,
                 },
                 Block {
-                    attributes: HashMap::from([("name".to_string(), "bar".to_string())]),
+                    attributes: text_attributes(&[("name", "bar")]),
                     start_tag_position_range: Position::new(7, 16)..Position::new(7, 34),
                     content: Content::source(142..440, Position::new(7, 34)..Position::new(17, 13),),
                     declaration: Declaration::Tags,
                     severity: BlockSeverity::Error,
                 },
                 Block {
-                    attributes: HashMap::from([("name".to_string(), "bar-bar".to_string())]),
+                    attributes: text_attributes(&[("name", "bar-bar")]),
                     start_tag_position_range: Position::new(11, 20)..Position::new(11, 42),
                     content: Content::source(
                         281..415,
@@ -596,7 +597,7 @@ println!("hello2");
                     severity: BlockSeverity::Error,
                 },
                 Block {
-                    attributes: HashMap::from([("name".to_string(), "buzz".to_string())]),
+                    attributes: text_attributes(&[("name", "buzz")]),
                     start_tag_position_range: Position::new(19, 16)..Position::new(19, 35),
                     content: Content::source(
                         487..599,
@@ -606,7 +607,7 @@ println!("hello2");
                     severity: BlockSeverity::Error,
                 },
                 Block {
-                    attributes: HashMap::from([("name".to_string(), "fizz".to_string())]),
+                    attributes: text_attributes(&[("name", "fizz")]),
                     start_tag_position_range: Position::new(26, 12)..Position::new(26, 31),
                     content: Content::source(662..671, Position::new(26, 31)..Position::new(27, 9),),
                     declaration: Declaration::Tags,
@@ -652,7 +653,7 @@ println!("hello2");
         assert_eq!(
             blocks,
             vec![Block {
-                attributes: HashMap::from([("name".to_string(), "foo".to_string())]),
+                attributes: text_attributes(&[("name", "foo")]),
                 start_tag_position_range: Position::new(1, 4)..Position::new(1, 22),
                 content: Content::source(
                     test_utils::substr_range(contents, "\n        let word = \"hello\";\n        "),
@@ -706,10 +707,10 @@ println!("hello2");
         assert_eq!(
             blocks,
             vec![Block {
-                attributes: HashMap::from([
-                    ("name".to_string(), "foo".to_string()),
-                    ("keep-sorted".to_string(), String::new()),
-                    ("keep-unique".to_string(), String::new()),
+                attributes: text_attributes(&[
+                    ("name", "foo"),
+                    ("keep-sorted", ""),
+                    ("keep-unique", ""),
                 ]),
                 start_tag_position_range: Position::new(1, 4)..Position::new(3, 16),
                 content: Content::source(
@@ -733,7 +734,7 @@ println!("hello2");
             blocks,
             vec![
                 Block {
-                    attributes: HashMap::from([("name".to_string(), "a".to_string())]),
+                    attributes: text_attributes(&[("name", "a")]),
                     start_tag_position_range: Position::new(1, 4)..Position::new(1, 20),
                     content: Content::source(
                         test_utils::substr_range(contents, "\nlet x = 1;\n"),
@@ -743,10 +744,7 @@ println!("hello2");
                     severity: BlockSeverity::Error,
                 },
                 Block {
-                    attributes: HashMap::from([
-                        ("name".to_string(), "b".to_string()),
-                        ("keep-sorted".to_string(), String::new()),
-                    ]),
+                    attributes: text_attributes(&[("name", "b"), ("keep-sorted", ""),]),
                     start_tag_position_range: Position::new(3, 13)..Position::new(4, 16),
                     content: Content::source(
                         test_utils::substr_range(contents, "\nlet y = 2;\n"),
@@ -1078,7 +1076,7 @@ println!("hello2");
         assert_eq!(
             blocks
                 .iter()
-                .map(|block| block.attributes["name"].as_str())
+                .map(|block| block.attributes["name"].text())
                 .collect::<Vec<_>>(),
             ["a"]
         );
@@ -1175,10 +1173,7 @@ println!("hello2");
         assert_eq!(blocks.len(), 1);
         assert_eq!(
             blocks[0].attributes,
-            HashMap::from([
-                ("name".to_string(), "bar".to_string()),
-                ("check-ai".to_string(), "buzz".to_string())
-            ])
+            text_attributes(&[("name", "bar"), ("check-ai", "buzz")])
         );
         Ok(())
     }
@@ -1199,10 +1194,7 @@ println!("hello2");
         assert_eq!(blocks.len(), 1);
         assert_eq!(
             blocks[0].attributes,
-            HashMap::from([
-                ("name".to_string(), "bar".to_string()),
-                ("check-ai".to_string(), "buzz".to_string())
-            ])
+            text_attributes(&[("name", "bar"), ("check-ai", "buzz")])
         );
         Ok(())
     }
@@ -1243,12 +1235,9 @@ println!("hello2");
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks[0].attributes,
-            HashMap::from([
-                (
-                    "keep-unique".to_string(),
-                    r#"\"(?P<value>[a-z]+)\""#.to_string()
-                ),
-                ("line-pattern".to_string(), r"^\'[a-z]+\'$".to_string())
+            text_attributes(&[
+                ("keep-unique", r#"\"(?P<value>[a-z]+)\""#),
+                ("line-pattern", r"^\'[a-z]+\'$")
             ])
         );
         Ok(())
@@ -1265,10 +1254,7 @@ println!("hello2");
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks[0].attributes,
-            HashMap::from([
-                ("line-pattern".to_string(), r"^C:\\".to_string()),
-                ("keep-unique".to_string(), r"\w+\\".to_string())
-            ])
+            text_attributes(&[("line-pattern", r"^C:\\"), ("keep-unique", r"\w+\\")])
         );
         Ok(())
     }
@@ -1310,11 +1296,7 @@ println!("hello2");
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks[0].attributes,
-            HashMap::from([
-                ("name".to_string(), "".to_string()),
-                ("check-ai".to_string(), "".to_string()),
-                ("keep-sorted".to_string(), "".to_string())
-            ])
+            text_attributes(&[("name", ""), ("check-ai", ""), ("keep-sorted", "")])
         );
         Ok(())
     }
@@ -1362,7 +1344,7 @@ println!("hello2");
 
         // Duplicate attributes: last value wins (standard HTML/XML behavior)
         assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].attributes.get("name"), Some(&"blue".to_string()));
+        assert_eq!(blocks[0].attribute("name"), Some("blue"));
         Ok(())
     }
 
@@ -1424,17 +1406,11 @@ println!("hello2");
         assert_eq!(blocks.len(), 2);
         assert_eq!(
             blocks[0].attributes,
-            HashMap::from([
-                ("name".to_string(), "outer".to_string()),
-                ("check-ai".to_string(), "bar".to_string()),
-            ])
+            text_attributes(&[("name", "outer"), ("check-ai", "bar"),])
         );
         assert_eq!(
             blocks[1].attributes,
-            HashMap::from([
-                ("name".to_string(), "inner".to_string()),
-                ("keep-sorted".to_string(), "buzz".to_string())
-            ])
+            text_attributes(&[("name", "inner"), ("keep-sorted", "buzz")])
         );
         Ok(())
     }

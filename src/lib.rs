@@ -163,7 +163,7 @@ mod count_rust_blocks_tests {
 
 #[cfg(test)]
 mod test_utils {
-    use crate::blocks::BlockSeverity;
+    use crate::blocks::{AttributeValue, Attributes, BlockSeverity};
     use crate::diff_parser::{DiffChanges, LineChange, LineChangeKind};
     use crate::fs::PathFilter;
     use crate::fs::test_utils::FakeFileSystem;
@@ -186,6 +186,14 @@ mod test_utils {
     pub(crate) fn substr_range(input: &str, substr: &str) -> Range<usize> {
         let pos = input.find(substr).unwrap();
         pos..(pos + substr.len())
+    }
+
+    /// The attributes `pairs`, each with a text value, as a tag gives them.
+    pub(crate) fn text_attributes(pairs: &[(&str, &str)]) -> Attributes {
+        pairs
+            .iter()
+            .map(|(name, value)| (name.to_string(), AttributeValue::Text(value.to_string())))
+            .collect()
     }
 
     /// The diff's changes to each of `files`.
@@ -256,10 +264,7 @@ mod test_utils {
             Some((file, path)) => (file, Locator::Symbol(SymbolPath::parse(path)?)),
             None => (target, Locator::File),
         };
-        let attributes = attributes
-            .iter()
-            .map(|(name, value)| (name.to_string(), value.to_string()))
-            .collect();
+        let attributes = text_attributes(attributes);
         Ok(VirtualBlock {
             file: RepoPath::from_reference(file)?,
             locator,

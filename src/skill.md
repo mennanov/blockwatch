@@ -208,7 +208,7 @@ same-as = 'config/models.json#/default'
 ```
 
 - One entry per target. Use `true` for valueless attributes (`keep-unique = true`) and integers for
-  `check-lua-timeout`.
+  `check-lua-timeout`. `affects` and `same-as` also take a list: `same-as = ['a.md:x', 'b.json#/y']`.
 - A missing target, a `target-pattern` without a unique match, or an empty target glob stops the run.
 - `target-if = { symbols = ['#/a'], patterns = ['^b$'] }` on a glob target keeps only the matched files with every
   symbol and a match for every regex. Those must still have the target. A full run fails when none passes.

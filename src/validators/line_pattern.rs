@@ -77,7 +77,7 @@ fn compile_attribute<'b>(
     block: &'b Block,
     attribute: &str,
 ) -> anyhow::Result<Option<(&'b str, Regex)>> {
-    let Some(pattern) = block.attributes.get(attribute) else {
+    let Some(pattern) = block.attribute(attribute) else {
         return Ok(None);
     };
     let re = compile_pattern(pattern).map_err(|e| {
@@ -86,7 +86,7 @@ fn compile_attribute<'b>(
             block.label(file_path),
         )
     })?;
-    Ok(Some((pattern.as_str(), re)))
+    Ok(Some((pattern, re)))
 }
 
 /// Returns the violation for the first non-empty line of `block` that fails a check, or `None`

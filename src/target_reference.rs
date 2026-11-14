@@ -1,9 +1,10 @@
 //! The reference to a block, a symbol or a file that `affects`, `check-lua` and `same-as` write in
 //! an attribute, and the target it points at.
 
+use crate::blocks::AttributeValue;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
-use anyhow::bail;
+use anyhow::{Context, bail};
 use std::fmt;
 
 /// One target named by a reference-based validator's attribute (`affects`, `check-lua`, `same-as`).
@@ -25,8 +26,9 @@ pub(crate) enum TargetReference {
 }
 
 impl TargetReference {
-    /// Parses a comma-separated list of the references shared by the reference-based validators
-    /// (`affects`, `check-lua`, `same-as`).
+    /// Parses the references in an attribute of the reference-based validators (`affects`,
+    /// `check-lua`, `same-as`), in the order they are written. A text value holds them separated
+    /// by commas. A list holds one in each entry, so an entry can have a comma.
     ///
     /// A reference can take one of three mutually exclusive forms:
     /// - `file#/path` or `#/path`: addresses a symbol by its symbol path.
@@ -39,8 +41,17 @@ impl TargetReference {
     /// A reference whose block name or symbol path is empty (`file.rs:` or `file.json#`) is
     /// rejected rather than treated as a whole-file reference, avoiding silently turning a syntax
     /// typo into a much coarser rule.
-    pub(crate) fn parse_list(value: &str) -> anyhow::Result<Vec<Self>> {
-        value.split(',').map(Self::parse).collect()
+    pub(crate) fn parse_list(value: &AttributeValue) -> anyhow::Result<Vec<Self>> {
+        match value {
+            AttributeValue::Text(text) => text.split(',').map(Self::parse).collect(),
+            AttributeValue::List(entries) => entries
+                .iter()
+                .enumerate()
+                .map(|(index, entry)| {
+                    Self::parse(entry).with_context(|| format!("entry {} of the list", index + 1))
+                })
+                .collect(),
+        }
     }
 
     /// Parses a single target reference string. See [`Self::parse_list`] for the forms it takes.
@@ -190,8 +201,20 @@ impl fmt::Display for ResolvedTarget {
 #[cfg(test)]
 mod parse_target_references_tests {
     use super::TargetReference;
+    use crate::blocks::AttributeValue;
     use crate::repo_path::RepoPath;
     use crate::symbol_path::SymbolPath;
+
+    /// The references in `value`, written as a tag writes them.
+    fn parse_text(value: &str) -> anyhow::Result<Vec<TargetReference>> {
+        TargetReference::parse_list(&AttributeValue::Text(value.to_string()))
+    }
+
+    /// The references in the list `entries`.
+    fn parse_entries(entries: &[&str]) -> anyhow::Result<Vec<TargetReference>> {
+        let entries = entries.iter().map(|entry| entry.to_string()).collect();
+        TargetReference::parse_list(&AttributeValue::List(entries))
+    }
 
     /// A `file:name` reference, for the expected values below.
     fn block(file: &str, name: &str) -> anyhow::Result<TargetReference> {
@@ -210,15 +233,41 @@ mod parse_target_references_tests {
     }
 
     #[test]
+    fn list_entries_parse_as_one_reference_each() -> anyhow::Result<()> {
+        let result = parse_entries(&["a.md#/Install, upgrade", "red,blue.txt", ":name"])?;
+        assert_eq!(
+            result,
+            vec![
+                path(Some("a.md"), "/Install, upgrade")?,
+                TargetReference::File(RepoPath::from_reference("red,blue.txt")?),
+                TargetReference::Block {
+                    file: None,
+                    name: "name".to_string()
+                },
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_list_entry_error_shows_its_position() {
+        let error = parse_entries(&["a.md", " "]).unwrap_err();
+        assert_eq!(
+            format!("{error:#}"),
+            "entry 2 of the list: invalid target reference: \"\""
+        );
+    }
+
+    #[test]
     fn single_reference() -> anyhow::Result<()> {
-        let result = TargetReference::parse_list("file.rs:block_name")?;
+        let result = parse_text("file.rs:block_name")?;
         assert_eq!(result, vec![block("file.rs", "block_name")?]);
         Ok(())
     }
 
     #[test]
     fn multiple_references() -> anyhow::Result<()> {
-        let result = TargetReference::parse_list("file1.rs:block1, file2.rs:block2")?;
+        let result = parse_text("file1.rs:block1, file2.rs:block2")?;
         assert_eq!(
             result,
             vec![block("file1.rs", "block1")?, block("file2.rs", "block2")?]
@@ -228,7 +277,7 @@ mod parse_target_references_tests {
 
     #[test]
     fn multiple_references_with_a_line_break_after_a_comma() -> anyhow::Result<()> {
-        let result = TargetReference::parse_list("file1.rs:block1,\n   file2.rs:block2")?;
+        let result = parse_text("file1.rs:block1,\n   file2.rs:block2")?;
         assert_eq!(
             result,
             vec![block("file1.rs", "block1")?, block("file2.rs", "block2")?]
@@ -238,7 +287,7 @@ mod parse_target_references_tests {
 
     #[test]
     fn a_reference_with_a_line_break_returns_error() {
-        let err = TargetReference::parse_list("docs/config.\n   md:block").unwrap_err();
+        let err = parse_text("docs/config.\n   md:block").unwrap_err();
         assert!(
             err.to_string().contains("line break"),
             "unexpected error: {err}"
@@ -247,7 +296,7 @@ mod parse_target_references_tests {
 
     #[test]
     fn empty_filename_returns_none_for_filename() -> anyhow::Result<()> {
-        let result = TargetReference::parse_list(":block_name")?;
+        let result = parse_text(":block_name")?;
         assert_eq!(
             result,
             vec![TargetReference::Block {
@@ -260,7 +309,7 @@ mod parse_target_references_tests {
 
     #[test]
     fn multiple_empty_filename_references_returns_non_for_filename() -> anyhow::Result<()> {
-        let result = TargetReference::parse_list(":block1, :block2")?;
+        let result = parse_text(":block1, :block2")?;
         assert_eq!(
             result,
             vec![
@@ -279,7 +328,7 @@ mod parse_target_references_tests {
 
     #[test]
     fn a_reference_without_a_colon_is_a_whole_file_reference() -> anyhow::Result<()> {
-        let result = TargetReference::parse_list("config/schema.json")?;
+        let result = parse_text("config/schema.json")?;
         assert_eq!(
             result,
             vec![TargetReference::File(RepoPath::from_reference(
@@ -291,7 +340,7 @@ mod parse_target_references_tests {
 
     #[test]
     fn whole_file_and_block_references_can_be_mixed() -> anyhow::Result<()> {
-        let result = TargetReference::parse_list("src/lib.rs:languages-code, locales/en.json")?;
+        let result = parse_text("src/lib.rs:languages-code, locales/en.json")?;
         assert_eq!(
             result,
             vec![
@@ -304,16 +353,13 @@ mod parse_target_references_tests {
 
     #[test]
     fn a_whole_file_reference_is_normalized() -> anyhow::Result<()> {
-        assert_eq!(
-            TargetReference::parse_list("./config.json")?,
-            TargetReference::parse_list("config.json")?
-        );
+        assert_eq!(parse_text("./config.json")?, parse_text("config.json")?);
         Ok(())
     }
 
     #[test]
     fn a_reference_with_an_empty_block_name_returns_error() {
-        let err = TargetReference::parse_list("config.json:").unwrap_err();
+        let err = parse_text("config.json:").unwrap_err();
         assert_eq!(
             err.to_string(),
             "invalid target reference: \"config.json:\" has no block name after ':'; \
@@ -323,13 +369,13 @@ mod parse_target_references_tests {
 
     #[test]
     fn an_empty_reference_returns_error() {
-        assert!(TargetReference::parse_list("").is_err());
-        assert!(TargetReference::parse_list("file.rs:block, ").is_err());
+        assert!(parse_text("").is_err());
+        assert!(parse_text("file.rs:block, ").is_err());
     }
 
     #[test]
     fn path_reference_with_file_parses_successfully() -> anyhow::Result<()> {
-        let result = TargetReference::parse_list("package.json#/dependencies/inngest")?;
+        let result = parse_text("package.json#/dependencies/inngest")?;
         assert_eq!(
             result,
             vec![path(Some("package.json"), "/dependencies/inngest")?]
@@ -339,15 +385,14 @@ mod parse_target_references_tests {
 
     #[test]
     fn path_reference_without_file_parses_successfully() -> anyhow::Result<()> {
-        let result = TargetReference::parse_list("#/dependencies/inngest")?;
+        let result = parse_text("#/dependencies/inngest")?;
         assert_eq!(result, vec![path(None, "/dependencies/inngest")?]);
         Ok(())
     }
 
     #[test]
     fn mixed_reference_types_parse_successfully() -> anyhow::Result<()> {
-        let result =
-            TargetReference::parse_list("package.json#/version, docs/cli.md:version, README.md")?;
+        let result = parse_text("package.json#/version, docs/cli.md:version, README.md")?;
         assert_eq!(
             result,
             vec![
@@ -361,14 +406,14 @@ mod parse_target_references_tests {
 
     #[test]
     fn percent_encoded_colon_in_path_reference_parses_successfully() -> anyhow::Result<()> {
-        let result = TargetReference::parse_list("package.json#/%3A")?;
+        let result = parse_text("package.json#/%3A")?;
         assert_eq!(result, vec![path(Some("package.json"), "/:")?]);
         Ok(())
     }
 
     #[test]
     fn colon_after_hash_is_part_of_the_path() -> anyhow::Result<()> {
-        let result = TargetReference::parse_list("package.json#/a:b, #/:root")?;
+        let result = parse_text("package.json#/a:b, #/:root")?;
         assert_eq!(
             result,
             vec![
@@ -381,14 +426,14 @@ mod parse_target_references_tests {
 
     #[test]
     fn colon_before_hash_is_part_of_the_file() -> anyhow::Result<()> {
-        let result = TargetReference::parse_list("file.rs:name#/x")?;
+        let result = parse_text("file.rs:name#/x")?;
         assert_eq!(result, vec![path(Some("file.rs:name"), "/x")?]);
         Ok(())
     }
 
     #[test]
     fn unrooted_path_reference_returns_error() {
-        let err = TargetReference::parse_list("package.json#dependencies/inngest").unwrap_err();
+        let err = parse_text("package.json#dependencies/inngest").unwrap_err();
         assert!(
             err.to_string().contains("symbol path must start with '/'"),
             "unexpected error message: {err}"
@@ -397,12 +442,12 @@ mod parse_target_references_tests {
 
     #[test]
     fn reference_with_empty_path_returns_error() {
-        let err = TargetReference::parse_list("package.json#").unwrap_err();
+        let err = parse_text("package.json#").unwrap_err();
         assert_eq!(
             err.to_string(),
             "invalid target reference: \"package.json#\" has no symbol path after '#'; \
              drop the '#' to reference the whole file"
         );
-        assert!(TargetReference::parse_list("#").is_err());
+        assert!(parse_text("#").is_err());
     }
 }

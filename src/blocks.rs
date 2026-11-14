@@ -18,6 +18,49 @@ use strum_macros::EnumString;
 
 const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
 
+/// The attributes of a block, by name.
+pub(crate) type Attributes = HashMap<String, AttributeValue>;
+
+/// The value of a block's attribute.
+#[derive(Debug, PartialEq, Eq, Clone, Serialize)]
+#[serde(untagged)]
+pub(crate) enum AttributeValue {
+    /// A tag's value, or a string, `true` or an integer in a `[[block]]` entry.
+    Text(String),
+    /// A list in a `[[block]]` entry, with at least one entry. Only the attributes in
+    /// [`LIST_ATTRIBUTES`] can have one.
+    List(Vec<String>),
+}
+
+impl AttributeValue {
+    /// The text of the value.
+    ///
+    /// # Panics
+    /// Panics on a list. Only the attributes in [`LIST_ATTRIBUTES`] can have one, and their
+    /// readers handle both forms.
+    pub(crate) fn text(&self) -> &str {
+        match self {
+            Self::Text(text) => text,
+            Self::List(_) => panic!("only the attributes in LIST_ATTRIBUTES can be a list"),
+        }
+    }
+}
+
+// A test compares a text value with the text it expects, such as `attributes["name"] == "foo"`.
+#[cfg(test)]
+impl PartialEq<&str> for AttributeValue {
+    fn eq(&self, other: &&str) -> bool {
+        match self {
+            Self::Text(text) => text == other,
+            Self::List(_) => false,
+        }
+    }
+}
+
+/// The attributes whose value can be a list, in a `[[block]]` entry. A tag writes the list as one
+/// string, with a comma between the references.
+pub(crate) const LIST_ATTRIBUTES: [&str; 2] = ["affects", "same-as"];
+
 /// A block: a part of a file that its attributes set rules for.
 ///
 /// A pair of tags in the file's comments declares a block. So does a `[[block]]` entry of the
@@ -27,7 +70,7 @@ pub(crate) struct Block {
     /// Optional attributes in the `block` tag, or in the `[[block]]` entry of a virtual block.
     /// Their names are what selects the validators that will check this block (`affects`,
     /// `keep-sorted`, …).
-    pub(crate) attributes: HashMap<String, String>,
+    pub(crate) attributes: Attributes,
     /// Block's start tag position range, half-open: it starts at the `<` symbol and ends one column
     /// past the `>` symbol. A virtual block has no tag, so it has the first line of the symbol's
     /// definition.
@@ -283,13 +326,17 @@ impl Block {
         start_tag_position_range: Range<Position>,
         content: Content,
     ) -> anyhow::Result<Self> {
+        let attributes: Attributes = attributes
+            .into_iter()
+            .map(|(name, value)| (name, AttributeValue::Text(value)))
+            .collect();
         let severity = validate_attributes(&attributes)
             .and_then(|()| BlockSeverity::from_attributes(&attributes))
             .map_err(|error| {
                 // The tag parser does not know the file, so the message cannot show it.
                 let name = attributes
                     .get("name")
-                    .map_or(UNNAMED_BLOCK_LABEL, String::as_str);
+                    .map_or(UNNAMED_BLOCK_LABEL, AttributeValue::text);
                 anyhow!(
                     "block {name} at line {} contains {error}",
                     start_tag_position_range.start.line
@@ -304,9 +351,17 @@ impl Block {
         })
     }
 
+    /// The text of the attribute `name`, or `None` if the block doesn't have it.
+    ///
+    /// # Panics
+    /// Panics if the value is a list. See [`AttributeValue::text`].
+    pub(crate) fn attribute(&self, name: &str) -> Option<&str> {
+        self.attributes.get(name).map(AttributeValue::text)
+    }
+
     /// Returns the optional value of the `name` attribute for this block.
     pub(crate) fn name(&self) -> Option<&str> {
-        self.attributes.get("name").map(String::as_str)
+        self.attribute("name")
     }
 
     /// Returns the block's name if present, otherwise a human-friendly placeholder label.
@@ -374,8 +429,8 @@ impl BlockSeverity {
     ///
     /// # Errors
     /// Returns an error that quotes the value if it is not a severity.
-    pub(crate) fn from_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<Self> {
-        match attributes.get("severity") {
+    pub(crate) fn from_attributes(attributes: &Attributes) -> anyhow::Result<Self> {
+        match attributes.get("severity").map(AttributeValue::text) {
             Some(value) => {
                 Self::from_str(value).map_err(|_| anyhow!("unrecognized severity value `{value}`"))
             }
@@ -419,7 +474,7 @@ pub(crate) struct BlockWithContext {
 #[derive(Serialize, Debug)]
 pub(crate) struct BlockListing<'a> {
     /// A map that is sorted, because the attributes of a block are not.
-    attributes: BTreeMap<&'a str, &'a str>,
+    attributes: BTreeMap<&'a str, &'a AttributeValue>,
     /// The validators that checked the block. `None` leaves the key out.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) checks: Option<BTreeSet<Validator>>,
@@ -455,7 +510,7 @@ impl<'a> From<&'a BlockWithContext> for BlockListing<'a> {
             attributes: block
                 .attributes
                 .iter()
-                .map(|(key, value)| (key.as_str(), value.as_str()))
+                .map(|(key, value)| (key.as_str(), value))
                 .collect(),
             checks: None,
             column: block.start_tag_position_range.start.character,
@@ -504,7 +559,7 @@ const RECOGNIZED_ATTRIBUTES: &[&str] = &[
 /// # Errors
 /// Returns an error that quotes the first attribute found to be wrong, such as
 /// ``unrecognized attribute `keep-sortd` ``.
-pub(crate) fn validate_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<()> {
+pub(crate) fn validate_attributes(attributes: &Attributes) -> anyhow::Result<()> {
     if let Some(name) = attributes
         .keys()
         .find(|name| !RECOGNIZED_ATTRIBUTES.contains(&name.as_str()))
@@ -519,8 +574,8 @@ pub(crate) fn validate_attributes(attributes: &HashMap<String, String>) -> anyho
 #[cfg(test)]
 mod validate_attributes_tests {
     use crate::blocks::{RECOGNIZED_ATTRIBUTES, validate_attributes};
+    use crate::test_utils::text_attributes;
     use crate::validators::Validator;
-    use std::collections::HashMap;
     use strum::IntoEnumIterator;
 
     #[test]
@@ -537,7 +592,7 @@ mod validate_attributes_tests {
             ])
             .collect();
         for name in RECOGNIZED_ATTRIBUTES {
-            let attributes = HashMap::from([(name.to_string(), String::new())]);
+            let attributes = text_attributes(&[(name, "")]);
 
             let result = validate_attributes(&attributes);
 
@@ -548,12 +603,13 @@ mod validate_attributes_tests {
 
 #[cfg(test)]
 mod block_severity_from_str_tests {
-    use crate::blocks::BlockSeverity;
+    use crate::blocks::{Attributes, BlockSeverity};
+    use crate::test_utils::text_attributes;
     use std::collections::HashMap;
 
     /// Attributes holding only a `severity`, to test how that attribute is parsed.
-    fn attributes_with_severity(severity: &str) -> HashMap<String, String> {
-        HashMap::from([("severity".into(), severity.into())])
+    fn attributes_with_severity(severity: &str) -> Attributes {
+        text_attributes(&[("severity", severity)])
     }
 
     #[test]
@@ -590,7 +646,7 @@ mod block_address_tests {
     use crate::Position;
     use crate::blocks::{Block, BlockAddress, BlockSeverity, Content, Declaration};
     use crate::repo_path::RepoPath;
-    use std::collections::HashMap;
+    use crate::test_utils::text_attributes;
 
     fn repo_path(path: &str) -> RepoPath {
         RepoPath::from_reference(path).expect("a valid repository path")
@@ -599,10 +655,7 @@ mod block_address_tests {
     /// Builds a contentless block with `attributes`.
     fn block_with_attributes(attributes: &[(&str, &str)]) -> Block {
         Block {
-            attributes: attributes
-                .iter()
-                .map(|(name, value)| (name.to_string(), value.to_string()))
-                .collect::<HashMap<_, _>>(),
+            attributes: text_attributes(attributes),
             start_tag_position_range: Position::new(0, 0)..Position::new(0, 0),
             content: Content::source(0..0, Position::new(0, 0)..Position::new(0, 0)),
             declaration: Declaration::Tags,
@@ -661,6 +714,7 @@ mod block_address_tests {
 #[cfg(test)]
 mod block_listing_tests {
     use super::*;
+    use crate::test_utils::text_attributes;
     use std::path::PathBuf;
 
     fn block_with_context(
@@ -669,10 +723,7 @@ mod block_listing_tests {
     ) -> BlockWithContext {
         BlockWithContext {
             block: Block {
-                attributes: attributes
-                    .iter()
-                    .map(|(name, value)| (name.to_string(), value.to_string()))
-                    .collect(),
+                attributes: text_attributes(attributes),
                 start_tag_position_range: Position::new(2, 4)..Position::new(2, 30),
                 content: Content::source(0..0, Position::new(3, 1)..Position::new(3, 1)),
                 declaration,
@@ -685,25 +736,24 @@ mod block_listing_tests {
 
     #[test]
     fn virtual_block_with_checks_is_written_with_its_keys_sorted() -> anyhow::Result<()> {
-        let block = block_with_context(
-            &[
-                ("name", "n"),
-                ("line-count", "<=3"),
-                ("keep-sorted", "asc"),
-                ("affects", "a.md:b"),
-            ],
+        let mut block = block_with_context(
+            &[("name", "n"), ("line-count", "<=3"), ("keep-sorted", "asc")],
             Declaration::ConfigEntry(ConfigEntry {
                 file: PathBuf::from("blockwatch.toml"),
                 line: 7,
                 index: 0,
             }),
         );
+        block.block.attributes.insert(
+            "affects".to_string(),
+            AttributeValue::List(vec!["a.md:b".to_string(), "c.md".to_string()]),
+        );
         let mut listing = BlockListing::from(&block);
         listing.checks = Some(BTreeSet::from([Validator::KeepSorted]));
 
         assert_eq!(
             serde_json::to_string(&listing)?,
-            r#"{"attributes":{"affects":"a.md:b","keep-sorted":"asc","line-count":"<=3","name":"n"},"checks":["keep-sorted"],"column":4,"config_line":7,"is_content_modified":true,"line":2,"name":"n"}"#
+            r#"{"attributes":{"affects":["a.md:b","c.md"],"keep-sorted":"asc","line-count":"<=3","name":"n"},"checks":["keep-sorted"],"column":4,"config_line":7,"is_content_modified":true,"line":2,"name":"n"}"#
         );
         Ok(())
     }

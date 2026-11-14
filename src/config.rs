@@ -1,7 +1,9 @@
 //! Reads the settings from the config file, `blockwatch.toml`.
 
 use crate::LineIndex;
-use crate::blocks::{BlockSeverity, validate_attributes};
+use crate::blocks::{
+    AttributeValue, Attributes, BlockSeverity, LIST_ATTRIBUTES, validate_attributes,
+};
 use crate::diff_parser::{DiffChanges, LineChanges};
 use crate::fs::FileSystem;
 use crate::language_parsers::toml;
@@ -79,7 +81,7 @@ struct BlockEntry {
     // `deny_unknown_fields` does not work with `flatten`, so an unknown attribute is caught by the
     // same check that tags go through.
     #[serde(flatten)]
-    attributes: HashMap<String, AttributeValue>,
+    attributes: HashMap<String, RawAttributeValue>,
 }
 
 /// The `target-if` table on a `[[block]]` entry, as written.
@@ -95,10 +97,11 @@ struct RawTargetIf {
 /// The value of an attribute, as written.
 #[derive(Deserialize)]
 #[serde(untagged)]
-enum AttributeValue {
+enum RawAttributeValue {
     Text(String),
     Flag(bool),
     Integer(i64),
+    List(Vec<String>),
     /// Any other value. It deserializes too, so that the error can show which attribute has it.
     Other(IgnoredAny),
 }
@@ -290,7 +293,7 @@ fn is_entry_modified(
 /// - `target-if` comes with a non-glob target, is empty, has an empty `symbols` list, or holds a
 ///   `symbols` item that is not written like `#/flag`;
 /// - an attribute is not one a tag can have, or has a value that is not a string, `true` or an
-///   integer;
+///   integer. `affects` and `same-as` can also have a list, but not an empty one;
 /// - an attribute comes without the attribute its validator needs, such as `check-lua-timeout`
 ///   without `check-lua`.
 fn entry_blocks(
@@ -302,7 +305,7 @@ fn entry_blocks(
     let (file, locator) = parse_target(&block_entry.target, block_entry.target_pattern)?;
     let target_file = TargetFile::new(file, file_system);
     let target_if = parse_target_if(block_entry.target_if, &target_file)?;
-    let attributes = attributes_as_text(block_entry.attributes)?;
+    let attributes = attribute_values(block_entry.attributes)?;
     validate_attributes(&attributes)?;
     let severity = BlockSeverity::from_attributes(&attributes)?;
     let files = target_file.files(file_system)?;
@@ -474,26 +477,35 @@ fn parse_target(
     })
 }
 
-/// Returns `attributes` with each value as the text a tag would give it.
+/// Returns `attributes` with each value as a tag would give it: `true` as an empty text, and an
+/// integer as its digits. A list stays a list, with its entries in the order they are written.
 ///
 /// # Errors
-/// Returns an error for a value that is not a string, `true` or an integer.
-fn attributes_as_text(
-    attributes: HashMap<String, AttributeValue>,
-) -> anyhow::Result<HashMap<String, String>> {
+/// Returns an error for a value that is not a string, `true` or an integer. A list is an error
+/// too, unless the attribute is in [`LIST_ATTRIBUTES`]. Then it is an error when it is empty.
+fn attribute_values(attributes: HashMap<String, RawAttributeValue>) -> anyhow::Result<Attributes> {
     attributes
         .into_iter()
         .map(|(name, value)| {
-            let text = match value {
-                AttributeValue::Text(text) => text,
+            let value = match value {
+                RawAttributeValue::Text(text) => AttributeValue::Text(text),
                 // A tag can have an attribute without a value, such as `keep-unique`. TOML can't.
-                AttributeValue::Flag(true) => String::new(),
-                AttributeValue::Integer(number) => number.to_string(),
-                AttributeValue::Flag(false) | AttributeValue::Other(_) => {
-                    bail!("`{name}` must be a string, `true` or an integer")
+                RawAttributeValue::Flag(true) => AttributeValue::Text(String::new()),
+                RawAttributeValue::Integer(number) => AttributeValue::Text(number.to_string()),
+                RawAttributeValue::List(entries) if LIST_ATTRIBUTES.contains(&name.as_str()) => {
+                    if entries.is_empty() {
+                        bail!("`{name}` must list at least one reference");
+                    }
+                    AttributeValue::List(entries)
                 }
+                RawAttributeValue::Flag(false)
+                | RawAttributeValue::List(_)
+                | RawAttributeValue::Other(_) => bail!(
+                    "`{name}` must be a string, `true` or an integer. `affects` and `same-as` can \
+                     also be a list of strings"
+                ),
             };
-            Ok((name, text))
+            Ok((name, value))
         })
         .collect()
 }
@@ -503,7 +515,7 @@ mod tests {
     use super::*;
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::test_utils::FakeFileSystem;
-    use crate::test_utils::diff_changes;
+    use crate::test_utils::{diff_changes, text_attributes};
     use std::path::PathBuf;
 
     /// Reads `text` as the default config file, with no diff.
@@ -564,11 +576,11 @@ target = 'a.yaml#/b'
                 VirtualBlock {
                     file: RepoPath::from_reference("package.json")?,
                     locator: Locator::Symbol(SymbolPath::parse("/version")?),
-                    attributes: HashMap::from([
-                        ("name".to_string(), "version".to_string()),
-                        ("keep-unique".to_string(), String::new()),
-                        ("check-lua".to_string(), "check.lua".to_string()),
-                        ("check-lua-timeout".to_string(), "30".to_string()),
+                    attributes: text_attributes(&[
+                        ("name", "version"),
+                        ("keep-unique", ""),
+                        ("check-lua", "check.lua"),
+                        ("check-lua-timeout", "30"),
                     ]),
                     entry: ConfigEntry {
                         file: PathBuf::from(DEFAULT_FILE),
@@ -647,7 +659,7 @@ name = 'version'
             Ok(VirtualBlock {
                 file: RepoPath::from_reference(file)?,
                 locator: Locator::Symbol(SymbolPath::parse("/version")?),
-                attributes: HashMap::from([("name".to_string(), "version".to_string())]),
+                attributes: text_attributes(&[("name", "version")]),
                 entry: ConfigEntry {
                     file: PathBuf::from(DEFAULT_FILE),
                     line: 1,
@@ -1265,20 +1277,61 @@ target-if = {{ symbols = ['{item}'] }}
     }
 
     #[test]
-    fn attribute_value_that_is_not_a_string_true_or_an_integer_is_rejected() {
-        for value in ["false", "1.5"] {
+    fn list_attribute_read_keeps_its_entries() -> anyhow::Result<()> {
+        let text = r"[[block]]
+target = 'a.json#/x'
+affects = ['b.md:x']
+same-as = ['c.md', 'd.md#/Red, blue']
+";
+
+        let config = read_text(text)?;
+
+        let attributes = &config.blocks[0].attributes;
+        let list = |entries: &[&str]| {
+            AttributeValue::List(entries.iter().map(|entry| entry.to_string()).collect())
+        };
+        assert_eq!(attributes["affects"], list(&["b.md:x"]));
+        assert_eq!(attributes["same-as"], list(&["c.md", "d.md#/Red, blue"]));
+        Ok(())
+    }
+
+    #[test]
+    fn empty_list_attribute_is_rejected() {
+        let text = r"[[block]]
+target = 'a.json#/x'
+affects = []
+";
+
+        assert_eq!(
+            read_error(text),
+            "invalid block at line 1 of \"blockwatch.toml\": `affects` must list at least one \
+             reference"
+        );
+    }
+
+    #[test]
+    fn attribute_value_of_a_wrong_type_is_rejected() {
+        for (name, value) in [
+            ("line-count", "false"),
+            ("line-count", "1.5"),
+            ("keep-sorted", "['asc']"),
+            ("affects", "false"),
+            ("affects", "['b.md', 1]"),
+        ] {
             let text = format!(
                 r"[[block]]
 target = 'a.json#/x'
-line-count = {value}
+{name} = {value}
 "
             );
 
             assert_eq!(
                 read_error(&text),
-                "invalid block at line 1 of \"blockwatch.toml\": `line-count` must be a string, \
-                 `true` or an integer",
-                "{value}"
+                format!(
+                    "invalid block at line 1 of \"blockwatch.toml\": `{name}` must be a string, \
+                     `true` or an integer. `affects` and `same-as` can also be a list of strings"
+                ),
+                "{name} = {value}"
             );
         }
     }

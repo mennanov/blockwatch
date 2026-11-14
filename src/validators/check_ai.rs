@@ -1,4 +1,4 @@
-use crate::blocks::{Block, BlockWithContext};
+use crate::blocks::{Attributes, Block, BlockWithContext};
 use crate::repo_path::RepoPath;
 use crate::validators::{
     AsyncValidator, PatternContent, ValidationContext, ValidationReport, Validator, ValidatorTrace,
@@ -15,7 +15,6 @@ use async_trait::async_trait;
 use secrecy::ExposeSecret;
 use serde::Serialize;
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::task::JoinSet;
 
@@ -55,7 +54,7 @@ impl<C: AiClient + 'static> AsyncValidator for CheckAiValidator<C> {
             for (block_idx, block_with_context) in
                 file_blocks.blocks_with_context.iter().enumerate()
             {
-                let Some(condition) = block_with_context.block.attributes.get("check-ai") else {
+                let Some(condition) = block_with_context.block.attribute("check-ai") else {
                     continue;
                 };
                 if condition.trim().is_empty() {
@@ -127,14 +126,14 @@ async fn check_block<C: AiClient>(
             let violation = create_pattern_no_match_violation(
                 file_path,
                 block,
-                &block.attributes["check-ai-pattern"],
+                block.attributes["check-ai-pattern"].text(),
             )?;
             return Ok((vec![violation], trace(None, None)));
         }
         PatternContent::Matches(matches) => Cow::Owned(matches.join("\n")),
     };
 
-    let prompt = user_prompt(&block.attributes["check-ai"], &content);
+    let prompt = user_prompt(block.attributes["check-ai"].text(), &content);
     let response = client
         .ask(&prompt)
         .await
@@ -152,7 +151,7 @@ async fn check_block<C: AiClient>(
 ///
 /// # Errors
 /// Returns an error that quotes `check-ai-pattern` when it comes without `check-ai`.
-pub(super) fn check_attributes(attributes: &HashMap<String, String>) -> anyhow::Result<()> {
+pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
     require_main(attributes, &["check-ai"], &["check-ai-pattern"])
 }
 
@@ -216,8 +215,7 @@ fn create_pattern_no_match_violation(
 /// The block's `check-ai` condition.
 fn condition_of(block: &Block) -> &str {
     block
-        .attributes
-        .get("check-ai")
+        .attribute("check-ai")
         .expect("check-ai attribute must be present")
         .trim()
 }
@@ -766,12 +764,12 @@ mod trace_tests {
 
 #[cfg(test)]
 mod check_attributes_tests {
+    use crate::test_utils::text_attributes;
     use crate::validators::Validator;
-    use std::collections::HashMap;
 
     #[test]
     fn pattern_without_check_ai_returns_an_error() {
-        let attributes = HashMap::from([("check-ai-pattern".to_string(), "\\d+".to_string())]);
+        let attributes = text_attributes(&[("check-ai-pattern", "\\d+")]);
 
         let error = Validator::CheckAi
             .check_attributes(&attributes)

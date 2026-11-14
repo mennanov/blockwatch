@@ -467,7 +467,10 @@ same-as-pattern = 'os\.environ\["(?P<value>[A-Z_]+)"\]'
   [Glob targets](#glob-targets).
 - Every other key is an attribute, with the same name and meaning as in a tag. An unknown attribute is an error.
 - A value is a string. `true` stands for an attribute without a value, so `keep-unique = true` is `keep-unique`. An
-  integer counts as its digits, so `check-lua-timeout = 30` works. Any other value is an error.
+  integer counts as its digits, so `check-lua-timeout = 30` works. `affects` and `same-as` can also take a list, such
+  as `same-as = ['README.md:version', 'docs/install.md']`. Each entry is one reference, so it can have a comma, as in
+  `'README.md#/Install, upgrade'`. A string splits at every comma. An empty list is an error. Any other value is an
+  error.
 - A target has at most one block. Put all its attributes in one entry. A second entry with the same `target` and the
   same `target-pattern` is an error. So is a glob that matches a file another entry already wraps the same way.
 
@@ -807,7 +810,8 @@ convention: the start is inclusive and the end is exclusive (`[start, end)`).
   "package.json": [
     {
       "attributes": {
-        "line-pattern": "^\\d+\\.\\d+\\.\\d+$"
+        "line-pattern": "^\\d+\\.\\d+\\.\\d+$",
+        "same-as": ["README.md:version", "docs/install.md"]
       },
       "column": 3,
       "config_line": 7,
@@ -821,9 +825,10 @@ convention: the start is inclusive and the end is exclusive (`[start, end)`).
 
 [//]: # (</block>)
 
-A block with no `name` attribute is reported as `(unnamed)`. Within a file, blocks appear in source order and each
-block's attributes are sorted by name; the files themselves are not ordered, and two runs over an unchanged tree may
-emit them differently. Sort by key downstream if you need to diff one run against another — or use
+A block with no `name` attribute is reported as `(unnamed)`. Each attribute value is a string, except a list in a
+[`[[block]]` entry](#blocks-in-the-config-file), which is an array of strings. Within a file, blocks appear in source
+order and each block's attributes are sorted by name; the files themselves are not ordered, and two runs over an
+unchanged tree may emit them differently. Sort by key downstream if you need to diff one run against another — or use
 [`--verbosity full`](#full-reports), which does order its files.
 
 ## The `explain` Command

@@ -12,6 +12,14 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- In a `[[block]]` entry of `blockwatch.toml`, `affects` and `same-as` can now be TOML lists, such as
+  `same-as = ['README.md:version', 'docs/install.md']`. Each entry is one reference, so it can have a comma, as in
+  `'README.md#/Install, upgrade'`. A string with the references separated by commas still works. `blockwatch list`
+  and `blockwatch explain` show such a list as a JSON array, and `check-lua` scripts get it as an array of strings in
+  `ctx.attrs`.
+
 ## [0.19.1] - 2026-11-13
 
 ### Added

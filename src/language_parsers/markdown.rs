@@ -363,8 +363,8 @@ fn title_start(definition: &[u8]) -> usize {
 mod tests {
     use super::*;
     use crate::blocks::{Block, BlockSeverity, Content, Declaration};
+    use crate::test_utils::text_attributes;
     use crate::{Position, test_utils};
-    use std::collections::HashMap;
 
     /// The symbols `source` derives, as `(path, value)` pairs in the order they were derived.
     fn derived_symbols(source: &str) -> anyhow::Result<Vec<(SymbolPath, String)>> {
@@ -649,7 +649,7 @@ Some text here 3
             blocks,
             vec![
                 Block {
-                    attributes: HashMap::from([("name".to_string(), "md_block".to_string())]),
+                    attributes: text_attributes(&[("name", "md_block")]),
                     start_tag_position_range: Position::new(5, 10)..Position::new(5, 33),
                     content: Content::source(
                         test_utils::substr_range(content, "Some text here\n\n"),
@@ -659,7 +659,7 @@ Some text here 3
                     severity: BlockSeverity::Error,
                 },
                 Block {
-                    attributes: HashMap::from([("name".to_string(), "md_block_2".to_string())]),
+                    attributes: text_attributes(&[("name", "md_block_2")]),
                     start_tag_position_range: Position::new(10, 10)..Position::new(10, 35),
                     content: Content::source(
                         test_utils::substr_range(
@@ -672,7 +672,7 @@ Some text here 3
                     severity: BlockSeverity::Error,
                 },
                 Block {
-                    attributes: HashMap::from([("name".to_string(), "md_block_3".to_string())]),
+                    attributes: text_attributes(&[("name", "md_block_3")]),
                     start_tag_position_range: Position::new(13, 10)..Position::new(13, 35),
                     content: Content::source(
                         test_utils::substr_range(content, "Some text here 3\n\n"),
@@ -809,8 +809,8 @@ Text
             .iter()
             .map(|block| {
                 (
-                    block.attributes["name"].as_str(),
-                    block.attributes["keep-sorted"].as_str(),
+                    block.attributes["name"].text(),
+                    block.attributes["keep-sorted"].text(),
                 )
             })
             .collect();
@@ -894,7 +894,7 @@ Inline code `<!-- <block name="ignored"> -->` is not a comment.
         assert_eq!(
             blocks,
             vec![Block {
-                attributes: HashMap::from([("name".to_string(), "inline_block".to_string())]),
+                attributes: text_attributes(&[("name", "inline_block")]),
                 start_tag_position_range: Position::new(4, 16)..Position::new(4, 43),
                 content: Content::source(
                     test_utils::substr_range(content, " and\nmore content here\nending text "),
@@ -1044,7 +1044,7 @@ Not wrapped in HTML tags on multiple lines
             blocks,
             vec![
                 Block {
-                    attributes: HashMap::from([("name".to_string(), "html_block".to_string())]),
+                    attributes: text_attributes(&[("name", "html_block")]),
                     start_tag_position_range: Position::new(5, 6)..Position::new(5, 31),
                     content: Content::source(
                         test_utils::substr_range(content, "\nSome html content\n"),
@@ -1054,7 +1054,7 @@ Not wrapped in HTML tags on multiple lines
                     severity: BlockSeverity::Error,
                 },
                 Block {
-                    attributes: HashMap::from([("name".to_string(), "md_block".to_string())]),
+                    attributes: text_attributes(&[("name", "md_block")]),
                     start_tag_position_range: Position::new(10, 10)..Position::new(10, 33),
                     content: Content::source(
                         test_utils::substr_range(content, "Some markdown content\n\n"),
@@ -1064,7 +1064,7 @@ Not wrapped in HTML tags on multiple lines
                     severity: BlockSeverity::Error,
                 },
                 Block {
-                    attributes: HashMap::from([("name".to_string(), "html_block2".to_string())]),
+                    attributes: text_attributes(&[("name", "html_block2")]),
                     start_tag_position_range: Position::new(15, 6)..Position::new(15, 32),
                     content: Content::source(
                         test_utils::substr_range(content, "Not wrapped in HTML tags"),
@@ -1074,7 +1074,7 @@ Not wrapped in HTML tags on multiple lines
                     severity: BlockSeverity::Error,
                 },
                 Block {
-                    attributes: HashMap::from([("name".to_string(), "html_block3".to_string())]),
+                    attributes: text_attributes(&[("name", "html_block3")]),
                     start_tag_position_range: Position::new(17, 6)..Position::new(17, 32),
                     content: Content::source(
                         test_utils::substr_range(
