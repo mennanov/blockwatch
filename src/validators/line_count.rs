@@ -33,7 +33,7 @@ impl SyncValidator for LineCountValidator {
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
                 let block = &block_with_context.block;
-                let Some(expr) = block.attribute("line-count") else {
+                let Some(expr) = block.attributes.text(TextAttribute::LineCount) else {
                     continue;
                 };
                 let (op, expected) = parse_constraint(expr).map_err(|e| anyhow!(
@@ -78,7 +78,8 @@ impl SyncValidator for LineCountValidator {
 /// Returns an error when the pattern is not a valid regex or has a line break.
 fn compile_count_pattern(file_path: &RepoPath, block: &Block) -> anyhow::Result<Option<Regex>> {
     block
-        .attribute("line-count-pattern")
+        .attributes
+        .text(TextAttribute::LineCountPattern)
         .map(|pattern| {
             compile_pattern(pattern).with_context(|| {
                 format!("invalid line-count-pattern in {}", block.label(file_path))

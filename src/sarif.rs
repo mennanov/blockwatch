@@ -372,7 +372,7 @@ fn help_uri(validator: Validator) -> String {
 mod tests {
     use super::*;
     use crate::Position;
-    use crate::blocks::{Block, Content, Declaration};
+    use crate::blocks::{AttributeName, Block, Content, Declaration, TextAttribute};
     use crate::test_utils::text_attributes;
     use crate::validators::ViolationRange;
     use assert_json_diff::assert_json_include;
@@ -388,7 +388,7 @@ mod tests {
     fn block(name: Option<&str>, severity: &str) -> Block {
         let mut attributes = text_attributes(&[("severity", severity)]);
         if let Some(name) = name {
-            attributes.extend(text_attributes(&[("name", name)]));
+            attributes.insert(AttributeName::Text(TextAttribute::Name), name.to_string());
         }
         Block {
             severity: BlockSeverity::from_attributes(&attributes).expect("a valid severity"),

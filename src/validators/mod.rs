@@ -146,7 +146,7 @@ impl Validator {
     pub(crate) fn is_turned_on_by(self, attributes: &Attributes) -> bool {
         self.attributes()
             .iter()
-            .any(|name| attributes.contains_key(name.as_str()))
+            .any(|name| attributes.contains(*name))
     }
 
     /// Creates this validator if `block_with_context` carries one of its attributes. Returns
@@ -999,14 +999,14 @@ enum PatternContent<'c> {
 fn block_content_for_pattern<'c>(
     block_with_context: &'c BlockWithContext,
     file_content: &'c str,
-    pattern_attribute: &str,
+    pattern_attribute: TextAttribute,
 ) -> anyhow::Result<PatternContent<'c>> {
     let content = block_with_context.block.content.text(file_content);
-    let Some(pattern) = block_with_context.block.attribute(pattern_attribute) else {
+    let Some(pattern) = block_with_context.block.attributes.text(pattern_attribute) else {
         return Ok(PatternContent::Whole(content.trim()));
     };
     let re = compile_pattern(pattern)
-        .with_context(|| format!("{pattern_attribute} is not a valid regex"))?;
+        .with_context(|| format!("{} is not a valid regex", pattern_attribute.as_str()))?;
     Ok(PatternContent::Matches(
         re.captures_iter(content)
             .filter_map(|captures| value_match(&re, &captures).map(|matched| matched.as_str()))
@@ -1031,15 +1031,12 @@ fn require_main(
 ) -> anyhow::Result<()> {
     // Without a main attribute, no validator reads the extra one, so the block would pass as if it
     // were not there.
-    if main
-        .iter()
-        .any(|name| attributes.contains_key(name.as_str()))
-    {
+    if main.iter().any(|name| attributes.contains(*name)) {
         return Ok(());
     }
     if let Some(extra) = extras
         .iter()
-        .find(|name| attributes.contains_key(name.as_str()))
+        .find(|name| attributes.contains(AttributeName::Text(**name)))
     {
         let extra = extra.as_str();
         let main: Vec<String> = main
@@ -1223,8 +1220,8 @@ mod target_files_tests {
 #[cfg(test)]
 mod tests {
     use crate::blocks::{
-        AttributeName, Block, BlockAddress, BlockSeverity, BlockWithContext, Content, Declaration,
-        ReferenceAttribute, TextAttribute,
+        AttributeName, Attributes, Block, BlockAddress, BlockSeverity, BlockWithContext, Content,
+        Declaration, ReferenceAttribute, TextAttribute,
     };
     use crate::fs::FileSystem;
     use crate::fs::test_utils::FakeFileSystem;
@@ -1244,7 +1241,7 @@ mod tests {
 
     fn empty_testing_block() -> Block {
         Block {
-            attributes: HashMap::new(),
+            attributes: Attributes::default(),
             start_tag_position_range: Position::new(0, 0)..Position::new(0, 0),
             content: Content::source(0..0, Position::new(0, 0)..Position::new(0, 0)),
             declaration: Declaration::Tags,

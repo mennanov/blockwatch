@@ -18,53 +18,104 @@ use strum_macros::{EnumIter, EnumString, IntoStaticStr};
 
 const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
 
-/// The attributes of a block, by name.
-pub(crate) type Attributes = HashMap<String, AttributeValue>;
+/// The attributes of a block. Only a [`ReferenceAttribute`] can hold a list.
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+pub(crate) struct Attributes {
+    text: HashMap<TextAttribute, String>,
+    references: HashMap<ReferenceAttribute, AttributeValue>,
+}
 
-/// The value of a block's attribute.
+impl Attributes {
+    /// The attributes of a start tag, from `values`: each attribute's name and its value.
+    ///
+    /// # Errors
+    /// Returns an error that quotes a name that no attribute has, such as
+    /// ``unrecognized attribute `keep-sortd` ``.
+    pub(crate) fn from_tag(values: HashMap<String, String>) -> anyhow::Result<Self> {
+        let mut attributes = Self::default();
+        for (name, value) in values {
+            attributes.insert(AttributeName::parse(&name)?, value);
+        }
+        Ok(attributes)
+    }
+
+    /// Sets the attribute `name` to `text`. The text of a [`ReferenceAttribute`] has a comma
+    /// between its references.
+    pub(crate) fn insert(&mut self, name: AttributeName, text: String) {
+        match name {
+            AttributeName::Text(name) => {
+                self.text.insert(name, text);
+            }
+            AttributeName::Reference(name) => {
+                self.references.insert(name, AttributeValue::Text(text));
+            }
+        }
+    }
+
+    /// Sets the attribute `name` to the list `references`.
+    ///
+    /// # Errors
+    /// Returns an error when `references` is empty.
+    pub(crate) fn insert_list(
+        &mut self,
+        name: ReferenceAttribute,
+        references: Vec<String>,
+    ) -> anyhow::Result<()> {
+        // An empty list would turn the rule on with nothing to check.
+        if references.is_empty() {
+            bail!("`{}` must list at least one reference", name.as_str());
+        }
+        self.references
+            .insert(name, AttributeValue::List(references));
+        Ok(())
+    }
+
+    /// The text of the attribute `name`, or `None` if there is no such attribute.
+    pub(crate) fn text(&self, name: TextAttribute) -> Option<&str> {
+        self.text.get(&name).map(String::as_str)
+    }
+
+    /// The references in the attribute `name`, or `None` if there is no such attribute.
+    pub(crate) fn references(&self, name: ReferenceAttribute) -> Option<&AttributeValue> {
+        self.references.get(&name)
+    }
+
+    /// Whether there is an attribute `name`.
+    pub(crate) fn contains(&self, name: AttributeName) -> bool {
+        match name {
+            AttributeName::Text(name) => self.text.contains_key(&name),
+            AttributeName::Reference(name) => self.references.contains_key(&name),
+        }
+    }
+
+    /// Each attribute, with its name as a tag writes it, in no set order.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&'static str, AttributeValue)> + '_ {
+        let text = self
+            .text
+            .iter()
+            .map(|(name, text)| (name.as_str(), AttributeValue::Text(text.clone())));
+        let references = self
+            .references
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.clone()));
+        text.chain(references)
+    }
+}
+
+/// The value of an attribute.
 #[derive(Debug, PartialEq, Eq, Clone, Serialize)]
 #[serde(untagged)]
 pub(crate) enum AttributeValue {
     /// A tag's value, or a string, `true` or an integer in a `[[block]]` entry.
     Text(String),
-    /// A list in a `[[block]]` entry, with at least one entry. Only the attributes in
-    /// [`LIST_ATTRIBUTES`] can have one.
+    /// A list in a `[[block]]` entry, with at least one entry.
     List(Vec<String>),
 }
-
-impl AttributeValue {
-    /// The text of the value.
-    ///
-    /// # Panics
-    /// Panics on a list. Only the attributes in [`LIST_ATTRIBUTES`] can have one, and their
-    /// readers handle both forms.
-    pub(crate) fn text(&self) -> &str {
-        match self {
-            Self::Text(text) => text,
-            Self::List(_) => panic!("only the attributes in LIST_ATTRIBUTES can be a list"),
-        }
-    }
-}
-
-// A test compares a text value with the text it expects, such as `attributes["name"] == "foo"`.
-#[cfg(test)]
-impl PartialEq<&str> for AttributeValue {
-    fn eq(&self, other: &&str) -> bool {
-        match self {
-            Self::Text(text) => text == other,
-            Self::List(_) => false,
-        }
-    }
-}
-
-/// The attributes whose value can be a list, in a `[[block]]` entry. A tag writes the list as one
-/// string, with a comma between the references.
-pub(crate) const LIST_ATTRIBUTES: [&str; 2] = ["affects", "same-as"];
 
 /* <block name="attribute-names" same-as="src/skill.md:validator-reference"
 same-as-format="identifier" same-as-pattern='^\s*(?P<value>[A-Za-z]+),'> */
 /// The name of an attribute whose value is text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumString, IntoStaticStr, EnumIter)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, IntoStaticStr, EnumIter)]
 #[strum(serialize_all = "kebab-case")]
 pub(crate) enum TextAttribute {
     // <block keep-sorted>
@@ -92,7 +143,7 @@ pub(crate) enum TextAttribute {
 
 /// The name of an attribute whose value lists references, as text with a comma between them or,
 /// in a `[[block]]` entry, as a list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumString, IntoStaticStr, EnumIter)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, IntoStaticStr, EnumIter)]
 #[strum(serialize_all = "kebab-case")]
 pub(crate) enum ReferenceAttribute {
     Affects,
@@ -127,7 +178,7 @@ impl AttributeName {
     /// # Errors
     /// Returns an error that quotes `name` when no attribute has it, such as
     /// ``unrecognized attribute `keep-sortd` ``.
-    fn parse(name: &str) -> anyhow::Result<Self> {
+    pub(crate) fn parse(name: &str) -> anyhow::Result<Self> {
         if let Ok(text) = TextAttribute::from_str(name) {
             return Ok(Self::Text(text));
         }
@@ -411,17 +462,18 @@ impl Block {
         start_tag_position_range: Range<Position>,
         content: Content,
     ) -> anyhow::Result<Self> {
-        let attributes: Attributes = attributes
-            .into_iter()
-            .map(|(name, value)| (name, AttributeValue::Text(value)))
-            .collect();
-        let severity = validate_attributes(&attributes)
-            .and_then(|()| BlockSeverity::from_attributes(&attributes))
+        let name = attributes
+            .get("name")
+            .map_or(UNNAMED_BLOCK_LABEL, String::as_str)
+            .to_string();
+        let (attributes, severity) = Attributes::from_tag(attributes)
+            .and_then(|attributes| {
+                validate_attributes(&attributes)?;
+                let severity = BlockSeverity::from_attributes(&attributes)?;
+                Ok((attributes, severity))
+            })
             .map_err(|error| {
                 // The tag parser does not know the file, so the message cannot show it.
-                let name = attributes
-                    .get("name")
-                    .map_or(UNNAMED_BLOCK_LABEL, AttributeValue::text);
                 anyhow!(
                     "block {name} at line {} contains {error}",
                     start_tag_position_range.start.line
@@ -436,17 +488,9 @@ impl Block {
         })
     }
 
-    /// The text of the attribute `name`, or `None` if the block doesn't have it.
-    ///
-    /// # Panics
-    /// Panics if the value is a list. See [`AttributeValue::text`].
-    pub(crate) fn attribute(&self, name: &str) -> Option<&str> {
-        self.attributes.get(name).map(AttributeValue::text)
-    }
-
     /// Returns the optional value of the `name` attribute for this block.
     pub(crate) fn name(&self) -> Option<&str> {
-        self.attribute("name")
+        self.attributes.text(TextAttribute::Name)
     }
 
     /// Returns the block's name if present, otherwise a human-friendly placeholder label.
@@ -515,7 +559,7 @@ impl BlockSeverity {
     /// # Errors
     /// Returns an error that quotes the value if it is not a severity.
     pub(crate) fn from_attributes(attributes: &Attributes) -> anyhow::Result<Self> {
-        match attributes.get("severity").map(AttributeValue::text) {
+        match attributes.text(TextAttribute::Severity) {
             Some(value) => {
                 Self::from_str(value).map_err(|_| anyhow!("unrecognized severity value `{value}`"))
             }
@@ -559,7 +603,7 @@ pub(crate) struct BlockWithContext {
 #[derive(Serialize, Debug)]
 pub(crate) struct BlockListing<'a> {
     /// A map that is sorted, because the attributes of a block are not.
-    attributes: BTreeMap<&'a str, &'a AttributeValue>,
+    attributes: BTreeMap<&'static str, AttributeValue>,
     /// The validators that checked the block. `None` leaves the key out.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) checks: Option<BTreeSet<Validator>>,
@@ -592,11 +636,7 @@ impl<'a> From<&'a BlockWithContext> for BlockListing<'a> {
     fn from(block_with_context: &'a BlockWithContext) -> Self {
         let block = &block_with_context.block;
         Self {
-            attributes: block
-                .attributes
-                .iter()
-                .map(|(key, value)| (key.as_str(), value))
-                .collect(),
+            attributes: block.attributes.iter().collect(),
             checks: None,
             column: block.start_tag_position_range.start.character,
             config_line: match &block.declaration {
@@ -610,17 +650,14 @@ impl<'a> From<&'a BlockWithContext> for BlockListing<'a> {
     }
 }
 
-/// Checks that each attribute of a block is recognized, and that each validator accepts the
-/// attributes it reads (see [`Validator::check_attributes`]). It does not check the values: see
+/// Checks that each validator accepts the attributes it reads (see
+/// [`Validator::check_attributes`]). It does not check the values: see
 /// [`BlockSeverity::from_attributes`] for `severity`.
 ///
 /// # Errors
 /// Returns an error that quotes the first attribute found to be wrong, such as
-/// ``unrecognized attribute `keep-sortd` ``.
+/// ``"`keep-sorted-pattern` without `keep-sorted`"``.
 pub(crate) fn validate_attributes(attributes: &Attributes) -> anyhow::Result<()> {
-    for name in attributes.keys() {
-        AttributeName::parse(name)?;
-    }
     // A block can be in a file that the run reads only to find a target, and no validator runs on
     // such a block. Every parsed block passes here.
     Validator::iter().try_for_each(|validator| validator.check_attributes(attributes))
@@ -667,7 +704,6 @@ mod validate_attributes_tests {
 mod block_severity_from_str_tests {
     use crate::blocks::{Attributes, BlockSeverity};
     use crate::test_utils::text_attributes;
-    use std::collections::HashMap;
 
     /// Attributes holding only a `severity`, to test how that attribute is parsed.
     fn attributes_with_severity(severity: &str) -> Attributes {
@@ -690,7 +726,7 @@ mod block_severity_from_str_tests {
 
     #[test]
     fn block_without_severity_attribute_returns_error_severity() {
-        let severity = BlockSeverity::from_attributes(&HashMap::new());
+        let severity = BlockSeverity::from_attributes(&Attributes::default());
 
         assert_eq!(severity.unwrap(), BlockSeverity::Error);
     }
@@ -806,10 +842,10 @@ mod block_listing_tests {
                 index: 0,
             }),
         );
-        block.block.attributes.insert(
-            "affects".to_string(),
-            AttributeValue::List(vec!["a.md:b".to_string(), "c.md".to_string()]),
-        );
+        block.block.attributes.insert_list(
+            ReferenceAttribute::Affects,
+            vec!["a.md:b".to_string(), "c.md".to_string()],
+        )?;
         let mut listing = BlockListing::from(&block);
         listing.checks = Some(BTreeSet::from([Validator::KeepSorted]));
 

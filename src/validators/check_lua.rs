@@ -1,5 +1,6 @@
 use crate::blocks::{
-    AttributeValue, Attributes, Block, BlockWithContext, FileBlocks, TextAttribute,
+    AttributeValue, Attributes, Block, BlockWithContext, FileBlocks, ReferenceAttribute,
+    TextAttribute,
 };
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
@@ -112,7 +113,11 @@ impl<Fs: FileSystem + 'static> AsyncValidator for CheckLuaValidator<Fs> {
             for (block_idx, block_with_context) in
                 file_blocks.blocks_with_context.iter().enumerate()
             {
-                let Some(script_path) = block_with_context.block.attribute("check-lua") else {
+                let Some(script_path) = block_with_context
+                    .block
+                    .attributes
+                    .text(TextAttribute::CheckLua)
+                else {
                     continue;
                 };
                 if script_path.trim().is_empty() {
@@ -167,11 +172,14 @@ async fn check_block<Fs: FileSystem>(
     let file_blocks = &context.blocks[file_path];
     let block_with_context = &file_blocks.blocks_with_context[block_idx];
     let block = &block_with_context.block;
-    let script_path = block.attributes["check-lua"].text();
+    let script_path = block
+        .attributes
+        .text(TextAttribute::CheckLua)
+        .expect("check-lua attribute must be present");
     let content = match block_content_for_pattern(
         block_with_context,
         &file_blocks.file_content,
-        "check-lua-pattern",
+        TextAttribute::CheckLuaPattern,
     )? {
         PatternContent::Whole(content) => LuaContent::Text(content.to_string()),
         PatternContent::Matches(matches) => {
@@ -307,7 +315,7 @@ impl LuaScriptInputs {
             attributes: block
                 .attributes
                 .iter()
-                .map(|(key, value)| (key.clone(), value.clone()))
+                .map(|(name, value)| (name.to_string(), value))
                 .collect(),
             affects,
             content,
@@ -421,7 +429,7 @@ fn run_lua_script_sync(inputs: LuaScriptInputs, mode: LuaMode) -> anyhow::Result
 /// A value below one second is rejected: a timeout that short cannot tell a runaway script from a
 /// slow-but-terminating one, which is the false-violation trap the timeout exists to avoid.
 fn parse_check_lua_timeout(block: &Block) -> anyhow::Result<Duration> {
-    let Some(raw) = block.attribute("check-lua-timeout") else {
+    let Some(raw) = block.attributes.text(TextAttribute::CheckLuaTimeout) else {
         return Ok(Duration::from_secs(DEFAULT_CHECK_LUA_TIMEOUT_SECS));
     };
     let seconds: u64 = raw
@@ -549,7 +557,7 @@ fn resolve_affected_targets<Fs: FileSystem>(
     current_file_path: &RepoPath,
     block: &Block,
 ) -> anyhow::Result<Option<Vec<AffectedTarget>>> {
-    let Some(affects) = block.attributes.get("affects") else {
+    let Some(affects) = block.attributes.references(ReferenceAttribute::Affects) else {
         return Ok(None);
     };
     let references = TargetReference::parse_list(affects).with_context(|| {
@@ -1062,10 +1070,10 @@ some content
             .expect("example.py's blocks")
             .blocks_with_context[0]
             .block;
-        block.attributes.insert(
-            "affects".to_string(),
-            AttributeValue::List(vec![":red".to_string(), ":blue".to_string()]),
-        );
+        block.attributes.insert_list(
+            ReferenceAttribute::Affects,
+            vec![":red".to_string(), ":blue".to_string()],
+        )?;
 
         let violations = validator(&[(
             "check.lua",

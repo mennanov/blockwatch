@@ -33,7 +33,7 @@ val value = 1
             .parse_blocks(contents)
             .collect::<anyhow::Result<Vec<_>>>()?;
         assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].attributes["name"], "only_once");
+        assert_eq!(blocks[0].name(), Some("only_once"));
         Ok(())
     }
 

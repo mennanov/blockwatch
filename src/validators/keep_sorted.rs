@@ -66,7 +66,11 @@ impl SyncValidator for KeepSortedValidator {
         let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
-                if let Some(keep_sorted) = block_with_context.block.attribute("keep-sorted") {
+                if let Some(keep_sorted) = block_with_context
+                    .block
+                    .attributes
+                    .text(TextAttribute::KeepSorted)
+                {
                     let located = |error: anyhow::Error| {
                         anyhow!("{error} in {}", block_with_context.block.label(file_path))
                     };
@@ -79,7 +83,8 @@ impl SyncValidator for KeepSortedValidator {
                     // Optional regex pattern similar to keep-unique: if provided, we compare extracted matches.
                     let pattern = block_with_context
                         .block
-                        .attribute("keep-sorted-pattern")
+                        .attributes
+                        .text(TextAttribute::KeepSortedPattern)
                         .unwrap_or_default();
                     let re = if pattern.is_empty() {
                         None
@@ -89,7 +94,8 @@ impl SyncValidator for KeepSortedValidator {
 
                     let format_raw = block_with_context
                         .block
-                        .attribute("keep-sorted-format")
+                        .attributes
+                        .text(TextAttribute::KeepSortedFormat)
                         .map(str::trim)
                         .unwrap_or_default();
                     let sort_format = if format_raw.is_empty() {

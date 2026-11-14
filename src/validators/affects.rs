@@ -1,4 +1,4 @@
-use crate::blocks::{AttributeValue, Block, BlockWithContext, FileBlocks};
+use crate::blocks::{AttributeValue, Block, BlockWithContext, FileBlocks, ReferenceAttribute};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
@@ -50,7 +50,11 @@ impl<Fs: FileSystem + 'static> validators::SyncValidator for AffectsValidator<Fs
         // integrity has to catch a dangling target even when the referencing block is unchanged.
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
-                let Some(affects) = block_with_context.block.attributes.get("affects") else {
+                let Some(affects) = block_with_context
+                    .block
+                    .attributes
+                    .references(ReferenceAttribute::Affects)
+                else {
                     continue;
                 };
                 let mut trace = context.traces_requested.then(|| AffectsTrace {

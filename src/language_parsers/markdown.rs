@@ -362,7 +362,7 @@ fn title_start(definition: &[u8]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blocks::{Block, BlockSeverity, Content, Declaration};
+    use crate::blocks::{Block, BlockSeverity, Content, Declaration, TextAttribute};
     use crate::test_utils::text_attributes;
     use crate::{Position, test_utils};
 
@@ -701,7 +701,7 @@ Text
             .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].attributes["name"], "unicode_title");
+        assert_eq!(blocks[0].name(), Some("unicode_title"));
         assert_eq!(blocks[0].content.text(content), "Text\n\n");
 
         Ok(())
@@ -720,7 +720,7 @@ Text
             .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].attributes["name"], "a");
+        assert_eq!(blocks[0].name(), Some("a"));
         assert_eq!(blocks[0].content.text(content), "Text\n\n");
         Ok(())
     }
@@ -761,7 +761,7 @@ Text
             .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].attributes["name"], "a");
+        assert_eq!(blocks[0].name(), Some("a"));
         Ok(())
     }
 
@@ -809,8 +809,11 @@ Text
             .iter()
             .map(|block| {
                 (
-                    block.attributes["name"].text(),
-                    block.attributes["keep-sorted"].text(),
+                    block.name().expect("a named block"),
+                    block
+                        .attributes
+                        .text(TextAttribute::KeepSorted)
+                        .expect("a keep-sorted block"),
                 )
             })
             .collect();
@@ -922,7 +925,7 @@ Closing text <!-- </block> --> tail.
             .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].attributes["name"], "mixed");
+        assert_eq!(blocks[0].name(), Some("mixed"));
 
         Ok(())
     }
@@ -945,7 +948,7 @@ Closing text <!-- </block> --> tail.
             .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].attributes["name"], "table_rows");
+        assert_eq!(blocks[0].name(), Some("table_rows"));
         assert_eq!(
             blocks[0].start_tag_position_range.start,
             Position::new(3, 8)
@@ -994,14 +997,14 @@ Second block content.
             .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 2);
-        assert_eq!(blocks[0].attributes["name"], "a");
+        assert_eq!(blocks[0].name(), Some("a"));
         assert!(
             blocks[0]
                 .content
                 .text(content)
                 .contains("First block content")
         );
-        assert_eq!(blocks[1].attributes["name"], "b");
+        assert_eq!(blocks[1].name(), Some("b"));
         assert!(
             blocks[1]
                 .content

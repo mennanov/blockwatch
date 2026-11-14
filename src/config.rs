@@ -1,9 +1,7 @@
 //! Reads the settings from the config file, `blockwatch.toml`.
 
 use crate::LineIndex;
-use crate::blocks::{
-    AttributeValue, Attributes, BlockSeverity, LIST_ATTRIBUTES, validate_attributes,
-};
+use crate::blocks::{AttributeName, Attributes, BlockSeverity, validate_attributes};
 use crate::diff_parser::{DiffChanges, LineChanges};
 use crate::fs::FileSystem;
 use crate::language_parsers::toml;
@@ -477,42 +475,46 @@ fn parse_target(
     })
 }
 
-/// Returns `attributes` with each value as a tag would give it: `true` as an empty text, and an
-/// integer as its digits. A list stays a list, with its entries in the order they are written.
+/// Returns the attributes in `values`, with each value as a tag would give it: `true` as an empty
+/// text, and an integer as its digits. A list stays a list, with its entries in the order they are
+/// written.
 ///
 /// # Errors
-/// Returns an error for a value that is not a string, `true` or an integer. A list is an error
-/// too, unless the attribute is in [`LIST_ATTRIBUTES`]. Then it is an error when it is empty.
-fn attribute_values(attributes: HashMap<String, RawAttributeValue>) -> anyhow::Result<Attributes> {
-    attributes
-        .into_iter()
-        .map(|(name, value)| {
-            let value = match value {
-                RawAttributeValue::Text(text) => AttributeValue::Text(text),
-                // A tag can have an attribute without a value, such as `keep-unique`. TOML can't.
-                RawAttributeValue::Flag(true) => AttributeValue::Text(String::new()),
-                RawAttributeValue::Integer(number) => AttributeValue::Text(number.to_string()),
-                RawAttributeValue::List(entries) if LIST_ATTRIBUTES.contains(&name.as_str()) => {
-                    if entries.is_empty() {
-                        bail!("`{name}` must list at least one reference");
-                    }
-                    AttributeValue::List(entries)
-                }
-                RawAttributeValue::Flag(false)
-                | RawAttributeValue::List(_)
-                | RawAttributeValue::Other(_) => bail!(
-                    "`{name}` must be a string, `true` or an integer. `affects` and `same-as` can \
-                     also be a list of strings"
-                ),
-            };
-            Ok((name, value))
-        })
-        .collect()
+/// Returns an error for a name that no attribute has, and then for a value that is not a string,
+/// `true` or an integer. A list is an error too, unless the attribute is `affects` or `same-as`. Then it
+/// is an error when it is empty.
+fn attribute_values(values: HashMap<String, RawAttributeValue>) -> anyhow::Result<Attributes> {
+    let mut attributes = Attributes::default();
+    for (name, value) in values {
+        let name = AttributeName::parse(&name)?;
+        let wrong_type = || {
+            anyhow!(
+                "`{}` must be a string, `true` or an integer. `affects` and `same-as` can also be \
+                 a list of strings",
+                name.as_str()
+            )
+        };
+        match value {
+            RawAttributeValue::Text(text) => attributes.insert(name, text),
+            // A tag can have an attribute without a value, such as `keep-unique`. TOML can't.
+            RawAttributeValue::Flag(true) => attributes.insert(name, String::new()),
+            RawAttributeValue::Integer(number) => attributes.insert(name, number.to_string()),
+            RawAttributeValue::List(entries) => match name {
+                AttributeName::Reference(name) => attributes.insert_list(name, entries)?,
+                AttributeName::Text(_) => return Err(wrong_type()),
+            },
+            RawAttributeValue::Flag(false) | RawAttributeValue::Other(_) => {
+                return Err(wrong_type());
+            }
+        }
+    }
+    Ok(attributes)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blocks::{AttributeValue, ReferenceAttribute};
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::test_utils::FakeFileSystem;
     use crate::test_utils::{diff_changes, text_attributes};
@@ -594,7 +596,7 @@ target = 'a.yaml#/b'
                 VirtualBlock {
                     file: RepoPath::from_reference("a.yaml")?,
                     locator: Locator::Symbol(SymbolPath::parse("/b")?),
-                    attributes: HashMap::new(),
+                    attributes: Attributes::default(),
                     entry: ConfigEntry {
                         file: PathBuf::from(DEFAULT_FILE),
                         line: 10,
@@ -625,7 +627,13 @@ target-pattern = '^MODEL = .*'
         let blocks: Vec<(&str, &Locator, usize)> = config
             .blocks
             .iter()
-            .map(|block| (block.file.as_str(), &block.locator, block.attributes.len()))
+            .map(|block| {
+                (
+                    block.file.as_str(),
+                    &block.locator,
+                    block.attributes.iter().count(),
+                )
+            })
             .collect();
         assert_eq!(
             blocks,
@@ -717,8 +725,6 @@ target-if = { symbols = ['#/flag'] }
         assert_eq!(config.blocks.len(), 2);
         for block in &config.blocks {
             assert_eq!(block.target_if.as_ref(), Some(&expected));
-            // `target-if` is not a block attribute.
-            assert!(!block.attributes.contains_key("target-if"));
         }
         Ok(())
     }
@@ -1290,8 +1296,14 @@ same-as = ['c.md', 'd.md#/Red, blue']
         let list = |entries: &[&str]| {
             AttributeValue::List(entries.iter().map(|entry| entry.to_string()).collect())
         };
-        assert_eq!(attributes["affects"], list(&["b.md:x"]));
-        assert_eq!(attributes["same-as"], list(&["c.md", "d.md#/Red, blue"]));
+        assert_eq!(
+            attributes.references(ReferenceAttribute::Affects),
+            Some(&list(&["b.md:x"]))
+        );
+        assert_eq!(
+            attributes.references(ReferenceAttribute::SameAs),
+            Some(&list(&["c.md", "d.md#/Red, blue"]))
+        );
         Ok(())
     }
 
@@ -1338,15 +1350,22 @@ target = 'a.json#/x'
 
     #[test]
     fn unknown_attribute_is_rejected() {
-        let text = r"[[block]]
+        // The name is wrong whatever the value, so the error is about the name.
+        for value in ["true", "false", "['asc']"] {
+            let text = format!(
+                r"[[block]]
 target = 'a.json#/x'
-keep-sortd = true
-";
+keep-sortd = {value}
+"
+            );
 
-        assert_eq!(
-            read_error(text),
-            "invalid block at line 1 of \"blockwatch.toml\": unrecognized attribute `keep-sortd`"
-        );
+            assert_eq!(
+                read_error(&text),
+                "invalid block at line 1 of \"blockwatch.toml\": unrecognized attribute \
+                 `keep-sortd`",
+                "{value}"
+            );
+        }
     }
 
     #[test]

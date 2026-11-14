@@ -758,7 +758,7 @@ mod tests {
             .collect::<anyhow::Result<Vec<_>>>()?;
         let names: Vec<&str> = blocks
             .iter()
-            .map(|block| block.attributes["name"].text())
+            .map(|block| block.name().expect("a named block"))
             .collect();
         assert_eq!(names, ["real"]);
         Ok(())

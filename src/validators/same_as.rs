@@ -1,6 +1,7 @@
 use crate::LineIndex;
 use crate::blocks::{
-    AttributeName, AttributeValue, Attributes, Block, BlockWithContext, FileBlocks, TextAttribute,
+    AttributeName, AttributeValue, Attributes, Block, BlockWithContext, FileBlocks,
+    ReferenceAttribute, TextAttribute,
 };
 use crate::fs::FileSystem;
 use crate::paths_glob::PathsGlob;
@@ -98,7 +99,10 @@ impl Comparison {
         Ok(Self {
             mode: parse_mode(block)?,
             source_records: canonicalize(extract_records(block, file_content)?, &formats),
-            pattern: block.attribute("same-as-pattern").map(str::to_string),
+            pattern: block
+                .attributes
+                .text(TextAttribute::SameAsPattern)
+                .map(str::to_string),
             formats,
         })
     }
@@ -147,7 +151,7 @@ fn block_violations<Fs: FileSystem>(
         targets: Vec::new(),
     });
     let mut violations = Vec::new();
-    if let Some(same_as) = block.attributes.get("same-as") {
+    if let Some(same_as) = block.attributes.references(ReferenceAttribute::SameAs) {
         for reference in parse_references(file_path, block, same_as)? {
             let violation = reference_violation(
                 targets,
@@ -160,7 +164,7 @@ fn block_violations<Fs: FileSystem>(
             violations.extend(violation);
         }
     }
-    if let Some(glob) = block.attribute("same-as-paths") {
+    if let Some(glob) = block.attributes.text(TextAttribute::SameAsPaths) {
         violations.extend(paths_violation(
             targets.file_system,
             &comparison,
@@ -410,7 +414,7 @@ impl fmt::Display for Record {
 fn extract_records(block: &Block, file_content: &str) -> anyhow::Result<Vec<Record>> {
     extract_records_from(
         block.content.text(file_content),
-        block.attribute("same-as-pattern"),
+        block.attributes.text(TextAttribute::SameAsPattern),
         |index| Some(block.content.position(index, 0).line),
     )
 }
@@ -651,13 +655,13 @@ impl Formats {
 /// Returns an error for an unknown format, for an attribute that mixes the two forms, and for a
 /// group that the block's `same-as-pattern` doesn't have.
 fn parse_formats(block: &Block) -> anyhow::Result<Formats> {
-    let Some(attribute) = block.attribute("same-as-format") else {
+    let Some(attribute) = block.attributes.text(TextAttribute::SameAsFormat) else {
         return Ok(Formats::All(Format::Verbatim));
     };
     if !attribute.contains(':') {
         return Ok(Formats::All(parse_keyword("same-as-format", attribute)?));
     }
-    let groups = pattern_groups(block.attribute("same-as-pattern"))?;
+    let groups = pattern_groups(block.attributes.text(TextAttribute::SameAsPattern))?;
     attribute
         .split(',')
         .map(|entry| {
@@ -746,12 +750,18 @@ enum Mode {
 /// Reads a block's `same-as-mode` attribute. Without one, the mode is [`Mode::Sequence`] for a
 /// block without a `same-as-pattern`, and [`Mode::Set`] for a block with one.
 fn parse_mode(block: &Block) -> anyhow::Result<Mode> {
-    match block.attribute("same-as-mode") {
+    match block.attributes.text(TextAttribute::SameAsMode) {
         Some(value) => parse_keyword("same-as-mode", value),
         // Without a pattern, each line is a record. A block of plain lines is usually a copy of
         // its target, so each line must equal the target's line at the same place. A pattern finds
         // values, and the order of values rarely matters.
-        None if block.attributes.contains_key("same-as-pattern") => Ok(Mode::Set),
+        None if block
+            .attributes
+            .text(TextAttribute::SameAsPattern)
+            .is_some() =>
+        {
+            Ok(Mode::Set)
+        }
         None => Ok(Mode::Sequence),
     }
 }

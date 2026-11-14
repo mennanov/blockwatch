@@ -163,7 +163,7 @@ mod count_rust_blocks_tests {
 
 #[cfg(test)]
 mod test_utils {
-    use crate::blocks::{AttributeValue, Attributes, BlockSeverity};
+    use crate::blocks::{Attributes, BlockSeverity};
     use crate::diff_parser::{DiffChanges, LineChange, LineChangeKind};
     use crate::fs::PathFilter;
     use crate::fs::test_utils::FakeFileSystem;
@@ -189,11 +189,15 @@ mod test_utils {
     }
 
     /// The attributes `pairs`, each with a text value, as a tag gives them.
+    ///
+    /// # Panics
+    /// Panics if no attribute has one of the names.
     pub(crate) fn text_attributes(pairs: &[(&str, &str)]) -> Attributes {
-        pairs
+        let values = pairs
             .iter()
-            .map(|(name, value)| (name.to_string(), AttributeValue::Text(value.to_string())))
-            .collect()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect();
+        Attributes::from_tag(values).expect("known attribute names")
     }
 
     /// The diff's changes to each of `files`.

@@ -1,4 +1,4 @@
-use crate::blocks::{Block, BlockWithContext};
+use crate::blocks::{Block, BlockWithContext, TextAttribute};
 use crate::repo_path::RepoPath;
 use crate::validators::{
     SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
@@ -23,17 +23,13 @@ impl SyncValidator for KeepUniqueValidator {
         let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
-                if !block_with_context
+                let Some(pattern) = block_with_context
                     .block
                     .attributes
-                    .contains_key("keep-unique")
-                {
+                    .text(TextAttribute::KeepUnique)
+                else {
                     continue;
-                }
-                let pattern = block_with_context
-                    .block
-                    .attribute("keep-unique")
-                    .unwrap_or_default();
+                };
                 let re = if pattern.is_empty() {
                     None
                 } else {

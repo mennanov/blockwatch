@@ -1,4 +1,4 @@
-use crate::blocks::{Block, BlockWithContext};
+use crate::blocks::{Block, BlockWithContext, TextAttribute};
 use crate::repo_path::RepoPath;
 use crate::validators::{
     SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
@@ -42,8 +42,9 @@ impl SyncValidator for LinePatternValidator {
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
                 let block = &block_with_context.block;
-                let required = compile_attribute(file_path, block, "line-pattern")?;
-                let forbidden = compile_attribute(file_path, block, "line-pattern-forbidden")?;
+                let required = compile_attribute(file_path, block, TextAttribute::LinePattern)?;
+                let forbidden =
+                    compile_attribute(file_path, block, TextAttribute::LinePatternForbidden)?;
                 if required.is_none() && forbidden.is_none() {
                     continue;
                 }
@@ -75,14 +76,15 @@ impl SyncValidator for LinePatternValidator {
 fn compile_attribute<'b>(
     file_path: &RepoPath,
     block: &'b Block,
-    attribute: &str,
+    attribute: TextAttribute,
 ) -> anyhow::Result<Option<(&'b str, Regex)>> {
-    let Some(pattern) = block.attribute(attribute) else {
+    let Some(pattern) = block.attributes.text(attribute) else {
         return Ok(None);
     };
     let re = compile_pattern(pattern).map_err(|e| {
         anyhow!(
-            "{attribute} expected a valid regular expression, got \"{pattern}\" in {} (error: {e})",
+            "{} expected a valid regular expression, got \"{pattern}\" in {} (error: {e})",
+            attribute.as_str(),
             block.label(file_path),
         )
     })?;

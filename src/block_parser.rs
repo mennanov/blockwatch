@@ -362,11 +362,10 @@ impl BlockEnd {
 
 #[cfg(test)]
 mod tests {
-    use crate::blocks::{Block, BlockSeverity, Content, Declaration};
+    use crate::blocks::{Attributes, Block, BlockSeverity, Content, Declaration, TextAttribute};
     use crate::language_parsers::LanguageParser;
     use crate::test_utils::text_attributes;
     use crate::{Position, language_parsers, test_utils};
-    use std::collections::HashMap;
 
     fn create_parser() -> impl LanguageParser {
         // Reuse existing real blocks parser.
@@ -399,7 +398,7 @@ mod tests {
         assert_eq!(
             blocks,
             vec![Block {
-                attributes: HashMap::new(),
+                attributes: Attributes::default(),
                 start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
                 content: Content::source(
                     test_utils::substr_range(contents, " let say = \"hi\"; "),
@@ -420,7 +419,7 @@ mod tests {
         assert_eq!(
             blocks,
             vec![Block {
-                attributes: HashMap::new(),
+                attributes: Attributes::default(),
                 start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
                 content: Content::source(
                     test_utils::substr_range(contents, "\nlet say = \"hi\";\n"),
@@ -447,7 +446,7 @@ println!("hello2");
             blocks,
             vec![
                 Block {
-                    attributes: HashMap::new(),
+                    attributes: Attributes::default(),
                     start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
                     content: Content::source(
                         test_utils::substr_range(contents, "\nprintln!(\"hello1\");\n"),
@@ -457,7 +456,7 @@ println!("hello2");
                     severity: BlockSeverity::Error,
                 },
                 Block {
-                    attributes: HashMap::new(),
+                    attributes: Attributes::default(),
                     start_tag_position_range: Position::new(4, 4)..Position::new(4, 11),
                     content: Content::source(
                         test_utils::substr_range(contents, "\nprintln!(\"hello2\");\n"),
@@ -480,7 +479,7 @@ println!("hello2");
             blocks,
             vec![
                 Block {
-                    attributes: HashMap::new(),
+                    attributes: Attributes::default(),
                     start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
                     content: Content::source(
                         test_utils::substr_range(contents, "println!(\"hello1\");"),
@@ -490,7 +489,7 @@ println!("hello2");
                     severity: BlockSeverity::Error,
                 },
                 Block {
-                    attributes: HashMap::new(),
+                    attributes: Attributes::default(),
                     start_tag_position_range: Position::new(1, 44)..Position::new(1, 51),
                     content: Content::source(
                         test_utils::substr_range(contents, "println!(\"hello2\");"),
@@ -513,7 +512,7 @@ println!("hello2");
             blocks,
             vec![
                 Block {
-                    attributes: HashMap::new(),
+                    attributes: Attributes::default(),
                     start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
                     content: Content::source(
                         test_utils::substr_range(contents, "\nprintln!(\"hello1\");\n"),
@@ -523,7 +522,7 @@ println!("hello2");
                     severity: BlockSeverity::Error,
                 },
                 Block {
-                    attributes: HashMap::new(),
+                    attributes: Attributes::default(),
                     start_tag_position_range: Position::new(3, 12)..Position::new(3, 19),
                     content: Content::source(
                         test_utils::substr_range(contents, "\nprintln!(\"hello2\");\n"),
@@ -636,10 +635,10 @@ println!("hello2");
         "#;
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 4);
-        assert_eq!(blocks[0].attributes["name"], "parent");
-        assert_eq!(blocks[1].attributes["name"], "child1");
-        assert_eq!(blocks[2].attributes["name"], "child2");
-        assert_eq!(blocks[3].attributes["name"], "child3");
+        assert_eq!(blocks[0].name(), Some("parent"));
+        assert_eq!(blocks[1].name(), Some("child1"));
+        assert_eq!(blocks[2].name(), Some("child2"));
+        assert_eq!(blocks[3].name(), Some("child3"));
         Ok(())
     }
 
@@ -685,7 +684,7 @@ println!("hello2");
         assert_eq!(
             blocks,
             vec![Block {
-                attributes: HashMap::new(),
+                attributes: Attributes::default(),
                 start_tag_position_range: Position::new(1, 4)..Position::new(2, 2),
                 content: Content::source(
                     test_utils::substr_range(contents, " let say = \"hi\"; "),
@@ -766,7 +765,7 @@ println!("hello2");
         assert_eq!(
             blocks,
             vec![Block {
-                attributes: HashMap::new(),
+                attributes: Attributes::default(),
                 start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
                 content: Content::source(
                     test_utils::substr_range(contents, "\n// b\n// a\n"),
@@ -787,7 +786,7 @@ println!("hello2");
         assert_eq!(
             blocks,
             vec![Block {
-                attributes: HashMap::new(),
+                attributes: Attributes::default(),
                 start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
                 content: Content::source(
                     test_utils::substr_range(contents, " let say = \"hi\"; "),
@@ -808,7 +807,7 @@ println!("hello2");
         assert_eq!(
             blocks,
             vec![Block {
-                attributes: HashMap::new(),
+                attributes: Attributes::default(),
                 start_tag_position_range: Position::new(2, 1)..Position::new(2, 8),
                 content: Content::source(
                     test_utils::substr_range(contents, "println!(\"hello1\");"),
@@ -829,7 +828,7 @@ println!("hello2");
         assert_eq!(
             blocks,
             vec![Block {
-                attributes: HashMap::new(),
+                attributes: Attributes::default(),
                 start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
                 content: Content::source(
                     test_utils::substr_range(contents, "println!(\"hello1\");"),
@@ -852,7 +851,7 @@ println!("hello2");
         assert_eq!(
             blocks,
             vec![Block {
-                attributes: HashMap::new(),
+                attributes: Attributes::default(),
                 start_tag_position_range: Position::new(1, 9)..Position::new(1, 16),
                 content: Content::source(
                     test_utils::substr_range(contents, "\nlet say = \"hi\";\n"),
@@ -876,7 +875,7 @@ println!("hello2");
         assert_eq!(
             blocks,
             vec![Block {
-                attributes: HashMap::new(),
+                attributes: Attributes::default(),
                 start_tag_position_range: Position::new(2, 9)..Position::new(2, 16),
                 content: Content::source(
                     test_utils::substr_range(contents, "\nlet say = \"hi\";\n"),
@@ -1076,7 +1075,7 @@ println!("hello2");
         assert_eq!(
             blocks
                 .iter()
-                .map(|block| block.attributes["name"].text())
+                .map(|block| block.name().expect("a named block"))
                 .collect::<Vec<_>>(),
             ["a"]
         );
@@ -1113,8 +1112,8 @@ println!("hello2");
                 .next()
                 .expect("a block")
                 .expect("no parse error")
-                .attributes["name"],
-            "closed"
+                .name(),
+            Some("closed")
         );
         assert_eq!(
             blocks
@@ -1207,8 +1206,11 @@ println!("hello2");
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks[0].attributes["name"], "red");
-        assert_eq!(blocks[0].attributes["check-ai"], "sweet");
+        assert_eq!(blocks[0].name(), Some("red"));
+        assert_eq!(
+            blocks[0].attributes.text(TextAttribute::CheckAi),
+            Some("sweet")
+        );
         Ok(())
     }
 
@@ -1220,7 +1222,10 @@ println!("hello2");
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks[0].attributes["check-ai"], "He said \"Hello\"");
+        assert_eq!(
+            blocks[0].attributes.text(TextAttribute::CheckAi),
+            Some("He said \"Hello\"")
+        );
         Ok(())
     }
 
@@ -1280,8 +1285,14 @@ println!("hello2");
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks[0].attributes["keep-sorted"], "");
-        assert_eq!(blocks[0].attributes["keep-unique"], "");
+        assert_eq!(
+            blocks[0].attributes.text(TextAttribute::KeepSorted),
+            Some("")
+        );
+        assert_eq!(
+            blocks[0].attributes.text(TextAttribute::KeepUnique),
+            Some("")
+        );
         Ok(())
     }
 
@@ -1310,8 +1321,11 @@ println!("hello2");
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks[0].attributes["name"], "foo");
-        assert_eq!(blocks[0].attributes["check-ai"], "bar");
+        assert_eq!(blocks[0].name(), Some("foo"));
+        assert_eq!(
+            blocks[0].attributes.text(TextAttribute::CheckAi),
+            Some("bar")
+        );
         Ok(())
     }
 
@@ -1325,10 +1339,19 @@ println!("hello2");
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks[0].attributes["name"], "red");
-        assert_eq!(blocks[0].attributes["keep-sorted"], "");
-        assert_eq!(blocks[0].attributes["check-ai"], "center");
-        assert_eq!(blocks[0].attributes["keep-unique"], "");
+        assert_eq!(blocks[0].name(), Some("red"));
+        assert_eq!(
+            blocks[0].attributes.text(TextAttribute::KeepSorted),
+            Some("")
+        );
+        assert_eq!(
+            blocks[0].attributes.text(TextAttribute::CheckAi),
+            Some("center")
+        );
+        assert_eq!(
+            blocks[0].attributes.text(TextAttribute::KeepUnique),
+            Some("")
+        );
         Ok(())
     }
 
@@ -1344,7 +1367,7 @@ println!("hello2");
 
         // Duplicate attributes: last value wins (standard HTML/XML behavior)
         assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].attribute("name"), Some("blue"));
+        assert_eq!(blocks[0].name(), Some("blue"));
         Ok(())
     }
 
@@ -1358,8 +1381,8 @@ println!("hello2");
         let blocks = parse_all(&mut parser, contents)?;
 
         assert_eq!(
-            blocks[0].attributes["check-ai"],
-            "He said &quot;Hello&quot;"
+            blocks[0].attributes.text(TextAttribute::CheckAi),
+            Some("He said &quot;Hello&quot;")
         );
         Ok(())
     }
@@ -1372,7 +1395,10 @@ println!("hello2");
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks[0].attributes["keep-unique"], r"(?P<value>\w+)");
+        assert_eq!(
+            blocks[0].attributes.text(TextAttribute::KeepUnique),
+            Some(r"(?P<value>\w+)")
+        );
         Ok(())
     }
 
@@ -1385,8 +1411,11 @@ println!("hello2");
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks[0].attributes["name"], "🦀");
-        assert_eq!(blocks[0].attributes["check-ai"], "Rust");
+        assert_eq!(blocks[0].name(), Some("🦀"));
+        assert_eq!(
+            blocks[0].attributes.text(TextAttribute::CheckAi),
+            Some("Rust")
+        );
         Ok(())
     }
 
