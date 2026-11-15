@@ -119,9 +119,8 @@ async fn check_block<C: AiClient>(
     let content = match block_content_for_pattern(
         block_with_context,
         &file_blocks.file_content,
-        "check-ai-pattern",
         block.attributes.check_ai_pattern(),
-    )? {
+    ) {
         PatternContent::Whole(content) => Cow::Borrowed(content),
         PatternContent::Matches(matches) if matches.is_empty() => {
             let violation = create_pattern_no_match_violation(
@@ -130,7 +129,8 @@ async fn check_block<C: AiClient>(
                 block
                     .attributes
                     .check_ai_pattern()
-                    .expect("a block with matches has a pattern"),
+                    .expect("a block with matches has a pattern")
+                    .as_str(),
             )?;
             return Ok((vec![violation], trace(None, None)));
         }

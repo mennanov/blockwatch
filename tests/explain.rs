@@ -255,3 +255,21 @@ fn block_that_the_config_skips_is_still_checked() -> anyhow::Result<()> {
     assert_eq!(json_from(&output.stdout)?["block"]["name"], "colors");
     Ok(())
 }
+
+#[test]
+#[allow(clippy::disallowed_macros)]
+fn explain_fails_when_a_block_has_an_invalid_attribute_value() -> anyhow::Result<()> {
+    let source = "# <block name=\"b\" keep-sorted=\"sideways\">\na\n# </block>\n";
+    let temp = tempfile::tempdir()?;
+    let root = repo_with_config(temp.path(), source, "")?;
+
+    let output = assert_cmd::cargo_bin_cmd!()
+        .current_dir(&root)
+        .args(["explain", "a.py:b"])
+        .output()?;
+
+    output.clone().assert().code(2).stdout("");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("invalid `keep-sorted`"), "{stderr}");
+    Ok(())
+}

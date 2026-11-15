@@ -224,6 +224,14 @@ mod test_utils {
         build_validation_context(file_name, contents, line_changes)
     }
 
+    /// Builds a [`ValidationContext`] for `file_name` and `contents`, returning any parse error.
+    pub(crate) fn try_validation_context(
+        file_name: &str,
+        contents: &str,
+    ) -> anyhow::Result<Arc<ValidationContext>> {
+        try_build_validation_context(file_name, contents, Vec::new())
+    }
+
     /// Creates a [`ValidationContext`] for the given `file_name` with `contents` and specified
     /// `line_changes`, rooted at the current directory.
     pub(crate) fn validation_context_with_changes(
@@ -239,6 +247,14 @@ mod test_utils {
         contents: &str,
         line_changes: Vec<LineChange>,
     ) -> Arc<ValidationContext> {
+        try_build_validation_context(file_name, contents, line_changes).unwrap()
+    }
+
+    fn try_build_validation_context(
+        file_name: &str,
+        contents: &str,
+        line_changes: Vec<LineChange>,
+    ) -> anyhow::Result<Arc<ValidationContext>> {
         let file_system = FakeFileSystem::new(HashMap::from([(
             file_name.to_string(),
             contents.to_string(),
@@ -246,15 +262,14 @@ mod test_utils {
         let line_changes_by_file =
             diff_changes([(RepoPath::from_reference(file_name).unwrap(), line_changes)]);
         let parsers = language_parsers::LanguageParsers::new();
-        Arc::new(ValidationContext::new(
+        Ok(Arc::new(ValidationContext::new(
             Scan::new(&file_system, &PathFilter::allow_all(), &parsers, &[])
-                .parse_blocks(&line_changes_by_file, ScanMode::OnlyChanged)
-                .unwrap()
+                .parse_blocks(&line_changes_by_file, ScanMode::OnlyChanged)?
                 .blocks,
             parsers,
             line_changes_by_file,
             Vec::new(),
-        ))
+        )))
     }
 
     /// A virtual block around `target`, with `attributes`. It is declared at line 7 of

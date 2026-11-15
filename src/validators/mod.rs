@@ -9,6 +9,11 @@ mod line_count;
 mod line_pattern;
 mod same_as;
 
+pub(crate) use check_lua::parse_timeout;
+pub(crate) use keep_sorted::{SortFormat, SortOrder};
+pub(crate) use line_count::Constraint;
+pub(crate) use same_as::{Formats, Mode, TargetPaths};
+
 use crate::Position;
 use crate::blocks::{
     Attributes, Block, BlockAddress, BlockKey, BlockListing, BlockSeverity, BlockWithContext,
@@ -515,6 +520,13 @@ pub(crate) struct ValidationContext {
     traces_requested: bool,
 }
 
+#[cfg(test)]
+impl std::fmt::Debug for ValidationContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ValidationContext").finish_non_exhaustive()
+    }
+}
+
 impl ValidationContext {
     /// Creates a new validation context with modified blocks grouped by filename.
     pub(crate) fn new(
@@ -981,7 +993,7 @@ fn regex_value<'a>(line: &'a str, regex: &regex::Regex) -> Option<(&'a str, Rang
 /// Compiles `pattern`, the regex in a block attribute such as `keep-sorted-pattern`.
 ///
 /// Returns an error when `pattern` has a line break or is not a valid regex.
-fn compile_pattern(pattern: &str) -> anyhow::Result<regex::Regex> {
+pub(crate) fn compile_pattern(pattern: &str) -> anyhow::Result<regex::Regex> {
     // A formatter that wraps long comments can break a tag inside a pattern. Where it breaks at a
     // space, the space is gone, so the line break can't be turned back into the text it replaced.
     // Left in, the line break makes the pattern match no line, and a rule such as keep-sorted then
@@ -1004,21 +1016,18 @@ enum PatternContent<'c> {
 fn block_content_for_pattern<'c>(
     block_with_context: &'c BlockWithContext,
     file_content: &'c str,
-    pattern_attribute: &str,
-    pattern: Option<&str>,
-) -> anyhow::Result<PatternContent<'c>> {
+    pattern: Option<&regex::Regex>,
+) -> PatternContent<'c> {
     let content = block_with_context.block.content.text(file_content);
-    let Some(pattern) = pattern else {
-        return Ok(PatternContent::Whole(content.trim()));
+    let Some(re) = pattern else {
+        return PatternContent::Whole(content.trim());
     };
-    let re = compile_pattern(pattern)
-        .with_context(|| format!("{pattern_attribute} is not a valid regex"))?;
-    Ok(PatternContent::Matches(
+    PatternContent::Matches(
         re.captures_iter(content)
-            .filter_map(|captures| value_match(&re, &captures).map(|matched| matched.as_str()))
+            .filter_map(|captures| value_match(re, &captures).map(|matched| matched.as_str()))
             .filter(|value| !value.is_empty())
             .collect(),
-    ))
+    )
 }
 
 /// Checks that each extra attribute comes with at least one main attribute when present.
@@ -1046,6 +1055,23 @@ fn require_main(has_main: bool, main: &[&str], extras: &[(&str, bool)]) -> anyho
     Ok(())
 }
 
+/// Parses `value` as one of the keywords of `T`.
+///
+/// # Errors
+/// Returns `"\"value\" (expected ...)"` when `value` does not match a variant of `T`.
+pub(crate) fn parse_keyword_value<T>(value: &str) -> anyhow::Result<T>
+where
+    T: FromStr + IntoEnumIterator + ToString,
+{
+    T::from_str(value).map_err(|_| {
+        let keywords: Vec<String> = T::iter().map(|keyword| keyword.to_string()).collect();
+        let (last, others) = keywords
+            .split_last()
+            .expect("a keyword type has at least one keyword");
+        anyhow!("\"{value}\" (expected {} or {last})", others.join(", "))
+    })
+}
+
 /// Parses `value`, the value of `attribute`, as one of the keywords of `T`. `T` decides the case of
 /// the keywords it accepts.
 ///
@@ -1056,16 +1082,7 @@ fn parse_keyword<T>(attribute: &str, value: &str) -> anyhow::Result<T>
 where
     T: FromStr + IntoEnumIterator + ToString,
 {
-    T::from_str(value).map_err(|_| {
-        let keywords: Vec<String> = T::iter().map(|keyword| keyword.to_string()).collect();
-        let (last, others) = keywords
-            .split_last()
-            .expect("a keyword type has at least one keyword");
-        anyhow!(
-            "invalid {attribute} \"{value}\" (expected {} or {last})",
-            others.join(", ")
-        )
-    })
+    parse_keyword_value(value).map_err(|reason| anyhow!("invalid {attribute} {reason}"))
 }
 
 /// Parses a numeric value from string.
@@ -1344,12 +1361,12 @@ mod tests {
         let context = merge_validation_contexts(vec![
             validation_context(
                 "example1.py",
-                r#"# <block keep-sorted="condition A" check-ai="condition B">
+                r#"# <block keep-sorted="asc" check-ai="condition B">
     # </block>"#,
             ),
             validation_context(
                 "example2.py",
-                r#"# <block keep-sorted="condition C" check-ai="condition D">
+                r#"# <block keep-sorted="desc" check-ai="condition D">
     # </block>"#,
             ),
         ]);
@@ -1391,12 +1408,12 @@ mod tests {
         let context = merge_validation_contexts(vec![
             validation_context(
                 "example1.py",
-                r#"# <block keep-sorted="condition A">
+                r#"# <block keep-sorted="asc">
     # </block>"#,
             ),
             validation_context(
                 "example2.py",
-                r#"# <block keep-sorted="condition B">
+                r#"# <block keep-sorted="desc">
     # </block>"#,
             ),
         ]);
@@ -1477,7 +1494,7 @@ mod tests {
     -> anyhow::Result<()> {
         let context = validation_context(
             "example1.py",
-            r#"# <block keep-sorted="condition A" check-ai="condition B">
+            r#"# <block keep-sorted="asc" check-ai="condition B">
     # </block>"#,
         );
         let (sync_validators, async_validators) = detect_validators(
@@ -1505,7 +1522,7 @@ mod tests {
     -> anyhow::Result<()> {
         let context = validation_context(
             "example1.py",
-            r#"# <block keep-sorted="condition A" check-ai="condition B">
+            r#"# <block keep-sorted="asc" check-ai="condition B">
     # </block>"#,
         );
 
@@ -1534,7 +1551,7 @@ mod tests {
     -> anyhow::Result<()> {
         let context = validation_context(
             "example1.py",
-            r#"# <block keep-sorted="condition A" check-ai="condition B">
+            r#"# <block keep-sorted="asc" check-ai="condition B">
     # </block>"#,
         );
         let (sync_validators, async_validators) = detect_validators(
@@ -1562,7 +1579,7 @@ mod tests {
     -> anyhow::Result<()> {
         let context = validation_context(
             "example1.py",
-            r#"# <block keep-sorted="condition A" check-ai="condition B">
+            r#"# <block keep-sorted="asc" check-ai="condition B">
     # </block>"#,
         );
 
@@ -1768,8 +1785,8 @@ print("target")
             ("same-as", Validator::SameAs),
             ("same-as-paths", Validator::SameAs),
         ];
-        for attribute in Attributes::known_names() {
-            let attributes = text_attributes(&[(&attribute, "")]);
+        for (attribute, value) in Attributes::sample_values() {
+            let attributes = text_attributes(&[(&attribute, &value)]);
 
             let turned_on: Vec<Validator> = Validator::iter()
                 .filter(|validator| validator.is_turned_on_by(&attributes))

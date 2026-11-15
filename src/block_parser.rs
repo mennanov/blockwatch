@@ -365,6 +365,7 @@ mod tests {
     use crate::blocks::{Attributes, Block, BlockSeverity, Content, Declaration};
     use crate::language_parsers::LanguageParser;
     use crate::test_utils::text_attributes;
+    use crate::validators::SortOrder;
     use crate::{Position, language_parsers, test_utils};
 
     fn create_parser() -> impl LanguageParser {
@@ -1279,8 +1280,8 @@ println!("hello2");
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks[0].attributes.keep_sorted(), Some(""));
-        assert_eq!(blocks[0].attributes.keep_unique(), Some(""));
+        assert_eq!(blocks[0].attributes.keep_sorted(), Some(SortOrder::Asc));
+        assert!(matches!(blocks[0].attributes.keep_unique(), Some(None)));
         Ok(())
     }
 
@@ -1325,9 +1326,9 @@ println!("hello2");
         "#;
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks[0].name(), Some("red"));
-        assert_eq!(blocks[0].attributes.keep_sorted(), Some(""));
+        assert_eq!(blocks[0].attributes.keep_sorted(), Some(SortOrder::Asc));
         assert_eq!(blocks[0].attributes.check_ai(), Some("center"));
-        assert_eq!(blocks[0].attributes.keep_unique(), Some(""));
+        assert!(matches!(blocks[0].attributes.keep_unique(), Some(None)));
         Ok(())
     }
 
@@ -1371,7 +1372,14 @@ println!("hello2");
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks[0].attributes.keep_unique(), Some(r"(?P<value>\w+)"));
+        assert_eq!(
+            blocks[0]
+                .attributes
+                .keep_unique()
+                .flatten()
+                .map(regex::Regex::as_str),
+            Some(r"(?P<value>\w+)")
+        );
         Ok(())
     }
 
@@ -1395,7 +1403,7 @@ println!("hello2");
         let contents = r#"
         // <block name="outer" check-ai="bar">
         fn outer() {
-            // <block name="inner" keep-sorted="buzz">
+            // <block name="inner" keep-sorted="desc">
             fn inner() {}
             // </block>
         }
@@ -1409,7 +1417,7 @@ println!("hello2");
         );
         assert_eq!(
             blocks[1].attributes,
-            text_attributes(&[("name", "inner"), ("keep-sorted", "buzz")])
+            text_attributes(&[("name", "inner"), ("keep-sorted", "desc")])
         );
         Ok(())
     }

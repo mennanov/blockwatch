@@ -8,7 +8,7 @@ use anyhow::{Context, bail};
 use std::fmt;
 
 /// One target named by a reference-based validator's attribute (`affects`, `check-lua`, `same-as`).
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TargetReference {
     /// A named block, in `file` or — when `file` is `None` — in the referencing file itself.
     Block {
@@ -82,21 +82,21 @@ impl TargetReference {
 
     /// The target this reference points at, written in `referencing_file`. A reference without a
     /// file, like `:name` or `#/path`, points into the file it is written in.
-    pub(crate) fn resolve(self, referencing_file: &RepoPath) -> ResolvedTarget {
+    pub(crate) fn resolve(&self, referencing_file: &RepoPath) -> ResolvedTarget {
         let in_referencing_file =
-            |file: Option<RepoPath>| file.unwrap_or_else(|| referencing_file.clone());
+            |file: Option<&RepoPath>| file.cloned().unwrap_or_else(|| referencing_file.clone());
         match self {
             Self::Block { file, name } => ResolvedTarget {
-                file: in_referencing_file(file),
-                kind: TargetKind::Block(name),
+                file: in_referencing_file(file.as_ref()),
+                kind: TargetKind::Block(name.clone()),
             },
             Self::File(file) => ResolvedTarget {
-                file,
+                file: file.clone(),
                 kind: TargetKind::WholeFile,
             },
             Self::Symbol { file, path } => ResolvedTarget {
-                file: in_referencing_file(file),
-                kind: TargetKind::Symbol(path),
+                file: in_referencing_file(file.as_ref()),
+                kind: TargetKind::Symbol(path.clone()),
             },
         }
     }

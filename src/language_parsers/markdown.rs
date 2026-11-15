@@ -364,6 +364,7 @@ mod tests {
     use super::*;
     use crate::blocks::{Block, BlockSeverity, Content, Declaration};
     use crate::test_utils::text_attributes;
+    use crate::validators::SortOrder;
     use crate::{Position, test_utils};
 
     /// The symbols `source` derives, as `(path, value)` pairs in the order they were derived.
@@ -805,7 +806,7 @@ Text
             .parse_blocks(content)
             .collect::<anyhow::Result<Vec<_>>>()?;
 
-        let tags: Vec<(&str, &str)> = blocks
+        let tags: Vec<(&str, SortOrder)> = blocks
             .iter()
             .map(|block| {
                 (
@@ -814,7 +815,14 @@ Text
                 )
             })
             .collect();
-        assert_eq!(tags, [("a", "asc"), ("b", "asc"), ("c", "asc")]);
+        assert_eq!(
+            tags,
+            [
+                ("a", SortOrder::Asc),
+                ("b", SortOrder::Asc),
+                ("c", SortOrder::Asc),
+            ]
+        );
         Ok(())
     }
 

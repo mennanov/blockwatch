@@ -1,8 +1,8 @@
-use crate::blocks::{Attributes, Block, BlockWithContext};
+use crate::blocks::{Attributes, Block, BlockWithContext, ParseAttribute};
 use crate::repo_path::RepoPath;
 use crate::validators::{
     SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
-    ViolationRange, compile_pattern, parse_keyword, parse_number, regex_value, require_main,
+    ViolationRange, parse_keyword_value, parse_number, regex_value, require_main,
     trimmed_line_value,
 };
 use crate::{Position, validators};
@@ -14,22 +14,44 @@ use std::sync::Arc;
 use strum_macros::{Display, EnumIter, EnumString};
 
 /// The direction of a `keep-sorted` block.
-#[derive(Default, Clone, Copy, Debug, EnumString, EnumIter, Display, Serialize)]
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq, EnumString, EnumIter, Display, Serialize)]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
-enum SortOrder {
+pub(crate) enum SortOrder {
     #[default]
     Asc,
     Desc,
 }
 
-#[derive(Default, Clone, Copy, Debug, EnumString, EnumIter, Display, Serialize)]
+impl ParseAttribute for SortOrder {
+    fn parse_attribute(raw: &str) -> anyhow::Result<Self> {
+        if raw.trim().is_empty() {
+            Ok(Self::default())
+        } else {
+            parse_keyword_value(raw)
+        }
+    }
+}
+
+/// How values are compared when sorting a `keep-sorted` block.
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq, EnumString, EnumIter, Display, Serialize)]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
-enum SortFormat {
+pub(crate) enum SortFormat {
     #[default]
     Lexicographic,
     Numeric,
+}
+
+impl ParseAttribute for SortFormat {
+    fn parse_attribute(raw: &str) -> anyhow::Result<Self> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            Ok(Self::default())
+        } else {
+            parse_keyword_value(trimmed)
+        }
+    }
 }
 
 impl SortFormat {
@@ -66,124 +88,93 @@ impl SyncValidator for KeepSortedValidator {
         let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
-                if let Some(keep_sorted) = block_with_context.block.attributes.keep_sorted() {
-                    let located = |error: anyhow::Error| {
-                        anyhow!("{error} in {}", block_with_context.block.label(file_path))
-                    };
-                    let order = if keep_sorted.trim().is_empty() {
-                        SortOrder::default()
-                    } else {
-                        parse_keyword("keep-sorted", keep_sorted).map_err(located)?
-                    };
-                    let order_name = order.to_string();
-                    // Optional regex pattern similar to keep-unique: if provided, we compare extracted matches.
-                    let pattern = block_with_context
-                        .block
-                        .attributes
-                        .keep_sorted_pattern()
-                        .unwrap_or_default();
-                    let re = if pattern.is_empty() {
-                        None
-                    } else {
-                        Some(compile_pattern(pattern))
-                    };
+                let Some(order) = block_with_context.block.attributes.keep_sorted() else {
+                    continue;
+                };
+                let order_name = order.to_string();
+                let re = block_with_context
+                    .block
+                    .attributes
+                    .keep_sorted_pattern()
+                    .flatten();
+                let sort_format = block_with_context
+                    .block
+                    .attributes
+                    .keep_sorted_format()
+                    .unwrap_or_default();
 
-                    let format_raw = block_with_context
-                        .block
-                        .attributes
-                        .keep_sorted_format()
-                        .map(str::trim)
-                        .unwrap_or_default();
-                    let sort_format = if format_raw.is_empty() {
-                        SortFormat::default()
-                    } else {
-                        parse_keyword("keep-sorted-format", format_raw).map_err(located)?
+                let violating_ord = match order {
+                    SortOrder::Asc => Ordering::Greater,
+                    SortOrder::Desc => Ordering::Less,
+                };
+                let mut trace = context.traces_requested.then(|| KeepSortedTrace {
+                    format: sort_format,
+                    lines: Vec::new(),
+                    order,
+                });
+                let mut block_violations = Vec::new();
+                // Keep previous value and its range for violation location purposes
+                let mut prev_value: Option<(&str, Range<usize>)> = None;
+                for (line_number, line) in block_with_context
+                    .block
+                    .content
+                    .text(&file_blocks.file_content)
+                    .lines()
+                    .enumerate()
+                {
+                    // Determine current comparable value and its character range within the line
+                    let value = match re {
+                        None => trimmed_line_value(line),
+                        Some(regex) => regex_value(line, regex),
                     };
-
-                    let violating_ord = match order {
-                        SortOrder::Asc => Ordering::Greater,
-                        SortOrder::Desc => Ordering::Less,
-                    };
-                    let mut trace = context.traces_requested.then(|| KeepSortedTrace {
-                        format: sort_format,
-                        lines: Vec::new(),
-                        order,
-                    });
-                    let mut block_violations = Vec::new();
-                    // Keep previous value and its range for violation location purposes
-                    let mut prev_value: Option<(&str, Range<usize>)> = None;
-                    for (line_number, line) in block_with_context
-                        .block
-                        .content
-                        .text(&file_blocks.file_content)
-                        .lines()
-                        .enumerate()
+                    if let Some(trace) = &mut trace
+                        && !line.trim().is_empty()
                     {
-                        // Determine current comparable value and its character range within the line
-                        let value = match &re {
-                            None => trimmed_line_value(line),
-                            Some(Ok(regex)) => regex_value(line, regex),
-                            Some(Err(e)) => {
-                                return Err(anyhow!(
-                                    "invalid keep-sorted-pattern expression in block {}: {}",
-                                    block_with_context.block.label(file_path),
-                                    e
-                                ));
-                            }
-                        };
-                        if let Some(trace) = &mut trace
-                            && !line.trim().is_empty()
-                        {
-                            trace.lines.push(KeepSortedLine {
-                                line: block_with_context
+                        trace.lines.push(KeepSortedLine {
+                            line: block_with_context
+                                .block
+                                .content
+                                .position(line_number, 0)
+                                .line,
+                            text: line.trim().to_string(),
+                            value: value.as_ref().map(|(value, _)| value.to_string()),
+                        });
+                    }
+
+                    if let Some((curr_val, curr_range)) = value {
+                        if let Some((prev_val, _prev_range)) = &prev_value {
+                            let cmp = sort_format.cmp(prev_val, curr_val).with_context(|| {
+                                format!("in block {}", block_with_context.block.label(file_path),)
+                            })?;
+                            if cmp == violating_ord {
+                                let violation_start = block_with_context
                                     .block
                                     .content
-                                    .position(line_number, 0)
-                                    .line,
-                                text: line.trim().to_string(),
-                                value: value.as_ref().map(|(value, _)| value.to_string()),
-                            });
-                        }
-
-                        if let Some((curr_val, curr_range)) = value {
-                            if let Some((prev_val, _prev_range)) = &prev_value {
-                                let cmp =
-                                    sort_format.cmp(prev_val, curr_val).with_context(|| {
-                                        format!(
-                                            "in block {}",
-                                            block_with_context.block.label(file_path),
-                                        )
-                                    })?;
-                                if cmp == violating_ord {
-                                    let violation_start = block_with_context
-                                        .block
-                                        .content
-                                        .position(line_number, curr_range.start);
-                                    let line_character_end =
-                                        violation_start.character + curr_range.len();
-                                    block_violations.push(create_violation(
-                                        file_path,
-                                        &block_with_context.block,
-                                        &order_name,
-                                        line.trim(),
-                                        violation_start.line,
-                                        violation_start.character,
-                                        line_character_end,
-                                    )?);
-                                    break;
-                                }
+                                    .position(line_number, curr_range.start);
+                                let line_character_end =
+                                    violation_start.character + curr_range.len();
+                                block_violations.push(create_violation(
+                                    file_path,
+                                    &block_with_context.block,
+                                    &order_name,
+                                    line.trim(),
+                                    violation_start.line,
+                                    violation_start.character,
+                                    line_character_end,
+                                )?);
+                                break;
                             }
-                            prev_value = Some((curr_val, curr_range));
                         }
+                        prev_value = Some((curr_val, curr_range));
                     }
-                    report.add_all(file_path, &block_with_context.block, block_violations);
-                    if let Some(trace) = trace {
-                        report.add_trace(
-                            file_path,
-                            &block_with_context.block,
-                            ValidatorTrace::KeepSorted(trace),
-                        );
-                    }
+                }
+                report.add_all(file_path, &block_with_context.block, block_violations);
+                if let Some(trace) = trace {
+                    report.add_trace(
+                        file_path,
+                        &block_with_context.block,
+                        ValidatorTrace::KeepSorted(trace),
+                    );
                 }
             }
         }
@@ -538,19 +529,18 @@ mod validate_tests {
     }
 
     #[test]
-    fn invalid_keep_sorted_value_returns_an_error() -> anyhow::Result<()> {
-        let validator = KeepSortedValidator;
-        let context = validation_context(
+    fn invalid_keep_sorted_value_returns_an_error() {
+        let error = crate::test_utils::try_validation_context(
             "example.py",
             r#"# <block keep-sorted="invalid">
         # </block>"#,
+        )
+        .unwrap_err();
+        assert!(
+            format!("{error:#}")
+                .contains("invalid `keep-sorted`: \"invalid\" (expected asc or desc)"),
+            "{error:#}"
         );
-        let error = validator.validate(context).unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "invalid keep-sorted \"invalid\" (expected asc or desc) in example.py:(unnamed) at line 1"
-        );
-        Ok(())
     }
 
     #[test]
@@ -700,40 +690,33 @@ mod validate_tests {
     }
 
     #[test]
-    fn invalid_keep_sorted_pattern_returns_an_error() -> anyhow::Result<()> {
-        let validator = KeepSortedValidator;
-        let context = validation_context(
+    fn invalid_keep_sorted_pattern_returns_an_error() {
+        let err = crate::test_utils::try_validation_context(
             "example.py",
             r#"# <block keep-sorted="asc" keep-sorted-pattern="(unclosed">
         item1 = 1
         item2 = 2
         # </block>"#,
-        );
+        )
+        .unwrap_err();
 
-        let result = validator.validate(context);
-        assert!(result.is_err());
         assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("invalid keep-sorted-pattern expression")
+            format!("{err:#}").contains("invalid `keep-sorted-pattern`"),
+            "unexpected error: {err:#}"
         );
-
-        Ok(())
     }
 
     #[test]
     fn pattern_with_a_line_break_returns_an_error() {
-        let validator = KeepSortedValidator;
-        let context = validation_context(
+        let err = crate::test_utils::try_validation_context(
             "example.py",
             "# <block keep-sorted=\"asc\" keep-sorted-pattern=\"id = (?P<value>\\w+)\n# ok\">\nid = b ok\nid = a ok\n# </block>",
-        );
+        )
+        .unwrap_err();
 
-        let err = validator.validate(context).unwrap_err();
         assert!(
-            err.to_string().contains("line break"),
-            "unexpected error: {err}"
+            format!("{err:#}").contains("line break"),
+            "unexpected error: {err:#}"
         );
     }
 
@@ -1080,22 +1063,21 @@ mod validate_tests {
     }
 
     #[test]
-    fn unknown_keep_sorted_format_value_returns_an_error() -> anyhow::Result<()> {
-        let validator = KeepSortedValidator;
-        let context = validation_context(
+    fn unknown_keep_sorted_format_value_returns_an_error() {
+        let error = crate::test_utils::try_validation_context(
             "example.py",
             r#"# <block keep-sorted="asc" keep-sorted-format="alphabetical">
         a
         b
         # </block>"#,
+        )
+        .unwrap_err();
+        assert!(
+            format!("{error:#}").contains(
+                "invalid `keep-sorted-format`: \"alphabetical\" (expected lexicographic or numeric)"
+            ),
+            "{error:#}"
         );
-        let result = validator.validate(context);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains(
-            "invalid keep-sorted-format \"alphabetical\" (expected lexicographic or numeric) \
-                     in example.py:(unnamed) at line 1"
-        ));
-        Ok(())
     }
 
     #[test]

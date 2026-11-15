@@ -1,11 +1,11 @@
-use crate::blocks::{Attributes, Block, BlockWithContext};
+use crate::blocks::{Attributes, Block, BlockWithContext, ParseAttribute};
 use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{
     SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
-    compile_pattern, regex_value, require_main, trimmed_line_value,
+    regex_value, require_main, trimmed_line_value,
 };
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
 use regex::Regex;
 use serde::Serialize;
 use std::sync::Arc;
@@ -33,35 +33,22 @@ impl SyncValidator for LineCountValidator {
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
                 let block = &block_with_context.block;
-                let Some(expr) = block.attributes.line_count() else {
+                let Some(constraint) = block.attributes.line_count() else {
                     continue;
                 };
-                let (op, expected) = parse_constraint(expr).map_err(|e| anyhow!(
-                    "line-count expected a comparator like <N, <=N, ==N, >=N, >N; got \"{}\" in {} (error: {})",
-                    expr,
-                    block.label(file_path),
-                    e
-                ))?;
-                let pattern = compile_count_pattern(file_path, block)?;
+                let pattern = block.attributes.line_count_pattern();
                 let mut lines = context.traces_requested.then(Vec::new);
-                let actual = count_lines(
-                    block,
-                    &file_blocks.file_content,
-                    pattern.as_ref(),
-                    lines.as_mut(),
-                );
-                let violation = (!op.accepts(actual, expected))
-                    .then(|| {
-                        create_violation(file_path, block, op, expected, actual, pattern.as_ref())
-                    })
+                let actual = count_lines(block, &file_blocks.file_content, pattern, lines.as_mut());
+                let violation = (!constraint.accepts(actual))
+                    .then(|| create_violation(file_path, block, constraint, actual, pattern))
                     .transpose()?;
                 report.add_all(file_path, block, violation.into_iter().collect());
                 if let Some(lines) = lines {
                     let trace = ValidatorTrace::LineCount(LineCountTrace {
                         actual,
-                        expected,
+                        expected: constraint.expected(),
                         lines,
-                        op: op.as_str(),
+                        op: constraint.op_str(),
                     });
                     report.add_trace(file_path, block, trace);
                 }
@@ -69,23 +56,6 @@ impl SyncValidator for LineCountValidator {
         }
         Ok(report)
     }
-}
-
-/// Compiles the `line-count-pattern` of `block`, which is in `file_path`. Returns `None` when the
-/// block doesn't have one.
-///
-/// # Errors
-/// Returns an error when the pattern is not a valid regex or has a line break.
-fn compile_count_pattern(file_path: &RepoPath, block: &Block) -> anyhow::Result<Option<Regex>> {
-    block
-        .attributes
-        .line_count_pattern()
-        .map(|pattern| {
-            compile_pattern(pattern).with_context(|| {
-                format!("invalid line-count-pattern in {}", block.label(file_path))
-            })
-        })
-        .transpose()
 }
 
 /// Returns how many lines of `block` count: the lines that `pattern` gives a value for, or every
@@ -120,12 +90,11 @@ fn count_lines(
 }
 
 /// Returns the violation for `block`, which is in `block_file_path`, when `actual` lines count but
-/// the rule is `operation` and `expected`. `pattern` is the block's `line-count-pattern`, if any.
+/// `constraint` is not met. `pattern` is the block's `line-count-pattern`, if any.
 fn create_violation(
     block_file_path: &RepoPath,
     block: &Block,
-    operation: Op,
-    expected: usize,
+    constraint: Constraint,
     actual: usize,
     pattern: Option<&Regex>,
 ) -> anyhow::Result<Violation> {
@@ -138,8 +107,8 @@ fn create_violation(
         block.label(block_file_path),
         actual,
         counted,
-        operation.as_str(),
-        expected
+        constraint.op_str(),
+        constraint.expected(),
     );
     Ok(Violation::new(
         block.start_tag_position_range.clone().into(),
@@ -151,8 +120,8 @@ fn create_violation(
         None,
         Some(serde_json::to_value(LineCountViolation {
             actual,
-            op: operation.as_str().to_string(),
-            expected,
+            op: constraint.op_str().to_string(),
+            expected: constraint.expected(),
         })?),
     ))
 }
@@ -205,7 +174,40 @@ pub(super) fn detect(block_with_context: &BlockWithContext) -> Option<ValidatorT
         .then(|| ValidatorType::Sync(Box::new(LineCountValidator)))
 }
 
-#[derive(Copy, Clone)]
+/// A comparator and count from `line-count`, such as `<50` or `== 0`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Constraint {
+    op: Op,
+    expected: usize,
+}
+
+impl Constraint {
+    /// Returns whether `actual` lines satisfy this rule.
+    fn accepts(self, actual: usize) -> bool {
+        self.op.accepts(actual, self.expected)
+    }
+
+    /// The operator as written in diagnostics and traces, such as `<=`.
+    fn op_str(self) -> &'static str {
+        self.op.as_str()
+    }
+
+    /// The target line count to compare against.
+    fn expected(self) -> usize {
+        self.expected
+    }
+}
+
+impl ParseAttribute for Constraint {
+    fn parse_attribute(raw: &str) -> anyhow::Result<Self> {
+        let (op, expected) = parse_constraint(raw).map_err(|e| {
+            anyhow!("expected a comparator like <N, <=N, ==N, >=N, >N; got \"{raw}\" (error: {e})")
+        })?;
+        Ok(Self { op, expected })
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Op {
     Lt,
     Le,
@@ -571,50 +573,84 @@ red
 
     #[test]
     fn pattern_with_invalid_regex_returns_an_error() {
-        let context = validation_context(
+        let err = crate::test_utils::try_validation_context(
             "example.py",
             r#"# <block line-count="==1" line-count-pattern="(unclosed">
 red
 # </block>"#,
-        );
-
-        let error = LineCountValidator.validate(context).unwrap_err();
+        )
+        .unwrap_err();
 
         assert!(
-            format!("{error:#}")
-                .starts_with("invalid line-count-pattern in example.py:(unnamed) at line 1: "),
-            "{error}"
+            format!("{err:#}").contains("invalid `line-count-pattern`"),
+            "{err:#}"
         );
     }
 
     #[test]
     fn pattern_with_a_line_break_returns_an_error() {
-        let context = validation_context(
+        let err = crate::test_utils::try_validation_context(
             "example.py",
             "# <block line-count=\"==1\" line-count-pattern=\"^red\n# $\">\nred\n# </block>",
-        );
-
-        let error = LineCountValidator.validate(context).unwrap_err();
+        )
+        .unwrap_err();
 
         assert!(
-            format!("{error:#}").contains("the pattern has a line break"),
-            "{error}"
+            format!("{err:#}").contains("the pattern has a line break"),
+            "{err:#}"
+        );
+    }
+
+    #[test]
+    fn block_with_an_invalid_line_count_returns_an_error() {
+        let error = crate::test_utils::try_validation_context(
+            "example.py",
+            "# <block line-count=\"50\">\na\n# </block>",
+        )
+        .unwrap_err();
+        let error_chain = format!("{error:#}");
+
+        assert!(
+            error_chain.contains("invalid `line-count`"),
+            "{error_chain}"
+        );
+        assert!(
+            error_chain.contains("expected a comparator like <N, <=N, ==N, >=N, >N"),
+            "{error_chain}"
         );
     }
 
     #[test]
     fn parse_constraint_with_invalid_syntax_returns_error() {
-        assert!(parse_constraint("50").is_err());
-        assert!(parse_constraint("").is_err());
-        assert!(parse_constraint("> -1").is_err());
-        assert!(parse_constraint("<== 50").is_err());
+        assert!(Constraint::parse_attribute("50").is_err());
+        assert!(Constraint::parse_attribute("").is_err());
+        assert!(Constraint::parse_attribute("> -1").is_err());
+        assert!(Constraint::parse_attribute("<== 50").is_err());
     }
 
     #[test]
     fn parse_constraint_with_valid_syntax_returns_correct_result() {
-        assert!(matches!(parse_constraint("< 50").unwrap(), (Op::Lt, 50)));
-        assert!(matches!(parse_constraint(">=10").unwrap(), (Op::Ge, 10)));
-        assert!(matches!(parse_constraint("== 0").unwrap(), (Op::Eq, 0)));
+        assert_eq!(
+            Constraint::parse_attribute("< 50").unwrap(),
+            Constraint {
+                op: Op::Lt,
+                expected: 50
+            }
+        );
+        assert_eq!(
+            Constraint::parse_attribute(">=10").unwrap(),
+            Constraint {
+                op: Op::Ge,
+                expected: 10
+            }
+        );
+        assert_eq!(
+            Constraint::parse_attribute("== 0").unwrap(),
+            Constraint {
+                op: Op::Eq,
+                expected: 0
+            }
+        );
     }
 
     #[test]

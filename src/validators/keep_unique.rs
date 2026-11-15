@@ -2,7 +2,7 @@ use crate::blocks::{Block, BlockWithContext};
 use crate::repo_path::RepoPath;
 use crate::validators::{
     SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
-    ViolationRange, compile_pattern, regex_value, trimmed_line_value,
+    ViolationRange, regex_value, trimmed_line_value,
 };
 use crate::{Position, validators};
 use serde::Serialize;
@@ -23,13 +23,8 @@ impl SyncValidator for KeepUniqueValidator {
         let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
-                let Some(pattern) = block_with_context.block.attributes.keep_unique() else {
+                let Some(re) = block_with_context.block.attributes.keep_unique() else {
                     continue;
-                };
-                let re = if pattern.is_empty() {
-                    None
-                } else {
-                    Some(compile_pattern(pattern))
                 };
                 let mut trace = context
                     .traces_requested
@@ -43,17 +38,9 @@ impl SyncValidator for KeepUniqueValidator {
                     .lines()
                     .enumerate()
                 {
-                    let line_match = match &re {
+                    let line_match = match re {
                         None => trimmed_line_value(line),
-                        Some(Ok(re)) => regex_value(line, re),
-                        Some(Err(e)) => {
-                            // Invalid regex: return an error for the validator
-                            return Err(anyhow::anyhow!(
-                                "invalid keep-unique regex pattern for block {}: {}",
-                                block_with_context.block.label(file_path),
-                                e
-                            ));
-                        }
+                        Some(re) => regex_value(line, re),
                     };
                     if let Some(trace) = &mut trace
                         && !line.trim().is_empty()
@@ -421,16 +408,15 @@ ID:1 C
 
     #[test]
     fn pattern_with_a_line_break_returns_an_error() {
-        let validator = KeepUniqueValidator;
-        let context = validation_context(
+        let err = crate::test_utils::try_validation_context(
             "example.py",
             "# <block keep-unique=\"id = (?P<value>\\w+)\n# ok\">\nid = a ok\nid = a ok\n# </block>",
-        );
+        )
+        .unwrap_err();
 
-        let err = validator.validate(context).unwrap_err();
         assert!(
-            err.to_string().contains("line break"),
-            "unexpected error: {err}"
+            format!("{err:#}").contains("line break"),
+            "unexpected error: {err:#}"
         );
     }
 

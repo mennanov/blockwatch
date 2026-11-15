@@ -1,6 +1,7 @@
 use assert_cmd::assert::OutputAssertExt;
 use assert_cmd::cargo::CommandCargoExt;
 use common::cargo_bin_cmd;
+use predicates::prelude::predicate;
 use serde_json::{Value, json};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -333,4 +334,26 @@ fn list_subcommand_with_closed_stdout_exits_without_an_error() {
     );
 
     output.assert().success().stderr("");
+}
+
+#[test]
+fn list_subcommand_fails_when_a_block_has_an_invalid_attribute_value() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    std::fs::create_dir_all(temp.path().join(".git"))?;
+    std::fs::write(
+        temp.path().join("a.py"),
+        "# <block line-count=\"50\">\na\n# </block>\n",
+    )?;
+
+    let output = cargo_bin_cmd!()
+        .current_dir(temp.path())
+        .args(["list", "a.py"])
+        .output()?;
+
+    output
+        .assert()
+        .code(2)
+        .stdout("")
+        .stderr(predicate::str::contains("invalid `line-count`"));
+    Ok(())
 }

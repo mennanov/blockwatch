@@ -502,9 +502,9 @@ fn attribute_values(values: HashMap<String, RawAttributeValue>) -> anyhow::Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blocks::AttributeValue;
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::test_utils::FakeFileSystem;
+    use crate::target_reference::TargetReference;
     use crate::test_utils::{diff_changes, text_attributes};
     use std::path::PathBuf;
 
@@ -910,7 +910,7 @@ symbols = ['#/flag']
         // `./package.json` is another spelling of the same file.
         let text = r"[[block]]
 target = 'package.json#/version'
-line-count = '1'
+line-count = '==1'
 
 [[block]]
 target = './package.json#/version'
@@ -1276,13 +1276,18 @@ same-as = ['c.md', 'd.md#/Red, blue']
         let config = read_text(text)?;
 
         let attributes = &config.blocks[0].attributes;
-        let list = |entries: &[&str]| {
-            AttributeValue::List(entries.iter().map(|entry| entry.to_string()).collect())
-        };
-        assert_eq!(attributes.affects(), Some(&list(&["b.md:x"])));
+        assert_eq!(
+            attributes.affects(),
+            Some(&[TargetReference::parse("b.md:x")?][..])
+        );
         assert_eq!(
             attributes.same_as(),
-            Some(&list(&["c.md", "d.md#/Red, blue"]))
+            Some(
+                &[
+                    TargetReference::parse("c.md")?,
+                    TargetReference::parse("d.md#/Red, blue")?,
+                ][..]
+            )
         );
         Ok(())
     }

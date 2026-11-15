@@ -1,4 +1,4 @@
-use crate::blocks::{AttributeValue, Block, BlockWithContext, FileBlocks};
+use crate::blocks::{Block, BlockWithContext, FileBlocks};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
@@ -8,7 +8,7 @@ use crate::validators::{
     TargetFiles, TargetResult, ValidationReport, Validator, ValidatorTrace, ValidatorType,
     Violation,
 };
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -190,7 +190,7 @@ impl<'a, Fs: FileSystem> TargetIndex<'a, Fs> {
 /// 1. The referenced target no longer exists.
 /// 2. The referenced target is not modified while `block_with_context` is.
 ///
-/// `affects` is the attribute's raw value from the block in `block_with_context`.
+/// `affects` holds the parsed target references from the block in `block_with_context`.
 ///
 /// # Errors
 /// Returns an error when a target file is missing or can't be parsed.
@@ -198,12 +198,12 @@ fn reference_violations<Fs: FileSystem>(
     targets: &mut TargetIndex<'_, Fs>,
     file_path: &RepoPath,
     block_with_context: &BlockWithContext,
-    affects: &AttributeValue,
+    affects: &[TargetReference],
     mut trace: Option<&mut Vec<AffectsTarget>>,
 ) -> anyhow::Result<Vec<Violation>> {
     let block = &block_with_context.block;
     let mut violations = Vec::new();
-    for reference in parse_references(file_path, block, affects)? {
+    for reference in affects {
         let target = reference.resolve(file_path);
         let changed = match &target.kind {
             TargetKind::Block(name) => targets
@@ -240,21 +240,6 @@ fn reference_violations<Fs: FileSystem>(
         violations.extend(violation);
     }
     Ok(violations)
-}
-
-/// Parses the attribute's raw value, naming the block that wrote it so an author can find the
-/// offending reference without searching for it.
-fn parse_references(
-    file_path: &RepoPath,
-    block: &Block,
-    affects: &AttributeValue,
-) -> anyhow::Result<Vec<TargetReference>> {
-    TargetReference::parse_list(affects).with_context(|| {
-        format!(
-            "invalid affects reference on block {}",
-            block.label(file_path),
-        )
-    })
 }
 
 /// Builds a map of the named blocks in `file_blocks` together with their modification bit.

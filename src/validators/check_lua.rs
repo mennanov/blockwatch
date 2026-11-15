@@ -2,7 +2,7 @@ use crate::blocks::{Attributes, Block, BlockWithContext, FileBlocks};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
-use crate::target_reference::{TargetKind, TargetReference};
+use crate::target_reference::TargetKind;
 use crate::validators::{
     AsyncValidator, PatternContent, TargetFiles, ValidationContext, ValidationReport, Validator,
     ValidatorTrace, ValidatorType, Violation, block_content_for_pattern, parse_keyword,
@@ -173,9 +173,8 @@ async fn check_block<Fs: FileSystem>(
     let content = match block_content_for_pattern(
         block_with_context,
         &file_blocks.file_content,
-        "check-lua-pattern",
         block.attributes.check_lua_pattern(),
-    )? {
+    ) {
         PatternContent::Whole(content) => LuaContent::Text(content.to_string()),
         PatternContent::Matches(matches) => {
             LuaContent::Matches(matches.into_iter().map(str::to_string).collect())
@@ -219,7 +218,11 @@ async fn run_lua_script<Fs: FileSystem>(
     affected_targets: Option<&[AffectedTarget]>,
     mode: LuaMode,
 ) -> anyhow::Result<Option<String>> {
-    let timeout = parse_check_lua_timeout(&block_with_context.block)?;
+    let timeout = block_with_context
+        .block
+        .attributes
+        .check_lua_timeout()
+        .unwrap_or(Duration::from_secs(DEFAULT_CHECK_LUA_TIMEOUT_SECS));
     let script_content = file_system
         .read_to_string(Path::new(script_path))
         .with_context(|| format!("failed to read Lua script: {script_path}"))?;
@@ -419,23 +422,17 @@ fn run_lua_script_sync(inputs: LuaScriptInputs, mode: LuaMode) -> anyhow::Result
     }
 }
 
-/// Reads the block's `check-lua-timeout` as a wall-clock budget in whole seconds, defaulting to
-/// [`DEFAULT_CHECK_LUA_TIMEOUT_SECS`] when it is absent.
+/// Parses `raw` as a `check-lua-timeout` wall-clock budget in whole seconds.
 ///
 /// A value below one second is rejected: a timeout that short cannot tell a runaway script from a
 /// slow-but-terminating one, which is the false-violation trap the timeout exists to avoid.
-fn parse_check_lua_timeout(block: &Block) -> anyhow::Result<Duration> {
-    let Some(raw) = block.attributes.check_lua_timeout() else {
-        return Ok(Duration::from_secs(DEFAULT_CHECK_LUA_TIMEOUT_SECS));
-    };
+pub(crate) fn parse_timeout(raw: &str) -> anyhow::Result<Duration> {
     let seconds: u64 = raw
         .trim()
         .parse()
         .ok()
         .filter(|&seconds| seconds >= 1)
-        .ok_or_else(|| {
-            anyhow!("check-lua-timeout must be a whole number of seconds >= 1, got {raw:?}")
-        })?;
+        .ok_or_else(|| anyhow!("must be a whole number of seconds >= 1, got {raw:?}"))?;
     Ok(Duration::from_secs(seconds))
 }
 
@@ -556,15 +553,9 @@ fn resolve_affected_targets<Fs: FileSystem>(
     let Some(affects) = block.attributes.affects() else {
         return Ok(None);
     };
-    let references = TargetReference::parse_list(affects).with_context(|| {
-        format!(
-            "invalid affects reference on block {}",
-            block.label(current_file_path),
-        )
-    })?;
     let mut result = Vec::new();
     let mut files = TargetFiles::new(context, file_system);
-    for reference in references {
+    for reference in affects {
         let target = reference.resolve(current_file_path);
         let content = match &target.kind {
             TargetKind::Block(name) => block_content(context, file_system, &target.file, name)?,
@@ -981,32 +972,29 @@ end
         Ok(())
     }
 
-    #[tokio::test]
-    async fn invalid_check_lua_pattern_returns_an_error() -> anyhow::Result<()> {
-        let context = validation_context(
+    #[test]
+    fn invalid_check_lua_pattern_returns_an_error() {
+        let err = crate::test_utils::try_validation_context(
             "example.py",
             r#"# <block check-lua="check.lua" check-lua-pattern="[invalid">
 some content
 # </block>"#,
-        );
-        // The invalid pattern fails before the script is read, so no script needs seeding.
-        let err = validator(&[]).validate(context).await.unwrap_err();
+        )
+        .unwrap_err();
         let err_chain = format!("{err:#}");
         assert!(
-            err_chain.contains("check-lua-pattern is not a valid regex"),
+            err_chain.contains("invalid `check-lua-pattern`"),
             "unexpected error: {err_chain}"
         );
-        Ok(())
     }
 
-    #[tokio::test]
-    async fn check_lua_pattern_with_a_line_break_returns_an_error() {
-        let context = validation_context(
+    #[test]
+    fn check_lua_pattern_with_a_line_break_returns_an_error() {
+        let err = crate::test_utils::try_validation_context(
             "example.py",
             "# <block check-lua=\"check.lua\" check-lua-pattern=\"port\n# (?P<value>\\d+)\">\nport 80\n# </block>",
-        );
-
-        let err = validator(&[]).validate(context).await.unwrap_err();
+        )
+        .unwrap_err();
         let err_chain = format!("{err:#}");
         assert!(
             err_chain.contains("line break"),
@@ -1478,40 +1466,37 @@ end
         Ok(())
     }
 
-    #[tokio::test]
-    async fn non_numeric_check_lua_timeout_returns_an_error() -> anyhow::Result<()> {
-        let context = validation_context(
+    #[test]
+    fn non_numeric_check_lua_timeout_returns_an_error() {
+        let err = crate::test_utils::try_validation_context(
             "example.py",
             r#"# <block check-lua="check.lua" check-lua-timeout="soon">
 some content
 # </block>"#,
-        );
-        // The invalid timeout fails before the script is read, so no script needs seeding.
-        let err = validator(&[]).validate(context).await.unwrap_err();
+        )
+        .unwrap_err();
         let err_chain = format!("{err:#}");
         assert!(
-            err_chain.contains("check-lua-timeout must be a whole number of seconds"),
+            err_chain.contains("invalid `check-lua-timeout`: must be a whole number of seconds"),
             "unexpected error: {err_chain}"
         );
-        Ok(())
     }
 
-    #[tokio::test]
-    async fn zero_check_lua_timeout_returns_an_error() -> anyhow::Result<()> {
-        let context = validation_context(
+    #[test]
+    fn zero_check_lua_timeout_returns_an_error() {
+        let err = crate::test_utils::try_validation_context(
             "example.py",
             r#"# <block check-lua="check.lua" check-lua-timeout="0">
 some content
 # </block>"#,
-        );
-        // Zero is rejected as a value error, not silently treated as an instant deadline.
-        let err = validator(&[]).validate(context).await.unwrap_err();
+        )
+        .unwrap_err();
         let err_chain = format!("{err:#}");
+        // Zero is rejected as a value error, not silently treated as an instant deadline.
         assert!(
-            err_chain.contains("check-lua-timeout must be a whole number of seconds"),
+            err_chain.contains("invalid `check-lua-timeout`: must be a whole number of seconds"),
             "unexpected error: {err_chain}"
         );
-        Ok(())
     }
 
     #[test]

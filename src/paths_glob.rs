@@ -24,6 +24,7 @@ pub(crate) fn glob_builder(glob: &str) -> GlobBuilder<'_> {
 }
 
 /// A glob over the repository's paths, compiled to list the files or the directories it matches.
+#[derive(Debug, Clone)]
 pub(crate) struct PathsGlob {
     /// Matches a path written without a trailing `/`.
     matcher: GlobMatcher,

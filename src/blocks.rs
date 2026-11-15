@@ -3,9 +3,14 @@
 use crate::Position;
 use crate::diff_parser::{self, LineChange, LineChangeKind, LineChanges};
 use crate::repo_path::RepoPath;
-use crate::validators::Validator;
+use crate::target_reference::TargetReference;
+use crate::validators::{
+    Constraint, Formats, Mode, SortFormat, SortOrder, TargetPaths, Validator, compile_pattern,
+    parse_timeout,
+};
 use crate::virtual_blocks::ConfigEntry;
 use anyhow::{Context, anyhow, bail};
+use regex::Regex;
 use serde::de::{self, DeserializeSeed, IntoDeserializer, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_repr::Serialize_repr;
@@ -14,6 +19,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::ops::Range;
 use std::str::FromStr;
+use std::time::Duration;
 use strum::IntoEnumIterator;
 use strum_macros::EnumString;
 
@@ -27,45 +33,45 @@ same-as-format="identifier" same-as-pattern='^\s*(?P<value>[a-z_]+):'> */
 pub(crate) struct Attributes {
     // <block keep-sorted keep-sorted-pattern="^\s*(?P<value>[a-z_]+):">
     #[serde(skip_serializing_if = "Option::is_none")]
-    affects: Option<AttributeValue>,
+    affects: Option<Parsed<Vec<TargetReference>, AttributeValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     check_ai: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    check_ai_pattern: Option<String>,
+    check_ai_pattern: Option<Parsed<Regex>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     check_lua: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    check_lua_pattern: Option<String>,
+    check_lua_pattern: Option<Parsed<Regex>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    check_lua_timeout: Option<String>,
+    check_lua_timeout: Option<Parsed<Duration>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    keep_sorted: Option<String>,
+    keep_sorted: Option<Parsed<SortOrder>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    keep_sorted_format: Option<String>,
+    keep_sorted_format: Option<Parsed<SortFormat>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    keep_sorted_pattern: Option<String>,
+    keep_sorted_pattern: Option<Parsed<Option<Regex>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    keep_unique: Option<String>,
+    keep_unique: Option<Parsed<Option<Regex>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    line_count: Option<String>,
+    line_count: Option<Parsed<Constraint>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    line_count_pattern: Option<String>,
+    line_count_pattern: Option<Parsed<Regex>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    line_pattern: Option<String>,
+    line_pattern: Option<Parsed<Regex>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    line_pattern_forbidden: Option<String>,
+    line_pattern_forbidden: Option<Parsed<Regex>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    same_as: Option<AttributeValue>,
+    same_as: Option<Parsed<Vec<TargetReference>, AttributeValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    same_as_format: Option<String>,
+    same_as_format: Option<Parsed<Formats>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    same_as_mode: Option<String>,
+    same_as_mode: Option<Parsed<Mode>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    same_as_paths: Option<String>,
+    same_as_paths: Option<Parsed<TargetPaths>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    same_as_pattern: Option<String>,
+    same_as_pattern: Option<Parsed<Regex>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     severity: Option<String>,
     // </block>
@@ -98,9 +104,9 @@ impl Attributes {
         Self::deserialize(AttributeEntriesDeserializer(entries.into_iter())).map_err(Into::into)
     }
 
-    /// The `affects` attribute, or `None` when not set.
-    pub(crate) fn affects(&self) -> Option<&AttributeValue> {
-        self.affects.as_ref()
+    /// The `affects` target references, or `None` when not set.
+    pub(crate) fn affects(&self) -> Option<&[TargetReference]> {
+        self.affects.as_ref().map(|parsed| parsed.value.as_slice())
     }
 
     /// The `check-ai` attribute, or `None` when not set.
@@ -108,9 +114,9 @@ impl Attributes {
         self.check_ai.as_deref()
     }
 
-    /// The `check-ai-pattern` attribute, or `None` when not set.
-    pub(crate) fn check_ai_pattern(&self) -> Option<&str> {
-        self.check_ai_pattern.as_deref()
+    /// The `check-ai-pattern` regex, or `None` when not set.
+    pub(crate) fn check_ai_pattern(&self) -> Option<&Regex> {
+        self.check_ai_pattern.as_ref().map(|parsed| &parsed.value)
     }
 
     /// The `check-lua` attribute, or `None` when not set.
@@ -118,54 +124,60 @@ impl Attributes {
         self.check_lua.as_deref()
     }
 
-    /// The `check-lua-pattern` attribute, or `None` when not set.
-    pub(crate) fn check_lua_pattern(&self) -> Option<&str> {
-        self.check_lua_pattern.as_deref()
+    /// The `check-lua-pattern` regex, or `None` when not set.
+    pub(crate) fn check_lua_pattern(&self) -> Option<&Regex> {
+        self.check_lua_pattern.as_ref().map(|parsed| &parsed.value)
     }
 
-    /// The `check-lua-timeout` attribute, or `None` when not set.
-    pub(crate) fn check_lua_timeout(&self) -> Option<&str> {
-        self.check_lua_timeout.as_deref()
+    /// The `check-lua-timeout` duration, or `None` when not set.
+    pub(crate) fn check_lua_timeout(&self) -> Option<Duration> {
+        self.check_lua_timeout.as_ref().map(|parsed| parsed.value)
     }
 
-    /// The `keep-sorted` attribute, or `None` when not set.
-    pub(crate) fn keep_sorted(&self) -> Option<&str> {
-        self.keep_sorted.as_deref()
+    /// The `keep-sorted` sort direction, or `None` when not set.
+    pub(crate) fn keep_sorted(&self) -> Option<SortOrder> {
+        self.keep_sorted.as_ref().map(|parsed| parsed.value)
     }
 
-    /// The `keep-sorted-format` attribute, or `None` when not set.
-    pub(crate) fn keep_sorted_format(&self) -> Option<&str> {
-        self.keep_sorted_format.as_deref()
+    /// The `keep-sorted-format` comparison mode, or `None` when not set.
+    pub(crate) fn keep_sorted_format(&self) -> Option<SortFormat> {
+        self.keep_sorted_format.as_ref().map(|parsed| parsed.value)
     }
 
-    /// The `keep-sorted-pattern` attribute, or `None` when not set.
-    pub(crate) fn keep_sorted_pattern(&self) -> Option<&str> {
-        self.keep_sorted_pattern.as_deref()
+    /// The `keep-sorted-pattern` attribute when set (`Some(None)` when empty), or `None` when omitted.
+    pub(crate) fn keep_sorted_pattern(&self) -> Option<Option<&Regex>> {
+        self.keep_sorted_pattern
+            .as_ref()
+            .map(|parsed| parsed.value.as_ref())
     }
 
-    /// The `keep-unique` attribute, or `None` when not set.
-    pub(crate) fn keep_unique(&self) -> Option<&str> {
-        self.keep_unique.as_deref()
+    /// The `keep-unique` attribute when set (`Some(None)` when empty), or `None` when omitted.
+    pub(crate) fn keep_unique(&self) -> Option<Option<&Regex>> {
+        self.keep_unique
+            .as_ref()
+            .map(|parsed| parsed.value.as_ref())
     }
 
-    /// The `line-count` attribute, or `None` when not set.
-    pub(crate) fn line_count(&self) -> Option<&str> {
-        self.line_count.as_deref()
+    /// The `line-count` constraint, or `None` when not set.
+    pub(crate) fn line_count(&self) -> Option<Constraint> {
+        self.line_count.as_ref().map(|parsed| parsed.value)
     }
 
-    /// The `line-count-pattern` attribute, or `None` when not set.
-    pub(crate) fn line_count_pattern(&self) -> Option<&str> {
-        self.line_count_pattern.as_deref()
+    /// The `line-count-pattern` regex, or `None` when not set.
+    pub(crate) fn line_count_pattern(&self) -> Option<&Regex> {
+        self.line_count_pattern.as_ref().map(|parsed| &parsed.value)
     }
 
-    /// The `line-pattern` attribute, or `None` when not set.
-    pub(crate) fn line_pattern(&self) -> Option<&str> {
-        self.line_pattern.as_deref()
+    /// The `line-pattern` regex, or `None` when not set.
+    pub(crate) fn line_pattern(&self) -> Option<&Regex> {
+        self.line_pattern.as_ref().map(|parsed| &parsed.value)
     }
 
-    /// The `line-pattern-forbidden` attribute, or `None` when not set.
-    pub(crate) fn line_pattern_forbidden(&self) -> Option<&str> {
-        self.line_pattern_forbidden.as_deref()
+    /// The `line-pattern-forbidden` regex, or `None` when not set.
+    pub(crate) fn line_pattern_forbidden(&self) -> Option<&Regex> {
+        self.line_pattern_forbidden
+            .as_ref()
+            .map(|parsed| &parsed.value)
     }
 
     /// The `name` attribute, or `None` when not set.
@@ -173,29 +185,29 @@ impl Attributes {
         self.name.as_deref()
     }
 
-    /// The `same-as` attribute, or `None` when not set.
-    pub(crate) fn same_as(&self) -> Option<&AttributeValue> {
-        self.same_as.as_ref()
+    /// The `same-as` target references, or `None` when not set.
+    pub(crate) fn same_as(&self) -> Option<&[TargetReference]> {
+        self.same_as.as_ref().map(|parsed| parsed.value.as_slice())
     }
 
-    /// The `same-as-format` attribute, or `None` when not set.
-    pub(crate) fn same_as_format(&self) -> Option<&str> {
-        self.same_as_format.as_deref()
+    /// The `same-as-format` rules, or `None` when not set.
+    pub(crate) fn same_as_format(&self) -> Option<&Formats> {
+        self.same_as_format.as_ref().map(|parsed| &parsed.value)
     }
 
-    /// The `same-as-mode` attribute, or `None` when not set.
-    pub(crate) fn same_as_mode(&self) -> Option<&str> {
-        self.same_as_mode.as_deref()
+    /// The `same-as-mode` comparison mode, or `None` when not set.
+    pub(crate) fn same_as_mode(&self) -> Option<Mode> {
+        self.same_as_mode.as_ref().map(|parsed| parsed.value)
     }
 
-    /// The `same-as-paths` attribute, or `None` when not set.
-    pub(crate) fn same_as_paths(&self) -> Option<&str> {
-        self.same_as_paths.as_deref()
+    /// The `same-as-paths` target glob, or `None` when not set.
+    pub(crate) fn same_as_paths(&self) -> Option<&TargetPaths> {
+        self.same_as_paths.as_ref().map(|parsed| &parsed.value)
     }
 
-    /// The `same-as-pattern` attribute, or `None` when not set.
-    pub(crate) fn same_as_pattern(&self) -> Option<&str> {
-        self.same_as_pattern.as_deref()
+    /// The `same-as-pattern` regex, or `None` when not set.
+    pub(crate) fn same_as_pattern(&self) -> Option<&Regex> {
+        self.same_as_pattern.as_ref().map(|parsed| &parsed.value)
     }
 
     /// The `severity` attribute, or `None` when not set.
@@ -223,38 +235,165 @@ impl Attributes {
             !references.is_empty(),
             "`affects` must list at least one reference"
         );
-        self.affects = Some(AttributeValue::List(references));
+        let raw = AttributeValue::List(references);
+        let value = TargetReference::parse_list(&raw).expect("valid affects references");
+        self.affects = Some(Parsed { raw, value });
     }
 
-    /// Every attribute name on `Attributes`, in serialized order.
+    /// Every attribute name paired with a valid sample value, in serialized order.
     #[cfg(test)]
-    pub(crate) fn known_names() -> Vec<String> {
+    pub(crate) fn sample_values() -> Vec<(String, String)> {
+        fn parsed<T: ParseAttribute>(raw: &str) -> Parsed<T> {
+            Parsed::parse(raw.to_string()).expect("valid sample attribute")
+        }
+        fn parsed_ref(raw: &str) -> Parsed<Vec<TargetReference>, AttributeValue> {
+            let raw = AttributeValue::Text(raw.to_string());
+            let value = TargetReference::parse_list(&raw).expect("valid sample reference");
+            Parsed { raw, value }
+        }
         // Struct literal without `..Default::default()` fails to compile when a new attribute
         // field is added until that field is included here.
         let all = Self {
-            affects: Some(AttributeValue::Text(String::new())),
+            affects: Some(parsed_ref("other.py:target")),
             check_ai: Some(String::new()),
-            check_ai_pattern: Some(String::new()),
+            check_ai_pattern: Some(parsed("")),
             check_lua: Some(String::new()),
-            check_lua_pattern: Some(String::new()),
-            check_lua_timeout: Some(String::new()),
-            keep_sorted: Some(String::new()),
-            keep_sorted_format: Some(String::new()),
-            keep_sorted_pattern: Some(String::new()),
-            keep_unique: Some(String::new()),
-            line_count: Some(String::new()),
-            line_count_pattern: Some(String::new()),
-            line_pattern: Some(String::new()),
-            line_pattern_forbidden: Some(String::new()),
+            check_lua_pattern: Some(parsed("")),
+            check_lua_timeout: Some(parsed("10")),
+            keep_sorted: Some(parsed("")),
+            keep_sorted_format: Some(parsed("")),
+            keep_sorted_pattern: Some(parsed("")),
+            keep_unique: Some(parsed("")),
+            line_count: Some(parsed(">0")),
+            line_count_pattern: Some(parsed("")),
+            line_pattern: Some(parsed("")),
+            line_pattern_forbidden: Some(parsed("")),
             name: Some(String::new()),
-            same_as: Some(AttributeValue::Text(String::new())),
-            same_as_format: Some(String::new()),
-            same_as_mode: Some(String::new()),
-            same_as_paths: Some(String::new()),
-            same_as_pattern: Some(String::new()),
+            same_as: Some(parsed_ref("other.py:target")),
+            same_as_format: Some(parsed("numeric")),
+            same_as_mode: Some(parsed("set")),
+            same_as_paths: Some(parsed("*.py")),
+            same_as_pattern: Some(parsed("")),
             severity: Some(String::new()),
         };
-        all.to_map().into_iter().map(|(name, _)| name).collect()
+        all.to_map()
+            .into_iter()
+            .map(|(name, value)| {
+                let text = value
+                    .as_str()
+                    .expect("sample attribute serializes as a string")
+                    .to_string();
+                (name, text)
+            })
+            .collect()
+    }
+}
+
+/// Parses the raw text of an attribute into its domain value.
+pub(crate) trait ParseAttribute: Sized {
+    /// Parses `raw`, leaving the attribute name out of any error message.
+    ///
+    /// # Errors
+    /// Returns an error describing why `raw` is invalid for this type.
+    fn parse_attribute(raw: &str) -> anyhow::Result<Self>;
+}
+
+impl ParseAttribute for Duration {
+    fn parse_attribute(raw: &str) -> anyhow::Result<Self> {
+        parse_timeout(raw)
+    }
+}
+
+impl ParseAttribute for Regex {
+    fn parse_attribute(raw: &str) -> anyhow::Result<Self> {
+        compile_pattern(raw)
+    }
+}
+
+impl ParseAttribute for Option<Regex> {
+    fn parse_attribute(raw: &str) -> anyhow::Result<Self> {
+        if raw.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(compile_pattern(raw)?))
+        }
+    }
+}
+
+/// An attribute's raw value paired with its parsed domain value.
+///
+/// Equality and serialization use `raw`, so `Attributes` compares equal when the author wrote the
+/// same text and `blockwatch list` outputs that text verbatim.
+#[derive(Debug, Clone, Serialize)]
+#[serde(transparent)]
+struct Parsed<T, R = String> {
+    raw: R,
+    #[serde(skip)]
+    value: T,
+}
+
+impl<T: ParseAttribute> Parsed<T> {
+    fn parse(raw: String) -> anyhow::Result<Self> {
+        let value = T::parse_attribute(&raw)?;
+        Ok(Self { raw, value })
+    }
+}
+
+impl<T, R: PartialEq> PartialEq for Parsed<T, R> {
+    fn eq(&self, other: &Self) -> bool {
+        self.raw == other.raw
+    }
+}
+
+impl<T, R: Eq> Eq for Parsed<T, R> {}
+
+impl<'de, T: ParseAttribute> Deserialize<'de> for Parsed<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Self::parse(raw).map_err(|error| de::Error::custom(format!("{error:#}")))
+    }
+}
+
+impl<'de> Deserialize<'de> for Parsed<Vec<TargetReference>, AttributeValue> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = AttributeValue::deserialize(deserializer)?;
+        let value = TargetReference::parse_list(&raw)
+            .map_err(|error| de::Error::custom(format!("{error:#}")))?;
+        Ok(Self { raw, value })
+    }
+}
+
+#[derive(Debug)]
+enum DeserializeError {
+    /// Already names the attribute (unknown name, wrong value type, empty reference list, duplicate).
+    Ready(String),
+    /// Raised from inside a field deserializer via `de::Error::custom`; needs ``invalid `{key}`: ``.
+    Field(String),
+}
+
+impl fmt::Display for DeserializeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Ready(message) | Self::Field(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for DeserializeError {}
+
+impl de::Error for DeserializeError {
+    fn custom<T: fmt::Display>(message: T) -> Self {
+        Self::Field(message.to_string())
+    }
+
+    fn duplicate_field(field: &'static str) -> Self {
+        Self::Ready(format!("duplicate field `{field}`"))
     }
 }
 
@@ -284,7 +423,7 @@ impl<'de, I> Deserializer<'de> for AttributeEntriesDeserializer<I>
 where
     I: Iterator<Item = (String, AttributeEntry)>,
 {
-    type Error = de::value::Error;
+    type Error = DeserializeError;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
@@ -312,7 +451,7 @@ impl<'de, I> MapAccess<'de> for AttributeMapAccess<I>
 where
     I: Iterator<Item = (String, AttributeEntry)>,
 {
-    type Error = de::value::Error;
+    type Error = DeserializeError;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
     where
@@ -325,7 +464,7 @@ where
         let parsed =
             seed.deserialize(key.as_str().into_deserializer())
                 .map_err(|_: Self::Error| {
-                    de::Error::custom(format!("unrecognized attribute `{key}`"))
+                    DeserializeError::Ready(format!("unrecognized attribute `{key}`"))
                 })?;
         self.current = Some((key, value));
         Ok(Some(parsed))
@@ -340,6 +479,12 @@ where
             .take()
             .expect("next_value_seed follows next_key_seed");
         seed.deserialize(AttributeEntryDeserializer { key: &key, entry })
+            .map_err(|error| match error {
+                DeserializeError::Ready(_) => error,
+                DeserializeError::Field(reason) => {
+                    DeserializeError::Ready(format!("invalid `{key}`: {reason}"))
+                }
+            })
     }
 }
 
@@ -350,7 +495,7 @@ struct AttributeEntryDeserializer<'a> {
 }
 
 impl<'de> Deserializer<'de> for AttributeEntryDeserializer<'_> {
-    type Error = de::value::Error;
+    type Error = DeserializeError;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
@@ -358,12 +503,13 @@ impl<'de> Deserializer<'de> for AttributeEntryDeserializer<'_> {
     {
         match self.entry {
             AttributeEntry::Text(text) => visitor.visit_string(text),
-            AttributeEntry::List(entries) if entries.is_empty() => Err(de::Error::custom(format!(
-                "`{}` must list at least one reference",
-                self.key
-            ))),
+            AttributeEntry::List(entries) if entries.is_empty() => Err(DeserializeError::Ready(
+                format!("`{}` must list at least one reference", self.key),
+            )),
             AttributeEntry::List(entries) => visitor.visit_seq(entries.into_deserializer()),
-            AttributeEntry::InvalidType => Err(de::Error::custom(wrong_type_message(self.key))),
+            AttributeEntry::InvalidType => {
+                Err(DeserializeError::Ready(wrong_type_message(self.key)))
+            }
         }
     }
 
@@ -381,7 +527,7 @@ impl<'de> Deserializer<'de> for AttributeEntryDeserializer<'_> {
         match self.entry {
             AttributeEntry::Text(text) => visitor.visit_string(text),
             AttributeEntry::List(_) | AttributeEntry::InvalidType => {
-                Err(de::Error::custom(wrong_type_message(self.key)))
+                Err(DeserializeError::Ready(wrong_type_message(self.key)))
             }
         }
     }
@@ -890,8 +1036,8 @@ mod validate_attributes_tests {
             .copied()
             .chain(["name", "severity"])
             .collect();
-        for name in Attributes::known_names() {
-            let attributes = text_attributes(&[(&name, "")]);
+        for (name, value) in Attributes::sample_values() {
+            let attributes = text_attributes(&[(&name, &value)]);
 
             let result = validate_attributes(&attributes);
 
@@ -906,7 +1052,10 @@ mod validate_attributes_tests {
     #[test]
     fn known_names_are_in_alphabetical_order() {
         // JSON output relies on field declaration order matching alphabetical order.
-        let names = Attributes::known_names();
+        let names: Vec<String> = Attributes::sample_values()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
         assert!(names.is_sorted(), "{names:?}");
     }
 }
@@ -988,6 +1137,61 @@ mod attributes_tests {
             "`keep-sorted` must be a string, `true` or an integer. `affects` and `same-as` can \
              also be a list of strings"
         );
+    }
+
+    #[test]
+    fn invalid_affects_text_from_tag_returns_error() {
+        let error = Attributes::from_tag(HashMap::from([("affects".into(), "file.rs:".into())]))
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(
+            error,
+            "invalid `affects`: invalid target reference: \"file.rs:\" has no block name after ':'; drop the ':' to reference the whole file"
+        );
+    }
+
+    #[test]
+    fn invalid_same_as_list_entry_from_entries_returns_error() {
+        let error = Attributes::from_entries([(
+            "same-as".into(),
+            AttributeEntry::List(vec!["ok.md".into(), "".into()]),
+        )])
+        .unwrap_err()
+        .to_string();
+
+        assert_eq!(
+            error,
+            "invalid `same-as`: entry 2 of the list: invalid target reference: \"\""
+        );
+    }
+
+    #[test]
+    fn empty_and_blank_optional_values_from_tag_return_defaults() {
+        let attrs = Attributes::from_tag(HashMap::from([
+            ("keep-sorted".into(), "  ".into()),
+            ("keep-sorted-format".into(), "  ".into()),
+            ("keep-sorted-pattern".into(), "".into()),
+            ("keep-unique".into(), "".into()),
+        ]))
+        .unwrap();
+
+        assert_eq!(attrs.keep_sorted(), Some(Default::default()));
+        assert_eq!(attrs.keep_sorted_format(), Some(Default::default()));
+        assert!(matches!(attrs.keep_sorted_pattern(), Some(None)));
+        assert!(matches!(attrs.keep_unique(), Some(None)));
+    }
+
+    #[test]
+    fn parsed_attributes_with_different_raw_text_are_not_equal() {
+        let lower = crate::test_utils::text_attributes(&[("keep-sorted", "asc")]);
+        let same_lower = crate::test_utils::text_attributes(&[("keep-sorted", "asc")]);
+        let upper = crate::test_utils::text_attributes(&[("keep-sorted", "ASC")]);
+        let desc = crate::test_utils::text_attributes(&[("keep-sorted", "desc")]);
+
+        assert_eq!(lower, same_lower);
+        assert_ne!(lower, upper);
+        assert_ne!(lower, desc);
     }
 }
 

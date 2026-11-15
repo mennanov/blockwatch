@@ -528,3 +528,80 @@ index 0000000..1111111 100644
     let output = cmd.output().expect("Failed to get command output");
     output.assert().success();
 }
+
+#[test]
+fn disabled_validator_still_fails_on_invalid_attribute_value() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    std::fs::create_dir_all(temp.path().join(".git"))?;
+    std::fs::write(
+        temp.path().join("a.py"),
+        "# <block keep-sorted=\"sideways\">\nb\na\n# </block>\n",
+    )?;
+
+    let output = cargo_bin_cmd!()
+        .current_dir(temp.path())
+        .args(["--disable", "keep-sorted", "a.py"])
+        .output()?;
+
+    output
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("invalid `keep-sorted`"));
+    Ok(())
+}
+
+#[test]
+fn only_changed_still_fails_on_invalid_attribute_in_untouched_block() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    std::fs::create_dir_all(temp.path().join(".git"))?;
+    std::fs::write(
+        temp.path().join("a.py"),
+        "# <block name=\"ok\">\na\n# </block>\n\n# <block name=\"broken\" keep-sorted=\"sideways\">\nb\n# </block>\n",
+    )?;
+    let diff = "\
+diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1,3 +1,3 @@
+ # <block name=\"ok\">
+-old
++a
+ # </block>
+";
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.current_dir(temp.path())
+        .args(["--diff", "--only-changed"]);
+    cmd.write_stdin(diff);
+
+    cmd.output()?
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("invalid `keep-sorted`"));
+    Ok(())
+}
+
+#[test]
+fn target_only_file_outside_cli_globs_fails_on_invalid_attribute() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    std::fs::create_dir_all(temp.path().join(".git"))?;
+    std::fs::write(
+        temp.path().join("a.py"),
+        "# <block affects=\"b.py:t\">\nx = 1\n# </block>\n",
+    )?;
+    std::fs::write(
+        temp.path().join("b.py"),
+        "# <block name=\"t\" keep-sorted=\"sideways\">\ny = 2\n# </block>\n",
+    )?;
+
+    let output = cargo_bin_cmd!()
+        .current_dir(temp.path())
+        .arg("a.py")
+        .output()?;
+
+    output
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("invalid `keep-sorted`"));
+    Ok(())
+}

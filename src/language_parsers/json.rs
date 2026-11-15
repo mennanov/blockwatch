@@ -176,6 +176,7 @@ mod tests {
     use super::*;
     use crate::Position;
     use crate::blocks::Block;
+    use crate::validators::SortOrder;
     use std::collections::HashMap;
     use std::ops::Range;
 
@@ -239,7 +240,7 @@ mod tests {
             .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].attributes.keep_sorted(), Some("asc"));
+        assert_eq!(blocks[0].attributes.keep_sorted(), Some(SortOrder::Asc));
         Ok(())
     }
 

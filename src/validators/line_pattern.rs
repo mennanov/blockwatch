@@ -2,10 +2,9 @@ use crate::blocks::{Block, BlockWithContext};
 use crate::repo_path::RepoPath;
 use crate::validators::{
     SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
-    ViolationRange, compile_pattern,
+    ViolationRange,
 };
 use crate::{Position, validators};
-use anyhow::anyhow;
 use regex::Regex;
 use serde::Serialize;
 use std::ops::Range;
@@ -42,18 +41,8 @@ impl SyncValidator for LinePatternValidator {
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
                 let block = &block_with_context.block;
-                let required = compile_attribute(
-                    file_path,
-                    block,
-                    "line-pattern",
-                    block.attributes.line_pattern(),
-                )?;
-                let forbidden = compile_attribute(
-                    file_path,
-                    block,
-                    "line-pattern-forbidden",
-                    block.attributes.line_pattern_forbidden(),
-                )?;
+                let required = block.attributes.line_pattern();
+                let forbidden = block.attributes.line_pattern_forbidden();
                 if required.is_none() && forbidden.is_none() {
                     continue;
                 }
@@ -62,8 +51,8 @@ impl SyncValidator for LinePatternValidator {
                     file_path,
                     block,
                     &file_blocks.file_content,
-                    required.as_ref(),
-                    forbidden.as_ref(),
+                    required,
+                    forbidden,
                     lines.as_mut(),
                 )?;
                 report.add_all(file_path, block, violation.into_iter().collect());
@@ -77,29 +66,6 @@ impl SyncValidator for LinePatternValidator {
     }
 }
 
-/// Compiles the regex in `attribute` of `block`, which is in `file_path`. Returns the attribute's
-/// value with its regex, or `None` when the block doesn't have the attribute.
-///
-/// # Errors
-/// Returns an error when the value is not a valid regex or has a line break.
-fn compile_attribute<'b>(
-    file_path: &RepoPath,
-    block: &'b Block,
-    attribute: &str,
-    pattern: Option<&'b str>,
-) -> anyhow::Result<Option<(&'b str, Regex)>> {
-    let Some(pattern) = pattern else {
-        return Ok(None);
-    };
-    let re = compile_pattern(pattern).map_err(|e| {
-        anyhow!(
-            "{attribute} expected a valid regular expression, got \"{pattern}\" in {} (error: {e})",
-            block.label(file_path),
-        )
-    })?;
-    Ok(Some((pattern, re)))
-}
-
 /// Returns the violation for the first non-empty line of `block` that fails a check, or `None`
 /// when every line passes. Each line is trimmed before it is checked. Adds each line it checks to
 /// `trace`, when given.
@@ -109,8 +75,8 @@ fn first_violation(
     file_path: &RepoPath,
     block: &Block,
     file_content: &str,
-    required: Option<&(&str, Regex)>,
-    forbidden: Option<&(&str, Regex)>,
+    required: Option<&Regex>,
+    forbidden: Option<&Regex>,
     mut trace: Option<&mut Vec<LinePatternLine>>,
 ) -> anyhow::Result<Option<Violation>> {
     for (line_idx, line) in block.content.text(file_content).lines().enumerate() {
@@ -130,7 +96,7 @@ fn first_violation(
             // The check only asks whether the line matches. The text it matched shows a pattern
             // that is looser than its author meant, such as one without `^` and `$`.
             let matched = required
-                .and_then(|(_, re)| re.find(trimmed_line))
+                .and_then(|re| re.find(trimmed_line))
                 .map(|found| found.as_str().to_string());
             lines.push(LinePatternLine {
                 fails,
@@ -152,21 +118,26 @@ fn first_violation(
 /// report, and why it fails. Returns `None` when `line` passes both.
 fn check_line<'a>(
     line: &'a str,
-    required: Option<&'a (&'a str, Regex)>,
-    forbidden: Option<&'a (&'a str, Regex)>,
+    required: Option<&'a Regex>,
+    forbidden: Option<&'a Regex>,
 ) -> Option<(Range<usize>, LinePatternViolation<'a>)> {
-    if let Some((pattern, re)) = required
+    if let Some(re) = required
         && !re.is_match(line)
     {
-        return Some((0..line.len(), LinePatternViolation::NonMatching { pattern }));
+        return Some((
+            0..line.len(),
+            LinePatternViolation::NonMatching {
+                pattern: re.as_str(),
+            },
+        ));
     }
-    if let Some((forbidden_pattern, re)) = forbidden
+    if let Some(re) = forbidden
         && let Some(found) = re.find(line)
     {
         return Some((
             found.range(),
             LinePatternViolation::Forbidden {
-                forbidden_pattern,
+                forbidden_pattern: re.as_str(),
                 text: found.as_str(),
             },
         ));
@@ -508,47 +479,44 @@ red
 
     #[test]
     fn block_with_an_invalid_regex_returns_an_error() {
-        let validator = LinePatternValidator;
-        let context = validation_context(
+        let err = crate::test_utils::try_validation_context(
             "example.py",
             r#"# <block line-pattern="[A-Z+">
         # </block>"#,
+        )
+        .unwrap_err();
+
+        assert!(
+            format!("{err:#}").contains("invalid `line-pattern`"),
+            "unexpected error: {err:#}"
         );
-
-        let result = validator.validate(context);
-
-        assert!(result.is_err());
     }
 
     #[test]
     fn block_with_an_invalid_forbidden_regex_returns_an_error() {
-        let context = validation_context(
+        let err = crate::test_utils::try_validation_context(
             "example.py",
             r#"# <block line-pattern-forbidden="[a-z+">
 # </block>"#,
-        );
-
-        let err = LinePatternValidator.validate(context).unwrap_err();
+        )
+        .unwrap_err();
 
         assert!(
-            err.to_string()
-                .starts_with("line-pattern-forbidden expected a valid regular expression"),
-            "unexpected error: {err}"
+            format!("{err:#}").contains("invalid `line-pattern-forbidden`"),
+            "unexpected error: {err:#}"
         );
     }
 
     #[test]
     fn block_with_a_line_break_in_the_pattern_returns_an_error() {
-        let validator = LinePatternValidator;
-        let context = validation_context(
+        let err = crate::test_utils::try_validation_context(
             "example.py",
             "# <block line-pattern=\"^[a-z]+\n# $\">\nabc\n# </block>",
-        );
-
-        let err = validator.validate(context).unwrap_err();
+        )
+        .unwrap_err();
         assert!(
-            err.to_string().contains("line break"),
-            "unexpected error: {err}"
+            format!("{err:#}").contains("line break"),
+            "unexpected error: {err:#}"
         );
     }
 
