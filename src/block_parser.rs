@@ -362,7 +362,7 @@ impl BlockEnd {
 
 #[cfg(test)]
 mod tests {
-    use crate::blocks::{Attributes, Block, BlockSeverity, Content, Declaration};
+    use crate::blocks::{Attributes, Block, Content, Declaration};
     use crate::language_parsers::LanguageParser;
     use crate::test_utils::text_attributes;
     use crate::validators::SortOrder;
@@ -406,7 +406,6 @@ mod tests {
                     Position::new(1, 14)..Position::new(1, 31),
                 ),
                 declaration: Declaration::Tags,
-                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -427,7 +426,6 @@ mod tests {
                     Position::new(1, 11)..Position::new(3, 1),
                 ),
                 declaration: Declaration::Tags,
-                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -454,7 +452,6 @@ println!("hello2");
                         Position::new(1, 11)..Position::new(3, 1),
                     ),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: Attributes::default(),
@@ -464,7 +461,6 @@ println!("hello2");
                         Position::new(4, 11)..Position::new(6, 1),
                     ),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 }
             ]
         );
@@ -487,7 +483,6 @@ println!("hello2");
                         Position::new(1, 14)..Position::new(1, 33),
                     ),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: Attributes::default(),
@@ -497,7 +492,6 @@ println!("hello2");
                         Position::new(1, 54)..Position::new(1, 73),
                     ),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 }
             ]
         );
@@ -520,7 +514,6 @@ println!("hello2");
                         Position::new(1, 11)..Position::new(3, 1),
                     ),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: Attributes::default(),
@@ -530,7 +523,6 @@ println!("hello2");
                         Position::new(3, 22)..Position::new(5, 1),
                     ),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 }
             ]
         );
@@ -577,14 +569,12 @@ println!("hello2");
                     start_tag_position_range: Position::new(2, 12)..Position::new(2, 30),
                     content: Content::source(30..620, Position::new(2, 30)..Position::new(25, 9),),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: text_attributes(&[("name", "bar")]),
                     start_tag_position_range: Position::new(7, 16)..Position::new(7, 34),
                     content: Content::source(142..440, Position::new(7, 34)..Position::new(17, 13),),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: text_attributes(&[("name", "bar-bar")]),
@@ -594,7 +584,6 @@ println!("hello2");
                         Position::new(11, 42)..Position::new(15, 17),
                     ),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: text_attributes(&[("name", "buzz")]),
@@ -604,14 +593,12 @@ println!("hello2");
                         Position::new(19, 35)..Position::new(23, 13),
                     ),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: text_attributes(&[("name", "fizz")]),
                     start_tag_position_range: Position::new(26, 12)..Position::new(26, 31),
                     content: Content::source(662..671, Position::new(26, 31)..Position::new(27, 9),),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 },
             ]
         );
@@ -660,7 +647,6 @@ println!("hello2");
                     Position::new(1, 42)..Position::new(3, 9),
                 ),
                 declaration: Declaration::Tags,
-                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -692,7 +678,6 @@ println!("hello2");
                     Position::new(2, 5)..Position::new(2, 22),
                 ),
                 declaration: Declaration::Tags,
-                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -718,7 +703,6 @@ println!("hello2");
                     Position::new(3, 16)..Position::new(5, 1),
                 ),
                 declaration: Declaration::Tags,
-                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -741,7 +725,6 @@ println!("hello2");
                         Position::new(1, 20)..Position::new(3, 1),
                     ),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: text_attributes(&[("name", "b"), ("keep-sorted", ""),]),
@@ -751,7 +734,6 @@ println!("hello2");
                         Position::new(4, 16)..Position::new(6, 1),
                     ),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 },
             ]
         );
@@ -773,7 +755,6 @@ println!("hello2");
                     Position::new(1, 11)..Position::new(4, 1),
                 ),
                 declaration: Declaration::Tags,
-                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -794,7 +775,6 @@ println!("hello2");
                     Position::new(1, 14)..Position::new(1, 31),
                 ),
                 declaration: Declaration::Tags,
-                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -815,7 +795,6 @@ println!("hello2");
                     Position::new(2, 11)..Position::new(2, 30),
                 ),
                 declaration: Declaration::Tags,
-                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -836,7 +815,6 @@ println!("hello2");
                     Position::new(1, 14)..Position::new(1, 33),
                 ),
                 declaration: Declaration::Tags,
-                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -859,7 +837,6 @@ println!("hello2");
                     Position::new(1, 16)..Position::new(3, 1),
                 ),
                 declaration: Declaration::Tags,
-                severity: BlockSeverity::Error,
             },]
         );
         Ok(())
@@ -883,7 +860,6 @@ println!("hello2");
                     Position::new(2, 19)..Position::new(4, 1),
                 ),
                 declaration: Declaration::Tags,
-                severity: BlockSeverity::Error,
             },]
         );
         Ok(())

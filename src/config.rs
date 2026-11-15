@@ -1,7 +1,7 @@
 //! Reads the settings from the config file, `blockwatch.toml`.
 
 use crate::LineIndex;
-use crate::blocks::{AttributeEntry, Attributes, BlockSeverity, validate_attributes};
+use crate::blocks::{AttributeEntry, Attributes, validate_attributes};
 use crate::diff_parser::{DiffChanges, LineChanges};
 use crate::fs::FileSystem;
 use crate::language_parsers::toml;
@@ -305,7 +305,6 @@ fn entry_blocks(
     let target_if = parse_target_if(block_entry.target_if, &target_file)?;
     let attributes = attribute_values(block_entry.attributes)?;
     validate_attributes(&attributes)?;
-    let severity = BlockSeverity::from_attributes(&attributes)?;
     let files = target_file.files(file_system)?;
     if files.is_empty() {
         // Without this error, a typo in the glob would turn the rules off without a word.
@@ -320,7 +319,6 @@ fn entry_blocks(
             attributes: attributes.clone(),
             entry: entry.clone(),
             is_entry_modified,
-            severity,
             target_if: target_if.clone(),
         })
         .collect())
@@ -502,6 +500,7 @@ fn attribute_values(values: HashMap<String, RawAttributeValue>) -> anyhow::Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blocks::BlockSeverity;
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::test_utils::FakeFileSystem;
     use crate::target_reference::TargetReference;
@@ -578,7 +577,6 @@ target = 'a.yaml#/b'
                         index: 0,
                     },
                     is_entry_modified: false,
-                    severity: BlockSeverity::Error,
                     target_if: None,
                 },
                 VirtualBlock {
@@ -591,7 +589,6 @@ target = 'a.yaml#/b'
                         index: 1,
                     },
                     is_entry_modified: false,
-                    severity: BlockSeverity::Error,
                     target_if: None,
                 },
             ]
@@ -657,7 +654,6 @@ name = 'version'
                     index: 0,
                 },
                 is_entry_modified: false,
-                severity: BlockSeverity::Error,
                 target_if: None,
             })
         };
@@ -1363,7 +1359,7 @@ severity = 'loud'
 
         assert_eq!(
             read_error(text),
-            "invalid block at line 1 of \"blockwatch.toml\": unrecognized severity value `loud`"
+            "invalid block at line 1 of \"blockwatch.toml\": invalid `severity`: \"loud\" (expected error, warning, info or hint)"
         );
     }
 
@@ -1376,7 +1372,10 @@ severity = 'warning'
 
         let config = read_text(text)?;
 
-        assert_eq!(config.blocks[0].severity, BlockSeverity::Warning);
+        assert_eq!(
+            config.blocks[0].attributes.severity(),
+            BlockSeverity::Warning
+        );
         Ok(())
     }
 

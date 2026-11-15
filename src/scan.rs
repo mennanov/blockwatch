@@ -1747,7 +1747,7 @@ mod parse_blocks_tests {
         assert!(file_blocks.is_err());
         assert_eq!(
             file_blocks.unwrap_err().source().unwrap().to_string(),
-            "block (unnamed) at line 1 contains unrecognized severity value `invalid-severity`"
+            "block (unnamed) at line 1 contains invalid `severity`: \"invalid-severity\" (expected error, warning, info or hint)"
         );
         Ok(())
     }

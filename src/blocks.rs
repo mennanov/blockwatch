@@ -5,7 +5,8 @@ use crate::diff_parser::{self, LineChange, LineChangeKind, LineChanges};
 use crate::repo_path::RepoPath;
 use crate::target_reference::TargetReference;
 use crate::validators::{
-    Constraint, Formats, Mode, SortFormat, SortOrder, TargetPaths, Validator, parse_timeout,
+    Constraint, Formats, Mode, SortFormat, SortOrder, TargetPaths, Validator, parse_keyword_value,
+    parse_timeout,
 };
 use crate::virtual_blocks::ConfigEntry;
 use anyhow::{Context, anyhow, bail};
@@ -17,10 +18,9 @@ use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::ops::Range;
-use std::str::FromStr;
 use std::time::Duration;
 use strum::IntoEnumIterator;
-use strum_macros::EnumString;
+use strum_macros::{Display, EnumIter, EnumString};
 
 const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
 
@@ -72,7 +72,7 @@ pub(crate) struct Attributes {
     #[serde(skip_serializing_if = "Option::is_none")]
     same_as_pattern: Option<Parsed<Regex>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    severity: Option<String>,
+    severity: Option<Parsed<BlockSeverity>>,
     // </block>
 }
 // </block>
@@ -209,9 +209,12 @@ impl Attributes {
         self.same_as_pattern.as_ref().map(|parsed| &parsed.value)
     }
 
-    /// The `severity` attribute, or `None` when not set.
-    pub(crate) fn severity(&self) -> Option<&str> {
-        self.severity.as_deref()
+    /// How serious a violation of this block is: its `severity` attribute, or
+    /// [`BlockSeverity::Error`] when not set.
+    pub(crate) fn severity(&self) -> BlockSeverity {
+        self.severity
+            .as_ref()
+            .map_or(BlockSeverity::default(), |parsed| parsed.value)
     }
 
     /// The attributes that are set, as a JSON object with keys in alphabetical order.
@@ -273,7 +276,7 @@ impl Attributes {
             same_as_mode: Some(parsed("set")),
             same_as_paths: Some(parsed("*.py")),
             same_as_pattern: Some(parsed("")),
-            severity: Some(String::new()),
+            severity: Some(parsed("error")),
         };
         all.to_map()
             .into_iter()
@@ -579,9 +582,6 @@ pub(crate) struct Block {
     pub(crate) content: Content,
     /// Where the block's attributes are written.
     pub(crate) declaration: Declaration,
-    /// How serious a violation of this block is. It is the `severity` attribute, or
-    /// [`BlockSeverity::Error`] if the block has none.
-    pub(crate) severity: BlockSeverity,
 }
 
 /// The content of a [`Block`]: its text, and where the block's file writes it.
@@ -820,7 +820,7 @@ impl Block {
     ///
     /// # Errors
     /// Returns an error that shows the block's name and line if its attributes are not valid; see
-    /// [`validate_attributes`] and [`BlockSeverity::from_attributes`].
+    /// [`validate_attributes`].
     pub(crate) fn from_tags(
         attributes: HashMap<String, String>,
         start_tag_position_range: Range<Position>,
@@ -830,11 +830,10 @@ impl Block {
             .get("name")
             .map_or(UNNAMED_BLOCK_LABEL, String::as_str)
             .to_string();
-        let (attributes, severity) = Attributes::from_tag(attributes)
+        let attributes = Attributes::from_tag(attributes)
             .and_then(|attributes| {
                 validate_attributes(&attributes)?;
-                let severity = BlockSeverity::from_attributes(&attributes)?;
-                Ok((attributes, severity))
+                Ok(attributes)
             })
             .map_err(|error| {
                 // The tag parser does not know the file, so the message cannot show it.
@@ -848,7 +847,6 @@ impl Block {
             start_tag_position_range,
             content,
             declaration: Declaration::Tags,
-            severity,
         })
     }
 
@@ -899,13 +897,16 @@ impl Block {
 /// Block's severity.
 ///
 /// Mirrors [LSP DiagnosticSeverity](https://github.com/microsoft/vscode-languageserver-node/blob/3412a17149850f445bf35b4ad71148cfe5f8411e/types/src/main.ts#L614)
-#[derive(Clone, Copy, Serialize_repr, EnumString, Debug, PartialEq, Eq)]
-#[strum(ascii_case_insensitive)]
+#[derive(
+    Default, Clone, Copy, Serialize_repr, EnumString, EnumIter, Display, Debug, PartialEq, Eq,
+)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 #[repr(u8)]
 /* <block name="block-severity" same-as="docs/validators/README.md:severity-levels"
 same-as-format="identifier" same-as-pattern="^(?P<value>[A-Z][a-z]+) = \d"> */
 pub(crate) enum BlockSeverity {
     /// The default. A violation at this level makes the run exit non-zero, failing a hook or CI.
+    #[default]
     Error = 1,
     /// Reported like an error but does not affect the exit code.
     Warning = 2,
@@ -916,19 +917,9 @@ pub(crate) enum BlockSeverity {
 }
 // </block>
 
-impl BlockSeverity {
-    /// The severity that `attributes` give a block: its `severity` attribute, or
-    /// [`BlockSeverity::Error`] if it has none.
-    ///
-    /// # Errors
-    /// Returns an error that quotes the value if it is not a severity.
-    pub(crate) fn from_attributes(attributes: &Attributes) -> anyhow::Result<Self> {
-        match attributes.severity() {
-            Some(value) => {
-                Self::from_str(value).map_err(|_| anyhow!("unrecognized severity value `{value}`"))
-            }
-            None => Ok(Self::Error),
-        }
+impl ParseAttribute for BlockSeverity {
+    fn parse_attribute(raw: &str) -> anyhow::Result<Self> {
+        parse_keyword_value(raw)
     }
 }
 
@@ -1014,8 +1005,7 @@ impl<'a> From<&'a BlockWithContext> for BlockListing<'a> {
 }
 
 /// Checks that each validator accepts the attributes it reads (see
-/// [`Validator::check_attributes`]). It does not check the values: see
-/// [`BlockSeverity::from_attributes`] for `severity`.
+/// [`Validator::check_attributes`]).
 ///
 /// # Errors
 /// Returns an error that quotes the first attribute found to be wrong, such as
@@ -1214,45 +1204,45 @@ mod attributes_tests {
 mod block_severity_from_str_tests {
     use crate::blocks::{Attributes, BlockSeverity};
     use crate::test_utils::text_attributes;
-
-    /// Attributes holding only a `severity`, to test how that attribute is parsed.
-    fn attributes_with_severity(severity: &str) -> Attributes {
-        text_attributes(&[("severity", severity)])
-    }
+    use std::collections::HashMap;
 
     #[test]
     fn block_with_valid_severity_attribute_returns_correct_severity() {
-        let severity = BlockSeverity::from_attributes(&attributes_with_severity("warning"));
+        let attributes = text_attributes(&[("severity", "warning")]);
 
-        assert_eq!(severity.unwrap(), BlockSeverity::Warning);
+        assert_eq!(attributes.severity(), BlockSeverity::Warning);
     }
 
     #[test]
     fn block_with_mixed_case_severity_attribute_returns_correct_severity() {
-        let severity = BlockSeverity::from_attributes(&attributes_with_severity("InFo"));
+        let attributes = text_attributes(&[("severity", "InFo")]);
 
-        assert_eq!(severity.unwrap(), BlockSeverity::Info);
+        assert_eq!(attributes.severity(), BlockSeverity::Info);
+        assert_eq!(attributes.to_map()["severity"], "InFo");
     }
 
     #[test]
     fn block_without_severity_attribute_returns_error_severity() {
-        let severity = BlockSeverity::from_attributes(&Attributes::default());
-
-        assert_eq!(severity.unwrap(), BlockSeverity::Error);
+        assert_eq!(Attributes::default().severity(), BlockSeverity::Error);
     }
 
     #[test]
     fn block_with_invalid_severity_attribute_returns_error() {
-        let severity = BlockSeverity::from_attributes(&attributes_with_severity("warn"));
+        let error = Attributes::from_tag(HashMap::from([("severity".into(), "warn".into())]))
+            .unwrap_err()
+            .to_string();
 
-        assert!(severity.is_err());
+        assert_eq!(
+            error,
+            "invalid `severity`: \"warn\" (expected error, warning, info or hint)"
+        );
     }
 }
 
 #[cfg(test)]
 mod block_address_tests {
     use crate::Position;
-    use crate::blocks::{Block, BlockAddress, BlockSeverity, Content, Declaration};
+    use crate::blocks::{Block, BlockAddress, Content, Declaration};
     use crate::repo_path::RepoPath;
     use crate::test_utils::text_attributes;
 
@@ -1267,7 +1257,6 @@ mod block_address_tests {
             start_tag_position_range: Position::new(0, 0)..Position::new(0, 0),
             content: Content::source(0..0, Position::new(0, 0)..Position::new(0, 0)),
             declaration: Declaration::Tags,
-            severity: BlockSeverity::Error,
         }
     }
 
@@ -1335,7 +1324,6 @@ mod block_listing_tests {
                 start_tag_position_range: Position::new(2, 4)..Position::new(2, 30),
                 content: Content::source(0..0, Position::new(3, 1)..Position::new(3, 1)),
                 declaration,
-                severity: BlockSeverity::Error,
             },
             is_start_tag_modified: false,
             is_content_modified: true,

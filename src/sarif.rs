@@ -392,7 +392,6 @@ mod tests {
         }
         let attributes = text_attributes(&pairs);
         Block {
-            severity: BlockSeverity::from_attributes(&attributes).expect("a valid severity"),
             attributes,
             start_tag_position_range: Position::new(1, 1)..Position::new(1, 1),
             content: Content::source(0..0, Position::new(1, 1)..Position::new(1, 1)),

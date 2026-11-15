@@ -163,7 +163,7 @@ mod count_rust_blocks_tests {
 
 #[cfg(test)]
 mod test_utils {
-    use crate::blocks::{Attributes, BlockSeverity};
+    use crate::blocks::Attributes;
     use crate::diff_parser::{DiffChanges, LineChange, LineChangeKind};
     use crate::fs::PathFilter;
     use crate::fs::test_utils::FakeFileSystem;
@@ -287,7 +287,6 @@ mod test_utils {
         Ok(VirtualBlock {
             file: RepoPath::from_reference(file)?,
             locator,
-            severity: BlockSeverity::from_attributes(&attributes)?,
             attributes,
             entry: ConfigEntry {
                 file: PathBuf::from("blockwatch.toml"),

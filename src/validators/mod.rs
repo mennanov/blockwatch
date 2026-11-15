@@ -265,7 +265,7 @@ impl Violation {
     ) -> Self {
         Self {
             address: ViolationAddress::new(file, block.name(), code, violation_text),
-            severity: block.severity,
+            severity: block.attributes.severity(),
             range,
             code,
             message,
@@ -1192,9 +1192,7 @@ mod target_files_tests {
 
 #[cfg(test)]
 mod tests {
-    use crate::blocks::{
-        Attributes, Block, BlockAddress, BlockSeverity, BlockWithContext, Content, Declaration,
-    };
+    use crate::blocks::{Attributes, Block, BlockAddress, BlockWithContext, Content, Declaration};
     use crate::fs::FileSystem;
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
@@ -1217,7 +1215,6 @@ mod tests {
             start_tag_position_range: Position::new(0, 0)..Position::new(0, 0),
             content: Content::source(0..0, Position::new(0, 0)..Position::new(0, 0)),
             declaration: Declaration::Tags,
-            severity: BlockSeverity::Error,
         }
     }
 

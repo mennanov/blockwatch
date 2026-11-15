@@ -362,7 +362,7 @@ fn title_start(definition: &[u8]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blocks::{Block, BlockSeverity, Content, Declaration};
+    use crate::blocks::{Block, Content, Declaration};
     use crate::test_utils::text_attributes;
     use crate::validators::SortOrder;
     use crate::{Position, test_utils};
@@ -657,7 +657,6 @@ Some text here 3
                         Position::new(6, 1)..Position::new(8, 1),
                     ),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: text_attributes(&[("name", "md_block_2")]),
@@ -670,7 +669,6 @@ Some text here 3
                         Position::new(11, 1)..Position::new(17, 1),
                     ),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: text_attributes(&[("name", "md_block_3")]),
@@ -680,7 +678,6 @@ Some text here 3
                         Position::new(14, 1)..Position::new(16, 1),
                     ),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 }
             ]
         );
@@ -909,7 +906,6 @@ Inline code `<!-- <block name="ignored"> -->` is not a comment.
                     Position::new(4, 47)..Position::new(6, 13),
                 ),
                 declaration: Declaration::Tags,
-                severity: BlockSeverity::Error,
             }]
         );
 
@@ -1059,7 +1055,6 @@ Not wrapped in HTML tags on multiple lines
                         Position::new(5, 35)..Position::new(7, 1),
                     ),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: text_attributes(&[("name", "md_block")]),
@@ -1069,7 +1064,6 @@ Not wrapped in HTML tags on multiple lines
                         Position::new(11, 1)..Position::new(13, 1),
                     ),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: text_attributes(&[("name", "html_block2")]),
@@ -1079,7 +1073,6 @@ Not wrapped in HTML tags on multiple lines
                         Position::new(15, 36)..Position::new(15, 60),
                     ),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 },
                 Block {
                     attributes: text_attributes(&[("name", "html_block3")]),
@@ -1092,7 +1085,6 @@ Not wrapped in HTML tags on multiple lines
                         Position::new(17, 36)..Position::new(19, 1),
                     ),
                     declaration: Declaration::Tags,
-                    severity: BlockSeverity::Error,
                 },
             ]
         );

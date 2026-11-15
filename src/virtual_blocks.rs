@@ -1,7 +1,7 @@
 //! Blocks that the config file declares around a symbol, instead of tags in a comment.
 
 use crate::LineIndex;
-use crate::blocks::{Attributes, Block, BlockSeverity, BlockWithContext, Content, Declaration};
+use crate::blocks::{Attributes, Block, BlockWithContext, Content, Declaration};
 use crate::diff_parser::LineChanges;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
@@ -27,8 +27,6 @@ pub(crate) struct VirtualBlock {
     pub(crate) entry: ConfigEntry,
     /// Whether the diff touches `entry`.
     pub(crate) is_entry_modified: bool,
-    /// The block's severity, from its `severity` attribute.
-    pub(crate) severity: BlockSeverity,
     /// Condition a file matched by a glob `target` must pass to receive this block.
     pub(crate) target_if: Option<TargetIf>,
 }
@@ -249,7 +247,6 @@ impl VirtualBlock {
                 start_tag_position_range,
                 content,
                 declaration: Declaration::ConfigEntry(self.entry.clone()),
-                severity: self.severity,
             },
             is_content_modified: match self.locator {
                 Locator::Symbol(_) | Locator::Pattern(_) => {
@@ -642,7 +639,10 @@ CREATE TABLE b (
             .expect("a block without target-if is always found")
             .block;
 
-        assert_eq!(block.severity, BlockSeverity::Warning);
+        assert_eq!(
+            block.attributes.severity(),
+            crate::blocks::BlockSeverity::Warning
+        );
         Ok(())
     }
 
