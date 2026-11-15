@@ -1,4 +1,4 @@
-use crate::blocks::{Attributes, Block, BlockWithContext, TextAttribute};
+use crate::blocks::{Attributes, Block, BlockWithContext};
 use crate::repo_path::RepoPath;
 use crate::validators::{
     AsyncValidator, PatternContent, ValidationContext, ValidationReport, Validator, ValidatorTrace,
@@ -54,11 +54,7 @@ impl<C: AiClient + 'static> AsyncValidator for CheckAiValidator<C> {
             for (block_idx, block_with_context) in
                 file_blocks.blocks_with_context.iter().enumerate()
             {
-                let Some(condition) = block_with_context
-                    .block
-                    .attributes
-                    .text(TextAttribute::CheckAi)
-                else {
+                let Some(condition) = block_with_context.block.attributes.check_ai() else {
                     continue;
                 };
                 if condition.trim().is_empty() {
@@ -123,7 +119,8 @@ async fn check_block<C: AiClient>(
     let content = match block_content_for_pattern(
         block_with_context,
         &file_blocks.file_content,
-        TextAttribute::CheckAiPattern,
+        "check-ai-pattern",
+        block.attributes.check_ai_pattern(),
     )? {
         PatternContent::Whole(content) => Cow::Borrowed(content),
         PatternContent::Matches(matches) if matches.is_empty() => {
@@ -132,7 +129,7 @@ async fn check_block<C: AiClient>(
                 block,
                 block
                     .attributes
-                    .text(TextAttribute::CheckAiPattern)
+                    .check_ai_pattern()
                     .expect("a block with matches has a pattern"),
             )?;
             return Ok((vec![violation], trace(None, None)));
@@ -142,7 +139,7 @@ async fn check_block<C: AiClient>(
 
     let condition = block
         .attributes
-        .text(TextAttribute::CheckAi)
+        .check_ai()
         .expect("check-ai attribute must be present");
     let prompt = user_prompt(condition, &content);
     let response = client
@@ -164,9 +161,9 @@ async fn check_block<C: AiClient>(
 /// Returns an error that quotes `check-ai-pattern` when it comes without `check-ai`.
 pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
     require_main(
-        attributes,
+        Validator::CheckAi.is_turned_on_by(attributes),
         Validator::CheckAi.attributes(),
-        &[TextAttribute::CheckAiPattern],
+        &[("check-ai-pattern", attributes.check_ai_pattern().is_some())],
     )
 }
 
@@ -229,7 +226,7 @@ fn create_pattern_no_match_violation(
 fn condition_of(block: &Block) -> &str {
     block
         .attributes
-        .text(TextAttribute::CheckAi)
+        .check_ai()
         .expect("check-ai attribute must be present")
         .trim()
 }

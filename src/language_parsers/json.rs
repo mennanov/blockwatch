@@ -175,7 +175,7 @@ fn decode_node(node: &Node, source: &str) -> anyhow::Result<String> {
 mod tests {
     use super::*;
     use crate::Position;
-    use crate::blocks::{Block, TextAttribute};
+    use crate::blocks::Block;
     use std::collections::HashMap;
     use std::ops::Range;
 
@@ -239,10 +239,7 @@ mod tests {
             .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
-        assert_eq!(
-            blocks[0].attributes.text(TextAttribute::KeepSorted),
-            Some("asc")
-        );
+        assert_eq!(blocks[0].attributes.keep_sorted(), Some("asc"));
         Ok(())
     }
 

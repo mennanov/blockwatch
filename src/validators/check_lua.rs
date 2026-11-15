@@ -1,7 +1,4 @@
-use crate::blocks::{
-    AttributeValue, Attributes, Block, BlockWithContext, FileBlocks, ReferenceAttribute,
-    TextAttribute,
-};
+use crate::blocks::{Attributes, Block, BlockWithContext, FileBlocks};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
@@ -15,6 +12,7 @@ use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use mlua::{HookTriggers, Lua, StdLib, VmState};
 use serde::Serialize;
+use serde_json::{Map, Value};
 use std::ffi::OsStr;
 use std::path::Path;
 use std::sync::Arc;
@@ -113,11 +111,7 @@ impl<Fs: FileSystem + 'static> AsyncValidator for CheckLuaValidator<Fs> {
             for (block_idx, block_with_context) in
                 file_blocks.blocks_with_context.iter().enumerate()
             {
-                let Some(script_path) = block_with_context
-                    .block
-                    .attributes
-                    .text(TextAttribute::CheckLua)
-                else {
+                let Some(script_path) = block_with_context.block.attributes.check_lua() else {
                     continue;
                 };
                 if script_path.trim().is_empty() {
@@ -174,12 +168,13 @@ async fn check_block<Fs: FileSystem>(
     let block = &block_with_context.block;
     let script_path = block
         .attributes
-        .text(TextAttribute::CheckLua)
+        .check_lua()
         .expect("check-lua attribute must be present");
     let content = match block_content_for_pattern(
         block_with_context,
         &file_blocks.file_content,
-        TextAttribute::CheckLuaPattern,
+        "check-lua-pattern",
+        block.attributes.check_lua_pattern(),
     )? {
         PatternContent::Whole(content) => LuaContent::Text(content.to_string()),
         PatternContent::Matches(matches) => {
@@ -257,7 +252,7 @@ struct LuaScriptInputs {
     timeout: Duration,
     file: String,
     line: usize,
-    attributes: Vec<(String, AttributeValue)>,
+    attributes: Map<String, Value>,
     /// `Some` exactly when the block carries an `affects` attribute, so `ctx.affects` is present in
     /// the script precisely when the attribute is.
     affects: Option<Vec<LuaAffected>>,
@@ -312,11 +307,7 @@ impl LuaScriptInputs {
             timeout,
             file: file_path.as_str().to_string(),
             line: block.start_tag_position_range.start.line,
-            attributes: block
-                .attributes
-                .iter()
-                .map(|(name, value)| (name.to_string(), value))
-                .collect(),
+            attributes: block.attributes.to_map(),
             affects,
             content,
         }
@@ -357,10 +348,15 @@ fn run_lua_script_sync(inputs: LuaScriptInputs, mode: LuaMode) -> anyhow::Result
     let attrs_table = lua.create_table().context("failed to create attrs table")?;
     for (key, value) in &inputs.attributes {
         let result = match value {
-            AttributeValue::Text(text) => attrs_table.set(key.as_str(), text.as_str()),
-            AttributeValue::List(entries) => lua
-                .create_sequence_from(entries.iter().map(String::as_str))
+            Value::String(text) => attrs_table.set(key.as_str(), text.as_str()),
+            Value::Array(entries) => lua
+                .create_sequence_from(
+                    entries
+                        .iter()
+                        .map(|entry| entry.as_str().expect("list entries serialize as strings")),
+                )
                 .and_then(|list| attrs_table.set(key.as_str(), list)),
+            _ => unreachable!("Attributes only serializes strings and string lists"),
         };
         result.with_context(|| format!("failed to set attr {key}"))?;
     }
@@ -429,7 +425,7 @@ fn run_lua_script_sync(inputs: LuaScriptInputs, mode: LuaMode) -> anyhow::Result
 /// A value below one second is rejected: a timeout that short cannot tell a runaway script from a
 /// slow-but-terminating one, which is the false-violation trap the timeout exists to avoid.
 fn parse_check_lua_timeout(block: &Block) -> anyhow::Result<Duration> {
-    let Some(raw) = block.attributes.text(TextAttribute::CheckLuaTimeout) else {
+    let Some(raw) = block.attributes.check_lua_timeout() else {
         return Ok(Duration::from_secs(DEFAULT_CHECK_LUA_TIMEOUT_SECS));
     };
     let seconds: u64 = raw
@@ -557,7 +553,7 @@ fn resolve_affected_targets<Fs: FileSystem>(
     current_file_path: &RepoPath,
     block: &Block,
 ) -> anyhow::Result<Option<Vec<AffectedTarget>>> {
-    let Some(affects) = block.attributes.references(ReferenceAttribute::Affects) else {
+    let Some(affects) = block.attributes.affects() else {
         return Ok(None);
     };
     let references = TargetReference::parse_list(affects).with_context(|| {
@@ -642,11 +638,17 @@ fn symbol_content<Fs: FileSystem>(
 /// Returns an error that quotes the first of the two attributes found without it.
 pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
     require_main(
-        attributes,
+        Validator::CheckLua.is_turned_on_by(attributes),
         Validator::CheckLua.attributes(),
         &[
-            TextAttribute::CheckLuaPattern,
-            TextAttribute::CheckLuaTimeout,
+            (
+                "check-lua-pattern",
+                attributes.check_lua_pattern().is_some(),
+            ),
+            (
+                "check-lua-timeout",
+                attributes.check_lua_timeout().is_some(),
+            ),
         ],
     )
 }
@@ -1070,10 +1072,9 @@ some content
             .expect("example.py's blocks")
             .blocks_with_context[0]
             .block;
-        block.attributes.insert_list(
-            ReferenceAttribute::Affects,
-            vec![":red".to_string(), ":blue".to_string()],
-        )?;
+        block
+            .attributes
+            .set_affects_list(vec![":red".to_string(), ":blue".to_string()]);
 
         let violations = validator(&[(
             "check.lua",

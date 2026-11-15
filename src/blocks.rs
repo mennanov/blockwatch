@@ -6,24 +6,71 @@ use crate::repo_path::RepoPath;
 use crate::validators::Validator;
 use crate::virtual_blocks::ConfigEntry;
 use anyhow::{Context, anyhow, bail};
-use serde::Serialize;
+use serde::de::{self, DeserializeSeed, IntoDeserializer, MapAccess, Visitor};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_repr::Serialize_repr;
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::ops::Range;
 use std::str::FromStr;
 use strum::IntoEnumIterator;
-use strum_macros::{EnumIter, EnumString, IntoStaticStr};
+use strum_macros::EnumString;
 
 const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
 
-/// The attributes of a block. Only a [`ReferenceAttribute`] can hold a list.
-#[derive(Debug, PartialEq, Eq, Clone, Default)]
+/* <block name="attribute-names" same-as="src/skill.md:validator-reference"
+same-as-format="identifier" same-as-pattern='^\s*(?P<value>[a-z_]+):'> */
+/// The attributes of a block. Only `affects` and `same-as` can hold a list.
+#[derive(Debug, PartialEq, Eq, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub(crate) struct Attributes {
-    text: HashMap<TextAttribute, String>,
-    references: HashMap<ReferenceAttribute, AttributeValue>,
+    // <block keep-sorted keep-sorted-pattern="^\s*(?P<value>[a-z_]+):">
+    #[serde(skip_serializing_if = "Option::is_none")]
+    affects: Option<AttributeValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    check_ai: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    check_ai_pattern: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    check_lua: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    check_lua_pattern: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    check_lua_timeout: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    keep_sorted: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    keep_sorted_format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    keep_sorted_pattern: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    keep_unique: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line_count: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line_count_pattern: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line_pattern: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line_pattern_forbidden: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    same_as: Option<AttributeValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    same_as_format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    same_as_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    same_as_paths: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    same_as_pattern: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    severity: Option<String>,
+    // </block>
 }
+// </block>
 
 impl Attributes {
     /// The attributes of a start tag, from `values`: each attribute's name and its value.
@@ -32,169 +79,334 @@ impl Attributes {
     /// Returns an error that quotes a name that no attribute has, such as
     /// ``unrecognized attribute `keep-sortd` ``.
     pub(crate) fn from_tag(values: HashMap<String, String>) -> anyhow::Result<Self> {
-        let mut attributes = Self::default();
-        for (name, value) in values {
-            attributes.insert(AttributeName::parse(&name)?, value);
-        }
-        Ok(attributes)
+        Self::from_entries(
+            values
+                .into_iter()
+                .map(|(name, value)| (name, AttributeEntry::Text(value))),
+        )
     }
 
-    /// Sets the attribute `name` to `text`. The text of a [`ReferenceAttribute`] has a comma
-    /// between its references.
-    pub(crate) fn insert(&mut self, name: AttributeName, text: String) {
-        match name {
-            AttributeName::Text(name) => {
-                self.text.insert(name, text);
-            }
-            AttributeName::Reference(name) => {
-                self.references.insert(name, AttributeValue::Text(text));
-            }
-        }
-    }
-
-    /// Sets the attribute `name` to the list `references`.
+    /// Builds attributes from normalized name-value `entries`.
     ///
     /// # Errors
-    /// Returns an error when `references` is empty.
-    pub(crate) fn insert_list(
-        &mut self,
-        name: ReferenceAttribute,
-        references: Vec<String>,
-    ) -> anyhow::Result<()> {
-        // An empty list would turn the rule on with nothing to check.
-        if references.is_empty() {
-            bail!("`{}` must list at least one reference", name.as_str());
+    /// Returns an error for an unrecognized attribute name, duplicate names, a wrong value type
+    /// (such as a list passed to a non-reference attribute), or an empty list on a reference
+    /// attribute.
+    pub(crate) fn from_entries(
+        entries: impl IntoIterator<Item = (String, AttributeEntry)>,
+    ) -> anyhow::Result<Self> {
+        Self::deserialize(AttributeEntriesDeserializer(entries.into_iter())).map_err(Into::into)
+    }
+
+    /// The `affects` attribute, or `None` when not set.
+    pub(crate) fn affects(&self) -> Option<&AttributeValue> {
+        self.affects.as_ref()
+    }
+
+    /// The `check-ai` attribute, or `None` when not set.
+    pub(crate) fn check_ai(&self) -> Option<&str> {
+        self.check_ai.as_deref()
+    }
+
+    /// The `check-ai-pattern` attribute, or `None` when not set.
+    pub(crate) fn check_ai_pattern(&self) -> Option<&str> {
+        self.check_ai_pattern.as_deref()
+    }
+
+    /// The `check-lua` attribute, or `None` when not set.
+    pub(crate) fn check_lua(&self) -> Option<&str> {
+        self.check_lua.as_deref()
+    }
+
+    /// The `check-lua-pattern` attribute, or `None` when not set.
+    pub(crate) fn check_lua_pattern(&self) -> Option<&str> {
+        self.check_lua_pattern.as_deref()
+    }
+
+    /// The `check-lua-timeout` attribute, or `None` when not set.
+    pub(crate) fn check_lua_timeout(&self) -> Option<&str> {
+        self.check_lua_timeout.as_deref()
+    }
+
+    /// The `keep-sorted` attribute, or `None` when not set.
+    pub(crate) fn keep_sorted(&self) -> Option<&str> {
+        self.keep_sorted.as_deref()
+    }
+
+    /// The `keep-sorted-format` attribute, or `None` when not set.
+    pub(crate) fn keep_sorted_format(&self) -> Option<&str> {
+        self.keep_sorted_format.as_deref()
+    }
+
+    /// The `keep-sorted-pattern` attribute, or `None` when not set.
+    pub(crate) fn keep_sorted_pattern(&self) -> Option<&str> {
+        self.keep_sorted_pattern.as_deref()
+    }
+
+    /// The `keep-unique` attribute, or `None` when not set.
+    pub(crate) fn keep_unique(&self) -> Option<&str> {
+        self.keep_unique.as_deref()
+    }
+
+    /// The `line-count` attribute, or `None` when not set.
+    pub(crate) fn line_count(&self) -> Option<&str> {
+        self.line_count.as_deref()
+    }
+
+    /// The `line-count-pattern` attribute, or `None` when not set.
+    pub(crate) fn line_count_pattern(&self) -> Option<&str> {
+        self.line_count_pattern.as_deref()
+    }
+
+    /// The `line-pattern` attribute, or `None` when not set.
+    pub(crate) fn line_pattern(&self) -> Option<&str> {
+        self.line_pattern.as_deref()
+    }
+
+    /// The `line-pattern-forbidden` attribute, or `None` when not set.
+    pub(crate) fn line_pattern_forbidden(&self) -> Option<&str> {
+        self.line_pattern_forbidden.as_deref()
+    }
+
+    /// The `name` attribute, or `None` when not set.
+    pub(crate) fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    /// The `same-as` attribute, or `None` when not set.
+    pub(crate) fn same_as(&self) -> Option<&AttributeValue> {
+        self.same_as.as_ref()
+    }
+
+    /// The `same-as-format` attribute, or `None` when not set.
+    pub(crate) fn same_as_format(&self) -> Option<&str> {
+        self.same_as_format.as_deref()
+    }
+
+    /// The `same-as-mode` attribute, or `None` when not set.
+    pub(crate) fn same_as_mode(&self) -> Option<&str> {
+        self.same_as_mode.as_deref()
+    }
+
+    /// The `same-as-paths` attribute, or `None` when not set.
+    pub(crate) fn same_as_paths(&self) -> Option<&str> {
+        self.same_as_paths.as_deref()
+    }
+
+    /// The `same-as-pattern` attribute, or `None` when not set.
+    pub(crate) fn same_as_pattern(&self) -> Option<&str> {
+        self.same_as_pattern.as_deref()
+    }
+
+    /// The `severity` attribute, or `None` when not set.
+    pub(crate) fn severity(&self) -> Option<&str> {
+        self.severity.as_deref()
+    }
+
+    /// The attributes that are set, as a JSON object with keys in alphabetical order.
+    pub(crate) fn to_map(&self) -> serde_json::Map<String, serde_json::Value> {
+        let serde_json::Value::Object(map) =
+            serde_json::to_value(self).expect("Attributes serializes as a JSON object")
+        else {
+            unreachable!("Attributes always serializes as a JSON object");
+        };
+        map
+    }
+
+    /// Sets `affects` to a list of references for tests.
+    ///
+    /// # Panics
+    /// Panics if `references` is empty.
+    #[cfg(test)]
+    pub(crate) fn set_affects_list(&mut self, references: Vec<String>) {
+        assert!(
+            !references.is_empty(),
+            "`affects` must list at least one reference"
+        );
+        self.affects = Some(AttributeValue::List(references));
+    }
+
+    /// Every attribute name on `Attributes`, in serialized order.
+    #[cfg(test)]
+    pub(crate) fn known_names() -> Vec<String> {
+        // Struct literal without `..Default::default()` fails to compile when a new attribute
+        // field is added until that field is included here.
+        let all = Self {
+            affects: Some(AttributeValue::Text(String::new())),
+            check_ai: Some(String::new()),
+            check_ai_pattern: Some(String::new()),
+            check_lua: Some(String::new()),
+            check_lua_pattern: Some(String::new()),
+            check_lua_timeout: Some(String::new()),
+            keep_sorted: Some(String::new()),
+            keep_sorted_format: Some(String::new()),
+            keep_sorted_pattern: Some(String::new()),
+            keep_unique: Some(String::new()),
+            line_count: Some(String::new()),
+            line_count_pattern: Some(String::new()),
+            line_pattern: Some(String::new()),
+            line_pattern_forbidden: Some(String::new()),
+            name: Some(String::new()),
+            same_as: Some(AttributeValue::Text(String::new())),
+            same_as_format: Some(String::new()),
+            same_as_mode: Some(String::new()),
+            same_as_paths: Some(String::new()),
+            same_as_pattern: Some(String::new()),
+            severity: Some(String::new()),
+        };
+        all.to_map().into_iter().map(|(name, _)| name).collect()
+    }
+}
+
+/// One attribute value passed to [`Attributes::from_entries`] before field deserialization.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub(crate) enum AttributeEntry {
+    /// Text from a tag, or a string, `true`, or integer from a `[[block]]` entry.
+    Text(String),
+    /// A list of strings from a `[[block]]` entry (`affects` or `same-as`).
+    List(Vec<String>),
+    /// A value whose type cannot hold any attribute, such as `false` or a float.
+    InvalidType,
+}
+
+/// Formats the config type error for `name`, quoting the accepted TOML value shapes.
+fn wrong_type_message(name: &str) -> String {
+    format!(
+        "`{name}` must be a string, `true` or an integer. `affects` and `same-as` can also be a \
+         list of strings"
+    )
+}
+
+/// Deserializes an iterator of `(name, AttributeEntry)` pairs into [`Attributes`].
+struct AttributeEntriesDeserializer<I>(I);
+
+impl<'de, I> Deserializer<'de> for AttributeEntriesDeserializer<I>
+where
+    I: Iterator<Item = (String, AttributeEntry)>,
+{
+    type Error = de::value::Error;
+
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_map(AttributeMapAccess {
+            entries: self.0,
+            current: None,
+        })
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 char str string bytes byte_buf option unit
+        unit_struct newtype_struct seq tuple tuple_struct map struct enum identifier ignored_any
+    }
+}
+
+/// Feeds `(name, AttributeEntry)` pairs into `serde`'s struct map visitor, one entry at a time.
+struct AttributeMapAccess<I> {
+    entries: I,
+    current: Option<(String, AttributeEntry)>,
+}
+
+impl<'de, I> MapAccess<'de> for AttributeMapAccess<I>
+where
+    I: Iterator<Item = (String, AttributeEntry)>,
+{
+    type Error = de::value::Error;
+
+    fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
+    where
+        K: DeserializeSeed<'de>,
+    {
+        let Some((key, value)) = self.entries.next() else {
+            return Ok(None);
+        };
+        // Check the key before its value so an unknown attribute is reported regardless of type.
+        let parsed =
+            seed.deserialize(key.as_str().into_deserializer())
+                .map_err(|_: Self::Error| {
+                    de::Error::custom(format!("unrecognized attribute `{key}`"))
+                })?;
+        self.current = Some((key, value));
+        Ok(Some(parsed))
+    }
+
+    fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
+    where
+        V: DeserializeSeed<'de>,
+    {
+        let (key, entry) = self
+            .current
+            .take()
+            .expect("next_value_seed follows next_key_seed");
+        seed.deserialize(AttributeEntryDeserializer { key: &key, entry })
+    }
+}
+
+/// Deserializes one [`AttributeEntry`] value for field `key`.
+struct AttributeEntryDeserializer<'a> {
+    key: &'a str,
+    entry: AttributeEntry,
+}
+
+impl<'de> Deserializer<'de> for AttributeEntryDeserializer<'_> {
+    type Error = de::value::Error;
+
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        match self.entry {
+            AttributeEntry::Text(text) => visitor.visit_string(text),
+            AttributeEntry::List(entries) if entries.is_empty() => Err(de::Error::custom(format!(
+                "`{}` must list at least one reference",
+                self.key
+            ))),
+            AttributeEntry::List(entries) => visitor.visit_seq(entries.into_deserializer()),
+            AttributeEntry::InvalidType => Err(de::Error::custom(wrong_type_message(self.key))),
         }
-        self.references
-            .insert(name, AttributeValue::List(references));
-        Ok(())
     }
 
-    /// The text of the attribute `name`, or `None` if there is no such attribute.
-    pub(crate) fn text(&self, name: TextAttribute) -> Option<&str> {
-        self.text.get(&name).map(String::as_str)
+    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_some(self)
     }
 
-    /// The references in the attribute `name`, or `None` if there is no such attribute.
-    pub(crate) fn references(&self, name: ReferenceAttribute) -> Option<&AttributeValue> {
-        self.references.get(&name)
-    }
-
-    /// Whether there is an attribute `name`.
-    pub(crate) fn contains(&self, name: AttributeName) -> bool {
-        match name {
-            AttributeName::Text(name) => self.text.contains_key(&name),
-            AttributeName::Reference(name) => self.references.contains_key(&name),
+    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        match self.entry {
+            AttributeEntry::Text(text) => visitor.visit_string(text),
+            AttributeEntry::List(_) | AttributeEntry::InvalidType => {
+                Err(de::Error::custom(wrong_type_message(self.key)))
+            }
         }
     }
 
-    /// Each attribute, with its name as a tag writes it, in no set order.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&'static str, AttributeValue)> + '_ {
-        let text = self
-            .text
-            .iter()
-            .map(|(name, text)| (name.as_str(), AttributeValue::Text(text.clone())));
-        let references = self
-            .references
-            .iter()
-            .map(|(name, value)| (name.as_str(), value.clone()));
-        text.chain(references)
+    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        self.deserialize_str(visitor)
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 char bytes byte_buf unit unit_struct
+        newtype_struct seq tuple tuple_struct map struct enum identifier ignored_any
     }
 }
 
 /// The value of an attribute.
-#[derive(Debug, PartialEq, Eq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub(crate) enum AttributeValue {
     /// A tag's value, or a string, `true` or an integer in a `[[block]]` entry.
     Text(String),
     /// A list in a `[[block]]` entry, with at least one entry.
     List(Vec<String>),
-}
-
-/* <block name="attribute-names" same-as="src/skill.md:validator-reference"
-same-as-format="identifier" same-as-pattern='^\s*(?P<value>[A-Za-z]+),'> */
-/// The name of an attribute whose value is text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, IntoStaticStr, EnumIter)]
-#[strum(serialize_all = "kebab-case")]
-pub(crate) enum TextAttribute {
-    // <block keep-sorted>
-    CheckAi,
-    CheckAiPattern,
-    CheckLua,
-    CheckLuaPattern,
-    CheckLuaTimeout,
-    KeepSorted,
-    KeepSortedFormat,
-    KeepSortedPattern,
-    KeepUnique,
-    LineCount,
-    LineCountPattern,
-    LinePattern,
-    LinePatternForbidden,
-    Name,
-    SameAsFormat,
-    SameAsMode,
-    SameAsPaths,
-    SameAsPattern,
-    Severity,
-    // </block>
-}
-
-/// The name of an attribute whose value lists references, as text with a comma between them or,
-/// in a `[[block]]` entry, as a list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, IntoStaticStr, EnumIter)]
-#[strum(serialize_all = "kebab-case")]
-pub(crate) enum ReferenceAttribute {
-    Affects,
-    SameAs,
-}
-// </block>
-
-impl TextAttribute {
-    /// The name as a tag writes it, such as `keep-sorted`.
-    pub(crate) fn as_str(self) -> &'static str {
-        self.into()
-    }
-}
-
-impl ReferenceAttribute {
-    /// The name as a tag writes it, such as `same-as`.
-    pub(crate) fn as_str(self) -> &'static str {
-        self.into()
-    }
-}
-
-/// The name of any attribute a block can have.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AttributeName {
-    Text(TextAttribute),
-    Reference(ReferenceAttribute),
-}
-
-impl AttributeName {
-    /// Looks up the attribute called `name`.
-    ///
-    /// # Errors
-    /// Returns an error that quotes `name` when no attribute has it, such as
-    /// ``unrecognized attribute `keep-sortd` ``.
-    pub(crate) fn parse(name: &str) -> anyhow::Result<Self> {
-        if let Ok(text) = TextAttribute::from_str(name) {
-            return Ok(Self::Text(text));
-        }
-        if let Ok(references) = ReferenceAttribute::from_str(name) {
-            return Ok(Self::Reference(references));
-        }
-        bail!("unrecognized attribute `{name}`")
-    }
-
-    /// The name as a tag writes it, such as `keep-sorted`.
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Text(name) => name.as_str(),
-            Self::Reference(name) => name.as_str(),
-        }
-    }
 }
 
 /// A block: a part of a file that its attributes set rules for.
@@ -490,7 +702,7 @@ impl Block {
 
     /// Returns the optional value of the `name` attribute for this block.
     pub(crate) fn name(&self) -> Option<&str> {
-        self.attributes.text(TextAttribute::Name)
+        self.attributes.name()
     }
 
     /// Returns the block's name if present, otherwise a human-friendly placeholder label.
@@ -559,7 +771,7 @@ impl BlockSeverity {
     /// # Errors
     /// Returns an error that quotes the value if it is not a severity.
     pub(crate) fn from_attributes(attributes: &Attributes) -> anyhow::Result<Self> {
-        match attributes.text(TextAttribute::Severity) {
+        match attributes.severity() {
             Some(value) => {
                 Self::from_str(value).map_err(|_| anyhow!("unrecognized severity value `{value}`"))
             }
@@ -602,8 +814,7 @@ pub(crate) struct BlockWithContext {
 /// sorted. So declare the fields in alphabetical order.
 #[derive(Serialize, Debug)]
 pub(crate) struct BlockListing<'a> {
-    /// A map that is sorted, because the attributes of a block are not.
-    attributes: BTreeMap<&'static str, AttributeValue>,
+    attributes: &'a Attributes,
     /// The validators that checked the block. `None` leaves the key out.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) checks: Option<BTreeSet<Validator>>,
@@ -636,7 +847,7 @@ impl<'a> From<&'a BlockWithContext> for BlockListing<'a> {
     fn from(block_with_context: &'a BlockWithContext) -> Self {
         let block = &block_with_context.block;
         Self {
-            attributes: block.attributes.iter().collect(),
+            attributes: &block.attributes,
             checks: None,
             column: block.start_tag_position_range.start.character,
             config_line: match &block.declaration {
@@ -665,7 +876,7 @@ pub(crate) fn validate_attributes(attributes: &Attributes) -> anyhow::Result<()>
 
 #[cfg(test)]
 mod validate_attributes_tests {
-    use crate::blocks::{AttributeName, ReferenceAttribute, TextAttribute, validate_attributes};
+    use crate::blocks::{Attributes, validate_attributes};
     use crate::test_utils::text_attributes;
     use crate::validators::Validator;
     use strum::IntoEnumIterator;
@@ -674,29 +885,109 @@ mod validate_attributes_tests {
     fn single_attribute_returns_an_error_only_when_it_needs_another() {
         // A new attribute must either work alone or stop the run alone. Otherwise a block with
         // only that attribute would pass without being checked.
-        let needs_no_other: Vec<AttributeName> = Validator::iter()
+        let needs_no_other: Vec<&'static str> = Validator::iter()
             .flat_map(Validator::attributes)
             .copied()
-            .chain([
-                AttributeName::Text(TextAttribute::Name),
-                AttributeName::Text(TextAttribute::Severity),
-            ])
+            .chain(["name", "severity"])
             .collect();
-        let names = TextAttribute::iter()
-            .map(AttributeName::Text)
-            .chain(ReferenceAttribute::iter().map(AttributeName::Reference));
-        for name in names {
-            let attributes = text_attributes(&[(name.as_str(), "")]);
+        for name in Attributes::known_names() {
+            let attributes = text_attributes(&[(&name, "")]);
 
             let result = validate_attributes(&attributes);
 
             assert_eq!(
                 result.is_ok(),
-                needs_no_other.contains(&name),
-                "{}",
-                name.as_str()
+                needs_no_other.contains(&name.as_str()),
+                "{name}"
             );
         }
+    }
+
+    #[test]
+    fn known_names_are_in_alphabetical_order() {
+        // JSON output relies on field declaration order matching alphabetical order.
+        let names = Attributes::known_names();
+        assert!(names.is_sorted(), "{names:?}");
+    }
+}
+
+#[cfg(test)]
+mod attributes_tests {
+    use crate::blocks::{AttributeEntry, Attributes};
+    use std::collections::HashMap;
+
+    #[test]
+    fn unrecognized_name_from_tag_returns_error() {
+        let error = Attributes::from_tag(HashMap::from([("keep-sortd".into(), "".into())]))
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(error, "unrecognized attribute `keep-sortd`");
+    }
+
+    #[test]
+    fn list_on_non_reference_attribute_from_entries_returns_wrong_type_error() {
+        let error = Attributes::from_entries([(
+            "keep-sorted".into(),
+            AttributeEntry::List(vec!["asc".into()]),
+        )])
+        .unwrap_err()
+        .to_string();
+
+        assert_eq!(
+            error,
+            "`keep-sorted` must be a string, `true` or an integer. `affects` and `same-as` can \
+             also be a list of strings"
+        );
+    }
+
+    #[test]
+    fn invalid_type_from_entries_returns_wrong_type_error() {
+        let error = Attributes::from_entries([("affects".into(), AttributeEntry::InvalidType)])
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(
+            error,
+            "`affects` must be a string, `true` or an integer. `affects` and `same-as` can also \
+             be a list of strings"
+        );
+    }
+
+    #[test]
+    fn duplicate_name_from_entries_returns_error() {
+        let error = Attributes::from_entries([
+            ("name".into(), AttributeEntry::Text("first".into())),
+            ("name".into(), AttributeEntry::Text("second".into())),
+        ])
+        .unwrap_err()
+        .to_string();
+
+        assert_eq!(error, "duplicate field `name`");
+    }
+
+    #[test]
+    fn empty_list_from_entries_returns_reference_error() {
+        let error =
+            Attributes::from_entries([("same-as".into(), AttributeEntry::List(Vec::new()))])
+                .unwrap_err()
+                .to_string();
+
+        assert_eq!(error, "`same-as` must list at least one reference");
+    }
+
+    #[test]
+    fn empty_list_on_non_reference_attribute_from_entries_returns_wrong_type_error() {
+        let error =
+            Attributes::from_entries([("keep-sorted".into(), AttributeEntry::List(Vec::new()))])
+                .unwrap_err()
+                .to_string();
+
+        assert_eq!(
+            error,
+            "`keep-sorted` must be a string, `true` or an integer. `affects` and `same-as` can \
+             also be a list of strings"
+        );
     }
 }
 
@@ -842,10 +1133,10 @@ mod block_listing_tests {
                 index: 0,
             }),
         );
-        block.block.attributes.insert_list(
-            ReferenceAttribute::Affects,
-            vec!["a.md:b".to_string(), "c.md".to_string()],
-        )?;
+        block
+            .block
+            .attributes
+            .set_affects_list(vec!["a.md:b".to_string(), "c.md".to_string()]);
         let mut listing = BlockListing::from(&block);
         listing.checks = Some(BTreeSet::from([Validator::KeepSorted]));
 

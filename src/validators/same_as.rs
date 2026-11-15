@@ -1,8 +1,5 @@
 use crate::LineIndex;
-use crate::blocks::{
-    AttributeName, AttributeValue, Attributes, Block, BlockWithContext, FileBlocks,
-    ReferenceAttribute, TextAttribute,
-};
+use crate::blocks::{AttributeValue, Attributes, Block, BlockWithContext, FileBlocks};
 use crate::fs::FileSystem;
 use crate::paths_glob::PathsGlob;
 use crate::repo_path::RepoPath;
@@ -99,10 +96,7 @@ impl Comparison {
         Ok(Self {
             mode: parse_mode(block)?,
             source_records: canonicalize(extract_records(block, file_content)?, &formats),
-            pattern: block
-                .attributes
-                .text(TextAttribute::SameAsPattern)
-                .map(str::to_string),
+            pattern: block.attributes.same_as_pattern().map(str::to_string),
             formats,
         })
     }
@@ -151,7 +145,7 @@ fn block_violations<Fs: FileSystem>(
         targets: Vec::new(),
     });
     let mut violations = Vec::new();
-    if let Some(same_as) = block.attributes.references(ReferenceAttribute::SameAs) {
+    if let Some(same_as) = block.attributes.same_as() {
         for reference in parse_references(file_path, block, same_as)? {
             let violation = reference_violation(
                 targets,
@@ -164,7 +158,7 @@ fn block_violations<Fs: FileSystem>(
             violations.extend(violation);
         }
     }
-    if let Some(glob) = block.attributes.text(TextAttribute::SameAsPaths) {
+    if let Some(glob) = block.attributes.same_as_paths() {
         violations.extend(paths_violation(
             targets.file_system,
             &comparison,
@@ -414,7 +408,7 @@ impl fmt::Display for Record {
 fn extract_records(block: &Block, file_content: &str) -> anyhow::Result<Vec<Record>> {
     extract_records_from(
         block.content.text(file_content),
-        block.attributes.text(TextAttribute::SameAsPattern),
+        block.attributes.same_as_pattern(),
         |index| Some(block.content.position(index, 0).line),
     )
 }
@@ -655,13 +649,13 @@ impl Formats {
 /// Returns an error for an unknown format, for an attribute that mixes the two forms, and for a
 /// group that the block's `same-as-pattern` doesn't have.
 fn parse_formats(block: &Block) -> anyhow::Result<Formats> {
-    let Some(attribute) = block.attributes.text(TextAttribute::SameAsFormat) else {
+    let Some(attribute) = block.attributes.same_as_format() else {
         return Ok(Formats::All(Format::Verbatim));
     };
     if !attribute.contains(':') {
         return Ok(Formats::All(parse_keyword("same-as-format", attribute)?));
     }
-    let groups = pattern_groups(block.attributes.text(TextAttribute::SameAsPattern))?;
+    let groups = pattern_groups(block.attributes.same_as_pattern())?;
     attribute
         .split(',')
         .map(|entry| {
@@ -750,11 +744,8 @@ enum Mode {
 /// Reads a block's `same-as-mode` attribute. Without one, the mode is [`Mode::Sequence`] for a
 /// block without a `same-as-pattern`, and [`Mode::Set`] for a block with one.
 fn parse_mode(block: &Block) -> anyhow::Result<Mode> {
-    let has_pattern = block
-        .attributes
-        .text(TextAttribute::SameAsPattern)
-        .is_some();
-    match block.attributes.text(TextAttribute::SameAsMode) {
+    let has_pattern = block.attributes.same_as_pattern().is_some();
+    match block.attributes.same_as_mode() {
         Some(value) => parse_keyword("same-as-mode", value),
         // Without a pattern, each line is a record. A block of plain lines is usually a copy of
         // its target, so each line must equal the target's line at the same place. A pattern finds
@@ -962,19 +953,18 @@ struct PathsTrace {
 /// Returns an error that quotes the first attribute found without them.
 pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
     require_main(
-        attributes,
+        Validator::SameAs.is_turned_on_by(attributes),
         Validator::SameAs.attributes(),
-        &[TextAttribute::SameAsMode, TextAttribute::SameAsFormat],
+        &[
+            ("same-as-mode", attributes.same_as_mode().is_some()),
+            ("same-as-format", attributes.same_as_format().is_some()),
+        ],
     )?;
     // A target's own pattern picks its values, but only a block with a name can be a target.
     require_main(
-        attributes,
-        &[
-            Validator::SameAs.attributes(),
-            &[AttributeName::Text(TextAttribute::Name)],
-        ]
-        .concat(),
-        &[TextAttribute::SameAsPattern],
+        Validator::SameAs.is_turned_on_by(attributes) || attributes.name().is_some(),
+        &[Validator::SameAs.attributes(), &["name"]].concat(),
+        &[("same-as-pattern", attributes.same_as_pattern().is_some())],
     )
 }
 

@@ -11,8 +11,8 @@ mod same_as;
 
 use crate::Position;
 use crate::blocks::{
-    AttributeName, Attributes, Block, BlockAddress, BlockKey, BlockListing, BlockSeverity,
-    BlockWithContext, FileBlocks, ReferenceAttribute, TextAttribute,
+    Attributes, Block, BlockAddress, BlockKey, BlockListing, BlockSeverity, BlockWithContext,
+    FileBlocks,
 };
 use crate::diff_parser::DiffChanges;
 use crate::fs::FileSystem;
@@ -122,31 +122,36 @@ impl Validator {
 
     /// The attributes that turn this validator on, such as `line-pattern` and
     /// `line-pattern-forbidden` for `line-pattern`. The validator's own name comes first.
-    pub(crate) fn attributes(self) -> &'static [AttributeName] {
+    pub(crate) fn attributes(self) -> &'static [&'static str] {
         match self {
-            Validator::Affects => &[AttributeName::Reference(ReferenceAttribute::Affects)],
-            Validator::CheckAi => &[AttributeName::Text(TextAttribute::CheckAi)],
-            Validator::CheckLua => &[AttributeName::Text(TextAttribute::CheckLua)],
-            Validator::KeepSorted => &[AttributeName::Text(TextAttribute::KeepSorted)],
-            Validator::KeepUnique => &[AttributeName::Text(TextAttribute::KeepUnique)],
-            Validator::LineCount => &[AttributeName::Text(TextAttribute::LineCount)],
-            Validator::LinePattern => &[
-                AttributeName::Text(TextAttribute::LinePattern),
-                AttributeName::Text(TextAttribute::LinePatternForbidden),
-            ],
-            Validator::SameAs => &[
-                AttributeName::Reference(ReferenceAttribute::SameAs),
-                AttributeName::Text(TextAttribute::SameAsPaths),
-            ],
+            Validator::Affects => &["affects"],
+            Validator::CheckAi => &["check-ai"],
+            Validator::CheckLua => &["check-lua"],
+            Validator::KeepSorted => &["keep-sorted"],
+            Validator::KeepUnique => &["keep-unique"],
+            Validator::LineCount => &["line-count"],
+            Validator::LinePattern => &["line-pattern", "line-pattern-forbidden"],
+            Validator::SameAs => &["same-as", "same-as-paths"],
         }
     }
 
     /// Whether `attributes` has one of the [`attributes`](Self::attributes) that turn this
     /// validator on.
     pub(crate) fn is_turned_on_by(self, attributes: &Attributes) -> bool {
-        self.attributes()
-            .iter()
-            .any(|name| attributes.contains(*name))
+        match self {
+            Validator::Affects => attributes.affects().is_some(),
+            Validator::CheckAi => attributes.check_ai().is_some(),
+            Validator::CheckLua => attributes.check_lua().is_some(),
+            Validator::KeepSorted => attributes.keep_sorted().is_some(),
+            Validator::KeepUnique => attributes.keep_unique().is_some(),
+            Validator::LineCount => attributes.line_count().is_some(),
+            Validator::LinePattern => {
+                attributes.line_pattern().is_some() || attributes.line_pattern_forbidden().is_some()
+            }
+            Validator::SameAs => {
+                attributes.same_as().is_some() || attributes.same_as_paths().is_some()
+            }
+        }
     }
 
     /// Creates this validator if `block_with_context` carries one of its attributes. Returns
@@ -999,14 +1004,15 @@ enum PatternContent<'c> {
 fn block_content_for_pattern<'c>(
     block_with_context: &'c BlockWithContext,
     file_content: &'c str,
-    pattern_attribute: TextAttribute,
+    pattern_attribute: &str,
+    pattern: Option<&str>,
 ) -> anyhow::Result<PatternContent<'c>> {
     let content = block_with_context.block.content.text(file_content);
-    let Some(pattern) = block_with_context.block.attributes.text(pattern_attribute) else {
+    let Some(pattern) = pattern else {
         return Ok(PatternContent::Whole(content.trim()));
     };
     let re = compile_pattern(pattern)
-        .with_context(|| format!("{} is not a valid regex", pattern_attribute.as_str()))?;
+        .with_context(|| format!("{pattern_attribute} is not a valid regex"))?;
     Ok(PatternContent::Matches(
         re.captures_iter(content)
             .filter_map(|captures| value_match(&re, &captures).map(|matched| matched.as_str()))
@@ -1015,34 +1021,22 @@ fn block_content_for_pattern<'c>(
     ))
 }
 
-/// Checks that each attribute in `extras` comes with at least one attribute in `main`, such as
-/// [`Validator::attributes`].
+/// Checks that each extra attribute comes with at least one main attribute when present.
 ///
 /// # Errors
-/// Returns an error that quotes the first attribute in `extras` found without one in `main`, such
-/// as ``"`keep-sorted-pattern` without `keep-sorted`"``.
+/// Returns an error that quotes the first attribute in `extras` that is present when `has_main` is
+/// false, such as ``"`keep-sorted-pattern` without `keep-sorted`"``.
 ///
 /// # Panics
 /// Panics if `main` is empty.
-fn require_main(
-    attributes: &Attributes,
-    main: &[AttributeName],
-    extras: &[TextAttribute],
-) -> anyhow::Result<()> {
+fn require_main(has_main: bool, main: &[&str], extras: &[(&str, bool)]) -> anyhow::Result<()> {
     // Without a main attribute, no validator reads the extra one, so the block would pass as if it
     // were not there.
-    if main.iter().any(|name| attributes.contains(*name)) {
+    if has_main {
         return Ok(());
     }
-    if let Some(extra) = extras
-        .iter()
-        .find(|name| attributes.contains(AttributeName::Text(**name)))
-    {
-        let extra = extra.as_str();
-        let main: Vec<String> = main
-            .iter()
-            .map(|name| format!("`{}`", name.as_str()))
-            .collect();
+    if let Some((extra, _)) = extras.iter().find(|(_, present)| *present) {
+        let main: Vec<String> = main.iter().map(|name| format!("`{name}`")).collect();
         let (last, others) = main.split_last().expect("a validator has a main attribute");
         if others.is_empty() {
             bail!("`{extra}` without {last}");
@@ -1220,8 +1214,7 @@ mod target_files_tests {
 #[cfg(test)]
 mod tests {
     use crate::blocks::{
-        AttributeName, Attributes, Block, BlockAddress, BlockSeverity, BlockWithContext, Content,
-        Declaration, ReferenceAttribute, TextAttribute,
+        Attributes, Block, BlockAddress, BlockSeverity, BlockWithContext, Content, Declaration,
     };
     use crate::fs::FileSystem;
     use crate::fs::test_utils::FakeFileSystem;
@@ -1775,12 +1768,8 @@ print("target")
             ("same-as", Validator::SameAs),
             ("same-as-paths", Validator::SameAs),
         ];
-        let names = TextAttribute::iter()
-            .map(AttributeName::Text)
-            .chain(ReferenceAttribute::iter().map(AttributeName::Reference));
-        for name in names {
-            let attribute = name.as_str();
-            let attributes = text_attributes(&[(attribute, "")]);
+        for attribute in Attributes::known_names() {
+            let attributes = text_attributes(&[(&attribute, "")]);
 
             let turned_on: Vec<Validator> = Validator::iter()
                 .filter(|validator| validator.is_turned_on_by(&attributes))
@@ -1800,11 +1789,7 @@ print("target")
         // An error such as "`keep-sorted-format` without `keep-sorted`" shows the validator's own
         // name first.
         for validator in Validator::iter() {
-            assert_eq!(
-                validator.attributes()[0].as_str(),
-                validator.as_str(),
-                "{validator}"
-            );
+            assert_eq!(validator.attributes()[0], validator.as_str(), "{validator}");
         }
     }
 

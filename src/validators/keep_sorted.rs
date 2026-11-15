@@ -1,4 +1,4 @@
-use crate::blocks::{Attributes, Block, BlockWithContext, TextAttribute};
+use crate::blocks::{Attributes, Block, BlockWithContext};
 use crate::repo_path::RepoPath;
 use crate::validators::{
     SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
@@ -66,11 +66,7 @@ impl SyncValidator for KeepSortedValidator {
         let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
-                if let Some(keep_sorted) = block_with_context
-                    .block
-                    .attributes
-                    .text(TextAttribute::KeepSorted)
-                {
+                if let Some(keep_sorted) = block_with_context.block.attributes.keep_sorted() {
                     let located = |error: anyhow::Error| {
                         anyhow!("{error} in {}", block_with_context.block.label(file_path))
                     };
@@ -84,7 +80,7 @@ impl SyncValidator for KeepSortedValidator {
                     let pattern = block_with_context
                         .block
                         .attributes
-                        .text(TextAttribute::KeepSortedPattern)
+                        .keep_sorted_pattern()
                         .unwrap_or_default();
                     let re = if pattern.is_empty() {
                         None
@@ -95,7 +91,7 @@ impl SyncValidator for KeepSortedValidator {
                     let format_raw = block_with_context
                         .block
                         .attributes
-                        .text(TextAttribute::KeepSortedFormat)
+                        .keep_sorted_format()
                         .map(str::trim)
                         .unwrap_or_default();
                     let sort_format = if format_raw.is_empty() {
@@ -226,11 +222,17 @@ struct KeepSortedLine {
 /// Returns an error that quotes the first of the two attributes found without it.
 pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
     require_main(
-        attributes,
+        Validator::KeepSorted.is_turned_on_by(attributes),
         Validator::KeepSorted.attributes(),
         &[
-            TextAttribute::KeepSortedPattern,
-            TextAttribute::KeepSortedFormat,
+            (
+                "keep-sorted-pattern",
+                attributes.keep_sorted_pattern().is_some(),
+            ),
+            (
+                "keep-sorted-format",
+                attributes.keep_sorted_format().is_some(),
+            ),
         ],
     )
 }

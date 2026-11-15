@@ -362,7 +362,7 @@ impl BlockEnd {
 
 #[cfg(test)]
 mod tests {
-    use crate::blocks::{Attributes, Block, BlockSeverity, Content, Declaration, TextAttribute};
+    use crate::blocks::{Attributes, Block, BlockSeverity, Content, Declaration};
     use crate::language_parsers::LanguageParser;
     use crate::test_utils::text_attributes;
     use crate::{Position, language_parsers, test_utils};
@@ -1207,10 +1207,7 @@ println!("hello2");
         "#;
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks[0].name(), Some("red"));
-        assert_eq!(
-            blocks[0].attributes.text(TextAttribute::CheckAi),
-            Some("sweet")
-        );
+        assert_eq!(blocks[0].attributes.check_ai(), Some("sweet"));
         Ok(())
     }
 
@@ -1222,10 +1219,7 @@ println!("hello2");
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks[0].attributes.text(TextAttribute::CheckAi),
-            Some("He said \"Hello\"")
-        );
+        assert_eq!(blocks[0].attributes.check_ai(), Some("He said \"Hello\""));
         Ok(())
     }
 
@@ -1285,14 +1279,8 @@ println!("hello2");
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks[0].attributes.text(TextAttribute::KeepSorted),
-            Some("")
-        );
-        assert_eq!(
-            blocks[0].attributes.text(TextAttribute::KeepUnique),
-            Some("")
-        );
+        assert_eq!(blocks[0].attributes.keep_sorted(), Some(""));
+        assert_eq!(blocks[0].attributes.keep_unique(), Some(""));
         Ok(())
     }
 
@@ -1322,10 +1310,7 @@ println!("hello2");
         "#;
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks[0].name(), Some("foo"));
-        assert_eq!(
-            blocks[0].attributes.text(TextAttribute::CheckAi),
-            Some("bar")
-        );
+        assert_eq!(blocks[0].attributes.check_ai(), Some("bar"));
         Ok(())
     }
 
@@ -1340,18 +1325,9 @@ println!("hello2");
         "#;
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks[0].name(), Some("red"));
-        assert_eq!(
-            blocks[0].attributes.text(TextAttribute::KeepSorted),
-            Some("")
-        );
-        assert_eq!(
-            blocks[0].attributes.text(TextAttribute::CheckAi),
-            Some("center")
-        );
-        assert_eq!(
-            blocks[0].attributes.text(TextAttribute::KeepUnique),
-            Some("")
-        );
+        assert_eq!(blocks[0].attributes.keep_sorted(), Some(""));
+        assert_eq!(blocks[0].attributes.check_ai(), Some("center"));
+        assert_eq!(blocks[0].attributes.keep_unique(), Some(""));
         Ok(())
     }
 
@@ -1381,7 +1357,7 @@ println!("hello2");
         let blocks = parse_all(&mut parser, contents)?;
 
         assert_eq!(
-            blocks[0].attributes.text(TextAttribute::CheckAi),
+            blocks[0].attributes.check_ai(),
             Some("He said &quot;Hello&quot;")
         );
         Ok(())
@@ -1395,10 +1371,7 @@ println!("hello2");
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks[0].attributes.text(TextAttribute::KeepUnique),
-            Some(r"(?P<value>\w+)")
-        );
+        assert_eq!(blocks[0].attributes.keep_unique(), Some(r"(?P<value>\w+)"));
         Ok(())
     }
 
@@ -1412,10 +1385,7 @@ println!("hello2");
         "#;
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks[0].name(), Some("🦀"));
-        assert_eq!(
-            blocks[0].attributes.text(TextAttribute::CheckAi),
-            Some("Rust")
-        );
+        assert_eq!(blocks[0].attributes.check_ai(), Some("Rust"));
         Ok(())
     }
 

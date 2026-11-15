@@ -1,4 +1,4 @@
-use crate::blocks::{Attributes, Block, BlockWithContext, TextAttribute};
+use crate::blocks::{Attributes, Block, BlockWithContext};
 use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{
@@ -33,7 +33,7 @@ impl SyncValidator for LineCountValidator {
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
                 let block = &block_with_context.block;
-                let Some(expr) = block.attributes.text(TextAttribute::LineCount) else {
+                let Some(expr) = block.attributes.line_count() else {
                     continue;
                 };
                 let (op, expected) = parse_constraint(expr).map_err(|e| anyhow!(
@@ -79,7 +79,7 @@ impl SyncValidator for LineCountValidator {
 fn compile_count_pattern(file_path: &RepoPath, block: &Block) -> anyhow::Result<Option<Regex>> {
     block
         .attributes
-        .text(TextAttribute::LineCountPattern)
+        .line_count_pattern()
         .map(|pattern| {
             compile_pattern(pattern).with_context(|| {
                 format!("invalid line-count-pattern in {}", block.label(file_path))
@@ -189,9 +189,12 @@ struct LineCountLine {
 /// Returns an error that quotes `line-count-pattern` when it comes without `line-count`.
 pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
     require_main(
-        attributes,
+        Validator::LineCount.is_turned_on_by(attributes),
         Validator::LineCount.attributes(),
-        &[TextAttribute::LineCountPattern],
+        &[(
+            "line-count-pattern",
+            attributes.line_count_pattern().is_some(),
+        )],
     )
 }
 

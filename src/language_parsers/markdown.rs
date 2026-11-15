@@ -362,7 +362,7 @@ fn title_start(definition: &[u8]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blocks::{Block, BlockSeverity, Content, Declaration, TextAttribute};
+    use crate::blocks::{Block, BlockSeverity, Content, Declaration};
     use crate::test_utils::text_attributes;
     use crate::{Position, test_utils};
 
@@ -810,10 +810,7 @@ Text
             .map(|block| {
                 (
                     block.name().expect("a named block"),
-                    block
-                        .attributes
-                        .text(TextAttribute::KeepSorted)
-                        .expect("a keep-sorted block"),
+                    block.attributes.keep_sorted().expect("a keep-sorted block"),
                 )
             })
             .collect();
