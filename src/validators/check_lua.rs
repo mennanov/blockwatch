@@ -5,7 +5,7 @@ use crate::symbol_path::SymbolPath;
 use crate::target_reference::TargetKind;
 use crate::validators::{
     AsyncValidator, PatternContent, TargetFiles, ValidationContext, ValidationReport, Validator,
-    ValidatorTrace, ValidatorType, Violation, block_content_for_pattern, parse_keyword,
+    ValidatorTrace, ValidatorType, Violation, block_content_for_pattern, parse_keyword_value,
     require_main,
 };
 use anyhow::{Context, anyhow};
@@ -66,7 +66,8 @@ impl LuaMode {
             return Ok(Self::Sandboxed);
         }
         // A value that is not valid Unicode matches no mode, and shows its replacement characters.
-        parse_keyword(LUA_STDLIB_ENV_VAR, &value.to_string_lossy())
+        parse_keyword_value(&value.to_string_lossy())
+            .map_err(|reason| anyhow!("invalid {LUA_STDLIB_ENV_VAR} {reason}"))
     }
 
     /// Starts a Lua VM with the libraries of this mode.

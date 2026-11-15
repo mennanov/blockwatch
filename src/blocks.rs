@@ -5,8 +5,7 @@ use crate::diff_parser::{self, LineChange, LineChangeKind, LineChanges};
 use crate::repo_path::RepoPath;
 use crate::target_reference::TargetReference;
 use crate::validators::{
-    Constraint, Formats, Mode, SortFormat, SortOrder, TargetPaths, Validator, compile_pattern,
-    parse_timeout,
+    Constraint, Formats, Mode, SortFormat, SortOrder, TargetPaths, Validator, parse_timeout,
 };
 use crate::virtual_blocks::ConfigEntry;
 use anyhow::{Context, anyhow, bail};
@@ -306,7 +305,14 @@ impl ParseAttribute for Duration {
 
 impl ParseAttribute for Regex {
     fn parse_attribute(raw: &str) -> anyhow::Result<Self> {
-        compile_pattern(raw)
+        // A formatter that wraps long comments can break a tag inside a pattern. Where it breaks at
+        // a space, the space is gone, so the line break can't be turned back into the text it
+        // replaced. Left in, the line break makes the pattern match no line, and a rule such as
+        // keep-sorted then checks nothing.
+        if raw.contains('\n') {
+            bail!("the pattern has a line break. Put the pattern on one line");
+        }
+        Ok(Self::new(raw)?)
     }
 }
 
@@ -315,7 +321,7 @@ impl ParseAttribute for Option<Regex> {
         if raw.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(compile_pattern(raw)?))
+            Ok(Some(Regex::parse_attribute(raw)?))
         }
     }
 }
@@ -1192,6 +1198,15 @@ mod attributes_tests {
         assert_eq!(lower, same_lower);
         assert_ne!(lower, upper);
         assert_ne!(lower, desc);
+    }
+
+    #[test]
+    fn pattern_with_an_escaped_line_break_compiles() -> anyhow::Result<()> {
+        assert!(
+            super::ParseAttribute::parse_attribute(r"a\nb")
+                .map(|re: regex::Regex| re.is_match("a\nb"))?
+        );
+        Ok(())
     }
 }
 
