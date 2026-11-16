@@ -2,7 +2,7 @@ use crate::blocks::{Block, BlockWithContext};
 use crate::repo_path::RepoPath;
 use crate::validators::{
     SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
-    ViolationRange, regex_value, trimmed_line_value,
+    ViolationRange, line_value,
 };
 use crate::{Position, validators};
 use serde::Serialize;
@@ -23,72 +23,72 @@ impl SyncValidator for KeepUniqueValidator {
         let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
-                let Some(re) = block_with_context.block.attributes.keep_unique() else {
+                let block = &block_with_context.block;
+                let Some(pattern) = block.attributes.keep_unique() else {
                     continue;
                 };
-                let mut trace = context
-                    .traces_requested
-                    .then(|| KeepUniqueTrace { lines: Vec::new() });
-                let mut block_violations = Vec::new();
-                let mut seen: HashSet<&str> = HashSet::new();
-                for (line_number, line) in block_with_context
-                    .block
-                    .content
-                    .text(&file_blocks.file_content)
-                    .lines()
-                    .enumerate()
-                {
-                    let line_match = match re {
-                        None => trimmed_line_value(line),
-                        Some(re) => regex_value(line, re),
-                    };
-                    if let Some(trace) = &mut trace
-                        && !line.trim().is_empty()
-                    {
-                        trace.push(
-                            block_with_context
-                                .block
-                                .content
-                                .position(line_number, 0)
-                                .line,
-                            line.trim(),
-                            line_match.as_ref().map(|(value, _)| *value),
-                        );
-                    }
-                    if let Some((matched_line, line_range)) = line_match
-                        && !seen.insert(matched_line)
-                    {
-                        // `line_range` is a 0-based column range within the content line, which is
-                        // not where that line starts in the source: content begins where the start
-                        // tag's comment ends.
-                        let violation_start = block_with_context
-                            .block
-                            .content
-                            .position(line_number, line_range.start);
-                        let line_character_end = violation_start.character + line_range.len();
-                        block_violations.push(create_violation(
-                            file_path,
-                            &block_with_context.block,
-                            line.trim(),
-                            violation_start.line,
-                            violation_start.character,
-                            line_character_end,
-                        ));
-                        break;
-                    }
-                }
-                report.add_all(file_path, &block_with_context.block, block_violations);
+                let (violation, trace) = check_block(
+                    file_path,
+                    block,
+                    &file_blocks.file_content,
+                    pattern,
+                    context.traces_requested,
+                );
+                report.add_all(file_path, block, violation.into_iter().collect());
                 if let Some(trace) = trace {
-                    report.add_trace(
-                        file_path,
-                        &block_with_context.block,
-                        ValidatorTrace::KeepUnique(trace),
-                    );
+                    report.add_trace(file_path, block, ValidatorTrace::KeepUnique(trace));
                 }
             }
         }
         Ok(report)
     }
+}
+
+/// Checks that no two non-empty lines of `block` hold the same value under `pattern`.
+///
+/// Stops at the first repeat and returns its violation. Includes a trace of the lines read before
+/// stopping when `traces_requested` is true.
+fn check_block(
+    file_path: &RepoPath,
+    block: &Block,
+    file_content: &str,
+    pattern: Option<&regex::Regex>,
+    traces_requested: bool,
+) -> (Option<Violation>, Option<KeepUniqueTrace>) {
+    let mut trace = traces_requested.then(|| KeepUniqueTrace { lines: Vec::new() });
+    let mut seen: HashSet<&str> = HashSet::new();
+    for (line_number, line) in block.content.text(file_content).lines().enumerate() {
+        let trimmed = line.trim();
+        let line_match = line_value(line, pattern);
+        if let Some(trace) = &mut trace
+            && !trimmed.is_empty()
+        {
+            trace.push(
+                block.content.position(line_number, 0).line,
+                trimmed,
+                line_match.as_ref().map(|(value, _)| *value),
+            );
+        }
+        let Some((matched_line, line_range)) = line_match else {
+            continue;
+        };
+        if !seen.insert(matched_line) {
+            // `line_range` is a 0-based column range within the content line, which is not where
+            // that line starts in the source: content begins where the start tag's comment ends.
+            let violation_start = block.content.position(line_number, line_range.start);
+            let line_character_end = violation_start.character + line_range.len();
+            let violation = create_violation(
+                file_path,
+                block,
+                trimmed,
+                violation_start.line,
+                violation_start.character,
+                line_character_end,
+            );
+            return (Some(violation), trace);
+        }
+    }
+    (None, trace)
 }
 
 /// What `keep-unique` saw in one block.
@@ -535,10 +535,10 @@ C
 # </block>"#,
         );
 
-        let report = KeepUniqueValidator.validate(context)?;
+        let report = KeepUniqueValidator.validate(Arc::clone(&context))?;
 
         // The block without a keep-unique attribute is not checked, so it records nothing.
-        assert_eq!(checked_lines(&report), vec![1, 5]);
+        assert_eq!(checked_lines(&context, &report), vec![1, 5]);
         assert_eq!(violation_count(&report), 1);
         Ok(())
     }

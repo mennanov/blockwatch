@@ -558,10 +558,10 @@ anything
 # </block>"#,
         );
 
-        let report = LinePatternValidator.validate(context)?;
+        let report = LinePatternValidator.validate(Arc::clone(&context))?;
 
         // The block without a line-pattern attribute is not checked, so it records nothing.
-        assert_eq!(checked_lines(&report), vec![1, 4]);
+        assert_eq!(checked_lines(&context, &report), vec![1, 4]);
         assert_eq!(violation_count(&report), 1);
         Ok(())
     }

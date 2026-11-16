@@ -1265,14 +1265,14 @@ println!("hello2");
     fn attributes_with_an_empty_quoted_value_return_empty_strings() -> anyhow::Result<()> {
         let mut parser = create_parser();
         let contents = r#"
-        // <block name="" check-ai="" keep-sorted=''>
+        // <block name="" keep-unique="" keep-sorted=''>
         fn foo() {}
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(
             blocks[0].attributes,
-            text_attributes(&[("name", ""), ("check-ai", ""), ("keep-sorted", "")])
+            text_attributes(&[("name", ""), ("keep-unique", ""), ("keep-sorted", "")])
         );
         Ok(())
     }

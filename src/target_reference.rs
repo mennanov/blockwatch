@@ -1,7 +1,6 @@
 //! The reference to a block, a symbol or a file that `affects`, `check-lua` and `same-as` write in
 //! an attribute, and the target it points at.
 
-use crate::blocks::AttributeValue;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
 use anyhow::{Context, bail};
@@ -26,9 +25,7 @@ pub(crate) enum TargetReference {
 }
 
 impl TargetReference {
-    /// Parses the references in an attribute of the reference-based validators (`affects`,
-    /// `check-lua`, `same-as`), in the order they are written. A text value holds them separated
-    /// by commas. A list holds one in each entry, so an entry can have a comma.
+    /// Parses comma-separated references from `text`, in the order they are written.
     ///
     /// A reference can take one of three mutually exclusive forms:
     /// - `file#/path` or `#/path`: addresses a symbol by its symbol path.
@@ -41,32 +38,32 @@ impl TargetReference {
     /// A reference whose block name or symbol path is empty (`file.rs:` or `file.json#`) is
     /// rejected rather than treated as a whole-file reference, avoiding silently turning a syntax
     /// typo into a much coarser rule.
-    pub(crate) fn parse_list(value: &AttributeValue) -> anyhow::Result<Vec<Self>> {
-        match value {
-            AttributeValue::Text(text) => text.split(',').map(Self::parse).collect(),
-            AttributeValue::List(entries) => entries
-                .iter()
-                .enumerate()
-                .map(|(index, entry)| {
-                    Self::parse(entry).with_context(|| format!("entry {} of the list", index + 1))
-                })
-                .collect(),
-        }
+    pub(crate) fn parse_separated(text: &str) -> anyhow::Result<Vec<Self>> {
+        text.split(',').map(Self::parse).collect()
     }
 
-    /// Parses a single target reference string. See [`Self::parse_list`] for the forms it takes.
+    /// Parses target references from list `entries`, one reference per entry so an entry can have a
+    /// comma.
+    pub(crate) fn parse_list(entries: &[String]) -> anyhow::Result<Vec<Self>> {
+        entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                Self::parse(entry).with_context(|| format!("entry {} of the list", index + 1))
+            })
+            .collect()
+    }
+
+    /// Parses a single target reference string. See [`Self::parse_separated`] for the forms it takes.
     pub(crate) fn parse(raw: &str) -> anyhow::Result<Self> {
         let reference = raw.trim();
         if reference.is_empty() {
-            bail!("invalid target reference: \"{reference}\"");
+            bail!("empty target reference");
         }
         // A formatter that wraps long comments can break a tag inside a reference. The file or
         // block would then not be found, and that error would not say why.
         if reference.contains('\n') {
-            bail!(
-                "invalid target reference: \"{reference}\" has a line break. Put the reference on \
-                 one line"
-            );
+            bail!("\"{reference}\" has a line break. Put the reference on one line");
         }
         // The `#` is checked first, so a path can hold a `:`, such as the `:root` of a CSS rule.
         if let Some((file_part, _)) = reference.split_once('#') {
@@ -111,11 +108,10 @@ fn parse_symbol_reference(
     let file_part = file_part.trim();
     if fragment == "#" {
         if file_part.is_empty() {
-            bail!("invalid target reference: \"{reference}\"");
+            bail!("\"#\" has no symbol path after '#'");
         }
         bail!(
-            "invalid target reference: \"{reference}\" has no symbol path after '#'; \
-             drop the '#' to reference the whole file"
+            "\"{reference}\" has no symbol path after '#'; drop the '#' to reference the whole file"
         );
     }
     let file = parse_optional_repo_path(file_part)?;
@@ -133,8 +129,7 @@ fn parse_block_reference(
     let name_part = name_part.trim();
     if name_part.is_empty() {
         bail!(
-            "invalid target reference: \"{reference}\" has no block name after ':'; \
-             drop the ':' to reference the whole file"
+            "\"{reference}\" has no block name after ':'; drop the ':' to reference the whole file"
         );
     }
     let file = parse_optional_repo_path(file_part)?;
@@ -201,19 +196,18 @@ impl fmt::Display for ResolvedTarget {
 #[cfg(test)]
 mod parse_target_references_tests {
     use super::TargetReference;
-    use crate::blocks::AttributeValue;
     use crate::repo_path::RepoPath;
     use crate::symbol_path::SymbolPath;
 
     /// The references in `value`, written as a tag writes them.
     fn parse_text(value: &str) -> anyhow::Result<Vec<TargetReference>> {
-        TargetReference::parse_list(&AttributeValue::Text(value.to_string()))
+        TargetReference::parse_separated(value)
     }
 
     /// The references in the list `entries`.
     fn parse_entries(entries: &[&str]) -> anyhow::Result<Vec<TargetReference>> {
-        let entries = entries.iter().map(|entry| entry.to_string()).collect();
-        TargetReference::parse_list(&AttributeValue::List(entries))
+        let entries: Vec<String> = entries.iter().map(|entry| entry.to_string()).collect();
+        TargetReference::parse_list(&entries)
     }
 
     /// A `file:name` reference, for the expected values below.
@@ -254,7 +248,7 @@ mod parse_target_references_tests {
         let error = parse_entries(&["a.md", " "]).unwrap_err();
         assert_eq!(
             format!("{error:#}"),
-            "entry 2 of the list: invalid target reference: \"\""
+            "entry 2 of the list: empty target reference"
         );
     }
 
@@ -362,8 +356,7 @@ mod parse_target_references_tests {
         let err = parse_text("config.json:").unwrap_err();
         assert_eq!(
             err.to_string(),
-            "invalid target reference: \"config.json:\" has no block name after ':'; \
-             drop the ':' to reference the whole file"
+            "\"config.json:\" has no block name after ':'; drop the ':' to reference the whole file"
         );
     }
 
@@ -445,9 +438,12 @@ mod parse_target_references_tests {
         let err = parse_text("package.json#").unwrap_err();
         assert_eq!(
             err.to_string(),
-            "invalid target reference: \"package.json#\" has no symbol path after '#'; \
-             drop the '#' to reference the whole file"
+            "\"package.json#\" has no symbol path after '#'; drop the '#' to reference the whole \
+             file"
         );
-        assert!(parse_text("#").is_err());
+        assert_eq!(
+            parse_text("#").unwrap_err().to_string(),
+            "\"#\" has no symbol path after '#'"
+        );
     }
 }

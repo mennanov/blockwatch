@@ -16,8 +16,8 @@ pub(crate) use same_as::{Formats, Mode, TargetPaths};
 
 use crate::Position;
 use crate::blocks::{
-    Attributes, Block, BlockAddress, BlockKey, BlockListing, BlockSeverity, BlockWithContext,
-    FileBlocks,
+    AttributeName, Attributes, Block, BlockAddress, BlockKey, BlockListing, BlockSeverity,
+    BlockWithContext, FileBlocks,
 };
 use crate::diff_parser::DiffChanges;
 use crate::fs::FileSystem;
@@ -127,16 +127,19 @@ impl Validator {
 
     /// The attributes that turn this validator on, such as `line-pattern` and
     /// `line-pattern-forbidden` for `line-pattern`. The validator's own name comes first.
-    pub(crate) fn attributes(self) -> &'static [&'static str] {
+    pub(crate) fn attributes(self) -> &'static [AttributeName] {
         match self {
-            Validator::Affects => &["affects"],
-            Validator::CheckAi => &["check-ai"],
-            Validator::CheckLua => &["check-lua"],
-            Validator::KeepSorted => &["keep-sorted"],
-            Validator::KeepUnique => &["keep-unique"],
-            Validator::LineCount => &["line-count"],
-            Validator::LinePattern => &["line-pattern", "line-pattern-forbidden"],
-            Validator::SameAs => &["same-as", "same-as-paths"],
+            Validator::Affects => &[AttributeName::Affects],
+            Validator::CheckAi => &[AttributeName::CheckAi],
+            Validator::CheckLua => &[AttributeName::CheckLua],
+            Validator::KeepSorted => &[AttributeName::KeepSorted],
+            Validator::KeepUnique => &[AttributeName::KeepUnique],
+            Validator::LineCount => &[AttributeName::LineCount],
+            Validator::LinePattern => &[
+                AttributeName::LinePattern,
+                AttributeName::LinePatternForbidden,
+            ],
+            Validator::SameAs => &[AttributeName::SameAs, AttributeName::SameAsPaths],
         }
     }
 
@@ -523,7 +526,12 @@ pub(crate) struct ValidationContext {
 #[cfg(test)]
 impl std::fmt::Debug for ValidationContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ValidationContext").finish_non_exhaustive()
+        f.debug_struct("ValidationContext")
+            .field("blocks", &self.blocks)
+            .field("line_changes", &self.line_changes)
+            .field("virtual_blocks", &self.virtual_blocks)
+            .field("traces_requested", &self.traces_requested)
+            .finish_non_exhaustive()
     }
 }
 
@@ -945,49 +953,39 @@ fn value_match<'h>(
     }
 }
 
-/// Returns the non-empty trimmed content of `line` together with its 0-based character-column
-/// range within `line`, or `None` for a blank line. The range is measured in characters rather than
-/// bytes and is half-open: `[start, end)`.
-fn trimmed_line_value(line: &str) -> Option<(&str, Range<usize>)> {
+/// Returns the substring compared on `line` and its 0-based character range `[start, end)` in
+/// `line`.
+///
+/// With `pattern`, matches the trimmed line (see [`value_match`]). Matching after trimming keeps
+/// `^` and `$` working on indented lines. Without `pattern`, returns the trimmed line. Returns
+/// `None` for a blank line, a line `pattern` does not match, or an empty match.
+fn line_value<'a>(
+    line: &'a str,
+    pattern: Option<&regex::Regex>,
+) -> Option<(&'a str, Range<usize>)> {
     let trimmed_line = line.trim();
     if trimmed_line.is_empty() {
-        None
-    } else {
-        let byte_offset = trimmed_line.as_ptr() as usize - line.as_ptr() as usize;
-        #[expect(clippy::string_slice, reason = "`trimmed_line` is a slice of `line`")]
-        let start = line[..byte_offset].chars().count();
-        let end = start + trimmed_line.chars().count();
-        Some((trimmed_line, start..end))
-    }
-}
-
-/// Returns the substring `regex` selects from `line` (see [`value_match`]) together with its
-/// 0-based character-column range `[start, end)`, or `None` when the line yields no value to compare.
-///
-/// The regex is applied to the trimmed line so that anchors such as `^` and `$` refer to the entry
-/// itself rather than to its indentation, which is what makes a pattern keep working once the
-/// entries are nested inside a list or a block of code.
-///
-/// A blank line, an unmatched line, and a line whose match gives no value or an empty one all return
-/// `None`: none of them carry a value.
-fn regex_value<'a>(line: &'a str, regex: &regex::Regex) -> Option<(&'a str, Range<usize>)> {
-    let trimmed_line = line.trim();
-    if trimmed_line.is_empty() {
-        return None;
-    }
-    let caps = regex.captures(trimmed_line)?;
-    let m = value_match(regex, &caps)?;
-    if m.is_empty() {
         return None;
     }
     let trimmed_byte_offset = trimmed_line.as_ptr() as usize - line.as_ptr() as usize;
+    let (value, match_offset) = match pattern {
+        None => (trimmed_line, 0),
+        Some(regex) => {
+            let caps = regex.captures(trimmed_line)?;
+            let matched = value_match(regex, &caps)?;
+            if matched.is_empty() {
+                return None;
+            }
+            (matched.as_str(), matched.start())
+        }
+    };
     #[expect(
         clippy::string_slice,
-        reason = "`m` is a match in `trimmed_line`, a slice of `line`"
+        reason = "`value` is a slice inside `trimmed_line`, which is inside `line`"
     )]
-    let start = line[..trimmed_byte_offset + m.start()].chars().count();
-    let end = start + m.as_str().chars().count();
-    Some((m.as_str(), start..end))
+    let start = line[..trimmed_byte_offset + match_offset].chars().count();
+    let end = start + value.chars().count();
+    Some((value, start..end))
 }
 
 /// The content for the `*-pattern` attribute extracted from the block.
@@ -1024,7 +1022,11 @@ fn block_content_for_pattern<'c>(
 ///
 /// # Panics
 /// Panics if `main` is empty.
-fn require_main(has_main: bool, main: &[&str], extras: &[(&str, bool)]) -> anyhow::Result<()> {
+fn require_main(
+    has_main: bool,
+    main: &[AttributeName],
+    extras: &[(AttributeName, bool)],
+) -> anyhow::Result<()> {
     // Without a main attribute, no validator reads the extra one, so the block would pass as if it
     // were not there.
     if has_main {
@@ -1054,7 +1056,11 @@ where
         let (last, others) = keywords
             .split_last()
             .expect("a keyword type has at least one keyword");
-        anyhow!("\"{value}\" (expected {} or {last})", others.join(", "))
+        if others.is_empty() {
+            anyhow!("\"{value}\" (expected {last})")
+        } else {
+            anyhow!("\"{value}\" (expected {} or {last})", others.join(", "))
+        }
     })
 }
 
@@ -1142,6 +1148,43 @@ mod parse_number_tests {
 }
 
 #[cfg(test)]
+mod parse_keyword_value_tests {
+    use super::parse_keyword_value;
+    use strum_macros::{Display, EnumIter, EnumString};
+
+    #[derive(Debug, PartialEq, Eq, Display, EnumString, EnumIter)]
+    #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
+    enum SingleKeyword {
+        Only,
+    }
+
+    #[derive(Debug, PartialEq, Eq, Display, EnumString, EnumIter)]
+    #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
+    enum TwoKeywords {
+        First,
+        Second,
+    }
+
+    #[test]
+    fn single_keyword_error_omits_or_connector() {
+        let error = parse_keyword_value::<SingleKeyword>("other")
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(error, "\"other\" (expected only)");
+    }
+
+    #[test]
+    fn two_keywords_error_lists_both_options() {
+        let error = parse_keyword_value::<TwoKeywords>("other")
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(error, "\"other\" (expected first or second)");
+    }
+}
+
+#[cfg(test)]
 mod target_files_tests {
     use super::*;
     use crate::fs::test_utils::FakeFileSystem;
@@ -1197,7 +1240,7 @@ mod tests {
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
     use crate::settings::{BlockSelection, ValidatorSelection};
-    use crate::test_utils::{text_attributes, validation_context, virtual_block};
+    use crate::test_utils::{validation_context, virtual_block};
     use crate::validators::test_utils::{merge_validation_contexts, with_virtual_blocks};
     use crate::validators::{
         AsyncValidator, SyncValidator, ValidationContext, ValidationReport, Validator,
@@ -1744,9 +1787,7 @@ print("target")
             ("same-as", Validator::SameAs),
             ("same-as-paths", Validator::SameAs),
         ];
-        for (attribute, value) in Attributes::sample_values() {
-            let attributes = text_attributes(&[(&attribute, &value)]);
-
+        for (attribute, attributes) in crate::blocks::test_utils::sample_attributes() {
             let turned_on: Vec<Validator> = Validator::iter()
                 .filter(|validator| validator.is_turned_on_by(&attributes))
                 .collect();
@@ -1765,7 +1806,11 @@ print("target")
         // An error such as "`keep-sorted-format` without `keep-sorted`" shows the validator's own
         // name first.
         for validator in Validator::iter() {
-            assert_eq!(validator.attributes()[0], validator.as_str(), "{validator}");
+            assert_eq!(
+                validator.attributes()[0].as_str(),
+                validator.as_str(),
+                "{validator}"
+            );
         }
     }
 
@@ -1952,11 +1997,26 @@ mod test_utils {
     use std::sync::Arc;
 
     /// The start line of every block a validator reported checking, in the order it checked them.
-    pub(super) fn checked_lines(report: &ValidationReport) -> Vec<usize> {
+    ///
+    /// Panics if any checked block is missing from `context`.
+    pub(super) fn checked_lines(
+        context: &ValidationContext,
+        report: &ValidationReport,
+    ) -> Vec<usize> {
         report
             .checked_blocks
             .iter()
-            .map(|(_, key)| key.start_line())
+            .map(|(file, key)| {
+                context.blocks()[file]
+                    .blocks_with_context
+                    .iter()
+                    .find(|block_with_context| block_with_context.block.key() == *key)
+                    .expect("checked block must exist in context")
+                    .block
+                    .start_tag_position_range
+                    .start
+                    .line
+            })
             .collect()
     }
 

@@ -1,4 +1,4 @@
-use crate::blocks::{Attributes, Block, BlockWithContext};
+use crate::blocks::{AttributeName, Attributes, Block, BlockWithContext};
 use crate::repo_path::RepoPath;
 use crate::validators::{
     AsyncValidator, PatternContent, ValidationContext, ValidationReport, Validator, ValidatorTrace,
@@ -54,14 +54,8 @@ impl<C: AiClient + 'static> AsyncValidator for CheckAiValidator<C> {
             for (block_idx, block_with_context) in
                 file_blocks.blocks_with_context.iter().enumerate()
             {
-                let Some(condition) = block_with_context.block.attributes.check_ai() else {
+                if block_with_context.block.attributes.check_ai().is_none() {
                     continue;
-                };
-                if condition.trim().is_empty() {
-                    return Err(anyhow!(
-                        "check-ai requires a non-empty condition in {}",
-                        block_with_context.block.label(file_path)
-                    ));
                 }
 
                 // The block is checked from here on, whatever the API answers, so add it
@@ -95,7 +89,7 @@ impl<C: AiClient + 'static> AsyncValidator for CheckAiValidator<C> {
 /// Returns the block's violations, and its trace when `context` asks for traces.
 ///
 /// # Errors
-/// Returns an error if `check-ai-pattern` is not a valid regex, or the request to the model fails.
+/// Returns an error if the request to the model fails.
 async fn check_block<C: AiClient>(
     client: &C,
     context: &ValidationContext,
@@ -163,7 +157,10 @@ pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
     require_main(
         Validator::CheckAi.is_turned_on_by(attributes),
         Validator::CheckAi.attributes(),
-        &[("check-ai-pattern", attributes.check_ai_pattern().is_some())],
+        &[(
+            AttributeName::CheckAiPattern,
+            attributes.check_ai_pattern().is_some(),
+        )],
     )
 }
 
@@ -532,11 +529,11 @@ text
 I like banana and apples
 # </block>"#,
         );
-        let report = validator.validate(context).await?;
+        let report = validator.validate(Arc::clone(&context)).await?;
 
         assert!(report.violations.is_empty());
         // The block was checked and passed. That is different from never being checked at all.
-        assert_eq!(checked_lines(&report), vec![1]);
+        assert_eq!(checked_lines(&context, &report), vec![1]);
         Ok(())
     }
 
@@ -651,21 +648,20 @@ I like apples
         Ok(())
     }
 
-    #[tokio::test]
-    async fn block_with_an_empty_check_ai_condition_returns_an_error() -> anyhow::Result<()> {
-        let validator = CheckAiValidator::with_client(FakeClient::default());
-        let context = validation_context(
-            "example.py",
-            r#"# <block check-ai=" ">
-text
-# </block>"#,
-        );
-        let err = validator.validate(context).await.unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("check-ai requires a non-empty condition")
-        );
-        Ok(())
+    #[test]
+    fn block_with_an_empty_check_ai_condition_returns_an_error() {
+        for attr in [r#"check-ai=" ""#, r#"check-ai="""#, "check-ai"] {
+            let err = crate::test_utils::try_validation_context(
+                "example.py",
+                &format!("# <block {attr}>\ntext\n# </block>"),
+            )
+            .unwrap_err();
+            let err_chain = format!("{err:#}");
+            assert!(
+                err_chain.contains("invalid `check-ai`"),
+                "{attr}: {err_chain}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -694,11 +690,11 @@ I like banana
 # </block>"#,
         );
 
-        let report = validator.validate(context).await?;
+        let report = validator.validate(Arc::clone(&context)).await?;
 
         // Both blocks are recorded whatever the answer comes back as, and the block without a
         // check-ai attribute is not checked, so it records nothing.
-        assert_eq!(checked_lines(&report), vec![1, 4]);
+        assert_eq!(checked_lines(&context, &report), vec![1, 4]);
         assert_eq!(violation_count(&report), 1);
         Ok(())
     }

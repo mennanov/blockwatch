@@ -448,7 +448,8 @@ fn parse_target(
     target: &str,
     target_pattern: Option<String>,
 ) -> anyhow::Result<(RepoPath, Locator)> {
-    Ok(match (TargetReference::parse(target)?, target_pattern) {
+    let parsed = TargetReference::parse(target).context("invalid `target`")?;
+    Ok(match (parsed, target_pattern) {
         (
             TargetReference::Symbol {
                 file: Some(file),
@@ -1027,6 +1028,17 @@ target = '{target}'
     }
 
     #[test]
+    fn empty_target_is_rejected_with_target_context() {
+        let error = read_error("[[block]]\ntarget = ''\n");
+
+        assert_eq!(
+            error,
+            "invalid block at line 1 of \"blockwatch.toml\": invalid `target`: empty target \
+             reference"
+        );
+    }
+
+    #[test]
     fn target_pattern_with_a_symbol_target_is_rejected() {
         let text = r"[[block]]
 target = 'package.json#/version'
@@ -1361,6 +1373,23 @@ severity = 'loud'
             read_error(text),
             "invalid block at line 1 of \"blockwatch.toml\": invalid `severity`: \"loud\" (expected error, warning, info or hint)"
         );
+    }
+
+    #[test]
+    fn flag_true_on_attribute_requiring_a_value_is_rejected() {
+        for name in ["check-ai", "check-lua", "line-pattern", "same-as-paths"] {
+            let text = format!(
+                r"[[block]]
+target = 'a.json#/x'
+{name} = true
+"
+            );
+
+            assert!(
+                read_error(&text).contains(&format!("invalid `{name}`")),
+                "{name}"
+            );
+        }
     }
 
     #[test]

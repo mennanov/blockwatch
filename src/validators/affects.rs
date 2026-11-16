@@ -409,7 +409,7 @@ mod validate_tests {
         let parsers = crate::language_parsers::LanguageParsers::new();
         let parsed = crate::scan::Scan::new(
             file_system,
-            &crate::fs::PathFilter::allow_only("source.py"),
+            &crate::fs::test_utils::path_filter_only("source.py"),
             &parsers,
             &[],
         )
@@ -1006,7 +1006,7 @@ pass
         let parsers = crate::language_parsers::LanguageParsers::new();
         let parsed = crate::scan::Scan::new(
             &file_system,
-            &crate::fs::PathFilter::allow_all(),
+            &crate::fs::test_utils::path_filter_all(),
             &parsers,
             &[],
         )
@@ -1335,10 +1335,10 @@ b = 2
 # </block>"#,
         );
 
-        let report = validator(&[]).validate(context)?;
+        let report = validator(&[]).validate(Arc::clone(&context))?;
 
         // Only the block with the `affects` attribute is checked. The target block is not.
-        assert_eq!(checked_lines(&report), vec![1]);
+        assert_eq!(checked_lines(&context, &report), vec![1]);
         Ok(())
     }
 }

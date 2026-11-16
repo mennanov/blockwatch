@@ -1,9 +1,9 @@
-use crate::blocks::{Attributes, Block, BlockWithContext, ParseAttribute};
+use crate::blocks::{AttributeName, Attributes, Block, BlockWithContext};
 use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{
     SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
-    regex_value, require_main, trimmed_line_value,
+    line_value, require_main,
 };
 use anyhow::anyhow;
 use regex::Regex;
@@ -69,10 +69,7 @@ fn count_lines(
 ) -> usize {
     let mut actual = 0;
     for (line_number, line) in block.content.text(file_content).lines().enumerate() {
-        let value = match pattern {
-            None => trimmed_line_value(line),
-            Some(pattern) => regex_value(line, pattern),
-        };
+        let value = line_value(line, pattern);
         if value.is_some() {
             actual += 1;
         }
@@ -161,7 +158,7 @@ pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
         Validator::LineCount.is_turned_on_by(attributes),
         Validator::LineCount.attributes(),
         &[(
-            "line-count-pattern",
+            AttributeName::LineCountPattern,
             attributes.line_count_pattern().is_some(),
         )],
     )
@@ -182,6 +179,14 @@ pub(crate) struct Constraint {
 }
 
 impl Constraint {
+    /// Parses `raw` as a line-count constraint such as `<50` or `== 0`.
+    pub(crate) fn parse(raw: &str) -> anyhow::Result<Self> {
+        let (op, expected) = parse_constraint(raw).map_err(|e| {
+            anyhow!("expected a comparator like <N, <=N, ==N, >=N, >N; got \"{raw}\" (error: {e})")
+        })?;
+        Ok(Self { op, expected })
+    }
+
     /// Returns whether `actual` lines satisfy this rule.
     fn accepts(self, actual: usize) -> bool {
         self.op.accepts(actual, self.expected)
@@ -195,15 +200,6 @@ impl Constraint {
     /// The target line count to compare against.
     fn expected(self) -> usize {
         self.expected
-    }
-}
-
-impl ParseAttribute for Constraint {
-    fn parse_attribute(raw: &str) -> anyhow::Result<Self> {
-        let (op, expected) = parse_constraint(raw).map_err(|e| {
-            anyhow!("expected a comparator like <N, <=N, ==N, >=N, >N; got \"{raw}\" (error: {e})")
-        })?;
-        Ok(Self { op, expected })
     }
 }
 
@@ -622,30 +618,30 @@ red
 
     #[test]
     fn parse_constraint_with_invalid_syntax_returns_error() {
-        assert!(Constraint::parse_attribute("50").is_err());
-        assert!(Constraint::parse_attribute("").is_err());
-        assert!(Constraint::parse_attribute("> -1").is_err());
-        assert!(Constraint::parse_attribute("<== 50").is_err());
+        assert!(Constraint::parse("50").is_err());
+        assert!(Constraint::parse("").is_err());
+        assert!(Constraint::parse("> -1").is_err());
+        assert!(Constraint::parse("<== 50").is_err());
     }
 
     #[test]
     fn parse_constraint_with_valid_syntax_returns_correct_result() {
         assert_eq!(
-            Constraint::parse_attribute("< 50").unwrap(),
+            Constraint::parse("< 50").unwrap(),
             Constraint {
                 op: Op::Lt,
                 expected: 50
             }
         );
         assert_eq!(
-            Constraint::parse_attribute(">=10").unwrap(),
+            Constraint::parse(">=10").unwrap(),
             Constraint {
                 op: Op::Ge,
                 expected: 10
             }
         );
         assert_eq!(
-            Constraint::parse_attribute("== 0").unwrap(),
+            Constraint::parse("== 0").unwrap(),
             Constraint {
                 op: Op::Eq,
                 expected: 0
@@ -670,10 +666,10 @@ c = 3
 # </block>"#,
         );
 
-        let report = LineCountValidator.validate(context)?;
+        let report = LineCountValidator.validate(Arc::clone(&context))?;
 
         // The block without a line-count attribute is not checked, so it records nothing.
-        assert_eq!(checked_lines(&report), vec![1, 4]);
+        assert_eq!(checked_lines(&context, &report), vec![1, 4]);
         assert_eq!(violation_count(&report), 1);
         Ok(())
     }

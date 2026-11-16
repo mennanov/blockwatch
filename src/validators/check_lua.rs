@@ -1,4 +1,6 @@
-use crate::blocks::{Attributes, Block, BlockWithContext, FileBlocks};
+use crate::blocks::{
+    AttributeName, AttributeValue, Attributes, Block, BlockWithContext, FileBlocks,
+};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
@@ -12,7 +14,6 @@ use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use mlua::{HookTriggers, Lua, StdLib, VmState};
 use serde::Serialize;
-use serde_json::{Map, Value};
 use std::ffi::OsStr;
 use std::path::Path;
 use std::sync::Arc;
@@ -112,14 +113,8 @@ impl<Fs: FileSystem + 'static> AsyncValidator for CheckLuaValidator<Fs> {
             for (block_idx, block_with_context) in
                 file_blocks.blocks_with_context.iter().enumerate()
             {
-                let Some(script_path) = block_with_context.block.attributes.check_lua() else {
+                if block_with_context.block.attributes.check_lua().is_none() {
                     continue;
-                };
-                if script_path.trim().is_empty() {
-                    return Err(anyhow!(
-                        "check-lua requires a non-empty script path in {}",
-                        block_with_context.block.label(file_path)
-                    ));
                 }
 
                 // The block is checked from here on, whatever the script returns, so add it
@@ -155,8 +150,7 @@ impl<Fs: FileSystem + 'static> AsyncValidator for CheckLuaValidator<Fs> {
 /// Returns the block's violations, and its trace when `context` asks for traces.
 ///
 /// # Errors
-/// Returns an error if `check-lua-pattern` is not a valid regex, an `affects` target can't be
-/// read, or the script fails to run.
+/// Returns an error if an `affects` target can't be read, or the script fails to run.
 async fn check_block<Fs: FileSystem>(
     file_system: &Fs,
     mode: LuaMode,
@@ -256,7 +250,7 @@ struct LuaScriptInputs {
     timeout: Duration,
     file: String,
     line: usize,
-    attributes: Map<String, Value>,
+    attributes: Vec<(AttributeName, AttributeValue)>,
     /// `Some` exactly when the block carries an `affects` attribute, so `ctx.affects` is present in
     /// the script precisely when the attribute is.
     affects: Option<Vec<LuaAffected>>,
@@ -311,7 +305,7 @@ impl LuaScriptInputs {
             timeout,
             file: file_path.as_str().to_string(),
             line: block.start_tag_position_range.start.line,
-            attributes: block.attributes.to_map(),
+            attributes: block.attributes.raw_values(),
             affects,
             content,
         }
@@ -351,16 +345,12 @@ fn run_lua_script_sync(inputs: LuaScriptInputs, mode: LuaMode) -> anyhow::Result
 
     let attrs_table = lua.create_table().context("failed to create attrs table")?;
     for (key, value) in &inputs.attributes {
+        let key = key.as_str();
         let result = match value {
-            Value::String(text) => attrs_table.set(key.as_str(), text.as_str()),
-            Value::Array(entries) => lua
-                .create_sequence_from(
-                    entries
-                        .iter()
-                        .map(|entry| entry.as_str().expect("list entries serialize as strings")),
-                )
-                .and_then(|list| attrs_table.set(key.as_str(), list)),
-            _ => unreachable!("Attributes only serializes strings and string lists"),
+            AttributeValue::Text(text) => attrs_table.set(key, text.as_str()),
+            AttributeValue::List(entries) => lua
+                .create_sequence_from(entries.iter().map(String::as_str))
+                .and_then(|list| attrs_table.set(key, list)),
         };
         result.with_context(|| format!("failed to set attr {key}"))?;
     }
@@ -634,11 +624,11 @@ pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
         Validator::CheckLua.attributes(),
         &[
             (
-                "check-lua-pattern",
+                AttributeName::CheckLuaPattern,
                 attributes.check_lua_pattern().is_some(),
             ),
             (
-                "check-lua-timeout",
+                AttributeName::CheckLuaTimeout,
                 attributes.check_lua_timeout().is_some(),
             ),
         ],
@@ -672,6 +662,7 @@ struct CheckLuaViolation<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blocks::AttributeEntry;
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
     use crate::test_utils::{validation_context, validation_context_with_changes};
@@ -748,12 +739,12 @@ function validate(ctx, content)
 end
 "#,
         )])
-        .validate(context)
+        .validate(Arc::clone(&context))
         .await?;
 
         assert!(report.violations.is_empty());
         // The block was checked and passed. That is different from never being checked at all.
-        assert_eq!(checked_lines(&report), vec![1]);
+        assert_eq!(checked_lines(&context, &report), vec![1]);
         Ok(())
     }
 
@@ -1061,9 +1052,16 @@ some content
             .expect("example.py's blocks")
             .blocks_with_context[0]
             .block;
-        block
-            .attributes
-            .set_affects_list(vec![":red".to_string(), ":blue".to_string()]);
+        block.attributes = Attributes::from_entries([
+            (
+                "check-lua".to_string(),
+                AttributeEntry::Text("check.lua".to_string()),
+            ),
+            (
+                "affects".to_string(),
+                AttributeEntry::List(vec![":red".to_string(), ":blue".to_string()]),
+            ),
+        ])?;
 
         let violations = validator(&[(
             "check.lua",
@@ -1401,12 +1399,12 @@ end
 "#,
             ),
         ])
-        .validate(context)
+        .validate(Arc::clone(&context))
         .await?;
 
         // Both blocks are recorded whatever the script returns, and the block without a check-lua
         // attribute is not checked, so it records nothing.
-        assert_eq!(checked_lines(&report), vec![1, 4]);
+        assert_eq!(checked_lines(&context, &report), vec![1, 4]);
         assert_eq!(violation_count(&report), 1);
         Ok(())
     }
@@ -1459,11 +1457,11 @@ function validate(ctx, content)
 end
 "#,
         )])
-        .validate(context)
+        .validate(Arc::clone(&context))
         .await?;
 
         assert!(report.violations.is_empty());
-        assert_eq!(checked_lines(&report), vec![1]);
+        assert_eq!(checked_lines(&context, &report), vec![1]);
         Ok(())
     }
 
@@ -1551,11 +1549,11 @@ function validate(ctx, content)
 end
 "#,
         )])
-        .validate(context)
+        .validate(Arc::clone(&context))
         .await?;
 
         assert!(report.violations.is_empty());
-        assert_eq!(checked_lines(&report), vec![1]);
+        assert_eq!(checked_lines(&context, &report), vec![1]);
         Ok(())
     }
 
@@ -1572,11 +1570,11 @@ some content
             "check.lua",
             "\u{feff}function validate(ctx, content)\n    return nil\nend\n",
         )])
-        .validate(context)
+        .validate(Arc::clone(&context))
         .await?;
 
         assert!(report.violations.is_empty());
-        assert_eq!(checked_lines(&report), vec![1]);
+        assert_eq!(checked_lines(&context, &report), vec![1]);
         Ok(())
     }
 
@@ -1593,11 +1591,11 @@ some content
             "check.lua",
             "\u{feff}#!/usr/bin/env lua\nfunction validate(ctx, content)\n    return nil\nend\n",
         )])
-        .validate(context)
+        .validate(Arc::clone(&context))
         .await?;
 
         assert!(report.violations.is_empty());
-        assert_eq!(checked_lines(&report), vec![1]);
+        assert_eq!(checked_lines(&context, &report), vec![1]);
         Ok(())
     }
 
@@ -1680,20 +1678,20 @@ text
         Ok(())
     }
 
-    #[tokio::test]
-    async fn empty_script_path_returns_an_error() -> anyhow::Result<()> {
-        let context = validation_context(
-            "example.py",
-            r#"# <block check-lua=" ">
-text
-# </block>"#,
-        );
-        let err = validator(&[]).validate(context).await.unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("check-lua requires a non-empty script path")
-        );
-        Ok(())
+    #[test]
+    fn empty_script_path_returns_an_error() {
+        for attr in [r#"check-lua=" ""#, r#"check-lua="""#, "check-lua"] {
+            let err = crate::test_utils::try_validation_context(
+                "example.py",
+                &format!("# <block {attr}>\ntext\n# </block>"),
+            )
+            .unwrap_err();
+            let err_chain = format!("{err:#}");
+            assert!(
+                err_chain.contains("invalid `check-lua`"),
+                "{attr}: {err_chain}"
+            );
+        }
     }
 }
 

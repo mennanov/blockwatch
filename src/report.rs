@@ -159,8 +159,7 @@ mod tests {
     use super::*;
     use crate::Position;
     use crate::diff_parser::DiffChanges;
-    use crate::fs::PathFilter;
-    use crate::fs::test_utils::FakeFileSystem;
+    use crate::fs::test_utils::{FakeFileSystem, path_filter_all};
     use crate::language_parsers::LanguageParsers;
     use crate::repo_path::RepoPath;
     use crate::scan::{Scan, ScanMode};
@@ -394,7 +393,7 @@ mod tests {
                 "a.toml".to_string(),
                 "a.b = 1\n".to_string(),
             )])),
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &LanguageParsers::new(),
             &[virtual_block("a.toml#/a", &[])?, inner],
         )

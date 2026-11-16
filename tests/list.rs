@@ -338,22 +338,28 @@ fn list_subcommand_with_closed_stdout_exits_without_an_error() {
 
 #[test]
 fn list_subcommand_fails_when_a_block_has_an_invalid_attribute_value() -> anyhow::Result<()> {
-    let temp = tempfile::tempdir()?;
-    std::fs::create_dir_all(temp.path().join(".git"))?;
-    std::fs::write(
-        temp.path().join("a.py"),
-        "# <block line-count=\"50\">\na\n# </block>\n",
-    )?;
+    for (attr, expected) in [
+        ("line-count=\"50\"", "invalid `line-count`"),
+        ("check-ai=\"\"", "invalid `check-ai`"),
+        ("line-pattern=\"\"", "invalid `line-pattern`"),
+    ] {
+        let temp = tempfile::tempdir()?;
+        std::fs::create_dir_all(temp.path().join(".git"))?;
+        std::fs::write(
+            temp.path().join("a.py"),
+            format!("# <block {attr}>\na\n# </block>\n"),
+        )?;
 
-    let output = cargo_bin_cmd!()
-        .current_dir(temp.path())
-        .args(["list", "a.py"])
-        .output()?;
+        let output = cargo_bin_cmd!()
+            .current_dir(temp.path())
+            .args(["list", "a.py"])
+            .output()?;
 
-    output
-        .assert()
-        .code(2)
-        .stdout("")
-        .stderr(predicate::str::contains("invalid `line-count`"));
+        output
+            .assert()
+            .code(2)
+            .stdout("")
+            .stderr(predicate::str::contains(expected));
+    }
     Ok(())
 }

@@ -607,11 +607,12 @@ mod parse_blocks_tests {
     use crate::blocks::*;
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::PathFilter;
-    use crate::fs::test_utils::FakeFileSystem;
+    use crate::fs::test_utils::{
+        FakeFileSystem, path_filter_all, path_filter_ignoring, path_filter_only,
+    };
     use crate::language_parsers::LanguageParsers;
     use crate::language_resolver::Language;
     use crate::test_utils::{self, diff_changes, virtual_block_with_target_if};
-    use std::collections::HashSet;
     use std::ops::Range;
 
     /// A newly added line.
@@ -658,7 +659,7 @@ mod parse_blocks_tests {
         ]));
         let parsers = LanguageParsers::new();
 
-        let parsed = Scan::new(&file_system, &PathFilter::allow_all(), &parsers, &[])
+        let parsed = Scan::new(&file_system, &path_filter_all(), &parsers, &[])
             .parse_blocks(&DiffChanges::default(), ScanMode::All)?;
 
         // The file without blocks is not kept, but it was parsed, so it counts as scanned. The
@@ -676,7 +677,7 @@ mod parse_blocks_tests {
             ("ignored.py".to_string(), String::new()),
             ("notes.unknown".to_string(), String::new()),
         ]));
-        let path_filter = PathFilter::with_ignored_paths(HashSet::from(["ignored.py".to_string()]));
+        let path_filter = path_filter_ignoring(["ignored.py"]);
 
         let files = Scan::new(&file_system, &path_filter, &LanguageParsers::new(), &[])
             .checkable_files()
@@ -696,7 +697,7 @@ mod parse_blocks_tests {
 
         let files = Scan::new(
             &file_system,
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &LanguageParsers::new(),
             &[],
         )
@@ -870,7 +871,7 @@ mod parse_blocks_tests {
         ]);
         let parsers = LanguageParsers::new();
 
-        let blocks_by_file = Scan::new(&file_system, &PathFilter::allow_all(), &parsers, &[])
+        let blocks_by_file = Scan::new(&file_system, &path_filter_all(), &parsers, &[])
             .parse_blocks(&line_changes, ScanMode::OnlyChanged)?
             .blocks;
 
@@ -934,7 +935,7 @@ mod parse_blocks_tests {
 
         let mut blocks_by_file = Scan::new(
             &file_system,
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &LanguageParsers::new(),
             &[],
         )
@@ -1223,7 +1224,7 @@ mod parse_blocks_tests {
                 }],
             ),
         ]);
-        let blocks_by_file = Scan::new(&file_system, &PathFilter::allow_all(), &parsers, &[])
+        let blocks_by_file = Scan::new(&file_system, &path_filter_all(), &parsers, &[])
             .parse_blocks(&line_changes, ScanMode::All)?
             .blocks;
 
@@ -1280,7 +1281,7 @@ mod parse_blocks_tests {
         ]));
         let parsers = LanguageParsers::new();
 
-        let blocks_by_file = Scan::new(&file_system, &PathFilter::allow_all(), &parsers, &[])
+        let blocks_by_file = Scan::new(&file_system, &path_filter_all(), &parsers, &[])
             .parse_blocks(&DiffChanges::default(), ScanMode::All)?
             .blocks;
 
@@ -1322,7 +1323,7 @@ mod parse_blocks_tests {
         )]));
         let parsers = LanguageParsers::new();
 
-        let blocks_by_file = Scan::new(&file_system, &PathFilter::allow_all(), &parsers, &[])
+        let blocks_by_file = Scan::new(&file_system, &path_filter_all(), &parsers, &[])
             .parse_blocks(&DiffChanges::default(), ScanMode::All)?
             .blocks;
 
@@ -1344,7 +1345,7 @@ mod parse_blocks_tests {
         let parsers = LanguageParsers::new()
             .with_extension_mappings(HashMap::from([("rust".into(), Language::Rust)]));
 
-        let blocks_by_file = Scan::new(&file_system, &PathFilter::allow_all(), &parsers, &[])
+        let blocks_by_file = Scan::new(&file_system, &path_filter_all(), &parsers, &[])
             .parse_blocks(&DiffChanges::default(), ScanMode::All)?
             .blocks;
 
@@ -1364,7 +1365,7 @@ mod parse_blocks_tests {
 
         let blocks = Scan::new(
             &FakeFileSystem::new(files),
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &LanguageParsers::new(),
             &[],
         )
@@ -1398,7 +1399,7 @@ mod parse_blocks_tests {
                 .to_string(),
             ),
         ]));
-        let path_filter = PathFilter::with_ignored_paths(HashSet::from(["ignored.rs".to_string()]));
+        let path_filter = path_filter_ignoring(["ignored.rs"]);
 
         let blocks = Scan::new(&file_system, &path_filter, &LanguageParsers::new(), &[])
             .parse_blocks(&DiffChanges::default(), ScanMode::All)?
@@ -1432,7 +1433,7 @@ mod parse_blocks_tests {
 
         let blocks = Scan::new(
             &file_system,
-            &PathFilter::allow_only("src/**"),
+            &path_filter_only("src/**"),
             &LanguageParsers::new(),
             &[],
         )
@@ -1459,7 +1460,7 @@ mod parse_blocks_tests {
 
         let parsed = Scan::new(
             &file_system,
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &LanguageParsers::new(),
             &[],
         )
@@ -1487,7 +1488,7 @@ mod parse_blocks_tests {
         )]);
         let error = Scan::new(
             &FakeFileSystem::new(HashMap::from([("src/rules.py".to_string(), String::new())])),
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &LanguageParsers::new(),
             &[],
         )
@@ -1508,7 +1509,7 @@ mod parse_blocks_tests {
         let line_changes = diff_changes([(RepoPath::from_reference("rules.py")?, vec![added(1)])]);
         let error = Scan::new(
             &FakeFileSystem::new(HashMap::from([("src/rules.py".to_string(), String::new())])),
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &LanguageParsers::new(),
             &[],
         )
@@ -1532,7 +1533,7 @@ mod parse_blocks_tests {
         ]);
         let error = Scan::new(
             &FakeFileSystem::new(HashMap::new()),
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &LanguageParsers::new(),
             &[],
         )
@@ -1557,7 +1558,7 @@ mod parse_blocks_tests {
         ]);
         let error = Scan::new(
             &FakeFileSystem::new(HashMap::from([("present.py".to_string(), String::new())])),
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &LanguageParsers::new(),
             &[],
         )
@@ -1582,7 +1583,7 @@ mod parse_blocks_tests {
                 "broken.py".to_string(),
                 "# <block name=\"open\">\nx = 1\n".to_string(),
             )])),
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &LanguageParsers::new(),
             &[],
         )
@@ -1611,7 +1612,7 @@ mod parse_blocks_tests {
                 "src/present.py".to_string(),
                 "# <block name=\"present\">\nx = 1\n# </block>\n".to_string(),
             )])),
-            &PathFilter::allow_only("src/**"),
+            &path_filter_only("src/**"),
             &LanguageParsers::new(),
             &[],
         )
@@ -1635,7 +1636,7 @@ mod parse_blocks_tests {
         )]);
         let blocks = Scan::new(
             &FakeFileSystem::new(HashMap::new()),
-            &PathFilter::with_ignored_paths(HashSet::from(["vendor/gone.py".to_string()])),
+            &path_filter_ignoring(["vendor/gone.py"]),
             &LanguageParsers::new(),
             &[],
         )
@@ -1658,7 +1659,7 @@ mod parse_blocks_tests {
         )]);
         let blocks = Scan::new(
             &FakeFileSystem::new(HashMap::new()),
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &LanguageParsers::new(),
             &[],
         )
@@ -1673,7 +1674,7 @@ mod parse_blocks_tests {
         let line_changes = DiffChanges::default();
         let blocks = Scan::new(
             &FakeFileSystem::new(HashMap::default()),
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &LanguageParsers::new(),
             &[],
         )
@@ -1840,7 +1841,7 @@ mod parse_blocks_tests {
         ]));
         let parsers = LanguageParsers::new();
 
-        let blocks = Scan::new(&file_system, &PathFilter::allow_all(), &parsers, &[])
+        let blocks = Scan::new(&file_system, &path_filter_all(), &parsers, &[])
             .parse_blocks(&DiffChanges::default(), ScanMode::All)?
             .blocks;
 
@@ -1878,11 +1879,8 @@ mod parse_blocks_tests {
             &[("name", "virtual")],
         )?];
 
-        let blocks = parse_with_virtual_blocks(
-            &[("a.json", source)],
-            &PathFilter::allow_all(),
-            &virtual_blocks,
-        )?;
+        let blocks =
+            parse_with_virtual_blocks(&[("a.json", source)], &path_filter_all(), &virtual_blocks)?;
 
         let mut listed = Vec::new();
         for block in &blocks[&RepoPath::from_reference("a.json")?].blocks_with_context {
@@ -1916,7 +1914,7 @@ mod parse_blocks_tests {
 
         let blocks = Scan::new(
             &file_system,
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &LanguageParsers::new(),
             &virtual_blocks,
         )
@@ -1963,7 +1961,7 @@ mod parse_blocks_tests {
 
         let parsed = Scan::new(
             &file_system,
-            &PathFilter::allow_only("{a,b}.json"),
+            &path_filter_only("{a,b}.json"),
             &LanguageParsers::new(),
             &virtual_blocks,
         )
@@ -1991,7 +1989,7 @@ mod parse_blocks_tests {
 
         let error = Scan::new(
             &FakeFileSystem::new(HashMap::new()),
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &LanguageParsers::new(),
             &[virtual_block],
         )
@@ -2016,7 +2014,7 @@ mod parse_blocks_tests {
 
         let blocks = parse_with_virtual_blocks(
             &[("vendor/a.json", "{}")],
-            &PathFilter::allow_only("src/**"),
+            &path_filter_only("src/**"),
             &virtual_blocks,
         )?;
 
@@ -2034,10 +2032,7 @@ mod parse_blocks_tests {
 
         let blocks = parse_with_virtual_blocks(
             &[("vendor/a.json", "{}")],
-            &PathFilter::with_ignored_paths(HashSet::from([
-                "vendor/a.json".to_string(),
-                "vendor/gone.json".to_string(),
-            ])),
+            &path_filter_ignoring(["vendor/a.json", "vendor/gone.json"]),
             &virtual_blocks,
         )?;
 
@@ -2050,7 +2045,7 @@ mod parse_blocks_tests {
         let virtual_blocks = [test_utils::virtual_block("gone.json#/x", &[])?];
 
         let error =
-            parse_with_virtual_blocks(&[], &PathFilter::allow_all(), &virtual_blocks).unwrap_err();
+            parse_with_virtual_blocks(&[], &path_filter_all(), &virtual_blocks).unwrap_err();
 
         assert_eq!(
             format!("{error:#}"),
@@ -2070,7 +2065,7 @@ mod parse_blocks_tests {
 
         let blocks = parse_with_virtual_blocks(
             &[("notes.txt", "x\n")],
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &virtual_blocks,
         )?;
 
@@ -2087,11 +2082,8 @@ mod parse_blocks_tests {
     fn target_file_without_symbols_parse_blocks_reads_its_whole_file_block() -> anyhow::Result<()> {
         let virtual_blocks = [test_utils::virtual_block("a.py", &[("name", "a")])?];
 
-        let blocks = parse_with_virtual_blocks(
-            &[("a.py", "x = 1\n")],
-            &PathFilter::allow_all(),
-            &virtual_blocks,
-        )?;
+        let blocks =
+            parse_with_virtual_blocks(&[("a.py", "x = 1\n")], &path_filter_all(), &virtual_blocks)?;
 
         assert_eq!(
             blocks[&RepoPath::from_reference("a.py")?].blocks_with_context[0]
@@ -2125,12 +2117,9 @@ mod parse_blocks_tests {
             test_utils::virtual_block("notes.txt#/x", &[])?,
         ];
 
-        let error = parse_with_virtual_blocks(
-            &[("notes.txt", "x")],
-            &PathFilter::allow_all(),
-            &virtual_blocks,
-        )
-        .unwrap_err();
+        let error =
+            parse_with_virtual_blocks(&[("notes.txt", "x")], &path_filter_all(), &virtual_blocks)
+                .unwrap_err();
 
         assert_eq!(
             format!("{error:#}"),
@@ -2148,12 +2137,9 @@ mod parse_blocks_tests {
             test_utils::virtual_block("a.rb#/x", &[])?,
         ];
 
-        let error = parse_with_virtual_blocks(
-            &[("a.rb", "x = 1\n")],
-            &PathFilter::allow_all(),
-            &virtual_blocks,
-        )
-        .unwrap_err();
+        let error =
+            parse_with_virtual_blocks(&[("a.rb", "x = 1\n")], &path_filter_all(), &virtual_blocks)
+                .unwrap_err();
 
         assert_eq!(
             format!("{error:#}"),
@@ -2168,12 +2154,9 @@ mod parse_blocks_tests {
         let source = "{\n  \"a\": 1,\n  // <block name=\"n\">\n  \"b\": 2\n  // </block>\n}\n";
         let virtual_blocks = [test_utils::virtual_block("a.json#/a", &[("name", "n")])?];
 
-        let error = parse_with_virtual_blocks(
-            &[("a.json", source)],
-            &PathFilter::allow_all(),
-            &virtual_blocks,
-        )
-        .unwrap_err();
+        let error =
+            parse_with_virtual_blocks(&[("a.json", source)], &path_filter_all(), &virtual_blocks)
+                .unwrap_err();
 
         assert_eq!(
             format!("{error:#}"),
@@ -2196,7 +2179,7 @@ mod parse_blocks_tests {
                 ("a.yml", "other: true\n"),
                 ("b.yml", "flag: true\nx: 1\n"),
             ],
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &virtual_blocks,
         )?;
 
@@ -2222,7 +2205,7 @@ mod parse_blocks_tests {
 
         let error = parse_with_virtual_blocks(
             &[("a.yml", "flag: true\n")],
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &virtual_blocks,
         )
         .unwrap_err();
@@ -2247,7 +2230,7 @@ mod parse_blocks_tests {
 
         let blocks = parse_with_virtual_blocks(
             &[("a.yml", a_source), ("b.yml", "flag: true\n")],
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &virtual_blocks,
         )?;
 
@@ -2275,7 +2258,7 @@ mod parse_blocks_tests {
 
         let error = parse_with_virtual_blocks(
             &[("bad.json", "{"), ("good.json", "{\"a\": 1}")],
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &virtual_blocks,
         )
         .unwrap_err();
@@ -2299,7 +2282,7 @@ mod parse_blocks_tests {
 
         let blocks = parse_with_virtual_blocks(
             &[("a.txt", "mode = on\n"), ("b.txt", "mode = off\n")],
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &virtual_blocks,
         )?;
 
@@ -2320,7 +2303,7 @@ mod parse_blocks_tests {
             let txt_block = virtual_block_with_target_if("notes.txt", &[], &["#/x"], patterns)?;
             let error = parse_with_virtual_blocks(
                 &[("notes.txt", "hello\n")],
-                &PathFilter::allow_all(),
+                &path_filter_all(),
                 &[txt_block],
             )
             .unwrap_err();
@@ -2333,12 +2316,9 @@ mod parse_blocks_tests {
         }
 
         let ruby_block = virtual_block_with_target_if("a.rb", &[], &["#/x"], &[])?;
-        let error = parse_with_virtual_blocks(
-            &[("a.rb", "x = 1\n")],
-            &PathFilter::allow_all(),
-            &[ruby_block],
-        )
-        .unwrap_err();
+        let error =
+            parse_with_virtual_blocks(&[("a.rb", "x = 1\n")], &path_filter_all(), &[ruby_block])
+                .unwrap_err();
         assert_eq!(
             format!("{error:#}"),
             "invalid block at line 7 of \"blockwatch.toml\": target a.rb does not resolve: \
@@ -2352,9 +2332,8 @@ mod parse_blocks_tests {
         let block = virtual_block_with_target_if("a.xml", &[], &["#/t"], &[])?;
         let source = "<t>&#0;</t>";
 
-        let error =
-            parse_with_virtual_blocks(&[("a.xml", source)], &PathFilter::allow_all(), &[block])
-                .unwrap_err();
+        let error = parse_with_virtual_blocks(&[("a.xml", source)], &path_filter_all(), &[block])
+            .unwrap_err();
 
         let message = format!("{error:#}");
         assert!(
@@ -2400,7 +2379,7 @@ mod parse_blocks_tests {
 
         let error = scan_and_ensure_covered_targets(
             &[("a.yml", "other: 1\n"), ("b.yml", "other: 2\n")],
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &virtual_blocks,
             &DiffChanges::default(),
             ScanMode::All,
@@ -2423,7 +2402,7 @@ mod parse_blocks_tests {
             virtual_block_with_target_if("b.yml#/x", &[], &["#/flag"], &[])?,
         ];
         // Config `ignore` skips the only covered file (`b.yml`), so a full run must fail.
-        let path_filter = PathFilter::with_ignored_paths(HashSet::from(["b.yml".to_string()]));
+        let path_filter = path_filter_ignoring(["b.yml"]);
 
         let error = scan_and_ensure_covered_targets(
             &[("a.yml", "other: true\n"), ("b.yml", "flag: true\nx: 1\n")],
@@ -2454,7 +2433,7 @@ mod parse_blocks_tests {
         // Unmodified entry: checking an uncovered file in the diff succeeds.
         scan_and_ensure_covered_targets(
             &uncovered,
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             std::slice::from_ref(&unmodified),
             &file_diff,
             ScanMode::OnlyChanged,
@@ -2463,7 +2442,7 @@ mod parse_blocks_tests {
         // Modified entry whose files fail `target-if`: must fail.
         let error = scan_and_ensure_covered_targets(
             &uncovered,
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             std::slice::from_ref(&modified),
             &DiffChanges::default(),
             ScanMode::OnlyChanged,
@@ -2478,7 +2457,7 @@ mod parse_blocks_tests {
         // Modified entry with a covered file that the diff doesn't touch: succeeds.
         scan_and_ensure_covered_targets(
             &[("a.yml", "flag: true\nx: 1\n")],
-            &PathFilter::allow_all(),
+            &path_filter_all(),
             &[modified],
             &DiffChanges::default(),
             ScanMode::OnlyChanged,

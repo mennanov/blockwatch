@@ -4,8 +4,6 @@ use crate::repo_path::RepoPath;
 use anyhow::{Context, anyhow};
 use globset::GlobSet;
 use ignore::WalkBuilder;
-#[cfg(test)]
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 /// Directory names a version control system keeps its own state in.
@@ -237,39 +235,6 @@ impl PathFilter {
     pub(crate) fn is_ignored(&self, path: &Path) -> bool {
         self.ignored_glob_set.is_match(path)
     }
-}
-
-/// Constructors that let a test describe a filter without building glob sets.
-#[cfg(test)]
-impl PathFilter {
-    /// Selects every path.
-    pub(crate) fn allow_all() -> Self {
-        Self::allow_only("**")
-    }
-
-    /// Selects only the paths matching `glob`.
-    pub(crate) fn allow_only(glob: &str) -> Self {
-        Self::new(glob_set([glob]), GlobSet::empty())
-    }
-
-    /// Selects every path except those listed.
-    pub(crate) fn with_ignored_paths(ignored_paths: HashSet<String>) -> Self {
-        Self::new(glob_set(["**"]), glob_set(ignored_paths))
-    }
-}
-
-/// Compiles `globs`, for the test constructors of [`PathFilter`].
-#[cfg(test)]
-fn glob_set(globs: impl IntoIterator<Item = impl AsRef<str>>) -> GlobSet {
-    let mut builder = GlobSet::builder();
-    for glob in globs {
-        builder.add(
-            crate::paths_glob::glob_builder(glob.as_ref())
-                .build()
-                .expect("malformed test glob"),
-        );
-    }
-    builder.build().expect("failed to build test glob set")
 }
 
 #[cfg(test)]
@@ -607,16 +572,47 @@ mod file_system_impl_tests {
     }
 }
 
-/// An in-memory stand-in for [`FileSystem`], so unit tests can describe a source tree as a map of
-/// strings instead of creating temporary directories.
+/// Test helpers for filesystems and path filters.
 #[cfg(test)]
 pub(crate) mod test_utils {
-    use crate::fs::{Entry, FileSystem};
+    use crate::fs::{Entry, FileSystem, PathFilter};
     use crate::repo_path::RepoPath;
+    use globset::GlobSet;
     use std::collections::HashMap;
     use std::path::{Component, Path};
 
-    /// A source tree held in memory, keyed by path exactly as it is spelled by the caller.
+    /// Selects every path.
+    pub(crate) fn path_filter_all() -> PathFilter {
+        path_filter_only("**")
+    }
+
+    /// Selects only the paths matching `glob`.
+    pub(crate) fn path_filter_only(glob: &str) -> PathFilter {
+        PathFilter::new(glob_set([glob]), GlobSet::empty())
+    }
+
+    /// Selects every path except those matching `ignored_globs`.
+    pub(crate) fn path_filter_ignoring(
+        ignored_globs: impl IntoIterator<Item = impl AsRef<str>>,
+    ) -> PathFilter {
+        PathFilter::new(glob_set(["**"]), glob_set(ignored_globs))
+    }
+
+    /// Compiles `globs` for the test filter builders.
+    fn glob_set(globs: impl IntoIterator<Item = impl AsRef<str>>) -> GlobSet {
+        let mut builder = GlobSet::builder();
+        for glob in globs {
+            builder.add(
+                crate::paths_glob::glob_builder(glob.as_ref())
+                    .build()
+                    .expect("malformed test glob"),
+            );
+        }
+        builder.build().expect("failed to build test glob set")
+    }
+
+    /// An in-memory stand-in for [`FileSystem`], so unit tests can describe a source tree as a map
+    /// of strings instead of creating temporary directories.
     ///
     /// Unlike [`super::FileSystemImpl`] it enforces no root confinement, so tests that care about
     /// containment must exercise the real implementation.

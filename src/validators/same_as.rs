@@ -1,5 +1,5 @@
 use crate::LineIndex;
-use crate::blocks::{Attributes, Block, BlockWithContext, FileBlocks, ParseAttribute};
+use crate::blocks::{AttributeName, Attributes, Block, BlockWithContext, FileBlocks};
 use crate::fs::FileSystem;
 use crate::paths_glob::PathsGlob;
 use crate::repo_path::RepoPath;
@@ -77,22 +77,24 @@ impl<Fs: FileSystem + 'static> SyncValidator for SameAsValidator<Fs> {
     }
 }
 
+static VERBATIM_FORMATS: Formats = Formats(FormatsKind::All(Format::Verbatim));
+
 /// One block's side of a `same-as` comparison: the records it contributes and the rules the two
 /// sides are held to. Built once per block and reused for each of its references.
-struct Comparison {
+struct Comparison<'a> {
     mode: Mode,
-    formats: Formats,
+    formats: &'a Formats,
     /// `Err` carries the reason the block's own records could not be canonicalized. It is reported
     /// against every reference the block makes rather than aborting the run, since content that does
     /// not meet the asserted shape is a violation like any other.
     source_records: Result<Vec<Record>, String>,
     /// The block's `same-as-pattern`. It also reads a whole-file, symbol or paths target, because
     /// such a target has no block of its own to carry one.
-    pattern: Option<Regex>,
+    pattern: Option<&'a Regex>,
 }
 
-impl Comparison {
-    fn new(block: &Block, file_content: &str) -> Self {
+impl<'a> Comparison<'a> {
+    fn new(block: &'a Block, file_content: &str) -> Self {
         let pattern = block.attributes.same_as_pattern();
         let mode = block
             .attributes
@@ -105,12 +107,11 @@ impl Comparison {
         let formats = block
             .attributes
             .same_as_format()
-            .cloned()
-            .unwrap_or_default();
+            .unwrap_or(&VERBATIM_FORMATS);
         Self {
             mode,
-            source_records: canonicalize(extract_records(block, file_content), &formats),
-            pattern: pattern.cloned(),
+            source_records: canonicalize(extract_records(block, file_content), formats),
+            pattern,
             formats,
         }
     }
@@ -121,7 +122,7 @@ impl Comparison {
             Err(reason) => Some(reason.clone()),
             Ok(source) => {
                 groups_disagreement(source, &target_records).or_else(|| {
-                    match canonicalize(target_records, &self.formats) {
+                    match canonicalize(target_records, self.formats) {
                         Err(reason) => Some(reason),
                         Ok(target) => disagreement(source, &target, self.mode),
                     }
@@ -132,7 +133,7 @@ impl Comparison {
 
     /// `records` after the block's `same-as-format`, or `None` when a value fails it.
     fn formatted(&self, records: &[Record]) -> Option<Vec<Record>> {
-        canonicalize(records.to_vec(), &self.formats).ok()
+        canonicalize(records.to_vec(), self.formats).ok()
     }
 }
 
@@ -190,6 +191,25 @@ pub(crate) struct TargetPaths {
 }
 
 impl TargetPaths {
+    /// Parses `raw` as a `same-as-paths` glob, trimming whitespace and rejecting empty patterns.
+    pub(crate) fn parse(raw: &str) -> anyhow::Result<Self> {
+        let trimmed = raw.trim();
+        // The glob is written the way the block writes its paths, so a directory ends with `/`.
+        let (pattern, directories) = match trimmed.strip_suffix('/') {
+            Some(directory_glob) => (directory_glob, true),
+            None => (trimmed, false),
+        };
+        if pattern.trim().is_empty() {
+            bail!("glob must not be empty");
+        }
+        let matcher = PathsGlob::new(pattern)?;
+        Ok(Self {
+            glob: trimmed.to_string(),
+            matcher,
+            directories,
+        })
+    }
+
     /// The glob text as written in the attribute.
     fn as_str(&self) -> &str {
         &self.glob
@@ -210,22 +230,6 @@ impl TargetPaths {
     }
 }
 
-impl ParseAttribute for TargetPaths {
-    fn parse_attribute(raw: &str) -> anyhow::Result<Self> {
-        // The glob is written the way the block writes its paths, so a directory ends with `/`.
-        let (pattern, directories) = match raw.strip_suffix('/') {
-            Some(directory_glob) => (directory_glob, true),
-            None => (raw, false),
-        };
-        let matcher = PathsGlob::new(pattern)?;
-        Ok(Self {
-            glob: raw.to_string(),
-            matcher,
-            directories,
-        })
-    }
-}
-
 /// The violation a `same-as-paths` glob produces, or `None` when the block agrees with the
 /// repository paths that match `target_paths`. Sets `trace`, when given, to what the comparison saw.
 ///
@@ -233,7 +237,7 @@ impl ParseAttribute for TargetPaths {
 /// Returns an error if the repository can't be walked.
 fn paths_violation(
     file_system: &impl FileSystem,
-    comparison: &Comparison,
+    comparison: &Comparison<'_>,
     file_path: &RepoPath,
     block: &Block,
     target_paths: &TargetPaths,
@@ -241,7 +245,7 @@ fn paths_violation(
 ) -> anyhow::Result<Option<Violation>> {
     let glob = target_paths.as_str();
     let paths = target_paths.matches(file_system)?;
-    let records = extract_records_from(&paths.join("\n"), comparison.pattern.as_ref(), |_| None);
+    let records = extract_records_from(&paths.join("\n"), comparison.pattern, |_| None);
     let formatted = trace
         .is_some()
         .then(|| comparison.formatted(&records))
@@ -283,7 +287,7 @@ fn paths_violation(
 /// cannot be read is an `Err`, which is [`TargetRecords`]'s call to make.
 fn reference_violation<Fs: FileSystem>(
     targets: &mut TargetRecords<'_, Fs>,
-    comparison: &Comparison,
+    comparison: &Comparison<'_>,
     file_path: &RepoPath,
     block: &Block,
     reference: &TargetReference,
@@ -292,11 +296,9 @@ fn reference_violation<Fs: FileSystem>(
     let target = reference.resolve(file_path);
     let resolution = match &target.kind {
         TargetKind::Block(name) => targets.named_block_records(&target.file, name)?,
-        TargetKind::WholeFile => {
-            Ok(targets.whole_file_records(&target.file, comparison.pattern.as_ref())?)
-        }
+        TargetKind::WholeFile => Ok(targets.whole_file_records(&target.file, comparison.pattern)?),
         TargetKind::Symbol(path) => {
-            targets.symbol_records(&target.file, path, comparison.pattern.as_ref())?
+            targets.symbol_records(&target.file, path, comparison.pattern)?
         }
     };
     let formatted = trace
@@ -470,17 +472,13 @@ fn extract_records_from(
 
 /// The groups of every record that `pattern` gives: its named groups, or [`WHOLE_GROUP`] when it
 /// has none or when there is no pattern.
-fn pattern_groups(pattern: Option<&Regex>) -> Vec<String> {
-    let groups: Vec<String> = match pattern {
-        Some(regex) => regex
-            .capture_names()
-            .flatten()
-            .map(str::to_string)
-            .collect(),
+fn pattern_groups(pattern: Option<&Regex>) -> Vec<&str> {
+    let groups: Vec<&str> = match pattern {
+        Some(regex) => regex.capture_names().flatten().collect(),
         None => Vec::new(),
     };
     if groups.is_empty() {
-        vec![WHOLE_GROUP.to_string()]
+        vec![WHOLE_GROUP]
     } else {
         groups
     }
@@ -651,13 +649,36 @@ enum FormatsKind {
     ByGroup(BTreeMap<String, Format>),
 }
 
-impl Default for Formats {
-    fn default() -> Self {
-        Self(FormatsKind::All(Format::Verbatim))
-    }
-}
-
 impl Formats {
+    /// Parses `raw` as a single `same-as-format` keyword or comma-separated `group:format` pairs.
+    pub(crate) fn parse(raw: &str) -> anyhow::Result<Self> {
+        let trimmed = raw.trim();
+        if !trimmed.contains(':') {
+            return Ok(Self(FormatsKind::All(parse_keyword_value(trimmed)?)));
+        }
+        let mut entries = BTreeMap::new();
+        for entry in trimmed.split(',') {
+            let (group, format) = entry.trim().split_once(':').ok_or_else(|| {
+                anyhow!(
+                    "\"{raw}\" (expected one format, or group:format entries such as \
+                     value:numeric)"
+                )
+            })?;
+            let group = group.trim();
+            let format = format.trim();
+            if group.is_empty() {
+                bail!("\"{raw}\" has an empty group name before ':'");
+            }
+            if entries
+                .insert(group.to_string(), parse_keyword_value(format)?)
+                .is_some()
+            {
+                bail!("duplicate format for group \"{group}\"");
+            }
+        }
+        Ok(Self(FormatsKind::ByGroup(entries)))
+    }
+
     /// The format of `group`.
     fn of(&self, group: &str) -> Format {
         match &self.0 {
@@ -680,34 +701,13 @@ impl Formats {
         for group in groups_map.keys() {
             // A typo in a group would otherwise compare that group as written, with no sign that
             // its format is lost.
-            if !groups.iter().any(|known| known == group) {
+            if !groups.iter().any(|&known| known == group) {
                 bail!(
                     "same-as-format refers to group \"{group}\", which same-as-pattern doesn't have"
                 );
             }
         }
         Ok(())
-    }
-}
-
-impl ParseAttribute for Formats {
-    fn parse_attribute(raw: &str) -> anyhow::Result<Self> {
-        if !raw.contains(':') {
-            return Ok(Self(FormatsKind::All(parse_keyword_value(raw)?)));
-        }
-        let entries = raw
-            .split(',')
-            .map(|entry| {
-                let (group, format) = entry.trim().split_once(':').ok_or_else(|| {
-                    anyhow!(
-                        "\"{raw}\" (expected one format, or group:format entries such as \
-                         value:numeric)"
-                    )
-                })?;
-                Ok((group.to_string(), parse_keyword_value(format)?))
-            })
-            .collect::<anyhow::Result<_>>()?;
-        Ok(Self(FormatsKind::ByGroup(entries)))
     }
 }
 
@@ -774,9 +774,10 @@ pub(crate) enum Mode {
     Subset,
 }
 
-impl ParseAttribute for Mode {
-    fn parse_attribute(raw: &str) -> anyhow::Result<Self> {
-        parse_keyword_value(raw)
+impl Mode {
+    /// Parses `raw` as a comparison mode after trimming whitespace.
+    pub(crate) fn parse(raw: &str) -> anyhow::Result<Self> {
+        parse_keyword_value(raw.trim())
     }
 }
 
@@ -981,15 +982,24 @@ pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
         Validator::SameAs.is_turned_on_by(attributes),
         Validator::SameAs.attributes(),
         &[
-            ("same-as-mode", attributes.same_as_mode().is_some()),
-            ("same-as-format", attributes.same_as_format().is_some()),
+            (
+                AttributeName::SameAsMode,
+                attributes.same_as_mode().is_some(),
+            ),
+            (
+                AttributeName::SameAsFormat,
+                attributes.same_as_format().is_some(),
+            ),
         ],
     )?;
     // A target's own pattern picks its values, but only a block with a name can be a target.
     require_main(
         Validator::SameAs.is_turned_on_by(attributes) || attributes.name().is_some(),
-        &[Validator::SameAs.attributes(), &["name"]].concat(),
-        &[("same-as-pattern", attributes.same_as_pattern().is_some())],
+        &[Validator::SameAs.attributes(), &[AttributeName::Name]].concat(),
+        &[(
+            AttributeName::SameAsPattern,
+            attributes.same_as_pattern().is_some(),
+        )],
     )?;
     if let Some(formats) = attributes.same_as_format() {
         formats.validate_groups(attributes.same_as_pattern())?;
@@ -2064,6 +2074,64 @@ cafe
     }
 
     #[test]
+    fn same_as_format_trims_single_and_group_entries() -> anyhow::Result<()> {
+        let single = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-format=" numeric ">
+1.0
+# </block>
+# <block name="b">
+1
+# </block>
+"#,
+        );
+        assert!(validator(&[]).validate(single)?.violations.is_empty());
+
+        let grouped = validation_context(
+            "a.py",
+            r#"# <block same-as=":b" same-as-format=" count : numeric , label : identifier " same-as-pattern="(?P<label>\w+) = (?P<count>\d+)">
+redBall = 1.0
+# </block>
+# <block name="b" same-as-pattern="(?P<label>\w+): (?P<count>[\d.]+)">
+red_ball: 1
+# </block>
+"#,
+        );
+        assert!(validator(&[]).validate(grouped)?.violations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn same_as_format_with_empty_or_duplicate_group_returns_an_error() {
+        for value in [
+            ":numeric",
+            " : numeric",
+            "value:numeric,",
+            "value:numeric, value:flat",
+            "value:numeric, value : flat",
+        ] {
+            let error = crate::test_utils::try_validation_context(
+                "a.py",
+                &format!(
+                    r#"# <block same-as=":b" same-as-format="{value}" same-as-pattern="(?P<value>\d+)">
+1
+# </block>
+# <block name="b">
+1
+# </block>
+"#
+                ),
+            )
+            .unwrap_err();
+
+            assert!(
+                format!("{error:#}").contains("invalid `same-as-format`"),
+                "{value}: {error:#}"
+            );
+        }
+    }
+
+    #[test]
     fn one_format_with_several_groups_applies_to_every_group() -> anyhow::Result<()> {
         let context = validation_context(
             "a.py",
@@ -2246,6 +2314,17 @@ red: 1
 
         let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
         assert_eq!(file.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn mode_with_surrounding_spaces_is_trimmed() -> anyhow::Result<()> {
+        let context = validation_context(
+            "a.rs",
+            "// <block same-as=\":b\" same-as-mode=\" set \">\n1\n2\n// </block>\n// <block name=\"b\">\n2\n1\n// </block>",
+        );
+
+        assert!(validator(&[]).validate(context)?.violations.is_empty());
         Ok(())
     }
 
@@ -2685,10 +2764,10 @@ alpha
 # </block>"#,
         );
 
-        let report = validator(&[]).validate(context)?;
+        let report = validator(&[]).validate(Arc::clone(&context))?;
 
         // Only the block with the `same-as` attribute is checked. The target block is not.
-        assert_eq!(checked_lines(&report), vec![1]);
+        assert_eq!(checked_lines(&context, &report), vec![1]);
         assert_eq!(violation_count(&report), 0);
         Ok(())
     }

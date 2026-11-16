@@ -11,8 +11,7 @@ use crate::validators::{
 use crate::virtual_blocks::ConfigEntry;
 use anyhow::{Context, anyhow, bail};
 use regex::Regex;
-use serde::de::{self, DeserializeSeed, IntoDeserializer, MapAccess, Visitor};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::Serialize;
 use serde_repr::Serialize_repr;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
@@ -20,15 +19,51 @@ use std::fmt;
 use std::ops::Range;
 use std::time::Duration;
 use strum::IntoEnumIterator;
-use strum_macros::{Display, EnumIter, EnumString};
+use strum_macros::{Display, EnumIter, EnumString, IntoStaticStr};
 
 const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
+
+/// Every attribute name a block tag or `[[block]]` entry can hold.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Display, EnumString, IntoStaticStr, EnumIter,
+)]
+#[strum(serialize_all = "kebab-case")]
+pub(crate) enum AttributeName {
+    Affects,
+    CheckAi,
+    CheckAiPattern,
+    CheckLua,
+    CheckLuaPattern,
+    CheckLuaTimeout,
+    KeepSorted,
+    KeepSortedFormat,
+    KeepSortedPattern,
+    KeepUnique,
+    LineCount,
+    LineCountPattern,
+    LinePattern,
+    LinePatternForbidden,
+    Name,
+    SameAs,
+    SameAsFormat,
+    SameAsMode,
+    SameAsPaths,
+    SameAsPattern,
+    Severity,
+}
+
+impl AttributeName {
+    /// The attribute name as written in tags and `blockwatch.toml`, such as `"keep-sorted"`.
+    pub(crate) fn as_str(self) -> &'static str {
+        self.into()
+    }
+}
 
 /* <block name="attribute-names" same-as="src/skill.md:validator-reference"
 same-as-format="identifier" same-as-pattern='^\s*(?P<value>[a-z_]+):'> */
 /// The attributes of a block. Only `affects` and `same-as` can hold a list.
-#[derive(Debug, PartialEq, Eq, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
+#[derive(Debug, PartialEq, Eq, Clone, Default, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub(crate) struct Attributes {
     // <block keep-sorted keep-sorted-pattern="^\s*(?P<value>[a-z_]+):">
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -93,14 +128,106 @@ impl Attributes {
 
     /// Builds attributes from normalized name-value `entries`.
     ///
+    /// Parses each attribute's text or list into its domain value. It does not check rules between
+    /// attributes, such as `keep-sorted-format` without `keep-sorted`; call
+    /// [`validate_attributes`] for those.
+    ///
     /// # Errors
     /// Returns an error for an unrecognized attribute name, duplicate names, a wrong value type
-    /// (such as a list passed to a non-reference attribute), or an empty list on a reference
-    /// attribute.
+    /// (such as a list passed to a non-reference attribute), an empty list on a reference
+    /// attribute, or an invalid attribute value.
     pub(crate) fn from_entries(
         entries: impl IntoIterator<Item = (String, AttributeEntry)>,
     ) -> anyhow::Result<Self> {
-        Self::deserialize(AttributeEntriesDeserializer(entries.into_iter())).map_err(Into::into)
+        let mut entries: Vec<(String, AttributeEntry)> = entries.into_iter().collect();
+        // Sort by name so multiple errors report in the same order regardless of map iteration.
+        entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+
+        // Resolve every attribute name first so a typo beats an invalid value on another field.
+        let named: Vec<(AttributeName, AttributeEntry)> = entries
+            .into_iter()
+            .map(|(raw_name, entry)| {
+                let name = raw_name
+                    .parse()
+                    .map_err(|_| anyhow!("unrecognized attribute `{raw_name}`"))?;
+                Ok((name, entry))
+            })
+            .collect::<anyhow::Result<_>>()?;
+
+        if let Some(pair) = named.windows(2).find(|pair| pair[0].0 == pair[1].0) {
+            bail!("duplicate attribute `{}`", pair[0].0);
+        }
+
+        let mut attributes = Self::default();
+        for (name, entry) in named {
+            attributes.set_entry(name, entry)?;
+        }
+        Ok(attributes)
+    }
+
+    /// Parses `entry` and stores it in the matching field of `self`.
+    fn set_entry(&mut self, name: AttributeName, entry: AttributeEntry) -> anyhow::Result<()> {
+        match name {
+            AttributeName::Affects => set_refs(&mut self.affects, name, entry),
+            AttributeName::CheckAi => set_non_empty_text(&mut self.check_ai, name, entry),
+            AttributeName::CheckAiPattern => {
+                set_parsed(&mut self.check_ai_pattern, name, entry, parse_regex)
+            }
+            AttributeName::CheckLua => set_non_empty_text(&mut self.check_lua, name, entry),
+            AttributeName::CheckLuaPattern => {
+                set_parsed(&mut self.check_lua_pattern, name, entry, parse_regex)
+            }
+            AttributeName::CheckLuaTimeout => {
+                set_parsed(&mut self.check_lua_timeout, name, entry, parse_timeout)
+            }
+            AttributeName::KeepSorted => {
+                set_parsed(&mut self.keep_sorted, name, entry, SortOrder::parse)
+            }
+            AttributeName::KeepSortedFormat => {
+                set_parsed(&mut self.keep_sorted_format, name, entry, SortFormat::parse)
+            }
+            AttributeName::KeepSortedPattern => set_parsed(
+                &mut self.keep_sorted_pattern,
+                name,
+                entry,
+                parse_optional_regex,
+            ),
+            AttributeName::KeepUnique => {
+                set_parsed(&mut self.keep_unique, name, entry, parse_optional_regex)
+            }
+            AttributeName::LineCount => {
+                set_parsed(&mut self.line_count, name, entry, Constraint::parse)
+            }
+            AttributeName::LineCountPattern => {
+                set_parsed(&mut self.line_count_pattern, name, entry, parse_regex)
+            }
+            AttributeName::LinePattern => {
+                set_parsed(&mut self.line_pattern, name, entry, parse_regex)
+            }
+            AttributeName::LinePatternForbidden => {
+                set_parsed(&mut self.line_pattern_forbidden, name, entry, parse_regex)
+            }
+            AttributeName::Name => {
+                self.name = Some(text_entry(name, entry)?);
+                Ok(())
+            }
+            AttributeName::SameAs => set_refs(&mut self.same_as, name, entry),
+            AttributeName::SameAsFormat => {
+                set_parsed(&mut self.same_as_format, name, entry, Formats::parse)
+            }
+            AttributeName::SameAsMode => {
+                set_parsed(&mut self.same_as_mode, name, entry, Mode::parse)
+            }
+            AttributeName::SameAsPaths => {
+                set_parsed(&mut self.same_as_paths, name, entry, TargetPaths::parse)
+            }
+            AttributeName::SameAsPattern => {
+                set_parsed(&mut self.same_as_pattern, name, entry, parse_regex)
+            }
+            AttributeName::Severity => {
+                set_parsed(&mut self.severity, name, entry, BlockSeverity::parse)
+            }
+        }
     }
 
     /// The `affects` target references, or `None` when not set.
@@ -217,115 +344,167 @@ impl Attributes {
             .map_or(BlockSeverity::default(), |parsed| parsed.value)
     }
 
-    /// The attributes that are set, as a JSON object with keys in alphabetical order.
-    pub(crate) fn to_map(&self) -> serde_json::Map<String, serde_json::Value> {
-        let serde_json::Value::Object(map) =
-            serde_json::to_value(self).expect("Attributes serializes as a JSON object")
-        else {
-            unreachable!("Attributes always serializes as a JSON object");
-        };
-        map
-    }
-
-    /// Sets `affects` to a list of references for tests.
-    ///
-    /// # Panics
-    /// Panics if `references` is empty.
-    #[cfg(test)]
-    pub(crate) fn set_affects_list(&mut self, references: Vec<String>) {
-        assert!(
-            !references.is_empty(),
-            "`affects` must list at least one reference"
-        );
-        let raw = AttributeValue::List(references);
-        let value = TargetReference::parse_list(&raw).expect("valid affects references");
-        self.affects = Some(Parsed { raw, value });
-    }
-
-    /// Every attribute name paired with a valid sample value, in serialized order.
-    #[cfg(test)]
-    pub(crate) fn sample_values() -> Vec<(String, String)> {
-        fn parsed<T: ParseAttribute>(raw: &str) -> Parsed<T> {
-            Parsed::parse(raw.to_string()).expect("valid sample attribute")
+    /// Every set attribute paired with its raw value, in alphabetical order of name.
+    pub(crate) fn raw_values(&self) -> Vec<(AttributeName, AttributeValue)> {
+        fn text_value(
+            attr: AttributeName,
+            value: Option<&String>,
+        ) -> Option<(AttributeName, AttributeValue)> {
+            value.map(|text| (attr, AttributeValue::Text(text.clone())))
         }
-        fn parsed_ref(raw: &str) -> Parsed<Vec<TargetReference>, AttributeValue> {
-            let raw = AttributeValue::Text(raw.to_string());
-            let value = TargetReference::parse_list(&raw).expect("valid sample reference");
-            Parsed { raw, value }
+        fn parsed_text<T>(
+            attr: AttributeName,
+            value: Option<&Parsed<T>>,
+        ) -> Option<(AttributeName, AttributeValue)> {
+            value.map(|parsed| (attr, AttributeValue::Text(parsed.raw.clone())))
         }
-        // Struct literal without `..Default::default()` fails to compile when a new attribute
-        // field is added until that field is included here.
-        let all = Self {
-            affects: Some(parsed_ref("other.py:target")),
-            check_ai: Some(String::new()),
-            check_ai_pattern: Some(parsed("")),
-            check_lua: Some(String::new()),
-            check_lua_pattern: Some(parsed("")),
-            check_lua_timeout: Some(parsed("10")),
-            keep_sorted: Some(parsed("")),
-            keep_sorted_format: Some(parsed("")),
-            keep_sorted_pattern: Some(parsed("")),
-            keep_unique: Some(parsed("")),
-            line_count: Some(parsed(">0")),
-            line_count_pattern: Some(parsed("")),
-            line_pattern: Some(parsed("")),
-            line_pattern_forbidden: Some(parsed("")),
-            name: Some(String::new()),
-            same_as: Some(parsed_ref("other.py:target")),
-            same_as_format: Some(parsed("numeric")),
-            same_as_mode: Some(parsed("set")),
-            same_as_paths: Some(parsed("*.py")),
-            same_as_pattern: Some(parsed("")),
-            severity: Some(parsed("error")),
-        };
-        all.to_map()
-            .into_iter()
-            .map(|(name, value)| {
-                let text = value
-                    .as_str()
-                    .expect("sample attribute serializes as a string")
-                    .to_string();
-                (name, text)
-            })
-            .collect()
+        fn parsed_ref(
+            attr: AttributeName,
+            value: Option<&Parsed<Vec<TargetReference>, AttributeValue>>,
+        ) -> Option<(AttributeName, AttributeValue)> {
+            value.map(|parsed| (attr, parsed.raw.clone()))
+        }
+
+        let Self {
+            affects,
+            check_ai,
+            check_ai_pattern,
+            check_lua,
+            check_lua_pattern,
+            check_lua_timeout,
+            keep_sorted,
+            keep_sorted_format,
+            keep_sorted_pattern,
+            keep_unique,
+            line_count,
+            line_count_pattern,
+            line_pattern,
+            line_pattern_forbidden,
+            name,
+            same_as,
+            same_as_format,
+            same_as_mode,
+            same_as_paths,
+            same_as_pattern,
+            severity,
+        } = self;
+
+        [
+            parsed_ref(AttributeName::Affects, affects.as_ref()),
+            text_value(AttributeName::CheckAi, check_ai.as_ref()),
+            parsed_text(AttributeName::CheckAiPattern, check_ai_pattern.as_ref()),
+            text_value(AttributeName::CheckLua, check_lua.as_ref()),
+            parsed_text(AttributeName::CheckLuaPattern, check_lua_pattern.as_ref()),
+            parsed_text(AttributeName::CheckLuaTimeout, check_lua_timeout.as_ref()),
+            parsed_text(AttributeName::KeepSorted, keep_sorted.as_ref()),
+            parsed_text(AttributeName::KeepSortedFormat, keep_sorted_format.as_ref()),
+            parsed_text(
+                AttributeName::KeepSortedPattern,
+                keep_sorted_pattern.as_ref(),
+            ),
+            parsed_text(AttributeName::KeepUnique, keep_unique.as_ref()),
+            parsed_text(AttributeName::LineCount, line_count.as_ref()),
+            parsed_text(AttributeName::LineCountPattern, line_count_pattern.as_ref()),
+            parsed_text(AttributeName::LinePattern, line_pattern.as_ref()),
+            parsed_text(
+                AttributeName::LinePatternForbidden,
+                line_pattern_forbidden.as_ref(),
+            ),
+            text_value(AttributeName::Name, name.as_ref()),
+            parsed_ref(AttributeName::SameAs, same_as.as_ref()),
+            parsed_text(AttributeName::SameAsFormat, same_as_format.as_ref()),
+            parsed_text(AttributeName::SameAsMode, same_as_mode.as_ref()),
+            parsed_text(AttributeName::SameAsPaths, same_as_paths.as_ref()),
+            parsed_text(AttributeName::SameAsPattern, same_as_pattern.as_ref()),
+            parsed_text(AttributeName::Severity, severity.as_ref()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
     }
 }
 
-/// Parses the raw text of an attribute into its domain value.
-pub(crate) trait ParseAttribute: Sized {
-    /// Parses `raw`, leaving the attribute name out of any error message.
-    ///
-    /// # Errors
-    /// Returns an error describing why `raw` is invalid for this type.
-    fn parse_attribute(raw: &str) -> anyhow::Result<Self>;
-}
-
-impl ParseAttribute for Duration {
-    fn parse_attribute(raw: &str) -> anyhow::Result<Self> {
-        parse_timeout(raw)
+/// Extracts a text value or returns the config type error for `name`.
+fn text_entry(name: AttributeName, entry: AttributeEntry) -> anyhow::Result<String> {
+    match entry {
+        AttributeEntry::Text(text) => Ok(text),
+        AttributeEntry::List(_) | AttributeEntry::InvalidType => {
+            bail!("{}", wrong_type_message(name))
+        }
     }
 }
 
-impl ParseAttribute for Regex {
-    fn parse_attribute(raw: &str) -> anyhow::Result<Self> {
-        // A formatter that wraps long comments can break a tag inside a pattern. Where it breaks at
-        // a space, the space is gone, so the line break can't be turned back into the text it
-        // replaced. Left in, the line break makes the pattern match no line, and a rule such as
-        // keep-sorted then checks nothing.
-        if raw.contains('\n') {
-            bail!("the pattern has a line break. Put the pattern on one line");
-        }
-        Ok(Self::new(raw)?)
+/// Extracts a non-blank text value, failing with ``invalid `{name}``` when empty or spaces only.
+fn set_non_empty_text(
+    slot: &mut Option<String>,
+    name: AttributeName,
+    entry: AttributeEntry,
+) -> anyhow::Result<()> {
+    let raw = text_entry(name, entry)?;
+    if raw.trim().is_empty() {
+        bail!("invalid `{name}`: must not be empty");
     }
+    *slot = Some(raw);
+    Ok(())
 }
 
-impl ParseAttribute for Option<Regex> {
-    fn parse_attribute(raw: &str) -> anyhow::Result<Self> {
-        if raw.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(Regex::parse_attribute(raw)?))
+/// Parses a text attribute with `parse` and stores both its raw text and parsed value.
+fn set_parsed<T>(
+    slot: &mut Option<Parsed<T>>,
+    name: AttributeName,
+    entry: AttributeEntry,
+    parse: fn(&str) -> anyhow::Result<T>,
+) -> anyhow::Result<()> {
+    let raw = text_entry(name, entry)?;
+    // Format `{error:#}` inline because `Block::from_tags` formats attribute errors with `{error}`.
+    let value = parse(&raw).map_err(|error| anyhow!("invalid `{name}`: {error:#}"))?;
+    *slot = Some(Parsed { raw, value });
+    Ok(())
+}
+
+/// Parses `affects` or `same-as` from a text value or a non-empty list of entries.
+fn set_refs(
+    slot: &mut Option<Parsed<Vec<TargetReference>, AttributeValue>>,
+    name: AttributeName,
+    entry: AttributeEntry,
+) -> anyhow::Result<()> {
+    let raw = match entry {
+        AttributeEntry::Text(text) => AttributeValue::Text(text),
+        AttributeEntry::List(entries) if entries.is_empty() => {
+            bail!("`{name}` must list at least one reference");
         }
+        AttributeEntry::List(entries) => AttributeValue::List(entries),
+        AttributeEntry::InvalidType => bail!("{}", wrong_type_message(name)),
+    };
+    let value = raw
+        .parse_references()
+        .map_err(|error| anyhow!("invalid `{name}`: {error:#}"))?;
+    *slot = Some(Parsed { raw, value });
+    Ok(())
+}
+
+/// Compiles a required attribute regex such as `line-pattern`.
+fn parse_regex(raw: &str) -> anyhow::Result<Regex> {
+    if raw.is_empty() {
+        bail!("must not be empty");
+    }
+    // A formatter that wraps long comments can break a tag inside a pattern. Where it breaks at
+    // a space, the space is gone, so the line break can't be turned back into the text it
+    // replaced. Left in, the line break makes the pattern match no line, and a rule such as
+    // line-pattern then checks the wrong text.
+    if raw.contains('\n') {
+        bail!("the pattern has a line break. Put the pattern on one line");
+    }
+    Ok(Regex::new(raw)?)
+}
+
+/// Compiles an optional attribute regex (`keep-sorted-pattern` or `keep-unique`), returning `None`
+/// when `raw` is empty.
+fn parse_optional_regex(raw: &str) -> anyhow::Result<Option<Regex>> {
+    if raw.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(parse_regex(raw)?))
     }
 }
 
@@ -341,13 +520,6 @@ struct Parsed<T, R = String> {
     value: T,
 }
 
-impl<T: ParseAttribute> Parsed<T> {
-    fn parse(raw: String) -> anyhow::Result<Self> {
-        let value = T::parse_attribute(&raw)?;
-        Ok(Self { raw, value })
-    }
-}
-
 impl<T, R: PartialEq> PartialEq for Parsed<T, R> {
     fn eq(&self, other: &Self) -> bool {
         self.raw == other.raw
@@ -356,57 +528,7 @@ impl<T, R: PartialEq> PartialEq for Parsed<T, R> {
 
 impl<T, R: Eq> Eq for Parsed<T, R> {}
 
-impl<'de, T: ParseAttribute> Deserialize<'de> for Parsed<T> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let raw = String::deserialize(deserializer)?;
-        Self::parse(raw).map_err(|error| de::Error::custom(format!("{error:#}")))
-    }
-}
-
-impl<'de> Deserialize<'de> for Parsed<Vec<TargetReference>, AttributeValue> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let raw = AttributeValue::deserialize(deserializer)?;
-        let value = TargetReference::parse_list(&raw)
-            .map_err(|error| de::Error::custom(format!("{error:#}")))?;
-        Ok(Self { raw, value })
-    }
-}
-
-#[derive(Debug)]
-enum DeserializeError {
-    /// Already names the attribute (unknown name, wrong value type, empty reference list, duplicate).
-    Ready(String),
-    /// Raised from inside a field deserializer via `de::Error::custom`; needs ``invalid `{key}`: ``.
-    Field(String),
-}
-
-impl fmt::Display for DeserializeError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Ready(message) | Self::Field(message) => formatter.write_str(message),
-        }
-    }
-}
-
-impl std::error::Error for DeserializeError {}
-
-impl de::Error for DeserializeError {
-    fn custom<T: fmt::Display>(message: T) -> Self {
-        Self::Field(message.to_string())
-    }
-
-    fn duplicate_field(field: &'static str) -> Self {
-        Self::Ready(format!("duplicate field `{field}`"))
-    }
-}
-
-/// One attribute value passed to [`Attributes::from_entries`] before field deserialization.
+/// One attribute value passed to [`Attributes::from_entries`] before parsing.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum AttributeEntry {
     /// Text from a tag, or a string, `true`, or integer from a `[[block]]` entry.
@@ -418,150 +540,31 @@ pub(crate) enum AttributeEntry {
 }
 
 /// Formats the config type error for `name`, quoting the accepted TOML value shapes.
-fn wrong_type_message(name: &str) -> String {
+fn wrong_type_message(name: AttributeName) -> String {
     format!(
         "`{name}` must be a string, `true` or an integer. `affects` and `same-as` can also be a \
          list of strings"
     )
 }
 
-/// Deserializes an iterator of `(name, AttributeEntry)` pairs into [`Attributes`].
-struct AttributeEntriesDeserializer<I>(I);
-
-impl<'de, I> Deserializer<'de> for AttributeEntriesDeserializer<I>
-where
-    I: Iterator<Item = (String, AttributeEntry)>,
-{
-    type Error = DeserializeError;
-
-    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        visitor.visit_map(AttributeMapAccess {
-            entries: self.0,
-            current: None,
-        })
-    }
-
-    serde::forward_to_deserialize_any! {
-        bool i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 char str string bytes byte_buf option unit
-        unit_struct newtype_struct seq tuple tuple_struct map struct enum identifier ignored_any
-    }
-}
-
-/// Feeds `(name, AttributeEntry)` pairs into `serde`'s struct map visitor, one entry at a time.
-struct AttributeMapAccess<I> {
-    entries: I,
-    current: Option<(String, AttributeEntry)>,
-}
-
-impl<'de, I> MapAccess<'de> for AttributeMapAccess<I>
-where
-    I: Iterator<Item = (String, AttributeEntry)>,
-{
-    type Error = DeserializeError;
-
-    fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
-    where
-        K: DeserializeSeed<'de>,
-    {
-        let Some((key, value)) = self.entries.next() else {
-            return Ok(None);
-        };
-        // Check the key before its value so an unknown attribute is reported regardless of type.
-        let parsed =
-            seed.deserialize(key.as_str().into_deserializer())
-                .map_err(|_: Self::Error| {
-                    DeserializeError::Ready(format!("unrecognized attribute `{key}`"))
-                })?;
-        self.current = Some((key, value));
-        Ok(Some(parsed))
-    }
-
-    fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
-    where
-        V: DeserializeSeed<'de>,
-    {
-        let (key, entry) = self
-            .current
-            .take()
-            .expect("next_value_seed follows next_key_seed");
-        seed.deserialize(AttributeEntryDeserializer { key: &key, entry })
-            .map_err(|error| match error {
-                DeserializeError::Ready(_) => error,
-                DeserializeError::Field(reason) => {
-                    DeserializeError::Ready(format!("invalid `{key}`: {reason}"))
-                }
-            })
-    }
-}
-
-/// Deserializes one [`AttributeEntry`] value for field `key`.
-struct AttributeEntryDeserializer<'a> {
-    key: &'a str,
-    entry: AttributeEntry,
-}
-
-impl<'de> Deserializer<'de> for AttributeEntryDeserializer<'_> {
-    type Error = DeserializeError;
-
-    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        match self.entry {
-            AttributeEntry::Text(text) => visitor.visit_string(text),
-            AttributeEntry::List(entries) if entries.is_empty() => Err(DeserializeError::Ready(
-                format!("`{}` must list at least one reference", self.key),
-            )),
-            AttributeEntry::List(entries) => visitor.visit_seq(entries.into_deserializer()),
-            AttributeEntry::InvalidType => {
-                Err(DeserializeError::Ready(wrong_type_message(self.key)))
-            }
-        }
-    }
-
-    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        visitor.visit_some(self)
-    }
-
-    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        match self.entry {
-            AttributeEntry::Text(text) => visitor.visit_string(text),
-            AttributeEntry::List(_) | AttributeEntry::InvalidType => {
-                Err(DeserializeError::Ready(wrong_type_message(self.key)))
-            }
-        }
-    }
-
-    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_str(visitor)
-    }
-
-    serde::forward_to_deserialize_any! {
-        bool i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 char bytes byte_buf unit unit_struct
-        newtype_struct seq tuple tuple_struct map struct enum identifier ignored_any
-    }
-}
-
-/// The value of an attribute.
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+/// The raw value of a set attribute.
+#[derive(Debug, PartialEq, Eq, Clone, Serialize)]
 #[serde(untagged)]
 pub(crate) enum AttributeValue {
     /// A tag's value, or a string, `true` or an integer in a `[[block]]` entry.
     Text(String),
     /// A list in a `[[block]]` entry, with at least one entry.
     List(Vec<String>),
+}
+
+impl AttributeValue {
+    /// Parses the target references carried by this attribute value.
+    fn parse_references(&self) -> anyhow::Result<Vec<TargetReference>> {
+        match self {
+            Self::Text(text) => TargetReference::parse_separated(text),
+            Self::List(entries) => TargetReference::parse_list(entries),
+        }
+    }
 }
 
 /// A block: a part of a file that its attributes set rules for.
@@ -616,6 +619,16 @@ pub(crate) enum Declaration {
     ConfigEntry(ConfigEntry),
 }
 
+impl Declaration {
+    /// The line of the `[[block]]` entry that declared the block, or `None` when declared by tags.
+    fn config_line(&self) -> Option<usize> {
+        match self {
+            Self::Tags => None,
+            Self::ConfigEntry(entry) => Some(entry.line),
+        }
+    }
+}
+
 /// A block and its file, written the way messages refer to the block. [`Block::label`] makes it.
 pub(crate) struct BlockLabel<'a> {
     file: &'a RepoPath,
@@ -643,14 +656,6 @@ pub(crate) struct BlockKey {
     /// can start at the same place, such as TOML's `/a` and `/a/b` in `a.b = 1`, but they never
     /// share a config line.
     config_line: Option<usize>,
-}
-
-#[cfg(test)]
-impl BlockKey {
-    /// The line the block starts on.
-    pub(crate) fn start_line(&self) -> usize {
-        self.start.line
-    }
 }
 
 /// What tells a named block apart from every other block in the repository: `FILE:BLOCK_NAME`.
@@ -886,10 +891,7 @@ impl Block {
     pub(crate) fn key(&self) -> BlockKey {
         BlockKey {
             start: self.start_tag_position_range.start,
-            config_line: match &self.declaration {
-                Declaration::Tags => None,
-                Declaration::ConfigEntry(entry) => Some(entry.line),
-            },
+            config_line: self.declaration.config_line(),
         }
     }
 }
@@ -917,9 +919,10 @@ pub(crate) enum BlockSeverity {
 }
 // </block>
 
-impl ParseAttribute for BlockSeverity {
-    fn parse_attribute(raw: &str) -> anyhow::Result<Self> {
-        parse_keyword_value(raw)
+impl BlockSeverity {
+    /// Parses `raw` as a severity level after trimming surrounding whitespace.
+    pub(crate) fn parse(raw: &str) -> anyhow::Result<Self> {
+        parse_keyword_value(raw.trim())
     }
 }
 
@@ -993,10 +996,7 @@ impl<'a> From<&'a BlockWithContext> for BlockListing<'a> {
             attributes: &block.attributes,
             checks: None,
             column: block.start_tag_position_range.start.character,
-            config_line: match &block.declaration {
-                Declaration::Tags => None,
-                Declaration::ConfigEntry(entry) => Some(entry.line),
-            },
+            config_line: block.declaration.config_line(),
             is_content_modified: block_with_context.is_content_modified,
             line: block.start_tag_position_range.start.line,
             name: block.name_display(),
@@ -1018,8 +1018,11 @@ pub(crate) fn validate_attributes(attributes: &Attributes) -> anyhow::Result<()>
 
 #[cfg(test)]
 mod validate_attributes_tests {
-    use crate::blocks::{Attributes, validate_attributes};
-    use crate::test_utils::text_attributes;
+    use crate::blocks::{
+        AttributeName,
+        test_utils::{sample_all_attributes, sample_attributes},
+        validate_attributes,
+    };
     use crate::validators::Validator;
     use strum::IntoEnumIterator;
 
@@ -1027,19 +1030,19 @@ mod validate_attributes_tests {
     fn single_attribute_returns_an_error_only_when_it_needs_another() {
         // A new attribute must either work alone or stop the run alone. Otherwise a block with
         // only that attribute would pass without being checked.
-        let needs_no_other: Vec<&'static str> = Validator::iter()
+        let needs_no_other: Vec<AttributeName> = Validator::iter()
             .flat_map(Validator::attributes)
             .copied()
-            .chain(["name", "severity"])
+            .chain([AttributeName::Name, AttributeName::Severity])
             .collect();
-        for (name, value) in Attributes::sample_values() {
-            let attributes = text_attributes(&[(&name, &value)]);
-
+        for (name, attributes) in sample_attributes() {
             let result = validate_attributes(&attributes);
 
             assert_eq!(
                 result.is_ok(),
-                needs_no_other.contains(&name.as_str()),
+                needs_no_other
+                    .iter()
+                    .any(|allowed| allowed.as_str() == name),
                 "{name}"
             );
         }
@@ -1048,11 +1051,22 @@ mod validate_attributes_tests {
     #[test]
     fn known_names_are_in_alphabetical_order() {
         // JSON output relies on field declaration order matching alphabetical order.
-        let names: Vec<String> = Attributes::sample_values()
+        let names: Vec<String> = sample_attributes()
             .into_iter()
             .map(|(name, _)| name)
             .collect();
         assert!(names.is_sorted(), "{names:?}");
+    }
+
+    #[test]
+    fn attribute_names_match_attributes_fields_in_order() {
+        let enum_names: Vec<&str> = AttributeName::iter().map(AttributeName::as_str).collect();
+        let raw_names: Vec<&str> = sample_all_attributes()
+            .raw_values()
+            .into_iter()
+            .map(|(name, _)| name.as_str())
+            .collect();
+        assert_eq!(enum_names, raw_names);
     }
 }
 
@@ -1108,7 +1122,38 @@ mod attributes_tests {
         .unwrap_err()
         .to_string();
 
-        assert_eq!(error, "duplicate field `name`");
+        assert_eq!(error, "duplicate attribute `name`");
+    }
+
+    #[test]
+    fn unrecognized_name_with_another_invalid_attribute_reports_unrecognized_name() {
+        for pairs in [
+            [("aaa-unknown", ""), ("line-count", "bad")],
+            [("zzz-unknown", ""), ("affects", "file.rs:")],
+            [("line-count", "bad"), ("zzz-unknown", "")],
+        ] {
+            let error = Attributes::from_entries(
+                pairs
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), AttributeEntry::Text(v.to_string()))),
+            )
+            .unwrap_err()
+            .to_string();
+
+            assert!(error.contains("unrecognized attribute"), "{error}");
+        }
+    }
+
+    #[test]
+    fn duplicate_attribute_with_invalid_second_value_reports_duplicate() {
+        let error = Attributes::from_entries([
+            ("line-count".into(), AttributeEntry::Text(">0".into())),
+            ("line-count".into(), AttributeEntry::Text("bad".into())),
+        ])
+        .unwrap_err()
+        .to_string();
+
+        assert_eq!(error, "duplicate attribute `line-count`");
     }
 
     #[test]
@@ -1138,12 +1183,12 @@ mod attributes_tests {
     #[test]
     fn invalid_affects_text_from_tag_returns_error() {
         let error = Attributes::from_tag(HashMap::from([("affects".into(), "file.rs:".into())]))
-            .unwrap_err()
-            .to_string();
+            .unwrap_err();
 
         assert_eq!(
-            error,
-            "invalid `affects`: invalid target reference: \"file.rs:\" has no block name after ':'; drop the ':' to reference the whole file"
+            format!("{error:#}"),
+            "invalid `affects`: \"file.rs:\" has no block name after ':'; drop the ':' to \
+             reference the whole file"
         );
     }
 
@@ -1153,13 +1198,61 @@ mod attributes_tests {
             "same-as".into(),
             AttributeEntry::List(vec!["ok.md".into(), "".into()]),
         )])
-        .unwrap_err()
-        .to_string();
+        .unwrap_err();
 
         assert_eq!(
-            error,
-            "invalid `same-as`: entry 2 of the list: invalid target reference: \"\""
+            format!("{error:#}"),
+            "invalid `same-as`: entry 2 of the list: empty target reference"
         );
+    }
+
+    #[test]
+    fn blank_check_ai_and_check_lua_from_tag_return_errors() {
+        for name in ["check-ai", "check-lua"] {
+            for value in ["", "   "] {
+                let error =
+                    Attributes::from_tag(HashMap::from([(name.into(), value.into())])).unwrap_err();
+                assert!(
+                    format!("{error:#}").starts_with(&format!("invalid `{name}`:")),
+                    "{name}={value:?}: {error:#}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn empty_required_pattern_from_tag_returns_error() {
+        for name in [
+            "check-ai-pattern",
+            "check-lua-pattern",
+            "line-count-pattern",
+            "line-pattern",
+            "line-pattern-forbidden",
+            "same-as-pattern",
+        ] {
+            let error =
+                Attributes::from_tag(HashMap::from([(name.into(), "".into())])).unwrap_err();
+            assert!(
+                format!("{error:#}").starts_with(&format!("invalid `{name}`:")),
+                "{name}: {error:#}"
+            );
+
+            // A single space regex is valid for matching literal spaces.
+            assert!(Attributes::from_tag(HashMap::from([(name.into(), " ".into())])).is_ok());
+        }
+    }
+
+    #[test]
+    fn empty_same_as_paths_from_tag_returns_error() {
+        for value in ["", "   ", "/", " / "] {
+            let error =
+                Attributes::from_tag(HashMap::from([("same-as-paths".into(), value.into())]))
+                    .unwrap_err();
+            assert!(
+                format!("{error:#}").starts_with("invalid `same-as-paths`:"),
+                "{value:?}: {error:#}"
+            );
+        }
     }
 
     #[test]
@@ -1192,17 +1285,14 @@ mod attributes_tests {
 
     #[test]
     fn pattern_with_an_escaped_line_break_compiles() -> anyhow::Result<()> {
-        assert!(
-            super::ParseAttribute::parse_attribute(r"a\nb")
-                .map(|re: regex::Regex| re.is_match("a\nb"))?
-        );
+        assert!(super::parse_regex(r"a\nb")?.is_match("a\nb"));
         Ok(())
     }
 }
 
 #[cfg(test)]
-mod block_severity_from_str_tests {
-    use crate::blocks::{Attributes, BlockSeverity};
+mod block_severity_tests {
+    use crate::blocks::{AttributeName, AttributeValue, Attributes, BlockSeverity};
     use crate::test_utils::text_attributes;
     use std::collections::HashMap;
 
@@ -1218,12 +1308,25 @@ mod block_severity_from_str_tests {
         let attributes = text_attributes(&[("severity", "InFo")]);
 
         assert_eq!(attributes.severity(), BlockSeverity::Info);
-        assert_eq!(attributes.to_map()["severity"], "InFo");
+        assert_eq!(
+            attributes.raw_values(),
+            vec![(
+                AttributeName::Severity,
+                AttributeValue::Text("InFo".to_string()),
+            )]
+        );
     }
 
     #[test]
     fn block_without_severity_attribute_returns_error_severity() {
         assert_eq!(Attributes::default().severity(), BlockSeverity::Error);
+    }
+
+    #[test]
+    fn block_with_trimmed_severity_attribute_returns_correct_severity() {
+        let attributes = text_attributes(&[("severity", " warning ")]);
+
+        assert_eq!(attributes.severity(), BlockSeverity::Warning);
     }
 
     #[test]
@@ -1311,16 +1414,12 @@ mod block_address_tests {
 #[cfg(test)]
 mod block_listing_tests {
     use super::*;
-    use crate::test_utils::text_attributes;
     use std::path::PathBuf;
 
-    fn block_with_context(
-        attributes: &[(&str, &str)],
-        declaration: Declaration,
-    ) -> BlockWithContext {
+    fn block_with_context(attributes: Attributes, declaration: Declaration) -> BlockWithContext {
         BlockWithContext {
             block: Block {
-                attributes: text_attributes(attributes),
+                attributes,
                 start_tag_position_range: Position::new(2, 4)..Position::new(2, 30),
                 content: Content::source(0..0, Position::new(3, 1)..Position::new(3, 1)),
                 declaration,
@@ -1332,18 +1431,23 @@ mod block_listing_tests {
 
     #[test]
     fn virtual_block_with_checks_is_written_with_its_keys_sorted() -> anyhow::Result<()> {
-        let mut block = block_with_context(
-            &[("name", "n"), ("line-count", "<=3"), ("keep-sorted", "asc")],
+        let attributes = Attributes::from_entries([
+            ("name".into(), AttributeEntry::Text("n".into())),
+            ("line-count".into(), AttributeEntry::Text("<=3".into())),
+            ("keep-sorted".into(), AttributeEntry::Text("asc".into())),
+            (
+                "affects".into(),
+                AttributeEntry::List(vec!["a.md:b".into(), "c.md".into()]),
+            ),
+        ])?;
+        let block = block_with_context(
+            attributes,
             Declaration::ConfigEntry(ConfigEntry {
                 file: PathBuf::from("blockwatch.toml"),
                 line: 7,
                 index: 0,
             }),
         );
-        block
-            .block
-            .attributes
-            .set_affects_list(vec!["a.md:b".to_string(), "c.md".to_string()]);
         let mut listing = BlockListing::from(&block);
         listing.checks = Some(BTreeSet::from([Validator::KeepSorted]));
 
@@ -1356,7 +1460,10 @@ mod block_listing_tests {
 
     #[test]
     fn unnamed_block_with_tags_is_written_without_checks_and_config_line() -> anyhow::Result<()> {
-        let block = block_with_context(&[("keep-sorted", "asc")], Declaration::Tags);
+        let block = block_with_context(
+            crate::test_utils::text_attributes(&[("keep-sorted", "asc")]),
+            Declaration::Tags,
+        );
 
         assert_eq!(
             serde_json::to_string(&BlockListing::from(&block))?,
@@ -1372,7 +1479,6 @@ mod supported_languages_tests {
 
     use crate::blocks::*;
     use crate::diff_parser::DiffChanges;
-    use crate::fs::PathFilter;
     use crate::fs::test_utils::FakeFileSystem;
     use crate::language_parsers::LanguageParsers;
     use crate::scan::{Scan, ScanMode};
@@ -1873,9 +1979,14 @@ mod supported_languages_tests {
         ]);
         let file_system = FakeFileSystem::new(files.clone());
 
-        let blocks_by_file = Scan::new(&file_system, &PathFilter::allow_all(), &parsers, &[])
-            .parse_blocks(&DiffChanges::default(), ScanMode::All)?
-            .blocks;
+        let blocks_by_file = Scan::new(
+            &file_system,
+            &crate::fs::test_utils::path_filter_all(),
+            &parsers,
+            &[],
+        )
+        .parse_blocks(&DiffChanges::default(), ScanMode::All)?
+        .blocks;
 
         for file_name in files.keys() {
             assert!(
@@ -1890,4 +2001,115 @@ mod supported_languages_tests {
         Ok(())
     }
     // </block>
+}
+
+/// Test helpers for building and inspecting [`Attributes`].
+#[cfg(test)]
+pub(crate) mod test_utils {
+    use super::*;
+    use serde::Deserializer;
+    use serde::de::{IgnoredAny, MapAccess, Visitor};
+
+    /// An [`Attributes`] value with every field set to a valid sample.
+    pub(crate) fn sample_all_attributes() -> Attributes {
+        fn parsed<T>(raw: &str, parse: fn(&str) -> anyhow::Result<T>) -> Parsed<T> {
+            let value = parse(raw).expect("valid sample attribute");
+            Parsed {
+                raw: raw.to_string(),
+                value,
+            }
+        }
+        fn parsed_ref(raw: &str) -> Parsed<Vec<TargetReference>, AttributeValue> {
+            let raw = AttributeValue::Text(raw.to_string());
+            let value = raw.parse_references().expect("valid sample reference");
+            Parsed { raw, value }
+        }
+        // Struct literal without `..Default::default()` fails to compile when a new attribute
+        // field is added until that field is included here.
+        Attributes {
+            affects: Some(parsed_ref("other.py:target")),
+            check_ai: Some("must be valid".to_string()),
+            check_ai_pattern: Some(parsed(".", parse_regex)),
+            check_lua: Some("check.lua".to_string()),
+            check_lua_pattern: Some(parsed(".", parse_regex)),
+            check_lua_timeout: Some(parsed("10", parse_timeout)),
+            keep_sorted: Some(parsed("", SortOrder::parse)),
+            keep_sorted_format: Some(parsed("", SortFormat::parse)),
+            keep_sorted_pattern: Some(parsed("", parse_optional_regex)),
+            keep_unique: Some(parsed("", parse_optional_regex)),
+            line_count: Some(parsed(">0", Constraint::parse)),
+            line_count_pattern: Some(parsed(".", parse_regex)),
+            line_pattern: Some(parsed(".", parse_regex)),
+            line_pattern_forbidden: Some(parsed("forbidden", parse_regex)),
+            name: Some("sample".to_string()),
+            same_as: Some(parsed_ref("other.py:target")),
+            same_as_format: Some(parsed("numeric", Formats::parse)),
+            same_as_mode: Some(parsed("set", Mode::parse)),
+            same_as_paths: Some(parsed("*.py", TargetPaths::parse)),
+            same_as_pattern: Some(parsed(".", parse_regex)),
+            severity: Some(parsed("error", BlockSeverity::parse)),
+        }
+    }
+
+    /// Every attribute paired with a single-attribute [`Attributes`] value, in [`Attributes`]
+    /// serialization order.
+    pub(crate) fn sample_attributes() -> Vec<(String, Attributes)> {
+        struct KeyOrder(Vec<String>);
+
+        impl<'de> serde::Deserialize<'de> for KeyOrder {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                struct KeysVisitor;
+
+                impl<'de> Visitor<'de> for KeysVisitor {
+                    type Value = KeyOrder;
+
+                    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        formatter.write_str("a JSON object of attributes")
+                    }
+
+                    fn visit_map<M>(self, mut map: M) -> Result<KeyOrder, M::Error>
+                    where
+                        M: MapAccess<'de>,
+                    {
+                        let mut keys = Vec::new();
+                        while let Some((key, _)) = map.next_entry::<String, IgnoredAny>()? {
+                            keys.push(key);
+                        }
+                        Ok(KeyOrder(keys))
+                    }
+                }
+
+                deserializer.deserialize_map(KeysVisitor)
+            }
+        }
+
+        let all = sample_all_attributes();
+        let json = serde_json::to_string(&all).expect("Attributes serializes to JSON");
+        // Parse the JSON stream instead of `serde_json::Value` (which sorts keys via `BTreeMap`
+        // unless `preserve_order` is enabled) so field-declaration order is actually verified.
+        let KeyOrder(keys) =
+            serde_json::from_str(&json).expect("sample attributes serialize as a JSON object");
+        let by_name: HashMap<&'static str, AttributeEntry> = all
+            .raw_values()
+            .into_iter()
+            .map(|(name, value)| {
+                let entry = match value {
+                    AttributeValue::Text(text) => AttributeEntry::Text(text),
+                    AttributeValue::List(list) => AttributeEntry::List(list),
+                };
+                (name.as_str(), entry)
+            })
+            .collect();
+        keys.into_iter()
+            .map(|name| {
+                let entry = by_name[name.as_str()].clone();
+                let single = Attributes::from_entries([(name.clone(), entry)])
+                    .expect("valid sample attribute");
+                (name, single)
+            })
+            .collect()
+    }
 }

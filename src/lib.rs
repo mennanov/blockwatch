@@ -165,8 +165,7 @@ mod count_rust_blocks_tests {
 mod test_utils {
     use crate::blocks::Attributes;
     use crate::diff_parser::{DiffChanges, LineChange, LineChangeKind};
-    use crate::fs::PathFilter;
-    use crate::fs::test_utils::FakeFileSystem;
+    use crate::fs::test_utils::{FakeFileSystem, path_filter_all};
     use crate::language_parsers;
     use crate::repo_path::RepoPath;
     use crate::scan::{Scan, ScanMode};
@@ -263,7 +262,7 @@ mod test_utils {
             diff_changes([(RepoPath::from_reference(file_name).unwrap(), line_changes)]);
         let parsers = language_parsers::LanguageParsers::new();
         Ok(Arc::new(ValidationContext::new(
-            Scan::new(&file_system, &PathFilter::allow_all(), &parsers, &[])
+            Scan::new(&file_system, &path_filter_all(), &parsers, &[])
                 .parse_blocks(&line_changes_by_file, ScanMode::OnlyChanged)?
                 .blocks,
             parsers,
