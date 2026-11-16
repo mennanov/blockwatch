@@ -15,29 +15,27 @@ See [Installation](../README.md#installation).
 
 ## 2. Run the Agent
 
-Paste this prompt into your agent. The agent installs the skill in your project and uses it to add blocks:
+Paste this prompt into your agent. The agent reads the skill and adds blocks to your project:
 
 <!-- <block same-as="README.md:agent-prompt"> -->
 
 ```text
-Run `blockwatch skill` and install the skill in this project as its "Installing this skill" section says. Then use the
-skill to annotate the project and add `blockwatch.toml` if needed. List each block you added and the mistake it
-catches.
+Run `blockwatch skill` and follow it to add `<block>` tags, plus `blockwatch.toml` if needed.
+Verify your blocks with `blockwatch`, then list each block you added and the mistake it catches.
 ```
 
 <!-- </block> -->
 
-The agent saves a short stub, not the whole skill. The stub runs `blockwatch skill` each time it loads, so it always
-matches the installed version. It stays in the project, so agents that work on it later know the rules too. Always
-inspect the generated diff before committing to ensure the added blocks are necessary and accurate.
+The agent does not install the skill or edit your hooks or CI. Inspect the generated diff before committing to make
+sure every added block is necessary and accurate.
 
 ## 3. Enable Automated Checks
 
 Set up pre-commit hooks or CI workflows to enforce rules on future changes. See [CI Integration](ci.md).
 
-## Other Ways to Install the Skill
+## Installing the Skill for Future Runs
 
-Install the skill in one of these ways, then leave the first sentence out of the prompt.
+To make agents follow blockwatch rules in future sessions without pasting the prompt again, install the skill once:
 
 ### Claude Code
 

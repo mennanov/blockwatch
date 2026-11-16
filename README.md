@@ -29,16 +29,15 @@ Then paste this prompt into your AI coding agent:
 <!-- <block name="agent-prompt"> -->
 
 ```text
-Run `blockwatch skill` and install the skill in this project as its "Installing this skill" section says. Then use the
-skill to annotate the project and add `blockwatch.toml` if needed. List each block you added and the mistake it
-catches.
+Run `blockwatch skill` and follow it to add `<block>` tags, plus `blockwatch.toml` if needed.
+Verify your blocks with `blockwatch`, then list each block you added and the mistake it catches.
 ```
 
 <!-- </block> -->
 
-Review the suggested blocks and commit them. The skill stays in the project, so agents working on it later know
-the rules too. It runs `blockwatch skill` each time it loads, so it always matches the installed version. To check every
-future change, add blockwatch to your [pre-commit hook or CI](#ci-integration).
+Review the blocks it adds and commit them. To check every future change, add blockwatch to your
+[pre-commit hook or CI](#ci-integration). You can also [install the skill](#ai-agents) so future agent runs know the
+rules too.
 
 ## How it works
 
@@ -160,8 +159,7 @@ See [Verifying a Download](SECURITY.md#verifying-a-download).
 ## AI Agents
 
 The [skill](src/skill.md) tells an agent where blocks make sense, how to format them, and how to check its own work.
-`blockwatch skill` prints it. The [Quick Start](#quick-start) prompt sets it up in a single project. To install it
-globally for every project in Claude Code instead:
+`blockwatch skill` prints it. To install it globally for every project in Claude Code:
 
 <!-- <block name="plugin-install"> -->
 
@@ -172,7 +170,7 @@ globally for every project in Claude Code instead:
 
 <!-- </block> -->
 
-See [docs/agents.md](docs/agents.md) for Cursor, Copilot, Codex, and other agent setups.
+See [docs/agents.md](docs/agents.md) to set up the skill per project or for Cursor, Copilot, Codex, and other tools.
 
 ## Usage
 

@@ -41,7 +41,7 @@ glob, or `#/path` rule.
 3. Run `blockwatch list` to confirm every tag parses, `blockwatch explain FILE:NAME` on pattern/glob rules, and
    `blockwatch` on the clean tree.
 4. Put project-wide ignores, extension maps, and validator defaults in `blockwatch.toml`.
-5. Wire blockwatch into [hooks and CI](#wiring-into-hooks-and-ci).
+5. If asked, wire blockwatch into [hooks and CI](#wiring-into-hooks-and-ci).
 
 ## Where blocks add value
 
