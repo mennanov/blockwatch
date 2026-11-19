@@ -261,7 +261,7 @@ mod test_utils {
             contents.to_string(),
         )]));
         let line_changes_by_file =
-            diff_changes([(RepoPath::from_reference(file_name).unwrap(), line_changes)]);
+            diff_changes([(RepoPath::from_reference(file_name)?, line_changes)]);
         let parsers = language_parsers::LanguageParsers::new();
         Ok(Arc::new(ValidationContext::new(
             Scan::new(&file_system, &path_filter_all(), &parsers, &[])
