@@ -91,7 +91,7 @@ fn stage_name<'tree>(from: Node<'tree>, source: &str) -> Option<Node<'tree>> {
 
 /// The syntax error right after `instruction`, on the line where it ends. `None` when there is
 /// none.
-fn error_after<'tree>(instruction: Node<'tree>) -> Option<Node<'tree>> {
+fn error_after(instruction: Node<'_>) -> Option<Node<'_>> {
     // The grammar ends an instruction where it can't read on, such as at an empty line inside a
     // continued value, and puts the rest of the instruction in an error node next to it. An
     // error that starts on a later line is a broken instruction of its own, such as `FOO bar`.

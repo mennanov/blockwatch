@@ -476,10 +476,10 @@ pub(crate) fn only_child(node: Node<'_>) -> Option<Node<'_>> {
 /// Each of `parts` with the byte range of its definition. `parts` are the parts of one
 /// declaration at `whole`, each declaring one name, such as `a = 1` and `b = 2` in
 /// `int a = 1, b = 2;`. A part that is the only one covers the whole declaration.
-pub(crate) fn part_ranges<'tree>(
+pub(crate) fn part_ranges(
     whole: Range<usize>,
-    parts: Vec<Node<'tree>>,
-) -> impl Iterator<Item = (Node<'tree>, Range<usize>)> {
+    parts: Vec<Node<'_>>,
+) -> impl Iterator<Item = (Node<'_>, Range<usize>)> {
     // With several parts, each covers only itself, so a change to one does not touch the others.
     let alone = parts.len() == 1;
     parts.into_iter().map(move |part| {
