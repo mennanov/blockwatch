@@ -129,6 +129,17 @@ impl Serialize for Attributes {
     }
 }
 
+/// Two attributes are equal when their [`values`](Attributes::values) are, so `keep-sorted` and
+/// `keep-sorted="asc"` are equal.
+impl PartialEq for Attributes {
+    fn eq(&self, other: &Self) -> bool {
+        // `Regex` has no `PartialEq`, so the fields can't be compared by a derive.
+        self.values().eq(other.values())
+    }
+}
+
+impl Eq for Attributes {}
+
 impl Attributes {
     /// The attributes of a start tag, from `values`: each attribute's name and its value.
     ///
@@ -144,7 +155,7 @@ impl Attributes {
         )
     }
 
-    /// Builds attributes from normalized name-value `entries`.
+    /// Builds attributes from `entries`: each attribute's name and its value as written.
     ///
     /// Parses each attribute's text or list into its domain value and checks cross-attribute rules,
     /// such as requiring `keep-sorted` alongside `keep-sorted-format` or checking `same-as-format`
@@ -355,29 +366,9 @@ impl Attributes {
 
     /// Whether `name` is set on this block.
     pub(crate) fn has(&self, name: AttributeName) -> bool {
-        match name {
-            AttributeName::Affects => self.affects.is_some(),
-            AttributeName::CheckAi => self.check_ai.is_some(),
-            AttributeName::CheckAiPattern => self.check_ai_pattern.is_some(),
-            AttributeName::CheckLua => self.check_lua.is_some(),
-            AttributeName::CheckLuaPattern => self.check_lua_pattern.is_some(),
-            AttributeName::CheckLuaTimeout => self.check_lua_timeout.is_some(),
-            AttributeName::KeepSorted => self.keep_sorted.is_some(),
-            AttributeName::KeepSortedFormat => self.keep_sorted_format.is_some(),
-            AttributeName::KeepSortedPattern => self.keep_sorted_pattern.is_some(),
-            AttributeName::KeepUnique => self.keep_unique.is_some(),
-            AttributeName::LineCount => self.line_count.is_some(),
-            AttributeName::LineCountPattern => self.line_count_pattern.is_some(),
-            AttributeName::LinePattern => self.line_pattern.is_some(),
-            AttributeName::LinePatternForbidden => self.line_pattern_forbidden.is_some(),
-            AttributeName::Name => self.name.is_some(),
-            AttributeName::SameAs => self.same_as.is_some(),
-            AttributeName::SameAsFormat => self.same_as_format.is_some(),
-            AttributeName::SameAsMode => self.same_as_mode.is_some(),
-            AttributeName::SameAsPaths => self.same_as_paths.is_some(),
-            AttributeName::SameAsPattern => self.same_as_pattern.is_some(),
-            AttributeName::Severity => self.severity.is_some(),
-        }
+        // Formatting a value costs a little, but then `value` is the only place that pairs each
+        // name with its field.
+        self.value(name).is_some()
     }
 
     /// The formatted value of `name`, or `None` when not set.
@@ -481,7 +472,8 @@ fn text_entry(name: AttributeName, entry: AttributeEntry) -> anyhow::Result<Stri
     }
 }
 
-/// Extracts a non-blank text value, failing with ``invalid `{name}``` when empty or spaces only.
+/// Stores the text of `entry` in `slot`. Fails with ``invalid `{name}` `` when the text is empty or
+/// only spaces.
 fn set_non_empty_text(
     slot: &mut Option<String>,
     name: AttributeName,
@@ -585,7 +577,7 @@ fn wrong_type_message(name: AttributeName) -> String {
 }
 
 #[cfg(test)]
-mod validate_attributes_tests {
+mod attribute_names_tests {
     use super::{
         AttributeName, Attributes,
         test_utils::{sample_all_attributes, sample_entries},
@@ -617,13 +609,67 @@ mod validate_attributes_tests {
     }
 
     #[test]
-    fn attribute_names_match_attributes_fields_in_order() {
-        let enum_names: Vec<AttributeName> = AttributeName::iter().collect();
-        let value_names: Vec<AttributeName> = sample_all_attributes()
-            .values()
-            .map(|(name, _)| name)
-            .collect();
-        assert_eq!(enum_names, value_names);
+    fn every_attribute_is_read_from_its_own_field() -> anyhow::Result<()> {
+        let sample = sample_all_attributes();
+
+        // Each sample value is different, so a name paired with the wrong field changes this.
+        assert_eq!(
+            serde_json::to_value(&sample)?,
+            serde_json::json!({
+                "affects": ["affected.py:target"],
+                "check-ai": "must be valid",
+                "check-ai-pattern": "ai",
+                "check-lua": "check.lua",
+                "check-lua-pattern": "lua",
+                "check-lua-timeout": "10",
+                "keep-sorted": "asc",
+                "keep-sorted-format": "lexicographic",
+                "keep-sorted-pattern": "sorted",
+                "keep-unique": "",
+                "line-count": ">0",
+                "line-count-pattern": "count",
+                "line-pattern": "allowed",
+                "line-pattern-forbidden": "forbidden",
+                "name": "sample",
+                "same-as": ["same.py:target"],
+                "same-as-format": "numeric",
+                "same-as-mode": "set",
+                "same-as-paths": "*.py",
+                "same-as-pattern": "same",
+                "severity": "error",
+            })
+        );
+        // Each value written back as its attribute is stored in the field it came from.
+        let entries = sample_entries()
+            .into_iter()
+            .map(|(name, entry)| (name.as_str().to_string(), entry));
+        assert_eq!(Attributes::from_entries(entries)?, sample);
+        Ok(())
+    }
+
+    #[test]
+    fn required_with_lists_the_attributes_that_turn_on_the_modified_validator() {
+        // A modifier's name starts with its validator's name, such as `keep-sorted-format`.
+        for name in AttributeName::iter() {
+            let required = name.required_with();
+            if required.is_empty() {
+                continue;
+            }
+            let validator = Validator::iter()
+                .find(|validator| {
+                    name.as_str()
+                        .starts_with(&format!("{}-", validator.as_str()))
+                })
+                .unwrap_or_else(|| panic!("no validator for `{name}`"));
+            // A block with a `name` can be a `same-as` target, which reads its own pattern.
+            let main: Vec<AttributeName> = required
+                .iter()
+                .copied()
+                .filter(|&main| main != AttributeName::Name)
+                .collect();
+
+            assert_eq!(main, validator.attributes(), "{name}");
+        }
     }
 }
 
@@ -830,6 +876,26 @@ mod attributes_tests {
     }
 
     #[test]
+    fn attributes_with_the_same_values_are_equal() -> anyhow::Result<()> {
+        let written = Attributes::from_tag([
+            ("keep-sorted".into(), "".into()),
+            ("severity".into(), "InFo".into()),
+        ])?;
+        let normalized = Attributes::from_tag([
+            ("keep-sorted".into(), "asc".into()),
+            ("severity".into(), "info".into()),
+        ])?;
+        let other = Attributes::from_tag([
+            ("keep-sorted".into(), "desc".into()),
+            ("severity".into(), "info".into()),
+        ])?;
+
+        assert_eq!(written, normalized);
+        assert_ne!(written, other);
+        Ok(())
+    }
+
+    #[test]
     fn pattern_with_an_escaped_line_break_compiles() -> anyhow::Result<()> {
         assert!(parse_regex(r"a\nb")?.is_match("a\nb"));
         Ok(())
@@ -922,17 +988,10 @@ mod attributes_tests {
     }
 }
 
-/// Test helpers for building and comparing [`Attributes`].
+/// Test helpers for building [`Attributes`].
 #[cfg(test)]
 pub(crate) mod test_utils {
     use super::*;
-
-    /// Asserts that `actual` and `expected` hold the same attributes.
-    pub(crate) fn assert_attributes_eq(actual: &Attributes, expected: &Attributes) {
-        let actual: Vec<_> = actual.values().collect();
-        let expected: Vec<_> = expected.values().collect();
-        assert_eq!(actual, expected);
-    }
 
     /// An [`Attributes`] value with every field set to a valid sample.
     pub(crate) fn sample_all_attributes() -> Attributes {
@@ -940,27 +999,28 @@ pub(crate) mod test_utils {
         let re = |raw| parse_regex(raw).expect("valid sample regex");
         // Struct literal without `..Default::default()` fails to compile when a new attribute
         // field is added until that field is included here.
+        // Every value differs from the others, so a test can tell which field a value came from.
         Attributes {
-            affects: Some(refs("other.py:target")),
+            affects: Some(refs("affected.py:target")),
             check_ai: Some("must be valid".to_string()),
-            check_ai_pattern: Some(re(".")),
+            check_ai_pattern: Some(re("ai")),
             check_lua: Some("check.lua".to_string()),
-            check_lua_pattern: Some(re(".")),
+            check_lua_pattern: Some(re("lua")),
             check_lua_timeout: Some(Duration::from_secs(10)),
             keep_sorted: Some(SortOrder::Asc),
             keep_sorted_format: Some(SortFormat::Lexicographic),
-            keep_sorted_pattern: Some(re(".")),
+            keep_sorted_pattern: Some(re("sorted")),
             keep_unique: Some(None),
             line_count: Some(Constraint::parse(">0").expect("valid sample constraint")),
-            line_count_pattern: Some(re(".")),
-            line_pattern: Some(re(".")),
+            line_count_pattern: Some(re("count")),
+            line_pattern: Some(re("allowed")),
             line_pattern_forbidden: Some(re("forbidden")),
             name: Some("sample".to_string()),
-            same_as: Some(refs("other.py:target")),
+            same_as: Some(refs("same.py:target")),
             same_as_format: Some(Formats::parse("numeric").expect("valid sample format")),
             same_as_mode: Some(Mode::Set),
             same_as_paths: Some(TargetPaths::parse("*.py").expect("valid sample glob")),
-            same_as_pattern: Some(re(".")),
+            same_as_pattern: Some(re("same")),
             severity: Some(Severity::Error),
         }
     }

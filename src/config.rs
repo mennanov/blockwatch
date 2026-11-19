@@ -501,7 +501,6 @@ fn attribute_values(values: HashMap<String, RawAttributeValue>) -> anyhow::Resul
 mod tests {
     use super::*;
     use crate::attributes::Severity;
-    use crate::attributes::test_utils::assert_attributes_eq;
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::test_utils::FakeFileSystem;
     use crate::target_reference::TargetReference;
@@ -543,19 +542,6 @@ mod tests {
         format!("{error:#}")
     }
 
-    /// Asserts that `actual` and `expected` hold the same virtual blocks.
-    fn assert_virtual_blocks_eq(actual: &[VirtualBlock], expected: &[VirtualBlock]) {
-        assert_eq!(actual.len(), expected.len(), "virtual block count mismatch");
-        for (actual, expected) in actual.iter().zip(expected) {
-            assert_eq!(actual.file, expected.file);
-            assert_eq!(actual.locator, expected.locator);
-            assert_attributes_eq(&actual.attributes, &expected.attributes);
-            assert_eq!(actual.entry, expected.entry);
-            assert_eq!(actual.is_entry_modified, expected.is_entry_modified);
-            assert_eq!(actual.target_if, expected.target_if);
-        }
-    }
-
     #[test]
     fn block_entries_read_as_virtual_blocks() -> anyhow::Result<()> {
         let text = r"ignore = []
@@ -573,9 +559,9 @@ target = 'a.yaml#/b'
 
         let config = read_text(text)?;
 
-        assert_virtual_blocks_eq(
-            &config.blocks,
-            &[
+        assert_eq!(
+            config.blocks,
+            [
                 VirtualBlock {
                     file: RepoPath::from_reference("package.json")?,
                     locator: Locator::Symbol(SymbolPath::parse("/version")?),
@@ -622,22 +608,21 @@ target-pattern = '^MODEL = .*'
 
         let config = read_text(text)?;
 
-        // `target-pattern` is not an attribute.
-        let blocks: Vec<(&str, &Locator)> = config
+        let blocks: Vec<(&str, &Locator, &Attributes)> = config
             .blocks
             .iter()
-            .map(|block| {
-                assert_attributes_eq(&block.attributes, &Attributes::default());
-                (block.file.as_str(), &block.locator)
-            })
+            .map(|block| (block.file.as_str(), &block.locator, &block.attributes))
             .collect();
+        // `target-pattern` sets the locator. It is not an attribute.
+        let empty = Attributes::default();
         assert_eq!(
             blocks,
             [
-                ("settings.py", &Locator::File),
+                ("settings.py", &Locator::File, &empty),
                 (
                     "settings.py",
                     &Locator::Pattern(TargetPattern::new("^MODEL = .*")?),
+                    &empty
                 ),
             ]
         );
@@ -673,9 +658,9 @@ name = 'version'
             })
         };
         // Sorted by file.
-        assert_virtual_blocks_eq(
-            &config.blocks,
-            &[
+        assert_eq!(
+            config.blocks,
+            [
                 block("plugins/blue/package.json")?,
                 block("plugins/red/package.json")?,
             ],

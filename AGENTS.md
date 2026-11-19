@@ -187,8 +187,7 @@ The whole pipeline is in `src/cli.rs`. `src/main.rs` only calls `blockwatch::run
    validators, such as `check-ai`, run on Tokio. The Tokio runtime only starts if at least one async validator is
    needed.
 8. Validators produce `Violation`s, each with a `ViolationRange` and a `Severity` (error, warning, info or hint). A
-   symbol
-   reference such as `file#/path` is found with `symbols::resolve`. It searches the symbols that
+   symbol reference such as `file#/path` is found with `symbols::resolve`. It searches the symbols that
    `LanguageParser::parse_symbols` finds in the target file, once per file. A missing or ambiguous symbol is a
    violation. A target file that doesn't parse stops the run. Addresses given to `--suppress` or `--suppress-from` mark
    the violations they cover as suppressed. Those are still reported, but they no longer fail the run.

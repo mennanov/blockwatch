@@ -3,27 +3,13 @@ use crate::blocks::Block;
 use crate::repo_path::RepoPath;
 use crate::validators::{
     SyncValidator, ValidationReport, Validator, ValidatorTrace, Violation, ViolationRange,
-    line_value, parse_number,
+    line_value,
 };
 use crate::{Position, validators};
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use serde::Serialize;
 use std::cmp::Ordering;
 use std::sync::Arc;
-
-/// Compares `a` and `b` according to `format`.
-fn compare_values(format: SortFormat, a: &str, b: &str) -> anyhow::Result<Ordering> {
-    match format {
-        SortFormat::Lexicographic => Ok(a.cmp(b)),
-        SortFormat::Numeric => {
-            let a_num =
-                parse_number(a).ok_or_else(|| anyhow!("\"{}\" is not a valid number", a))?;
-            let b_num =
-                parse_number(b).ok_or_else(|| anyhow!("\"{}\" is not a valid number", b))?;
-            Ok(a_num.cmp(&b_num))
-        }
-    }
-}
 
 /// Enforces `keep-sorted`: the non-empty lines inside the block must be in ascending order.
 ///
@@ -106,7 +92,8 @@ fn check_block(
             continue;
         };
         if let Some(prev_val) = prev_value {
-            let cmp = compare_values(sort_format, prev_val, curr_val)
+            let cmp = sort_format
+                .compare(prev_val, curr_val)
                 .with_context(|| format!("in block {}", block.label(file_path)))?;
             if cmp == violating_ord {
                 let violation_start = block.content.position(line_number, curr_range.start);

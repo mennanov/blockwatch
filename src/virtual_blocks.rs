@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 /// A block that a `[[block]]` entry of the config file declares in one file, instead of tags in a
 /// comment. It is a block of that file.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct VirtualBlock {
     /// The file the block is in.
     pub(crate) file: RepoPath,

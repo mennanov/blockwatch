@@ -499,12 +499,7 @@ pub(crate) struct ValidationContext {
 #[cfg(test)]
 impl std::fmt::Debug for ValidationContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ValidationContext")
-            .field("blocks", &self.blocks)
-            .field("line_changes", &self.line_changes)
-            .field("virtual_blocks", &self.virtual_blocks)
-            .field("traces_requested", &self.traces_requested)
-            .finish_non_exhaustive()
+        f.debug_struct("ValidationContext").finish_non_exhaustive()
     }
 }
 
@@ -993,7 +988,7 @@ fn block_content_for_pattern<'c>(
 /// Parses a numeric value from string.
 ///
 /// Supports very big numbers (bigger than `f64` may hold) and `_` digits separator.
-fn parse_number(value: &str) -> Option<BigDecimal> {
+pub(crate) fn parse_number(value: &str) -> Option<BigDecimal> {
     let bytes = value.as_bytes();
     let separator_positions: Vec<usize> = bytes
         .iter()

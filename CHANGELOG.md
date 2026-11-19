@@ -14,16 +14,25 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Changed
 
-- `blockwatch list`, `blockwatch explain`, `--verbosity full`, and `ctx.attrs` in `check-lua` now output normalized
-  attribute values (for example, `"asc"` for a bare `keep-sorted`, `"info"` for `severity="InFo"`, and `"<=50"` for
-  `line-count="<= 50"`). `affects` and `same-as` are now always arrays of strings, whether written in a tag or as a TOML
-  list.
+- **Breaking:** `blockwatch list`, `blockwatch explain`, `--verbosity full`, and `ctx.attrs` in `check-lua` now output
+  normalized attribute values (for example, `"asc"` for a bare `keep-sorted`, `"info"` for `severity="InFo"`, and
+  `"<=50"` for `line-count="<= 50"`). `affects` and `same-as` are now always arrays of strings, whether written in a tag
+  or as a TOML list. A Lua script that reads a value as it was written, such as `ctx.attrs["affects"]` as a string, must
+  be updated.
 - Invalid attribute values (such as a bad `line-count`, a bad or empty required regex, a blank `check-ai`, `check-lua`,
   or `same-as-paths`, or an unknown `keep-sorted`, `same-as-mode`, `same-as-format`, or `severity` value) now fail as
   soon as the block or `[[block]]` entry is read, rather than only when a validator runs. As a result, `blockwatch list`,
   `blockwatch explain`, runs with `--disable` or `skip-blocks`, untouched blocks under `--only-changed`, and target-only
-  files read for `affects` or `same-as` now fail on bad attribute values too. Every such error now uses the same message
-  format (``invalid `<attr>`: ...``).
+  files read for `affects` or `same-as` now fail on bad attribute values too. Every such error names the attribute, as
+  in ``invalid `line-count` ``.
+- An empty `keep-sorted-pattern` is now an error. Before, `keep-sorted-pattern=""` meant no pattern.
+- Spaces around the value of `keep-sorted`, `keep-sorted-format`, `same-as-format`, `same-as-mode`, `same-as-paths` and
+  `severity` are now ignored. Before, `keep-sorted=" desc "` was an error.
+
+### Fixed
+
+- A `same-as-format` that lists a group twice, such as `value:numeric, value:flat`, is now an error. Before, the last
+  entry was used and the first was ignored.
 
 ## [0.19.2] - 2026-11-14
 

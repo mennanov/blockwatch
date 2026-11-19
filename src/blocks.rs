@@ -18,7 +18,7 @@ const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
 ///
 /// A pair of tags in the file's comments declares a block. So does a `[[block]]` entry of the
 /// config file, around a symbol of the file. That is a virtual block.
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) struct Block {
     /// Optional attributes in the `block` tag, or in the `[[block]]` entry of a virtual block.
     /// Their names are what selects the validators that will check this block (`affects`,
@@ -1068,24 +1068,9 @@ mod supported_languages_tests {
 #[cfg(test)]
 pub(crate) mod test_utils {
     use super::*;
-    use crate::attributes::test_utils::assert_attributes_eq;
 
     /// The 1-based start line of `key`.
     pub(crate) fn block_key_start_line(key: &BlockKey) -> usize {
         key.start.line
-    }
-
-    /// Asserts that `actual` and `expected` hold the same blocks.
-    pub(crate) fn assert_blocks_eq(actual: &[Block], expected: &[Block]) {
-        assert_eq!(actual.len(), expected.len(), "block count mismatch");
-        for (actual, expected) in actual.iter().zip(expected) {
-            assert_attributes_eq(&actual.attributes, &expected.attributes);
-            assert_eq!(
-                actual.start_tag_position_range,
-                expected.start_tag_position_range
-            );
-            assert_eq!(actual.content, expected.content);
-            assert_eq!(actual.declaration, expected.declaration);
-        }
     }
 }

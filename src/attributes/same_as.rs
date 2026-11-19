@@ -61,6 +61,9 @@ enum FormatsKind {
 
 impl Formats {
     /// Compares every group as written, the default when `same-as-format` is not set.
+    ///
+    /// Don't format it: [`Format::Verbatim`] has no keyword, so strum's `Display` panics on it.
+    /// A parsed `same-as-format` never holds it, so formatting the attribute is safe.
     pub(crate) const VERBATIM: Self = Self(FormatsKind::All(Format::Verbatim));
 
     /// Parses `raw` as a single `same-as-format` keyword or comma-separated `group:format` pairs.
@@ -181,7 +184,7 @@ impl TargetPaths {
             Some(directory_glob) => (directory_glob, true),
             None => (trimmed, false),
         };
-        if pattern.trim().is_empty() {
+        if pattern.is_empty() {
             bail!("glob must not be empty");
         }
         let matcher = PathsGlob::new(pattern)?;

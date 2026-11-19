@@ -363,7 +363,6 @@ fn title_start(definition: &[u8]) -> usize {
 mod tests {
     use super::*;
     use crate::attributes::SortOrder;
-    use crate::blocks::test_utils::assert_blocks_eq;
     use crate::blocks::{Block, Content, Declaration};
     use crate::test_utils::text_attributes;
     use crate::{Position, test_utils};
@@ -647,9 +646,9 @@ Some text here 3
             .parse_blocks(content)
             .collect::<anyhow::Result<Vec<_>>>()?;
 
-        assert_blocks_eq(
-            &blocks,
-            &[
+        assert_eq!(
+            blocks,
+            [
                 Block {
                     attributes: text_attributes(&[("name", "md_block")]),
                     start_tag_position_range: Position::new(5, 10)..Position::new(5, 33),
@@ -897,9 +896,9 @@ Inline code `<!-- <block name="ignored"> -->` is not a comment.
             .parse_blocks(content)
             .collect::<anyhow::Result<Vec<_>>>()?;
 
-        assert_blocks_eq(
-            &blocks,
-            &[Block {
+        assert_eq!(
+            blocks,
+            [Block {
                 attributes: text_attributes(&[("name", "inline_block")]),
                 start_tag_position_range: Position::new(4, 16)..Position::new(4, 43),
                 content: Content::source(
@@ -1045,9 +1044,9 @@ Not wrapped in HTML tags on multiple lines
             .parse_blocks(content)
             .collect::<anyhow::Result<Vec<_>>>()?;
 
-        assert_blocks_eq(
-            &blocks,
-            &[
+        assert_eq!(
+            blocks,
+            [
                 Block {
                     attributes: text_attributes(&[("name", "html_block")]),
                     start_tag_position_range: Position::new(5, 6)..Position::new(5, 31),
