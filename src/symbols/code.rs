@@ -691,6 +691,25 @@ pub(crate) mod test_utils {
         )
     }
 
+    /// The path of each of `symbols`, the symbols of `source`, with the text of `source` where its
+    /// value is written. A symbol without a value has `None`.
+    pub(crate) fn values_as_written<'a>(
+        symbols: &Symbols,
+        source: &'a str,
+    ) -> Vec<(String, Option<&'a str>)> {
+        symbols
+            .symbols
+            .iter()
+            .map(|symbol| {
+                let written = symbol
+                    .value
+                    .as_ref()
+                    .map(|value| &source[value.byte_range.clone()]);
+                (symbol.path.to_string(), written)
+            })
+            .collect()
+    }
+
     /// The path and value of each of `symbols`, the symbols of `source`, for a test that only
     /// checks values. A symbol without a value has `None`.
     pub(crate) fn values(symbols: &Symbols, source: &str) -> Vec<(String, Option<String>)> {

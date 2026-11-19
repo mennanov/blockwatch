@@ -177,6 +177,7 @@ mod tests {
     use crate::Position;
     use crate::attributes::SortOrder;
     use crate::blocks::Block;
+    use crate::symbols::code::test_utils::values_as_written;
     use std::collections::HashMap;
     use std::ops::Range;
 
@@ -330,18 +331,10 @@ mod tests {
     fn scalar_values_parse_symbols_returns_correct_byte_range() -> anyhow::Result<()> {
         let source = r#"{"string": "a\nb", "number": 42, "array": ["item"]}"#;
 
-        let byte_range: Vec<(String, Option<&str>)> = parser()
-            .parse_symbols(source)?
-            .symbols
-            .into_iter()
-            .map(|symbol| {
-                let written = symbol.value.map(|value| &source[value.byte_range]);
-                (symbol.path.to_string(), written)
-            })
-            .collect();
+        let symbols = parser().parse_symbols(source)?;
 
         assert_eq!(
-            byte_range,
+            values_as_written(&symbols, source),
             vec![
                 ("/string".to_string(), Some(r#""a\nb""#)),
                 ("/number".to_string(), Some("42")),

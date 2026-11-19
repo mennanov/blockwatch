@@ -239,6 +239,7 @@ pub(crate) fn parse_validator(value: &str) -> anyhow::Result<Validator> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blocks::test_utils::block_addresses;
 
     fn resolve(flags: RawSettings, config_file: RawSettings) -> anyhow::Result<Settings> {
         Settings::resolve(flags, config_file)
@@ -251,13 +252,6 @@ mod tests {
 
     fn to_string_vec(names: &[&str]) -> Vec<String> {
         names.iter().map(|name| name.to_string()).collect()
-    }
-
-    fn block_addresses(addresses: &[&str]) -> Vec<BlockAddress> {
-        addresses
-            .iter()
-            .map(|address| BlockAddress::parse(address).expect("a valid address"))
-            .collect()
     }
 
     #[test]

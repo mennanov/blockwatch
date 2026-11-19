@@ -1120,7 +1120,8 @@ mod target_files_tests {
 #[cfg(test)]
 mod tests {
     use crate::attributes::{AttributeName, Attributes};
-    use crate::blocks::{Block, BlockAddress, Content, Declaration};
+    use crate::blocks::test_utils::block_addresses;
+    use crate::blocks::{Block, Content, Declaration};
     use crate::fs::FileSystem;
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
@@ -1369,9 +1370,9 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn detect_and_run_with_disabled_async_validators_returns_violations_for_sync_validators_only()
-    -> anyhow::Result<()> {
+    /// Runs the fake validators that `selection` picks on one block that turns on both
+    /// `keep-sorted` and `check-ai`. Returns the code of each violation.
+    fn violation_codes(selection: ValidatorSelection) -> anyhow::Result<Vec<Validator>> {
         let context = validation_context(
             "example1.py",
             r#"# <block keep-sorted="asc" check-ai="condition B">
@@ -1380,106 +1381,46 @@ mod tests {
         let (sync_validators, async_validators) = detect_validators(
             &context,
             create_fakes,
-            &ValidatorSelection::Skip(HashSet::from([Validator::CheckAi])),
+            &selection,
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?.violations;
+        Ok(violations
+            .into_values()
+            .flatten()
+            .map(|violation| violation.code)
+            .collect())
+    }
 
-        assert_eq!(violations.len(), 1);
-        assert_eq!(
-            violations[&RepoPath::from_reference("example1.py")?].len(),
-            1
-        );
-        assert_eq!(
-            violations[&RepoPath::from_reference("example1.py")?][0].code,
-            Validator::KeepSorted
-        );
+    #[test]
+    fn detect_and_run_with_disabled_async_validators_returns_violations_for_sync_validators_only()
+    -> anyhow::Result<()> {
+        let selection = ValidatorSelection::Skip(HashSet::from([Validator::CheckAi]));
+        assert_eq!(violation_codes(selection)?, [Validator::KeepSorted]);
         Ok(())
     }
 
     #[test]
     fn detect_and_run_with_enabled_async_validators_returns_violations_for_async_validators_only()
     -> anyhow::Result<()> {
-        let context = validation_context(
-            "example1.py",
-            r#"# <block keep-sorted="asc" check-ai="condition B">
-    # </block>"#,
-        );
-
-        let (sync_validators, async_validators) = detect_validators(
-            &context,
-            create_fakes,
-            &ValidatorSelection::Only(HashSet::from([Validator::CheckAi])),
-            &Arc::new(FakeFileSystem::new(HashMap::new())),
-        )?;
-        let violations = validators::run(context, sync_validators, async_validators)?.violations;
-
-        assert_eq!(violations.len(), 1);
-        assert_eq!(
-            violations[&RepoPath::from_reference("example1.py")?].len(),
-            1
-        );
-        assert_eq!(
-            violations[&RepoPath::from_reference("example1.py")?][0].code,
-            Validator::CheckAi
-        );
+        let selection = ValidatorSelection::Only(HashSet::from([Validator::CheckAi]));
+        assert_eq!(violation_codes(selection)?, [Validator::CheckAi]);
         Ok(())
     }
 
     #[test]
     fn detect_and_run_with_disabled_sync_validators_returns_violations_for_async_validators_only()
     -> anyhow::Result<()> {
-        let context = validation_context(
-            "example1.py",
-            r#"# <block keep-sorted="asc" check-ai="condition B">
-    # </block>"#,
-        );
-        let (sync_validators, async_validators) = detect_validators(
-            &context,
-            create_fakes,
-            &ValidatorSelection::Skip(HashSet::from([Validator::KeepSorted])),
-            &Arc::new(FakeFileSystem::new(HashMap::new())),
-        )?;
-        let violations = validators::run(context, sync_validators, async_validators)?.violations;
-
-        assert_eq!(violations.len(), 1);
-        assert_eq!(
-            violations[&RepoPath::from_reference("example1.py")?].len(),
-            1
-        );
-        assert_eq!(
-            violations[&RepoPath::from_reference("example1.py")?][0].code,
-            Validator::CheckAi
-        );
+        let selection = ValidatorSelection::Skip(HashSet::from([Validator::KeepSorted]));
+        assert_eq!(violation_codes(selection)?, [Validator::CheckAi]);
         Ok(())
     }
 
     #[test]
     fn detect_and_run_with_enabled_sync_validators_returns_violations_for_sync_validators_only()
     -> anyhow::Result<()> {
-        let context = validation_context(
-            "example1.py",
-            r#"# <block keep-sorted="asc" check-ai="condition B">
-    # </block>"#,
-        );
-
-        let (sync_validators, async_validators) = detect_validators(
-            &context,
-            create_fakes,
-            &ValidatorSelection::Only(HashSet::from([Validator::KeepSorted])),
-            &Arc::new(FakeFileSystem::new(HashMap::new())),
-        )?;
-        let violations = validators::run(context, sync_validators, async_validators)?.violations;
-
-        assert_eq!(violations.len(), 1);
-        assert_eq!(
-            violations[&RepoPath::from_reference("example1.py")?].len(),
-            1
-        );
-        assert_eq!(
-            violations[&RepoPath::from_reference("example1.py")?][0].code,
-            Validator::KeepSorted
-        );
+        let selection = ValidatorSelection::Only(HashSet::from([Validator::KeepSorted]));
+        assert_eq!(violation_codes(selection)?, [Validator::KeepSorted]);
         Ok(())
     }
 
@@ -1759,13 +1700,6 @@ print("target")
                 .collect(),
         );
         (context, file_system)
-    }
-
-    fn block_addresses(addresses: &[&str]) -> Vec<BlockAddress> {
-        addresses
-            .iter()
-            .map(|address| BlockAddress::parse(address).expect("a valid address"))
-            .collect()
     }
 
     /// The blocks `context` keeps, as `FILE:NAME`, sorted. An unnamed block shows as

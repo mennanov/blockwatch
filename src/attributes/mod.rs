@@ -214,11 +214,14 @@ impl Attributes {
                 set_parsed(&mut self.check_lua_timeout, name, entry, parse_timeout)
             }
             AttributeName::KeepSorted => {
-                set_parsed(&mut self.keep_sorted, name, entry, SortOrder::parse)
+                set_parsed(&mut self.keep_sorted, name, entry, parse_keyword_or_default)
             }
-            AttributeName::KeepSortedFormat => {
-                set_parsed(&mut self.keep_sorted_format, name, entry, SortFormat::parse)
-            }
+            AttributeName::KeepSortedFormat => set_parsed(
+                &mut self.keep_sorted_format,
+                name,
+                entry,
+                parse_keyword_or_default,
+            ),
             AttributeName::KeepSortedPattern => {
                 set_parsed(&mut self.keep_sorted_pattern, name, entry, parse_regex)
             }
@@ -460,6 +463,23 @@ where
             .expect("a keyword type has at least one keyword");
         anyhow!("\"{value}\" (expected {} or {last})", others.join(", "))
     })
+}
+
+/// Parses `raw`, after trimming whitespace, as one of the keywords of `T`. An empty value gives
+/// `T::default()`.
+///
+/// # Errors
+/// Returns the error of [`parse_keyword_value`] when the value is not empty and not a keyword.
+fn parse_keyword_or_default<T>(raw: &str) -> anyhow::Result<T>
+where
+    T: Default + FromStr + IntoEnumIterator + ToString,
+{
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        Ok(T::default())
+    } else {
+        parse_keyword_value(trimmed)
+    }
 }
 
 /// Extracts a text value or returns the config type error for `name`.

@@ -1073,4 +1073,15 @@ pub(crate) mod test_utils {
     pub(crate) fn block_key_start_line(key: &BlockKey) -> usize {
         key.start.line
     }
+
+    /// Parses each of `addresses`, in order.
+    ///
+    /// # Panics
+    /// Panics if an address is not valid.
+    pub(crate) fn block_addresses(addresses: &[&str]) -> Vec<BlockAddress> {
+        addresses
+            .iter()
+            .map(|address| BlockAddress::parse(address).expect("a valid address"))
+            .collect()
+    }
 }

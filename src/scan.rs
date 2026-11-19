@@ -1175,6 +1175,27 @@ mod parse_blocks_tests {
         Ok(())
     }
 
+    /// The name of each block in `file`, in order, with whether the diff modified its content.
+    ///
+    /// # Panics
+    /// Panics if `file` has no blocks or a block has no name.
+    fn content_modified<'a>(
+        blocks_by_file: &'a HashMap<RepoPath, FileBlocks>,
+        file: &str,
+    ) -> Vec<(&'a str, bool)> {
+        let file = RepoPath::from_reference(file).expect("a valid path");
+        blocks_by_file[&file]
+            .blocks_with_context
+            .iter()
+            .map(|b| {
+                (
+                    b.block.name().expect("a named block"),
+                    b.is_content_modified,
+                )
+            })
+            .collect()
+    }
+
     #[test]
     fn all_mode_with_line_changes_parses_modified_and_unmodified_blocks() -> anyhow::Result<()> {
         let file_system = FakeFileSystem::new(HashMap::from([
@@ -1230,20 +1251,12 @@ mod parse_blocks_tests {
             .blocks;
 
         assert_eq!(
-            blocks_by_file[&RepoPath::from_reference("a.rs")?]
-                .blocks_with_context
-                .iter()
-                .map(|b| { (b.block.name().unwrap(), b.is_content_modified) })
-                .collect::<Vec<(&str, bool)>>(),
-            &[("first_from_a", true), ("second_from_a", false)]
+            content_modified(&blocks_by_file, "a.rs"),
+            [("first_from_a", true), ("second_from_a", false)]
         );
         assert_eq!(
-            blocks_by_file[&RepoPath::from_reference("b.rs")?]
-                .blocks_with_context
-                .iter()
-                .map(|b| { (b.block.name().unwrap(), b.is_content_modified) })
-                .collect::<Vec<(&str, bool)>>(),
-            &[("first_from_b", true), ("second_from_b", false)]
+            content_modified(&blocks_by_file, "b.rs"),
+            [("first_from_b", true), ("second_from_b", false)]
         );
         Ok(())
     }
@@ -1287,20 +1300,12 @@ mod parse_blocks_tests {
             .blocks;
 
         assert_eq!(
-            blocks_by_file[&RepoPath::from_reference("a.rs")?]
-                .blocks_with_context
-                .iter()
-                .map(|b| { (b.block.name().unwrap(), b.is_content_modified) })
-                .collect::<Vec<(&str, bool)>>(),
-            &[("first_from_a", false), ("second_from_a", false)]
+            content_modified(&blocks_by_file, "a.rs"),
+            [("first_from_a", false), ("second_from_a", false)]
         );
         assert_eq!(
-            blocks_by_file[&RepoPath::from_reference("b.rs")?]
-                .blocks_with_context
-                .iter()
-                .map(|b| { (b.block.name().unwrap(), b.is_content_modified) })
-                .collect::<Vec<(&str, bool)>>(),
-            &[("first_from_b", false), ("second_from_b", false)]
+            content_modified(&blocks_by_file, "b.rs"),
+            [("first_from_b", false), ("second_from_b", false)]
         );
         Ok(())
     }
@@ -1477,25 +1482,38 @@ mod parse_blocks_tests {
         Ok(())
     }
 
-    #[test]
-    fn diff_with_a_missing_file_reports_the_likely_cause() -> anyhow::Result<()> {
-        // What `diff.relative=true` produces: a well-formed path that matches no file.
-        let line_changes = diff_changes([(
-            RepoPath::from_reference("rules.py")?,
-            vec![LineChange {
-                line: 1,
-                kind: LineChangeKind::Added,
-            }],
-        )]);
+    /// The error, with its causes, that scanning `files` (path and contents) with `line_changes`
+    /// returns.
+    ///
+    /// # Panics
+    /// Panics if the scan succeeds.
+    fn scan_error(files: &[(&str, &str)], line_changes: &DiffChanges, mode: ScanMode) -> String {
+        let file_system = FakeFileSystem::new(
+            files
+                .iter()
+                .map(|(path, contents)| (path.to_string(), contents.to_string()))
+                .collect(),
+        );
         let error = Scan::new(
-            &FakeFileSystem::new(HashMap::from([("src/rules.py".to_string(), String::new())])),
+            &file_system,
             &path_filter_all(),
             &LanguageParsers::new(),
             &[],
         )
-        .parse_blocks(&line_changes, ScanMode::OnlyChanged)
-        .unwrap_err();
-        let message = format!("{error:#}");
+        .parse_blocks(line_changes, mode)
+        .expect_err("the scan must fail");
+        format!("{error:#}")
+    }
+
+    #[test]
+    fn diff_with_a_missing_file_reports_the_likely_cause() -> anyhow::Result<()> {
+        // What `diff.relative=true` produces: a well-formed path that matches no file.
+        let line_changes = diff_changes([(RepoPath::from_reference("rules.py")?, vec![added(1)])]);
+        let message = scan_error(
+            &[("src/rules.py", "")],
+            &line_changes,
+            ScanMode::OnlyChanged,
+        );
         assert!(
             message.contains("does not exist in the repository root"),
             "unexpected error: {message}"
@@ -1508,15 +1526,7 @@ mod parse_blocks_tests {
         // A diff where no path is valid marks no block as modified, so every rule that needs a
         // diff would go quiet, and the run would report success, which is undesirable.
         let line_changes = diff_changes([(RepoPath::from_reference("rules.py")?, vec![added(1)])]);
-        let error = Scan::new(
-            &FakeFileSystem::new(HashMap::from([("src/rules.py".to_string(), String::new())])),
-            &path_filter_all(),
-            &LanguageParsers::new(),
-            &[],
-        )
-        .parse_blocks(&line_changes, ScanMode::All)
-        .unwrap_err();
-        let message = format!("{error:#}");
+        let message = scan_error(&[("src/rules.py", "")], &line_changes, ScanMode::All);
         assert!(
             message.contains("does not exist in the repository root"),
             "unexpected error: {message}"
@@ -1532,17 +1542,8 @@ mod parse_blocks_tests {
             (RepoPath::from_reference("a.py")?, vec![added(1)]),
             (RepoPath::from_reference("b.py")?, vec![added(1)]),
         ]);
-        let error = Scan::new(
-            &FakeFileSystem::new(HashMap::new()),
-            &path_filter_all(),
-            &LanguageParsers::new(),
-            &[],
-        )
-        .parse_blocks(&line_changes, ScanMode::All)
-        .unwrap_err();
-
         assert_eq!(
-            format!("{error:#}"),
+            scan_error(&[], &line_changes, ScanMode::All),
             "diff target \"a.py\" does not exist in the repository root"
         );
         Ok(())
@@ -1557,16 +1558,7 @@ mod parse_blocks_tests {
             (RepoPath::from_reference("present.py")?, vec![added(1)]),
             (RepoPath::from_reference("gone.py")?, vec![added(1)]),
         ]);
-        let error = Scan::new(
-            &FakeFileSystem::new(HashMap::from([("present.py".to_string(), String::new())])),
-            &path_filter_all(),
-            &LanguageParsers::new(),
-            &[],
-        )
-        .parse_blocks(&line_changes, ScanMode::OnlyChanged)
-        .unwrap_err();
-
-        let message = format!("{error:#}");
+        let message = scan_error(&[("present.py", "")], &line_changes, ScanMode::OnlyChanged);
         assert!(
             message.contains("diff target \"gone.py\" does not exist in the repository root"),
             "unexpected error: {message}"
@@ -1579,19 +1571,11 @@ mod parse_blocks_tests {
     -> anyhow::Result<()> {
         // The path is right, so blaming it would send the user to the wrong place.
         let line_changes = diff_changes([(RepoPath::from_reference("broken.py")?, vec![added(1)])]);
-        let error = Scan::new(
-            &FakeFileSystem::new(HashMap::from([(
-                "broken.py".to_string(),
-                "# <block name=\"open\">\nx = 1\n".to_string(),
-            )])),
-            &path_filter_all(),
-            &LanguageParsers::new(),
-            &[],
-        )
-        .parse_blocks(&line_changes, ScanMode::OnlyChanged)
-        .unwrap_err();
-
-        let message = format!("{error:#}");
+        let message = scan_error(
+            &[("broken.py", "# <block name=\"open\">\nx = 1\n")],
+            &line_changes,
+            ScanMode::OnlyChanged,
+        );
         assert!(
             message.contains("failed to parse file"),
             "unexpected error: {message}"
