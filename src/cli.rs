@@ -1,7 +1,8 @@
 //! The whole run: reads the flags and the input, runs the validators, `list` or `explain`, and
 //! writes the output.
 
-use crate::blocks::{BlockAddress, BlockSeverity};
+use crate::attributes::Severity;
+use crate::blocks::BlockAddress;
 use crate::config;
 use crate::diff_parser::{self, DiffChanges};
 use crate::explain::Explanation;
@@ -87,7 +88,7 @@ fn run_explain(args: &flags::Args, address: &BlockAddress) -> anyhow::Result<Exi
     )?;
     let (sync_validators, async_validators) = validators::detect_validators(
         &context,
-        validators::Validator::detect,
+        validators::Validator::create,
         settings.validator_selection(),
         &file_system,
     )?;
@@ -132,7 +133,7 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<ExitCode> {
     context.apply_block_selection(settings.block_selection(), file_system.as_ref())?;
     let (sync_validators, async_validators) = validators::detect_validators(
         &context,
-        validators::Validator::detect,
+        validators::Validator::create,
         settings.validator_selection(),
         &file_system,
     )?;
@@ -373,7 +374,7 @@ fn process_violations(
         let diagnostic = violation.as_simple_diagnostic();
         // A suppressed violation is still reported, at the severity its author declared; only its
         // effect on the exit code goes away.
-        diagnostic.severity() == BlockSeverity::Error && !diagnostic.is_suppressed()
+        diagnostic.severity() == Severity::Error && !diagnostic.is_suppressed()
     });
     match format {
         // JSON is written to stderr only when there are violations.

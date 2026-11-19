@@ -57,11 +57,11 @@ end
   - `ctx.file` — the source file path, relative to the repository root and always separated by
     `/`, on every platform and in every run mode. A script may compare or pattern-match it without normalizing first.
   - `ctx.line` — the line number of the block's start tag.
-  - `ctx.attrs` — the block's own attributes, keyed by attribute name, each value exactly as it was written in the
-    tag. A block tagged `<block check-lua="…" name="limits" severity="warning">` gives the script
-    `ctx.attrs["check-lua"]`, `ctx.attrs["name"]` and `ctx.attrs["severity"]`. Only blockwatch's own attributes can
-    appear here. Each value is a string, except an `affects` or `same-as` list in a `[[block]]` entry of
-    `blockwatch.toml`. That one is a 1-based array of strings, one for each entry.
+  - `ctx.attrs` — the block's own attributes, keyed by attribute name, in normalized form (for example, a bare
+    `keep-sorted` becomes `"asc"` and `severity="InFo"` becomes `"info"`). A block tagged
+    `<block check-lua="…" name="limits" severity="warning">` gives the script `ctx.attrs["check-lua"]`,
+    `ctx.attrs["name"]` and `ctx.attrs["severity"]`. Only blockwatch's own attributes can appear here. `affects` and
+    `same-as` are always 1-based arrays of strings, one for each target reference; every other attribute is a string.
   - `ctx.affects` — present only when the block also has an [`affects`](affects.md) attribute. A 1-based array with
     one table per target, holding `file`, `name` and `content` (trimmed). `file` uses the same format as `ctx.file`.
     Targets that don't resolve are left out.

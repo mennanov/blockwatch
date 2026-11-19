@@ -1,7 +1,8 @@
 //! Blocks that the config file declares around a symbol, instead of tags in a comment.
 
 use crate::LineIndex;
-use crate::blocks::{Attributes, Block, BlockWithContext, Content, Declaration};
+use crate::attributes::Attributes;
+use crate::blocks::{Block, BlockWithContext, Content, Declaration};
 use crate::diff_parser::LineChanges;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
@@ -15,7 +16,7 @@ use std::path::PathBuf;
 
 /// A block that a `[[block]]` entry of the config file declares in one file, instead of tags in a
 /// comment. It is a block of that file.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub(crate) struct VirtualBlock {
     /// The file the block is in.
     pub(crate) file: RepoPath,
@@ -641,7 +642,7 @@ CREATE TABLE b (
 
         assert_eq!(
             block.attributes.severity(),
-            crate::blocks::BlockSeverity::Warning
+            crate::attributes::Severity::Warning
         );
         Ok(())
     }

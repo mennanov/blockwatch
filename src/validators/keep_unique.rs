@@ -1,8 +1,8 @@
-use crate::blocks::{Block, BlockWithContext};
+use crate::blocks::Block;
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
-    ViolationRange, line_value,
+    SyncValidator, ValidationReport, Validator, ValidatorTrace, Violation, ViolationRange,
+    line_value,
 };
 use crate::{Position, validators};
 use serde::Serialize;
@@ -13,7 +13,7 @@ use std::sync::Arc;
 ///
 /// The attribute's value optionally supplies a regex selecting the part of each line that must be
 /// unique, which is how lists of ids or keys are checked without regard to the rest of the line.
-struct KeepUniqueValidator;
+pub(super) struct KeepUniqueValidator;
 
 impl SyncValidator for KeepUniqueValidator {
     fn validate(
@@ -135,13 +135,6 @@ struct KeepUniqueLine {
     /// What is compared: the `value` group of the pattern, the whole match, or the trimmed line.
     /// `None` when the pattern skips the line.
     value: Option<String>,
-}
-
-/// Selects [`KeepUniqueValidator`] for blocks carrying a `keep-unique` attribute.
-pub(super) fn detect(block_with_context: &BlockWithContext) -> Option<ValidatorType> {
-    Validator::KeepUnique
-        .is_turned_on_by(&block_with_context.block.attributes)
-        .then(|| ValidatorType::Sync(Box::new(KeepUniqueValidator)))
 }
 
 fn create_violation(
@@ -535,10 +528,10 @@ C
 # </block>"#,
         );
 
-        let report = KeepUniqueValidator.validate(Arc::clone(&context))?;
+        let report = KeepUniqueValidator.validate(context)?;
 
         // The block without a keep-unique attribute is not checked, so it records nothing.
-        assert_eq!(checked_lines(&context, &report), vec![1, 5]);
+        assert_eq!(checked_lines(&report), vec![1, 5]);
         assert_eq!(violation_count(&report), 1);
         Ok(())
     }

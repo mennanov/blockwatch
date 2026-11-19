@@ -1,73 +1,26 @@
-use crate::blocks::{AttributeName, Attributes, Block, BlockWithContext};
+use crate::attributes::{SortFormat, SortOrder};
+use crate::blocks::Block;
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
-    ViolationRange, line_value, parse_keyword_value, parse_number, require_main,
+    SyncValidator, ValidationReport, Validator, ValidatorTrace, Violation, ViolationRange,
+    line_value, parse_number,
 };
 use crate::{Position, validators};
 use anyhow::{Context, anyhow};
 use serde::Serialize;
 use std::cmp::Ordering;
 use std::sync::Arc;
-use strum_macros::{Display, EnumIter, EnumString};
 
-/// The direction of a `keep-sorted` block.
-#[derive(Default, Clone, Copy, Debug, PartialEq, Eq, EnumString, EnumIter, Display, Serialize)]
-#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum SortOrder {
-    #[default]
-    Asc,
-    Desc,
-}
-
-impl SortOrder {
-    /// Parses a `keep-sorted` attribute value after trimming whitespace. An empty value defaults to
-    /// ascending order.
-    pub(crate) fn parse(raw: &str) -> anyhow::Result<Self> {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            Ok(Self::default())
-        } else {
-            parse_keyword_value(trimmed)
-        }
-    }
-}
-
-/// How values are compared when sorting a `keep-sorted` block.
-#[derive(Default, Clone, Copy, Debug, PartialEq, Eq, EnumString, EnumIter, Display, Serialize)]
-#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum SortFormat {
-    #[default]
-    Lexicographic,
-    Numeric,
-}
-
-impl SortFormat {
-    /// Parses a `keep-sorted-format` attribute value after trimming whitespace. An empty value
-    /// defaults to lexicographic order.
-    pub(crate) fn parse(raw: &str) -> anyhow::Result<Self> {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            Ok(Self::default())
-        } else {
-            parse_keyword_value(trimmed)
-        }
-    }
-}
-
-impl SortFormat {
-    fn cmp(&self, a: &str, b: &str) -> anyhow::Result<Ordering> {
-        match self {
-            Self::Lexicographic => Ok(a.cmp(b)),
-            Self::Numeric => {
-                let a_num =
-                    parse_number(a).ok_or_else(|| anyhow!("\"{}\" is not a valid number", a))?;
-                let b_num =
-                    parse_number(b).ok_or_else(|| anyhow!("\"{}\" is not a valid number", b))?;
-                Ok(a_num.cmp(&b_num))
-            }
+/// Compares `a` and `b` according to `format`.
+fn compare_values(format: SortFormat, a: &str, b: &str) -> anyhow::Result<Ordering> {
+    match format {
+        SortFormat::Lexicographic => Ok(a.cmp(b)),
+        SortFormat::Numeric => {
+            let a_num =
+                parse_number(a).ok_or_else(|| anyhow!("\"{}\" is not a valid number", a))?;
+            let b_num =
+                parse_number(b).ok_or_else(|| anyhow!("\"{}\" is not a valid number", b))?;
+            Ok(a_num.cmp(&b_num))
         }
     }
 }
@@ -76,7 +29,7 @@ impl SortFormat {
 ///
 /// The `keep-sorted` attribute's value optionally supplies a regex selecting the part of each line
 /// to compare, so entries can be sorted by a key rather than by the whole line.
-struct KeepSortedValidator;
+pub(super) struct KeepSortedValidator;
 
 #[derive(Serialize)]
 struct KeepSortedViolation<'a> {
@@ -124,7 +77,7 @@ fn check_block(
     order: SortOrder,
     traces_requested: bool,
 ) -> anyhow::Result<(Option<Violation>, Option<KeepSortedTrace>)> {
-    let re = block.attributes.keep_sorted_pattern().flatten();
+    let re = block.attributes.keep_sorted_pattern();
     let sort_format = block.attributes.keep_sorted_format().unwrap_or_default();
     let violating_ord = match order {
         SortOrder::Asc => Ordering::Greater,
@@ -153,8 +106,7 @@ fn check_block(
             continue;
         };
         if let Some(prev_val) = prev_value {
-            let cmp = sort_format
-                .cmp(prev_val, curr_val)
+            let cmp = compare_values(sort_format, prev_val, curr_val)
                 .with_context(|| format!("in block {}", block.label(file_path)))?;
             if cmp == violating_ord {
                 let violation_start = block.content.position(line_number, curr_range.start);
@@ -199,34 +151,6 @@ struct KeepSortedLine {
     /// What is compared: the `value` group of `keep-sorted-pattern`, the whole match, or the
     /// trimmed line. `None` when the pattern skips the line.
     value: Option<String>,
-}
-
-/// Checks that `keep-sorted-pattern` and `keep-sorted-format` come with `keep-sorted`.
-///
-/// # Errors
-/// Returns an error that quotes the first of the two attributes found without it.
-pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
-    require_main(
-        Validator::KeepSorted.is_turned_on_by(attributes),
-        Validator::KeepSorted.attributes(),
-        &[
-            (
-                AttributeName::KeepSortedPattern,
-                attributes.keep_sorted_pattern().is_some(),
-            ),
-            (
-                AttributeName::KeepSortedFormat,
-                attributes.keep_sorted_format().is_some(),
-            ),
-        ],
-    )
-}
-
-/// Selects [`KeepSortedValidator`] for blocks carrying a `keep-sorted` attribute.
-pub(super) fn detect(block_with_context: &BlockWithContext) -> Option<ValidatorType> {
-    Validator::KeepSorted
-        .is_turned_on_by(&block_with_context.block.attributes)
-        .then(|| ValidatorType::Sync(Box::new(KeepSortedValidator)))
 }
 
 fn create_violation(
@@ -1128,10 +1052,10 @@ mod validate_tests {
 # </block>"#,
         );
 
-        let report = KeepSortedValidator.validate(Arc::clone(&context))?;
+        let report = KeepSortedValidator.validate(context)?;
 
         // The block without a keep-sorted attribute is not checked, so it records nothing.
-        assert_eq!(checked_lines(&context, &report), vec![1, 5]);
+        assert_eq!(checked_lines(&report), vec![1, 5]);
         assert_eq!(violation_count(&report), 1);
         Ok(())
     }
@@ -1210,27 +1134,5 @@ id: 3 green
 
         assert!(report.traces.is_empty());
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod check_attributes_tests {
-    use crate::test_utils::text_attributes;
-    use crate::validators::Validator;
-
-    #[test]
-    fn pattern_or_format_without_keep_sorted_returns_an_error() {
-        for (name, value) in [
-            ("keep-sorted-pattern", "id: (?P<value>\\d+)"),
-            ("keep-sorted-format", "numeric"),
-        ] {
-            let attributes = text_attributes(&[(name, value)]);
-
-            let error = Validator::KeepSorted
-                .check_attributes(&attributes)
-                .unwrap_err();
-
-            assert_eq!(error.to_string(), format!("`{name}` without `keep-sorted`"));
-        }
     }
 }

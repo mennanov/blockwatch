@@ -458,7 +458,8 @@ fn parse_source(
         &mut names_seen,
     )?);
     // The tags come in source order. The virtual blocks join them there.
-    blocks_with_context.sort_by(|a, b| a.block.cmp(&b.block));
+    blocks_with_context
+        .sort_by_key(|block_with_context| block_with_context.block.start_tag_position_range.start);
     Ok(FileBlocks {
         file_content: source_code,
         blocks_with_context,

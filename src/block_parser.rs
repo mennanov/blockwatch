@@ -119,7 +119,9 @@ impl<'source, I: Iterator<Item = Comment>> Blocks<'source, I> {
 
     /// Puts a group into start-tag order, which is how callers expect blocks to arrive.
     fn sort_completed_group(&mut self) {
-        self.blocks.make_contiguous().sort();
+        self.blocks
+            .make_contiguous()
+            .sort_by_key(|block| block.start_tag_position_range.start);
     }
 }
 
@@ -362,10 +364,12 @@ impl BlockEnd {
 
 #[cfg(test)]
 mod tests {
-    use crate::blocks::{Attributes, Block, Content, Declaration};
+    use crate::attributes::test_utils::assert_attributes_eq;
+    use crate::attributes::{Attributes, SortOrder};
+    use crate::blocks::test_utils::assert_blocks_eq;
+    use crate::blocks::{Block, Content, Declaration};
     use crate::language_parsers::LanguageParser;
     use crate::test_utils::text_attributes;
-    use crate::validators::SortOrder;
     use crate::{Position, language_parsers, test_utils};
 
     fn create_parser() -> impl LanguageParser {
@@ -387,7 +391,7 @@ mod tests {
             }
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks, vec![]);
+        assert!(blocks.is_empty());
         Ok(())
     }
 
@@ -396,9 +400,9 @@ mod tests {
         let mut parser = create_parser();
         let contents = r#"/* <block> */ let say = "hi"; /* </block> */"#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![Block {
+        assert_blocks_eq(
+            &blocks,
+            &[Block {
                 attributes: Attributes::default(),
                 start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
                 content: Content::source(
@@ -406,7 +410,7 @@ mod tests {
                     Position::new(1, 14)..Position::new(1, 31),
                 ),
                 declaration: Declaration::Tags,
-            },]
+            }],
         );
         Ok(())
     }
@@ -416,9 +420,9 @@ mod tests {
         let mut parser = create_parser();
         let contents = "// <block>\nlet say = \"hi\";\n// </block>";
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![Block {
+        assert_blocks_eq(
+            &blocks,
+            &[Block {
                 attributes: Attributes::default(),
                 start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
                 content: Content::source(
@@ -426,7 +430,7 @@ mod tests {
                     Position::new(1, 11)..Position::new(3, 1),
                 ),
                 declaration: Declaration::Tags,
-            },]
+            }],
         );
         Ok(())
     }
@@ -441,9 +445,9 @@ println!("hello1");
 println!("hello2");
 // </block>"#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![
+        assert_blocks_eq(
+            &blocks,
+            &[
                 Block {
                     attributes: Attributes::default(),
                     start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
@@ -461,8 +465,8 @@ println!("hello2");
                         Position::new(4, 11)..Position::new(6, 1),
                     ),
                     declaration: Declaration::Tags,
-                }
-            ]
+                },
+            ],
         );
         Ok(())
     }
@@ -472,9 +476,9 @@ println!("hello2");
         let mut parser = create_parser();
         let contents = "/* <block> */println!(\"hello1\");/* </block><block> */println!(\"hello2\");// </block>";
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![
+        assert_blocks_eq(
+            &blocks,
+            &[
                 Block {
                     attributes: Attributes::default(),
                     start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
@@ -492,8 +496,8 @@ println!("hello2");
                         Position::new(1, 54)..Position::new(1, 73),
                     ),
                     declaration: Declaration::Tags,
-                }
-            ]
+                },
+            ],
         );
         Ok(())
     }
@@ -503,9 +507,9 @@ println!("hello2");
         let mut parser = create_parser();
         let contents = "// <block>\nprintln!(\"hello1\");\n/* </block><block> */\nprintln!(\"hello2\");\n// </block>";
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![
+        assert_blocks_eq(
+            &blocks,
+            &[
                 Block {
                     attributes: Attributes::default(),
                     start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
@@ -523,8 +527,8 @@ println!("hello2");
                         Position::new(3, 22)..Position::new(5, 1),
                     ),
                     declaration: Declaration::Tags,
-                }
-            ]
+                },
+            ],
         );
         Ok(())
     }
@@ -561,19 +565,19 @@ println!("hello2");
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![
+        assert_blocks_eq(
+            &blocks,
+            &[
                 Block {
                     attributes: text_attributes(&[("name", "foo")]),
                     start_tag_position_range: Position::new(2, 12)..Position::new(2, 30),
-                    content: Content::source(30..620, Position::new(2, 30)..Position::new(25, 9),),
+                    content: Content::source(30..620, Position::new(2, 30)..Position::new(25, 9)),
                     declaration: Declaration::Tags,
                 },
                 Block {
                     attributes: text_attributes(&[("name", "bar")]),
                     start_tag_position_range: Position::new(7, 16)..Position::new(7, 34),
-                    content: Content::source(142..440, Position::new(7, 34)..Position::new(17, 13),),
+                    content: Content::source(142..440, Position::new(7, 34)..Position::new(17, 13)),
                     declaration: Declaration::Tags,
                 },
                 Block {
@@ -597,10 +601,10 @@ println!("hello2");
                 Block {
                     attributes: text_attributes(&[("name", "fizz")]),
                     start_tag_position_range: Position::new(26, 12)..Position::new(26, 31),
-                    content: Content::source(662..671, Position::new(26, 31)..Position::new(27, 9),),
+                    content: Content::source(662..671, Position::new(26, 31)..Position::new(27, 9)),
                     declaration: Declaration::Tags,
                 },
-            ]
+            ],
         );
         Ok(())
     }
@@ -637,9 +641,9 @@ println!("hello2");
         let word = "hello";
         // </block> Some comment."#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![Block {
+        assert_blocks_eq(
+            &blocks,
+            &[Block {
                 attributes: text_attributes(&[("name", "foo")]),
                 start_tag_position_range: Position::new(1, 4)..Position::new(1, 22),
                 content: Content::source(
@@ -647,7 +651,7 @@ println!("hello2");
                     Position::new(1, 42)..Position::new(3, 9),
                 ),
                 declaration: Declaration::Tags,
-            },]
+            }],
         );
         Ok(())
     }
@@ -668,9 +672,9 @@ println!("hello2");
         let mut parser = create_parser();
         let contents = "/* <block\n> */ let say = \"hi\"; // </block>";
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![Block {
+        assert_blocks_eq(
+            &blocks,
+            &[Block {
                 attributes: Attributes::default(),
                 start_tag_position_range: Position::new(1, 4)..Position::new(2, 2),
                 content: Content::source(
@@ -678,7 +682,7 @@ println!("hello2");
                     Position::new(2, 5)..Position::new(2, 22),
                 ),
                 declaration: Declaration::Tags,
-            },]
+            }],
         );
         Ok(())
     }
@@ -689,9 +693,9 @@ println!("hello2");
         let contents =
             "// <block name=\"foo\"\n// keep-sorted\n// keep-unique>\nlet a = 1;\n// </block>";
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![Block {
+        assert_blocks_eq(
+            &blocks,
+            &[Block {
                 attributes: text_attributes(&[
                     ("name", "foo"),
                     ("keep-sorted", ""),
@@ -703,7 +707,7 @@ println!("hello2");
                     Position::new(3, 16)..Position::new(5, 1),
                 ),
                 declaration: Declaration::Tags,
-            },]
+            }],
         );
         Ok(())
     }
@@ -714,9 +718,9 @@ println!("hello2");
         let mut parser = create_parser();
         let contents = "// <block name=\"a\">\nlet x = 1;\n// </block> <block name=\"b\"\n// keep-sorted>\nlet y = 2;\n// </block>";
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![
+        assert_blocks_eq(
+            &blocks,
+            &[
                 Block {
                     attributes: text_attributes(&[("name", "a")]),
                     start_tag_position_range: Position::new(1, 4)..Position::new(1, 20),
@@ -727,7 +731,7 @@ println!("hello2");
                     declaration: Declaration::Tags,
                 },
                 Block {
-                    attributes: text_attributes(&[("name", "b"), ("keep-sorted", ""),]),
+                    attributes: text_attributes(&[("name", "b"), ("keep-sorted", "")]),
                     start_tag_position_range: Position::new(3, 13)..Position::new(4, 16),
                     content: Content::source(
                         test_utils::substr_range(contents, "\nlet y = 2;\n"),
@@ -735,7 +739,7 @@ println!("hello2");
                     ),
                     declaration: Declaration::Tags,
                 },
-            ]
+            ],
         );
         Ok(())
     }
@@ -745,9 +749,9 @@ println!("hello2");
         let mut parser = create_parser();
         let contents = "// <block>\n// b\n// a\n// </block>";
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![Block {
+        assert_blocks_eq(
+            &blocks,
+            &[Block {
                 attributes: Attributes::default(),
                 start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
                 content: Content::source(
@@ -755,7 +759,7 @@ println!("hello2");
                     Position::new(1, 11)..Position::new(4, 1),
                 ),
                 declaration: Declaration::Tags,
-            },]
+            }],
         );
         Ok(())
     }
@@ -765,9 +769,9 @@ println!("hello2");
         let mut parser = create_parser();
         let contents = "/* <block> */ let say = \"hi\"; /* </block\n> */";
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![Block {
+        assert_blocks_eq(
+            &blocks,
+            &[Block {
                 attributes: Attributes::default(),
                 start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
                 content: Content::source(
@@ -775,7 +779,7 @@ println!("hello2");
                     Position::new(1, 14)..Position::new(1, 31),
                 ),
                 declaration: Declaration::Tags,
-            },]
+            }],
         );
         Ok(())
     }
@@ -785,9 +789,9 @@ println!("hello2");
         let mut parser = create_parser();
         let contents = "/* Some comment\n<block> */println!(\"hello1\");// </block>";
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![Block {
+        assert_blocks_eq(
+            &blocks,
+            &[Block {
                 attributes: Attributes::default(),
                 start_tag_position_range: Position::new(2, 1)..Position::new(2, 8),
                 content: Content::source(
@@ -795,7 +799,7 @@ println!("hello2");
                     Position::new(2, 11)..Position::new(2, 30),
                 ),
                 declaration: Declaration::Tags,
-            },]
+            }],
         );
         Ok(())
     }
@@ -805,9 +809,9 @@ println!("hello2");
         let mut parser = create_parser();
         let contents = "/* <block> */println!(\"hello1\");/* Some comment\n</block> */";
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![Block {
+        assert_blocks_eq(
+            &blocks,
+            &[Block {
                 attributes: Attributes::default(),
                 start_tag_position_range: Position::new(1, 4)..Position::new(1, 11),
                 content: Content::source(
@@ -815,7 +819,7 @@ println!("hello2");
                     Position::new(1, 14)..Position::new(1, 33),
                 ),
                 declaration: Declaration::Tags,
-            },]
+            }],
         );
         Ok(())
     }
@@ -827,9 +831,9 @@ println!("hello2");
         // with a plain `e`.
         let contents = "// café <block>\nlet say = \"hi\";\n// </block>";
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![Block {
+        assert_blocks_eq(
+            &blocks,
+            &[Block {
                 attributes: Attributes::default(),
                 start_tag_position_range: Position::new(1, 9)..Position::new(1, 16),
                 content: Content::source(
@@ -837,7 +841,7 @@ println!("hello2");
                     Position::new(1, 16)..Position::new(3, 1),
                 ),
                 declaration: Declaration::Tags,
-            },]
+            }],
         );
         Ok(())
     }
@@ -850,9 +854,9 @@ println!("hello2");
         // same line.
         let contents = "/*\n   café <block> */\nlet say = \"hi\";\n// </block>";
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks,
-            vec![Block {
+        assert_blocks_eq(
+            &blocks,
+            &[Block {
                 attributes: Attributes::default(),
                 start_tag_position_range: Position::new(2, 9)..Position::new(2, 16),
                 content: Content::source(
@@ -860,7 +864,7 @@ println!("hello2");
                     Position::new(2, 19)..Position::new(4, 1),
                 ),
                 declaration: Declaration::Tags,
-            },]
+            }],
         );
         Ok(())
     }
@@ -1005,7 +1009,7 @@ println!("hello2");
         // ordinary text, not an attempted tag.
         let contents = "// see <blockquote> for details\nfn foo() {}\n";
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks, vec![]);
+        assert!(blocks.is_empty());
         Ok(())
     }
 
@@ -1016,7 +1020,7 @@ println!("hello2");
         // comma there instead.
         let contents = "// only <block, filesystem> is tested\nfn foo() {}\n";
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks, vec![]);
+        assert!(blocks.is_empty());
         Ok(())
     }
 
@@ -1026,7 +1030,7 @@ println!("hello2");
         let mut parser = create_parser();
         let contents = "// a block ends at </block, as in HTML\nfn foo() {}\n";
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks, vec![]);
+        assert!(blocks.is_empty());
         Ok(())
     }
 
@@ -1073,7 +1077,7 @@ println!("hello2");
         let mut parser = create_parser();
         let contents = "// ``a ` <block> `` and `b `` <block> `\nfn foo() {}\n";
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(blocks, vec![]);
+        assert!(blocks.is_empty());
         Ok(())
     }
 
@@ -1147,9 +1151,9 @@ println!("hello2");
         "#;
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 1);
-        assert_eq!(
-            blocks[0].attributes,
-            text_attributes(&[("name", "bar"), ("check-ai", "buzz")])
+        assert_attributes_eq(
+            &blocks[0].attributes,
+            &text_attributes(&[("name", "bar"), ("check-ai", "buzz")]),
         );
         Ok(())
     }
@@ -1168,9 +1172,9 @@ println!("hello2");
         "#;
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 1);
-        assert_eq!(
-            blocks[0].attributes,
-            text_attributes(&[("name", "bar"), ("check-ai", "buzz")])
+        assert_attributes_eq(
+            &blocks[0].attributes,
+            &text_attributes(&[("name", "bar"), ("check-ai", "buzz")]),
         );
         Ok(())
     }
@@ -1209,12 +1213,12 @@ println!("hello2");
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks[0].attributes,
-            text_attributes(&[
+        assert_attributes_eq(
+            &blocks[0].attributes,
+            &text_attributes(&[
                 ("keep-unique", r#"\"(?P<value>[a-z]+)\""#),
-                ("line-pattern", r"^\'[a-z]+\'$")
-            ])
+                ("line-pattern", r"^\'[a-z]+\'$"),
+            ]),
         );
         Ok(())
     }
@@ -1228,9 +1232,9 @@ println!("hello2");
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks[0].attributes,
-            text_attributes(&[("line-pattern", r"^C:\\"), ("keep-unique", r"\w+\\")])
+        assert_attributes_eq(
+            &blocks[0].attributes,
+            &text_attributes(&[("line-pattern", r"^C:\\"), ("keep-unique", r"\w+\\")]),
         );
         Ok(())
     }
@@ -1270,9 +1274,9 @@ println!("hello2");
         // </block>
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert_eq!(
-            blocks[0].attributes,
-            text_attributes(&[("name", ""), ("keep-unique", ""), ("keep-sorted", "")])
+        assert_attributes_eq(
+            &blocks[0].attributes,
+            &text_attributes(&[("name", ""), ("keep-unique", ""), ("keep-sorted", "")]),
         );
         Ok(())
     }
@@ -1387,13 +1391,13 @@ println!("hello2");
         "#;
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 2);
-        assert_eq!(
-            blocks[0].attributes,
-            text_attributes(&[("name", "outer"), ("check-ai", "bar"),])
+        assert_attributes_eq(
+            &blocks[0].attributes,
+            &text_attributes(&[("name", "outer"), ("check-ai", "bar")]),
         );
-        assert_eq!(
-            blocks[1].attributes,
-            text_attributes(&[("name", "inner"), ("keep-sorted", "desc")])
+        assert_attributes_eq(
+            &blocks[1].attributes,
+            &text_attributes(&[("name", "inner"), ("keep-sorted", "desc")]),
         );
         Ok(())
     }

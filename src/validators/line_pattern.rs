@@ -1,8 +1,7 @@
-use crate::blocks::{Block, BlockWithContext};
+use crate::blocks::Block;
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
-    ViolationRange,
+    SyncValidator, ValidationReport, Validator, ValidatorTrace, Violation, ViolationRange,
 };
 use crate::{Position, validators};
 use regex::Regex;
@@ -15,7 +14,7 @@ use std::sync::Arc;
 ///
 /// Keeps hand-maintained lists in shape — a table of `KEY=value` settings, or entries that must
 /// all be relative paths — and keeps unwanted text, such as `TODO`, out of a block.
-struct LinePatternValidator;
+pub(super) struct LinePatternValidator;
 
 /// Why a line fails. It serializes as the violation's data: `{"pattern": ...}` or
 /// `{"forbidden_pattern": ...}`.
@@ -203,14 +202,6 @@ struct LinePatternLine {
     matched: Option<String>,
     /// The line, trimmed.
     text: String,
-}
-
-/// Selects [`LinePatternValidator`] for blocks carrying a `line-pattern` or a
-/// `line-pattern-forbidden` attribute.
-pub(super) fn detect(block_with_context: &BlockWithContext) -> Option<ValidatorType> {
-    Validator::LinePattern
-        .is_turned_on_by(&block_with_context.block.attributes)
-        .then(|| ValidatorType::Sync(Box::new(LinePatternValidator)))
 }
 
 /// Builds the violation of `block`, which is in `block_file_path`, for `violation_line`: the
@@ -558,10 +549,10 @@ anything
 # </block>"#,
         );
 
-        let report = LinePatternValidator.validate(Arc::clone(&context))?;
+        let report = LinePatternValidator.validate(context)?;
 
         // The block without a line-pattern attribute is not checked, so it records nothing.
-        assert_eq!(checked_lines(&context, &report), vec![1, 4]);
+        assert_eq!(checked_lines(&report), vec![1, 4]);
         assert_eq!(violation_count(&report), 1);
         Ok(())
     }

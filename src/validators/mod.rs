@@ -9,16 +9,9 @@ mod line_count;
 mod line_pattern;
 mod same_as;
 
-pub(crate) use check_lua::parse_timeout;
-pub(crate) use keep_sorted::{SortFormat, SortOrder};
-pub(crate) use line_count::Constraint;
-pub(crate) use same_as::{Formats, Mode, TargetPaths};
-
 use crate::Position;
-use crate::blocks::{
-    AttributeName, Attributes, Block, BlockAddress, BlockKey, BlockListing, BlockSeverity,
-    BlockWithContext, FileBlocks,
-};
+use crate::attributes::{AttributeName, Attributes, Severity};
+use crate::blocks::{Block, BlockAddress, BlockKey, BlockListing, BlockWithContext, FileBlocks};
 use crate::diff_parser::DiffChanges;
 use crate::fs::FileSystem;
 use crate::language_parsers::LanguageParsers;
@@ -36,7 +29,6 @@ use serde::Serialize;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ops::Range;
-use std::str::FromStr;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString, IntoStaticStr};
@@ -54,8 +46,8 @@ pub(crate) trait SyncValidator: Send + Sync {
     fn validate(&self, context: Arc<ValidationContext>) -> anyhow::Result<ValidationReport>;
 }
 
-/// Validator type (sync or async).
-pub(crate) enum ValidatorType {
+/// A sync or async validator instance.
+pub(crate) enum TypedValidator {
     Sync(Box<dyn SyncValidator>),
     Async(Box<dyn AsyncValidator>),
 }
@@ -146,62 +138,43 @@ impl Validator {
     /// Whether `attributes` has one of the [`attributes`](Self::attributes) that turn this
     /// validator on.
     pub(crate) fn is_turned_on_by(self, attributes: &Attributes) -> bool {
-        match self {
-            Validator::Affects => attributes.affects().is_some(),
-            Validator::CheckAi => attributes.check_ai().is_some(),
-            Validator::CheckLua => attributes.check_lua().is_some(),
-            Validator::KeepSorted => attributes.keep_sorted().is_some(),
-            Validator::KeepUnique => attributes.keep_unique().is_some(),
-            Validator::LineCount => attributes.line_count().is_some(),
-            Validator::LinePattern => {
-                attributes.line_pattern().is_some() || attributes.line_pattern_forbidden().is_some()
-            }
-            Validator::SameAs => {
-                attributes.same_as().is_some() || attributes.same_as_paths().is_some()
-            }
-        }
+        self.attributes().iter().any(|&name| attributes.has(name))
     }
 
-    /// Creates this validator if `block_with_context` carries one of its attributes. Returns
-    /// `None` otherwise.
+    /// Creates this validator.
     ///
     /// The `match` has no `_` arm, so a new validator can't be left out. The result says whether
     /// the validator is sync or async, which lets the caller start a Tokio runtime only when an
     /// async validator exists.
     ///
+    /// # Errors
     /// Returns an error when the validator can't be set up, such as `check-lua` with an unknown
     /// `BLOCKWATCH_LUA_MODE`.
-    pub(crate) fn detect<Fs: FileSystem + 'static>(
+    pub(crate) fn create<Fs: FileSystem + 'static>(
         self,
-        block_with_context: &BlockWithContext,
         file_system: &Arc<Fs>,
-    ) -> anyhow::Result<Option<ValidatorType>> {
+    ) -> anyhow::Result<TypedValidator> {
         match self {
-            Validator::Affects => Ok(affects::detect(block_with_context, file_system)),
-            Validator::CheckAi => Ok(check_ai::detect(block_with_context)),
-            Validator::CheckLua => check_lua::detect(block_with_context, file_system),
-            Validator::KeepSorted => Ok(keep_sorted::detect(block_with_context)),
-            Validator::KeepUnique => Ok(keep_unique::detect(block_with_context)),
-            Validator::LineCount => Ok(line_count::detect(block_with_context)),
-            Validator::LinePattern => Ok(line_pattern::detect(block_with_context)),
-            Validator::SameAs => Ok(same_as::detect(block_with_context, file_system)),
-        }
-    }
-
-    /// Checks the attributes of one block that this validator reads, before any validator runs.
-    /// It runs for every validator, even one that the settings turn off, so a block that is wrong
-    /// fails the same way in every run.
-    ///
-    /// # Errors
-    /// Returns an error that quotes the attribute that is wrong.
-    pub(crate) fn check_attributes(self, attributes: &Attributes) -> anyhow::Result<()> {
-        match self {
-            Validator::Affects | Validator::KeepUnique | Validator::LinePattern => Ok(()),
-            Validator::CheckAi => check_ai::check_attributes(attributes),
-            Validator::CheckLua => check_lua::check_attributes(attributes),
-            Validator::KeepSorted => keep_sorted::check_attributes(attributes),
-            Validator::LineCount => line_count::check_attributes(attributes),
-            Validator::SameAs => same_as::check_attributes(attributes),
+            Validator::Affects => Ok(TypedValidator::Sync(Box::new(
+                affects::AffectsValidator::new(Arc::clone(file_system)),
+            ))),
+            Validator::CheckAi => Ok(check_ai::validator()),
+            Validator::CheckLua => check_lua::validator(file_system),
+            Validator::KeepSorted => Ok(TypedValidator::Sync(Box::new(
+                keep_sorted::KeepSortedValidator,
+            ))),
+            Validator::KeepUnique => Ok(TypedValidator::Sync(Box::new(
+                keep_unique::KeepUniqueValidator,
+            ))),
+            Validator::LineCount => Ok(TypedValidator::Sync(Box::new(
+                line_count::LineCountValidator,
+            ))),
+            Validator::LinePattern => Ok(TypedValidator::Sync(Box::new(
+                line_pattern::LinePatternValidator,
+            ))),
+            Validator::SameAs => Ok(TypedValidator::Sync(Box::new(
+                same_as::SameAsValidator::new(Arc::clone(file_system)),
+            ))),
         }
     }
 
@@ -235,8 +208,8 @@ pub(crate) struct Violation {
     code: Validator,
     /// Human-readable explanation, printed to the developer.
     message: String,
-    /// Decides whether this breach fails the run; see [`BlockSeverity`].
-    severity: BlockSeverity,
+    /// Decides whether this breach fails the run; see [`Severity`].
+    severity: Severity,
     /// A unique address of this violation.
     /// `None` if the block has no name as its address may not be unique.
     address: Option<ViolationAddress>,
@@ -453,7 +426,7 @@ pub(crate) struct SimpleDiagnostic<'a> {
     range: &'a ViolationRange,
     code: Validator,
     message: &'a str,
-    severity: BlockSeverity,
+    severity: Severity,
     #[serde(skip_serializing_if = "Option::is_none")]
     address: Option<&'a ViolationAddress>,
     #[serde(skip_serializing_if = "is_false")]
@@ -474,7 +447,7 @@ impl<'a> SimpleDiagnostic<'a> {
     }
 
     /// The severity, which the caller uses to decide the process exit code.
-    pub(crate) fn severity(&self) -> BlockSeverity {
+    pub(crate) fn severity(&self) -> Severity {
         self.severity
     }
 
@@ -792,11 +765,11 @@ pub(crate) fn diff_gated_block_count(
 ///
 /// Only the validators that `selection` includes are considered.
 ///
-/// `detect` decides whether a validator applies to a block, as [`Validator::detect`] does. It is a
-/// parameter so that a test can use validators that don't call a model or read the environment.
+/// `create` instantiates a detected validator, as [`Validator::create`] does. It is a parameter so
+/// that a test can use validators that don't call a model or read the environment.
 pub(crate) fn detect_validators<Fs: FileSystem + 'static>(
     context: &ValidationContext,
-    detect: impl Fn(Validator, &BlockWithContext, &Arc<Fs>) -> anyhow::Result<Option<ValidatorType>>,
+    create: impl Fn(Validator, &Arc<Fs>) -> anyhow::Result<TypedValidator>,
     selection: &ValidatorSelection,
     file_system: &Arc<Fs>,
 ) -> anyhow::Result<(SyncValidators, AsyncValidators)> {
@@ -809,14 +782,17 @@ pub(crate) fn detect_validators<Fs: FileSystem + 'static>(
         for block in &file_blocks.blocks_with_context {
             let mut still_undetected = Vec::new();
             for validator in undetected {
-                match detect(validator, block, file_system)? {
-                    Some(ValidatorType::Sync(sync_validator)) => {
+                if !validator.is_turned_on_by(&block.block.attributes) {
+                    still_undetected.push(validator);
+                    continue;
+                }
+                match create(validator, file_system)? {
+                    TypedValidator::Sync(sync_validator) => {
                         sync_validators.push((validator, sync_validator));
                     }
-                    Some(ValidatorType::Async(async_validator)) => {
+                    TypedValidator::Async(async_validator) => {
                         async_validators.push((validator, async_validator));
                     }
-                    None => still_undetected.push(validator),
                 }
             }
             undetected = still_undetected;
@@ -1014,56 +990,6 @@ fn block_content_for_pattern<'c>(
     )
 }
 
-/// Checks that each extra attribute comes with at least one main attribute when present.
-///
-/// # Errors
-/// Returns an error that quotes the first attribute in `extras` that is present when `has_main` is
-/// false, such as ``"`keep-sorted-pattern` without `keep-sorted`"``.
-///
-/// # Panics
-/// Panics if `main` is empty.
-fn require_main(
-    has_main: bool,
-    main: &[AttributeName],
-    extras: &[(AttributeName, bool)],
-) -> anyhow::Result<()> {
-    // Without a main attribute, no validator reads the extra one, so the block would pass as if it
-    // were not there.
-    if has_main {
-        return Ok(());
-    }
-    if let Some((extra, _)) = extras.iter().find(|(_, present)| *present) {
-        let main: Vec<String> = main.iter().map(|name| format!("`{name}`")).collect();
-        let (last, others) = main.split_last().expect("a validator has a main attribute");
-        if others.is_empty() {
-            bail!("`{extra}` without {last}");
-        }
-        bail!("`{extra}` without {} or {last}", others.join(", "));
-    }
-    Ok(())
-}
-
-/// Parses `value` as one of the keywords of `T`.
-///
-/// # Errors
-/// Returns `"\"value\" (expected ...)"` when `value` does not match a variant of `T`.
-pub(crate) fn parse_keyword_value<T>(value: &str) -> anyhow::Result<T>
-where
-    T: FromStr + IntoEnumIterator + ToString,
-{
-    T::from_str(value).map_err(|_| {
-        let keywords: Vec<String> = T::iter().map(|keyword| keyword.to_string()).collect();
-        let (last, others) = keywords
-            .split_last()
-            .expect("a keyword type has at least one keyword");
-        if others.is_empty() {
-            anyhow!("\"{value}\" (expected {last})")
-        } else {
-            anyhow!("\"{value}\" (expected {} or {last})", others.join(", "))
-        }
-    })
-}
-
 /// Parses a numeric value from string.
 ///
 /// Supports very big numbers (bigger than `f64` may hold) and `_` digits separator.
@@ -1148,43 +1074,6 @@ mod parse_number_tests {
 }
 
 #[cfg(test)]
-mod parse_keyword_value_tests {
-    use super::parse_keyword_value;
-    use strum_macros::{Display, EnumIter, EnumString};
-
-    #[derive(Debug, PartialEq, Eq, Display, EnumString, EnumIter)]
-    #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
-    enum SingleKeyword {
-        Only,
-    }
-
-    #[derive(Debug, PartialEq, Eq, Display, EnumString, EnumIter)]
-    #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
-    enum TwoKeywords {
-        First,
-        Second,
-    }
-
-    #[test]
-    fn single_keyword_error_omits_or_connector() {
-        let error = parse_keyword_value::<SingleKeyword>("other")
-            .unwrap_err()
-            .to_string();
-
-        assert_eq!(error, "\"other\" (expected only)");
-    }
-
-    #[test]
-    fn two_keywords_error_lists_both_options() {
-        let error = parse_keyword_value::<TwoKeywords>("other")
-            .unwrap_err()
-            .to_string();
-
-        assert_eq!(error, "\"other\" (expected first or second)");
-    }
-}
-
-#[cfg(test)]
 mod target_files_tests {
     use super::*;
     use crate::fs::test_utils::FakeFileSystem;
@@ -1235,7 +1124,8 @@ mod target_files_tests {
 
 #[cfg(test)]
 mod tests {
-    use crate::blocks::{Attributes, Block, BlockAddress, BlockWithContext, Content, Declaration};
+    use crate::attributes::{AttributeName, Attributes};
+    use crate::blocks::{Block, BlockAddress, Content, Declaration};
     use crate::fs::FileSystem;
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
@@ -1243,8 +1133,8 @@ mod tests {
     use crate::test_utils::{validation_context, virtual_block};
     use crate::validators::test_utils::{merge_validation_contexts, with_virtual_blocks};
     use crate::validators::{
-        AsyncValidator, SyncValidator, ValidationContext, ValidationReport, Validator,
-        ValidatorType, Violation, ViolationRange, detect_validators,
+        AsyncValidator, SyncValidator, TypedValidator, ValidationContext, ValidationReport,
+        Validator, Violation, ViolationRange, detect_validators,
     };
     use crate::{Position, validators};
     use async_trait::async_trait;
@@ -1329,31 +1219,24 @@ mod tests {
         }
     }
 
-    /// Detects the fakes above in place of `keep-sorted` and `check-ai`. No other validator is
-    /// detected.
-    fn detect_fakes<Fs: FileSystem>(
+    /// Creates the fakes above in place of `keep-sorted` and `check-ai`.
+    fn create_fakes<Fs: FileSystem>(
         validator: Validator,
-        block_with_context: &BlockWithContext,
         _file_system: &Arc<Fs>,
-    ) -> anyhow::Result<Option<ValidatorType>> {
-        let attributes = &block_with_context.block.attributes;
+    ) -> anyhow::Result<TypedValidator> {
         Ok(match validator {
-            Validator::KeepSorted => validator.is_turned_on_by(attributes).then(|| {
-                ValidatorType::Sync(Box::new(FakeSyncValidator {
-                    testing_block: Arc::new(empty_testing_block()),
-                }))
-            }),
-            Validator::CheckAi => validator.is_turned_on_by(attributes).then(|| {
-                ValidatorType::Async(Box::new(FakeAsyncValidator {
-                    testing_block: Arc::new(empty_testing_block()),
-                }))
-            }),
+            Validator::KeepSorted => TypedValidator::Sync(Box::new(FakeSyncValidator {
+                testing_block: Arc::new(empty_testing_block()),
+            })),
+            Validator::CheckAi => TypedValidator::Async(Box::new(FakeAsyncValidator {
+                testing_block: Arc::new(empty_testing_block()),
+            })),
             Validator::Affects
             | Validator::CheckLua
             | Validator::KeepUnique
             | Validator::LineCount
             | Validator::LinePattern
-            | Validator::SameAs => None,
+            | Validator::SameAs => unreachable!("tests only use keep-sorted and check-ai blocks"),
         })
     }
 
@@ -1375,7 +1258,7 @@ mod tests {
 
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            detect_fakes,
+            create_fakes,
             &ValidatorSelection::All,
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
@@ -1422,7 +1305,7 @@ mod tests {
 
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            detect_fakes,
+            create_fakes,
             &ValidatorSelection::All,
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
@@ -1465,7 +1348,7 @@ mod tests {
         ]);
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            detect_fakes,
+            create_fakes,
             &ValidatorSelection::All,
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
@@ -1501,7 +1384,7 @@ mod tests {
         );
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            detect_fakes,
+            create_fakes,
             &ValidatorSelection::Skip(HashSet::from([Validator::CheckAi])),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
@@ -1530,7 +1413,7 @@ mod tests {
 
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            detect_fakes,
+            create_fakes,
             &ValidatorSelection::Only(HashSet::from([Validator::CheckAi])),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
@@ -1558,7 +1441,7 @@ mod tests {
         );
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            detect_fakes,
+            create_fakes,
             &ValidatorSelection::Skip(HashSet::from([Validator::KeepSorted])),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
@@ -1587,7 +1470,7 @@ mod tests {
 
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            detect_fakes,
+            create_fakes,
             &ValidatorSelection::Only(HashSet::from([Validator::KeepSorted])),
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
@@ -1716,7 +1599,7 @@ x
 
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            Validator::detect,
+            Validator::create,
             &ValidatorSelection::All,
             &Arc::new(FakeFileSystem::new(HashMap::from([(
                 "example.py".to_string(),
@@ -1776,28 +1659,35 @@ print("target")
         // the run check it, not only from the validator's own name. Any other attribute, such as
         // `keep-sorted-pattern`, turns no validator on.
         let turned_on_by = [
-            ("affects", Validator::Affects),
-            ("check-ai", Validator::CheckAi),
-            ("check-lua", Validator::CheckLua),
-            ("keep-sorted", Validator::KeepSorted),
-            ("keep-unique", Validator::KeepUnique),
-            ("line-count", Validator::LineCount),
-            ("line-pattern", Validator::LinePattern),
-            ("line-pattern-forbidden", Validator::LinePattern),
-            ("same-as", Validator::SameAs),
-            ("same-as-paths", Validator::SameAs),
+            (AttributeName::Affects, Validator::Affects),
+            (AttributeName::CheckAi, Validator::CheckAi),
+            (AttributeName::CheckLua, Validator::CheckLua),
+            (AttributeName::KeepSorted, Validator::KeepSorted),
+            (AttributeName::KeepUnique, Validator::KeepUnique),
+            (AttributeName::LineCount, Validator::LineCount),
+            (AttributeName::LinePattern, Validator::LinePattern),
+            (AttributeName::LinePatternForbidden, Validator::LinePattern),
+            (AttributeName::SameAs, Validator::SameAs),
+            (AttributeName::SameAsPaths, Validator::SameAs),
         ];
-        for (attribute, attributes) in crate::blocks::test_utils::sample_attributes() {
-            let turned_on: Vec<Validator> = Validator::iter()
-                .filter(|validator| validator.is_turned_on_by(&attributes))
-                .collect();
-
+        for (attribute, entry) in crate::attributes::test_utils::sample_entries() {
             let expected: Vec<Validator> = turned_on_by
                 .iter()
                 .filter(|(turning_on, _)| *turning_on == attribute)
                 .map(|(_, validator)| *validator)
                 .collect();
-            assert_eq!(turned_on, expected, "{attribute}");
+            let listed: Vec<Validator> = Validator::iter()
+                .filter(|validator| validator.attributes().contains(&attribute))
+                .collect();
+            assert_eq!(listed, expected, "{attribute}");
+            if let Ok(attributes) =
+                Attributes::from_entries([(attribute.as_str().to_string(), entry)])
+            {
+                let turned_on: Vec<Validator> = Validator::iter()
+                    .filter(|validator| validator.is_turned_on_by(&attributes))
+                    .collect();
+                assert_eq!(turned_on, expected, "{attribute}");
+            }
         }
     }
 
@@ -1997,26 +1887,11 @@ mod test_utils {
     use std::sync::Arc;
 
     /// The start line of every block a validator reported checking, in the order it checked them.
-    ///
-    /// Panics if any checked block is missing from `context`.
-    pub(super) fn checked_lines(
-        context: &ValidationContext,
-        report: &ValidationReport,
-    ) -> Vec<usize> {
+    pub(super) fn checked_lines(report: &ValidationReport) -> Vec<usize> {
         report
             .checked_blocks
             .iter()
-            .map(|(file, key)| {
-                context.blocks()[file]
-                    .blocks_with_context
-                    .iter()
-                    .find(|block_with_context| block_with_context.block.key() == *key)
-                    .expect("checked block must exist in context")
-                    .block
-                    .start_tag_position_range
-                    .start
-                    .line
-            })
+            .map(|(_, key)| crate::blocks::test_utils::block_key_start_line(key))
             .collect()
     }
 

@@ -1,11 +1,10 @@
-use crate::blocks::{AttributeName, Attributes, Block, BlockWithContext};
+use crate::attributes::Constraint;
+use crate::blocks::Block;
 use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{
-    SyncValidator, ValidationReport, Validator, ValidatorTrace, ValidatorType, Violation,
-    line_value, require_main,
+    SyncValidator, ValidationReport, Validator, ValidatorTrace, Violation, line_value,
 };
-use anyhow::anyhow;
 use regex::Regex;
 use serde::Serialize;
 use std::sync::Arc;
@@ -15,7 +14,7 @@ use std::sync::Arc;
 ///
 /// Useful for keeping a section from silently growing past the size it was designed for — a code
 /// sample that must stay readable, or a list with a hard limit.
-struct LineCountValidator;
+pub(super) struct LineCountValidator;
 
 #[derive(Serialize)]
 struct LineCountViolation {
@@ -147,114 +146,6 @@ struct LineCountLine {
     /// The `value` group of `line-count-pattern`, the whole match, or the trimmed line. `None`
     /// when the pattern skips the line, so the line isn't counted.
     value: Option<String>,
-}
-
-/// Checks that `line-count-pattern` comes with `line-count`.
-///
-/// # Errors
-/// Returns an error that quotes `line-count-pattern` when it comes without `line-count`.
-pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
-    require_main(
-        Validator::LineCount.is_turned_on_by(attributes),
-        Validator::LineCount.attributes(),
-        &[(
-            AttributeName::LineCountPattern,
-            attributes.line_count_pattern().is_some(),
-        )],
-    )
-}
-
-/// Selects [`LineCountValidator`] for blocks carrying a `line-count` attribute.
-pub(super) fn detect(block_with_context: &BlockWithContext) -> Option<ValidatorType> {
-    Validator::LineCount
-        .is_turned_on_by(&block_with_context.block.attributes)
-        .then(|| ValidatorType::Sync(Box::new(LineCountValidator)))
-}
-
-/// A comparator and count from `line-count`, such as `<50` or `== 0`.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Constraint {
-    op: Op,
-    expected: usize,
-}
-
-impl Constraint {
-    /// Parses `raw` as a line-count constraint such as `<50` or `== 0`.
-    pub(crate) fn parse(raw: &str) -> anyhow::Result<Self> {
-        let (op, expected) = parse_constraint(raw).map_err(|e| {
-            anyhow!("expected a comparator like <N, <=N, ==N, >=N, >N; got \"{raw}\" (error: {e})")
-        })?;
-        Ok(Self { op, expected })
-    }
-
-    /// Returns whether `actual` lines satisfy this rule.
-    fn accepts(self, actual: usize) -> bool {
-        self.op.accepts(actual, self.expected)
-    }
-
-    /// The operator as written in diagnostics and traces, such as `<=`.
-    fn op_str(self) -> &'static str {
-        self.op.as_str()
-    }
-
-    /// The target line count to compare against.
-    fn expected(self) -> usize {
-        self.expected
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum Op {
-    Lt,
-    Le,
-    Eq,
-    Ge,
-    Gt,
-}
-impl Op {
-    fn as_str(&self) -> &'static str {
-        match self {
-            Op::Lt => "<",
-            Op::Le => "<=",
-            Op::Eq => "==",
-            Op::Ge => ">=",
-            Op::Gt => ">",
-        }
-    }
-
-    /// Returns whether `actual` satisfies the rule this operator forms with `expected`.
-    fn accepts(self, actual: usize, expected: usize) -> bool {
-        match self {
-            Op::Lt => actual < expected,
-            Op::Le => actual <= expected,
-            Op::Eq => actual == expected,
-            Op::Ge => actual >= expected,
-            Op::Gt => actual > expected,
-        }
-    }
-}
-
-fn parse_constraint(s: &str) -> anyhow::Result<(Op, usize)> {
-    let trimmed = s.trim();
-    let (op, rest) = if let Some(r) = trimmed.strip_prefix("<=") {
-        (Op::Le, r)
-    } else if let Some(r) = trimmed.strip_prefix(">=") {
-        (Op::Ge, r)
-    } else if let Some(r) = trimmed.strip_prefix("==") {
-        (Op::Eq, r)
-    } else if let Some(r) = trimmed.strip_prefix('<') {
-        (Op::Lt, r)
-    } else if let Some(r) = trimmed.strip_prefix('>') {
-        (Op::Gt, r)
-    } else {
-        return Err(anyhow!("missing comparator"));
-    };
-    let num_str = rest.trim();
-    if num_str.is_empty() {
-        return Err(anyhow!("missing number"));
-    }
-    let expected: usize = num_str.parse().map_err(|_| anyhow!("invalid number"))?;
-    Ok((op, expected))
 }
 
 #[cfg(test)]
@@ -617,39 +508,6 @@ red
     }
 
     #[test]
-    fn parse_constraint_with_invalid_syntax_returns_error() {
-        assert!(Constraint::parse("50").is_err());
-        assert!(Constraint::parse("").is_err());
-        assert!(Constraint::parse("> -1").is_err());
-        assert!(Constraint::parse("<== 50").is_err());
-    }
-
-    #[test]
-    fn parse_constraint_with_valid_syntax_returns_correct_result() {
-        assert_eq!(
-            Constraint::parse("< 50").unwrap(),
-            Constraint {
-                op: Op::Lt,
-                expected: 50
-            }
-        );
-        assert_eq!(
-            Constraint::parse(">=10").unwrap(),
-            Constraint {
-                op: Op::Ge,
-                expected: 10
-            }
-        );
-        assert_eq!(
-            Constraint::parse("== 0").unwrap(),
-            Constraint {
-                op: Op::Eq,
-                expected: 0
-            }
-        );
-    }
-
-    #[test]
     fn validate_with_blocks_without_line_count_records_a_check_for_the_examined_ones_only()
     -> anyhow::Result<()> {
         let context = validation_context(
@@ -666,10 +524,10 @@ c = 3
 # </block>"#,
         );
 
-        let report = LineCountValidator.validate(Arc::clone(&context))?;
+        let report = LineCountValidator.validate(context)?;
 
         // The block without a line-count attribute is not checked, so it records nothing.
-        assert_eq!(checked_lines(&context, &report), vec![1, 4]);
+        assert_eq!(checked_lines(&report), vec![1, 4]);
         assert_eq!(violation_count(&report), 1);
         Ok(())
     }
@@ -748,25 +606,5 @@ mod trace_tests {
 
         assert!(report.traces.is_empty());
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod check_attributes_tests {
-    use crate::test_utils::text_attributes;
-    use crate::validators::Validator;
-
-    #[test]
-    fn pattern_without_line_count_returns_an_error() {
-        let attributes = text_attributes(&[("line-count-pattern", "\\w+")]);
-
-        let error = Validator::LineCount
-            .check_attributes(&attributes)
-            .unwrap_err();
-
-        assert_eq!(
-            error.to_string(),
-            "`line-count-pattern` without `line-count`"
-        );
     }
 }

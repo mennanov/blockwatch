@@ -44,12 +44,13 @@ impl TargetReference {
 
     /// Parses target references from list `entries`, one reference per entry so an entry can have a
     /// comma.
-    pub(crate) fn parse_list(entries: &[String]) -> anyhow::Result<Vec<Self>> {
+    pub(crate) fn parse_list(entries: &[impl AsRef<str>]) -> anyhow::Result<Vec<Self>> {
         entries
             .iter()
             .enumerate()
             .map(|(index, entry)| {
-                Self::parse(entry).with_context(|| format!("entry {} of the list", index + 1))
+                Self::parse(entry.as_ref())
+                    .with_context(|| format!("entry {} of the list", index + 1))
             })
             .collect()
     }
@@ -95,6 +96,24 @@ impl TargetReference {
                 file: in_referencing_file(file.as_ref()),
                 kind: TargetKind::Symbol(path.clone()),
             },
+        }
+    }
+}
+
+impl fmt::Display for TargetReference {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Block {
+                file: Some(file),
+                name,
+            } => write!(f, "{file}:{name}"),
+            Self::Block { file: None, name } => write!(f, ":{name}"),
+            Self::File(file) => write!(f, "{file}"),
+            Self::Symbol {
+                file: Some(file),
+                path,
+            } => write!(f, "{file}#{path}"),
+            Self::Symbol { file: None, path } => write!(f, "#{path}"),
         }
     }
 }
@@ -206,8 +225,7 @@ mod parse_target_references_tests {
 
     /// The references in the list `entries`.
     fn parse_entries(entries: &[&str]) -> anyhow::Result<Vec<TargetReference>> {
-        let entries: Vec<String> = entries.iter().map(|entry| entry.to_string()).collect();
-        TargetReference::parse_list(&entries)
+        TargetReference::parse_list(entries)
     }
 
     /// A `file:name` reference, for the expected values below.

@@ -1,6 +1,6 @@
 //! Renders the violations of a run as a SARIF log, the format code-scanning services read.
 
-use crate::blocks::BlockSeverity;
+use crate::attributes::Severity;
 use crate::repo_path::RepoPath;
 use crate::validators::{SimpleDiagnostic, Validator, Violation};
 use crate::violation_address::ViolationAddress;
@@ -347,13 +347,13 @@ struct Region {
 }
 
 /// Returns the SARIF level a finding of `severity` is reported at.
-fn sarif_level(severity: BlockSeverity) -> &'static str {
+fn sarif_level(severity: Severity) -> &'static str {
     match severity {
-        BlockSeverity::Error => "error",
-        BlockSeverity::Warning => "warning",
+        Severity::Error => "error",
+        Severity::Warning => "warning",
         // The only SARIF level below `note` is `none`, and some consumers hide it altogether, so
         // the quieter severities stay notes instead of disappearing.
-        BlockSeverity::Info | BlockSeverity::Hint => "note",
+        Severity::Info | Severity::Hint => "note",
     }
 }
 
@@ -519,23 +519,23 @@ mod tests {
     #[test]
     fn severity_below_a_warning_is_reported_as_a_note() {
         for severity in [
-            BlockSeverity::Error,
-            BlockSeverity::Warning,
-            BlockSeverity::Info,
-            BlockSeverity::Hint,
+            Severity::Error,
+            Severity::Warning,
+            Severity::Info,
+            Severity::Hint,
         ] {
             // Exhaustive match is used to ensure that the test fails when new severity is added.
             match severity {
-                BlockSeverity::Error => {
+                Severity::Error => {
                     assert_eq!(sarif_level(severity), "error");
                 }
-                BlockSeverity::Warning => {
+                Severity::Warning => {
                     assert_eq!(sarif_level(severity), "warning");
                 }
-                BlockSeverity::Info => {
+                Severity::Info => {
                     assert_eq!(sarif_level(severity), "note");
                 }
-                BlockSeverity::Hint => {
+                Severity::Hint => {
                     assert_eq!(sarif_level(severity), "note");
                 }
             }

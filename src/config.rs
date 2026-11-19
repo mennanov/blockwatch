@@ -1,7 +1,7 @@
 //! Reads the settings from the config file, `blockwatch.toml`.
 
 use crate::LineIndex;
-use crate::blocks::{AttributeEntry, Attributes, validate_attributes};
+use crate::attributes::{AttributeEntry, Attributes};
 use crate::diff_parser::{DiffChanges, LineChanges};
 use crate::fs::FileSystem;
 use crate::language_parsers::toml;
@@ -304,7 +304,6 @@ fn entry_blocks(
     let target_file = TargetFile::new(file, file_system);
     let target_if = parse_target_if(block_entry.target_if, &target_file)?;
     let attributes = attribute_values(block_entry.attributes)?;
-    validate_attributes(&attributes)?;
     let files = target_file.files(file_system)?;
     if files.is_empty() {
         // Without this error, a typo in the glob would turn the rules off without a word.
@@ -501,7 +500,8 @@ fn attribute_values(values: HashMap<String, RawAttributeValue>) -> anyhow::Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blocks::BlockSeverity;
+    use crate::attributes::Severity;
+    use crate::attributes::test_utils::assert_attributes_eq;
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::test_utils::FakeFileSystem;
     use crate::target_reference::TargetReference;
@@ -543,6 +543,19 @@ mod tests {
         format!("{error:#}")
     }
 
+    /// Asserts that `actual` and `expected` hold the same virtual blocks.
+    fn assert_virtual_blocks_eq(actual: &[VirtualBlock], expected: &[VirtualBlock]) {
+        assert_eq!(actual.len(), expected.len(), "virtual block count mismatch");
+        for (actual, expected) in actual.iter().zip(expected) {
+            assert_eq!(actual.file, expected.file);
+            assert_eq!(actual.locator, expected.locator);
+            assert_attributes_eq(&actual.attributes, &expected.attributes);
+            assert_eq!(actual.entry, expected.entry);
+            assert_eq!(actual.is_entry_modified, expected.is_entry_modified);
+            assert_eq!(actual.target_if, expected.target_if);
+        }
+    }
+
     #[test]
     fn block_entries_read_as_virtual_blocks() -> anyhow::Result<()> {
         let text = r"ignore = []
@@ -560,9 +573,9 @@ target = 'a.yaml#/b'
 
         let config = read_text(text)?;
 
-        assert_eq!(
-            config.blocks,
-            vec![
+        assert_virtual_blocks_eq(
+            &config.blocks,
+            &[
                 VirtualBlock {
                     file: RepoPath::from_reference("package.json")?,
                     locator: Locator::Symbol(SymbolPath::parse("/version")?),
@@ -592,7 +605,7 @@ target = 'a.yaml#/b'
                     is_entry_modified: false,
                     target_if: None,
                 },
-            ]
+            ],
         );
         Ok(())
     }
@@ -610,20 +623,21 @@ target-pattern = '^MODEL = .*'
         let config = read_text(text)?;
 
         // `target-pattern` is not an attribute.
-        let blocks: Vec<(&str, &Locator, &Attributes)> = config
+        let blocks: Vec<(&str, &Locator)> = config
             .blocks
             .iter()
-            .map(|block| (block.file.as_str(), &block.locator, &block.attributes))
+            .map(|block| {
+                assert_attributes_eq(&block.attributes, &Attributes::default());
+                (block.file.as_str(), &block.locator)
+            })
             .collect();
-        let empty = Attributes::default();
         assert_eq!(
             blocks,
             [
-                ("settings.py", &Locator::File, &empty),
+                ("settings.py", &Locator::File),
                 (
                     "settings.py",
                     &Locator::Pattern(TargetPattern::new("^MODEL = .*")?),
-                    &empty
                 ),
             ]
         );
@@ -659,12 +673,12 @@ name = 'version'
             })
         };
         // Sorted by file.
-        assert_eq!(
-            config.blocks,
-            [
+        assert_virtual_blocks_eq(
+            &config.blocks,
+            &[
                 block("plugins/blue/package.json")?,
-                block("plugins/red/package.json")?
-            ]
+                block("plugins/red/package.json")?,
+            ],
         );
         Ok(())
     }
@@ -1377,7 +1391,13 @@ severity = 'loud'
 
     #[test]
     fn flag_true_on_attribute_requiring_a_value_is_rejected() {
-        for name in ["check-ai", "check-lua", "line-pattern", "same-as-paths"] {
+        for name in [
+            "check-ai",
+            "check-lua",
+            "keep-sorted-pattern",
+            "line-pattern",
+            "same-as-paths",
+        ] {
             let text = format!(
                 r"[[block]]
 target = 'a.json#/x'
@@ -1401,10 +1421,7 @@ severity = 'warning'
 
         let config = read_text(text)?;
 
-        assert_eq!(
-            config.blocks[0].attributes.severity(),
-            BlockSeverity::Warning
-        );
+        assert_eq!(config.blocks[0].attributes.severity(), Severity::Warning);
         Ok(())
     }
 

@@ -21,6 +21,7 @@
 use serde::Serialize;
 use std::ops::Range;
 
+mod attributes;
 mod block_parser;
 mod blocks;
 mod cli;
@@ -163,7 +164,7 @@ mod count_rust_blocks_tests {
 
 #[cfg(test)]
 mod test_utils {
-    use crate::blocks::Attributes;
+    use crate::attributes::Attributes;
     use crate::diff_parser::{DiffChanges, LineChange, LineChangeKind};
     use crate::fs::test_utils::{FakeFileSystem, path_filter_all};
     use crate::language_parsers;
@@ -192,11 +193,12 @@ mod test_utils {
     /// # Panics
     /// Panics if no attribute has one of the names.
     pub(crate) fn text_attributes(pairs: &[(&str, &str)]) -> Attributes {
-        let values = pairs
-            .iter()
-            .map(|(name, value)| (name.to_string(), value.to_string()))
-            .collect();
-        Attributes::from_tag(values).expect("known attribute names")
+        Attributes::from_tag(
+            pairs
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.to_string())),
+        )
+        .expect("known attribute names")
     }
 
     /// The diff's changes to each of `files`.

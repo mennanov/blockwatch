@@ -1,14 +1,12 @@
-use crate::blocks::{
-    AttributeName, AttributeValue, Attributes, Block, BlockWithContext, FileBlocks,
-};
+use crate::attributes::{AttributeName, AttributeValue, parse_keyword_value};
+use crate::blocks::{Block, BlockWithContext, FileBlocks};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
 use crate::target_reference::TargetKind;
 use crate::validators::{
-    AsyncValidator, PatternContent, TargetFiles, ValidationContext, ValidationReport, Validator,
-    ValidatorTrace, ValidatorType, Violation, block_content_for_pattern, parse_keyword_value,
-    require_main,
+    AsyncValidator, PatternContent, TargetFiles, TypedValidator, ValidationContext,
+    ValidationReport, Validator, ValidatorTrace, Violation, block_content_for_pattern,
 };
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -305,7 +303,7 @@ impl LuaScriptInputs {
             timeout,
             file: file_path.as_str().to_string(),
             line: block.start_tag_position_range.start.line,
-            attributes: block.attributes.raw_values(),
+            attributes: block.attributes.values().collect(),
             affects,
             content,
         }
@@ -411,20 +409,6 @@ fn run_lua_script_sync(inputs: LuaScriptInputs, mode: LuaMode) -> anyhow::Result
             other.type_name()
         )),
     }
-}
-
-/// Parses `raw` as a `check-lua-timeout` wall-clock budget in whole seconds.
-///
-/// A value below one second is rejected: a timeout that short cannot tell a runaway script from a
-/// slow-but-terminating one, which is the false-violation trap the timeout exists to avoid.
-pub(crate) fn parse_timeout(raw: &str) -> anyhow::Result<Duration> {
-    let seconds: u64 = raw
-        .trim()
-        .parse()
-        .ok()
-        .filter(|&seconds| seconds >= 1)
-        .ok_or_else(|| anyhow!("must be a whole number of seconds >= 1, got {raw:?}"))?;
-    Ok(Duration::from_secs(seconds))
 }
 
 /// The message both timeout layers report, so a script stopped inside the VM by the hook and one
@@ -614,42 +598,19 @@ fn symbol_content<Fs: FileSystem>(
         .map(|symbol| symbol.value_or_definition(content).to_string()))
 }
 
-/// Checks that `check-lua-pattern` and `check-lua-timeout` come with `check-lua`.
+/// Creates [`CheckLuaValidator`], reading `BLOCKWATCH_LUA_MODE` from the environment.
 ///
 /// # Errors
-/// Returns an error that quotes the first of the two attributes found without it.
-pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
-    require_main(
-        Validator::CheckLua.is_turned_on_by(attributes),
-        Validator::CheckLua.attributes(),
-        &[
-            (
-                AttributeName::CheckLuaPattern,
-                attributes.check_lua_pattern().is_some(),
-            ),
-            (
-                AttributeName::CheckLuaTimeout,
-                attributes.check_lua_timeout().is_some(),
-            ),
-        ],
-    )
-}
-
-/// Selects [`CheckLuaValidator`] for blocks carrying a `check-lua` attribute.
-///
-/// Detecting such a block returns an error when `BLOCKWATCH_LUA_MODE` has an unknown value.
-pub(super) fn detect<Fs: FileSystem + 'static>(
-    block_with_context: &BlockWithContext,
+/// Returns an error when `BLOCKWATCH_LUA_MODE` has an unknown value.
+pub(super) fn validator<Fs: FileSystem + 'static>(
     file_system: &Arc<Fs>,
-) -> anyhow::Result<Option<ValidatorType>> {
-    if !Validator::CheckLua.is_turned_on_by(&block_with_context.block.attributes) {
-        return Ok(None);
-    }
+) -> anyhow::Result<TypedValidator> {
     // Read here, not at startup, so a run without a check-lua block never fails over a
     // variable it doesn't use.
     let mode = LuaMode::parse(&std::env::var_os(LUA_STDLIB_ENV_VAR).unwrap_or_default())?;
-    Ok(Some(ValidatorType::Async(Box::new(
-        CheckLuaValidator::new(Arc::clone(file_system), mode),
+    Ok(TypedValidator::Async(Box::new(CheckLuaValidator::new(
+        Arc::clone(file_system),
+        mode,
     ))))
 }
 
@@ -662,7 +623,6 @@ struct CheckLuaViolation<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blocks::AttributeEntry;
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
     use crate::test_utils::{validation_context, validation_context_with_changes};
@@ -739,12 +699,12 @@ function validate(ctx, content)
 end
 "#,
         )])
-        .validate(Arc::clone(&context))
+        .validate(context)
         .await?;
 
         assert!(report.violations.is_empty());
         // The block was checked and passed. That is different from never being checked at all.
-        assert_eq!(checked_lines(&context, &report), vec![1]);
+        assert_eq!(checked_lines(&report), vec![1]);
         Ok(())
     }
 
@@ -1032,10 +992,10 @@ end
     }
 
     #[tokio::test]
-    async fn list_attribute_reaches_lua_as_a_table_of_strings() -> anyhow::Result<()> {
+    async fn affects_attribute_reaches_lua_as_a_table_of_strings() -> anyhow::Result<()> {
         let context = validation_context(
             "example.py",
-            r#"# <block check-lua="check.lua">
+            r#"# <block check-lua="check.lua" affects=":red, :blue">
 some content
 # </block>
 # <block name="red">
@@ -1043,25 +1003,6 @@ some content
 # <block name="blue">
 # </block>"#,
         );
-        // Only a `[[block]]` entry can write a list, so the test puts it on the block directly.
-        let mut context = Arc::into_inner(context).expect("the context is not shared");
-        let path = RepoPath::from_reference("example.py")?;
-        let block = &mut context
-            .blocks
-            .get_mut(&path)
-            .expect("example.py's blocks")
-            .blocks_with_context[0]
-            .block;
-        block.attributes = Attributes::from_entries([
-            (
-                "check-lua".to_string(),
-                AttributeEntry::Text("check.lua".to_string()),
-            ),
-            (
-                "affects".to_string(),
-                AttributeEntry::List(vec![":red".to_string(), ":blue".to_string()]),
-            ),
-        ])?;
 
         let violations = validator(&[(
             "check.lua",
@@ -1078,7 +1019,7 @@ function validate(ctx, content)
 end
 "#,
         )])
-        .validate(Arc::new(context))
+        .validate(context)
         .await?
         .violations;
 
@@ -1399,12 +1340,12 @@ end
 "#,
             ),
         ])
-        .validate(Arc::clone(&context))
+        .validate(context)
         .await?;
 
         // Both blocks are recorded whatever the script returns, and the block without a check-lua
         // attribute is not checked, so it records nothing.
-        assert_eq!(checked_lines(&context, &report), vec![1, 4]);
+        assert_eq!(checked_lines(&report), vec![1, 4]);
         assert_eq!(violation_count(&report), 1);
         Ok(())
     }
@@ -1457,11 +1398,11 @@ function validate(ctx, content)
 end
 "#,
         )])
-        .validate(Arc::clone(&context))
+        .validate(context)
         .await?;
 
         assert!(report.violations.is_empty());
-        assert_eq!(checked_lines(&context, &report), vec![1]);
+        assert_eq!(checked_lines(&report), vec![1]);
         Ok(())
     }
 
@@ -1549,11 +1490,11 @@ function validate(ctx, content)
 end
 "#,
         )])
-        .validate(Arc::clone(&context))
+        .validate(context)
         .await?;
 
         assert!(report.violations.is_empty());
-        assert_eq!(checked_lines(&context, &report), vec![1]);
+        assert_eq!(checked_lines(&report), vec![1]);
         Ok(())
     }
 
@@ -1570,11 +1511,11 @@ some content
             "check.lua",
             "\u{feff}function validate(ctx, content)\n    return nil\nend\n",
         )])
-        .validate(Arc::clone(&context))
+        .validate(context)
         .await?;
 
         assert!(report.violations.is_empty());
-        assert_eq!(checked_lines(&context, &report), vec![1]);
+        assert_eq!(checked_lines(&report), vec![1]);
         Ok(())
     }
 
@@ -1591,11 +1532,11 @@ some content
             "check.lua",
             "\u{feff}#!/usr/bin/env lua\nfunction validate(ctx, content)\n    return nil\nend\n",
         )])
-        .validate(Arc::clone(&context))
+        .validate(context)
         .await?;
 
         assert!(report.violations.is_empty());
-        assert_eq!(checked_lines(&context, &report), vec![1]);
+        assert_eq!(checked_lines(&report), vec![1]);
         Ok(())
     }
 
@@ -1771,24 +1712,5 @@ red
 
         assert!(report.traces.is_empty());
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod check_attributes_tests {
-    use crate::test_utils::text_attributes;
-    use crate::validators::Validator;
-
-    #[test]
-    fn pattern_or_timeout_without_check_lua_returns_an_error() {
-        for (name, value) in [("check-lua-pattern", "\\d+"), ("check-lua-timeout", "60")] {
-            let attributes = text_attributes(&[(name, value)]);
-
-            let error = Validator::CheckLua
-                .check_attributes(&attributes)
-                .unwrap_err();
-
-            assert_eq!(error.to_string(), format!("`{name}` without `check-lua`"));
-        }
     }
 }

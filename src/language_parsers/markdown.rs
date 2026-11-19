@@ -362,9 +362,10 @@ fn title_start(definition: &[u8]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::attributes::SortOrder;
+    use crate::blocks::test_utils::assert_blocks_eq;
     use crate::blocks::{Block, Content, Declaration};
     use crate::test_utils::text_attributes;
-    use crate::validators::SortOrder;
     use crate::{Position, test_utils};
 
     /// The symbols `source` derives, as `(path, value)` pairs in the order they were derived.
@@ -646,9 +647,9 @@ Some text here 3
             .parse_blocks(content)
             .collect::<anyhow::Result<Vec<_>>>()?;
 
-        assert_eq!(
-            blocks,
-            vec![
+        assert_blocks_eq(
+            &blocks,
+            &[
                 Block {
                     attributes: text_attributes(&[("name", "md_block")]),
                     start_tag_position_range: Position::new(5, 10)..Position::new(5, 33),
@@ -664,7 +665,7 @@ Some text here 3
                     content: Content::source(
                         test_utils::substr_range(
                             content,
-                            "Some text here 2\n\n[//]: # (<block name=\"md_block_3\">)\nSome text here 3\n\n[//]: # (</block>)\n"
+                            "Some text here 2\n\n[//]: # (<block name=\"md_block_3\">)\nSome text here 3\n\n[//]: # (</block>)\n",
                         ),
                         Position::new(11, 1)..Position::new(17, 1),
                     ),
@@ -678,8 +679,8 @@ Some text here 3
                         Position::new(14, 1)..Position::new(16, 1),
                     ),
                     declaration: Declaration::Tags,
-                }
-            ]
+                },
+            ],
         );
 
         Ok(())
@@ -896,9 +897,9 @@ Inline code `<!-- <block name="ignored"> -->` is not a comment.
             .parse_blocks(content)
             .collect::<anyhow::Result<Vec<_>>>()?;
 
-        assert_eq!(
-            blocks,
-            vec![Block {
+        assert_blocks_eq(
+            &blocks,
+            &[Block {
                 attributes: text_attributes(&[("name", "inline_block")]),
                 start_tag_position_range: Position::new(4, 16)..Position::new(4, 43),
                 content: Content::source(
@@ -906,7 +907,7 @@ Inline code `<!-- <block name="ignored"> -->` is not a comment.
                     Position::new(4, 47)..Position::new(6, 13),
                 ),
                 declaration: Declaration::Tags,
-            }]
+            }],
         );
 
         Ok(())
@@ -1044,9 +1045,9 @@ Not wrapped in HTML tags on multiple lines
             .parse_blocks(content)
             .collect::<anyhow::Result<Vec<_>>>()?;
 
-        assert_eq!(
-            blocks,
-            vec![
+        assert_blocks_eq(
+            &blocks,
+            &[
                 Block {
                     attributes: text_attributes(&[("name", "html_block")]),
                     start_tag_position_range: Position::new(5, 6)..Position::new(5, 31),
@@ -1086,7 +1087,7 @@ Not wrapped in HTML tags on multiple lines
                     ),
                     declaration: Declaration::Tags,
                 },
-            ]
+            ],
         );
 
         Ok(())

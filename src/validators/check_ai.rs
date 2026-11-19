@@ -1,8 +1,8 @@
-use crate::blocks::{AttributeName, Attributes, Block, BlockWithContext};
+use crate::blocks::Block;
 use crate::repo_path::RepoPath;
 use crate::validators::{
-    AsyncValidator, PatternContent, ValidationContext, ValidationReport, Validator, ValidatorTrace,
-    ValidatorType, Violation, block_content_for_pattern, require_main,
+    AsyncValidator, PatternContent, TypedValidator, ValidationContext, ValidationReport, Validator,
+    ValidatorTrace, Violation, block_content_for_pattern,
 };
 use anyhow::{Context, anyhow};
 use async_openai::Client;
@@ -149,31 +149,12 @@ async fn check_block<C: AiClient>(
     ))
 }
 
-/// Checks that `check-ai-pattern` comes with `check-ai`.
-///
-/// # Errors
-/// Returns an error that quotes `check-ai-pattern` when it comes without `check-ai`.
-pub(super) fn check_attributes(attributes: &Attributes) -> anyhow::Result<()> {
-    require_main(
-        Validator::CheckAi.is_turned_on_by(attributes),
-        Validator::CheckAi.attributes(),
-        &[(
-            AttributeName::CheckAiPattern,
-            attributes.check_ai_pattern().is_some(),
-        )],
-    )
-}
-
-/// Selects [`CheckAiValidator`] for blocks carrying a `check-ai` attribute, building a client from
-/// the `BLOCKWATCH_AI_*` environment variables.
-pub(super) fn detect(block_with_context: &BlockWithContext) -> Option<ValidatorType> {
-    Validator::CheckAi
-        .is_turned_on_by(&block_with_context.block.attributes)
-        .then(|| {
-            ValidatorType::Async(Box::new(CheckAiValidator::with_client(
-                OpenAiClient::from_env(),
-            )))
-        })
+/// Creates [`CheckAiValidator`], configuring its client from the `BLOCKWATCH_AI_*` environment
+/// variables.
+pub(super) fn validator() -> TypedValidator {
+    TypedValidator::Async(Box::new(CheckAiValidator::with_client(
+        OpenAiClient::from_env(),
+    )))
 }
 
 fn create_violation(
@@ -529,11 +510,11 @@ text
 I like banana and apples
 # </block>"#,
         );
-        let report = validator.validate(Arc::clone(&context)).await?;
+        let report = validator.validate(context).await?;
 
         assert!(report.violations.is_empty());
         // The block was checked and passed. That is different from never being checked at all.
-        assert_eq!(checked_lines(&context, &report), vec![1]);
+        assert_eq!(checked_lines(&report), vec![1]);
         Ok(())
     }
 
@@ -690,11 +671,11 @@ I like banana
 # </block>"#,
         );
 
-        let report = validator.validate(Arc::clone(&context)).await?;
+        let report = validator.validate(context).await?;
 
         // Both blocks are recorded whatever the answer comes back as, and the block without a
         // check-ai attribute is not checked, so it records nothing.
-        assert_eq!(checked_lines(&context, &report), vec![1, 4]);
+        assert_eq!(checked_lines(&report), vec![1, 4]);
         assert_eq!(violation_count(&report), 1);
         Ok(())
     }
@@ -766,22 +747,5 @@ mod trace_tests {
 
         assert!(report.traces.is_empty());
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod check_attributes_tests {
-    use crate::test_utils::text_attributes;
-    use crate::validators::Validator;
-
-    #[test]
-    fn pattern_without_check_ai_returns_an_error() {
-        let attributes = text_attributes(&[("check-ai-pattern", "\\d+")]);
-
-        let error = Validator::CheckAi
-            .check_attributes(&attributes)
-            .unwrap_err();
-
-        assert_eq!(error.to_string(), "`check-ai-pattern` without `check-ai`");
     }
 }

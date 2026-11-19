@@ -175,8 +175,8 @@ fn decode_node(node: &Node, source: &str) -> anyhow::Result<String> {
 mod tests {
     use super::*;
     use crate::Position;
+    use crate::attributes::SortOrder;
     use crate::blocks::Block;
-    use crate::validators::SortOrder;
     use std::collections::HashMap;
     use std::ops::Range;
 

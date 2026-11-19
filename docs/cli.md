@@ -789,7 +789,7 @@ convention: the start is inclusive and the end is exclusive (`[start, end)`).
   "src/lib.rs": [
     {
       "attributes": {
-        "affects": "README.md:supported-langs",
+        "affects": ["README.md:supported-langs"],
         "name": "languages-code"
       },
       "column": 4,
@@ -825,8 +825,9 @@ convention: the start is inclusive and the end is exclusive (`[start, end)`).
 
 [//]: # (</block>)
 
-A block with no `name` attribute is reported as `(unnamed)`. Each attribute value is a string, except a list in a
-[`[[block]]` entry](#blocks-in-the-config-file), which is an array of strings. Within a file, blocks appear in source
+A block with no `name` attribute is reported as `(unnamed)`. `affects` and `same-as` are arrays of strings, and every
+other attribute value is a string. Values appear in normalized form (such as `"asc"` for a bare `keep-sorted`, or
+`"<=50"` for `<= 50`). Within a file, blocks appear in source
 order and each block's attributes are sorted by name; the files themselves are not ordered, and two runs over an
 unchanged tree may emit them differently. Sort by key downstream if you need to diff one run against another — or use
 [`--verbosity full`](#full-reports), which does order its files.
@@ -1075,9 +1076,9 @@ and is absent — not zero — in the other two modes.
     "src/validators/check_ai.rs": [
       {
         "attributes": {
-          "affects": "docs/validators/check-ai.md:check-ai-env-vars",
+          "affects": ["docs/validators/check-ai.md:check-ai-env-vars"],
           "name": "check-ai-env-vars",
-          "same-as": "docs/validators/check-ai.md:check-ai-env-vars",
+          "same-as": ["docs/validators/check-ai.md:check-ai-env-vars"],
           "same-as-pattern": "BLOCKWATCH_AI_[A-Z_]+"
         },
         "checks": [

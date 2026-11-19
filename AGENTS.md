@@ -182,10 +182,12 @@ The whole pipeline is in `src/cli.rs`. `src/main.rs` only calls `blockwatch::run
    touches, even when the diff does not touch that file. The result is a `blocks::FileBlocks` for each file, kept in a
    `validators::ValidationContext`. Each path or glob argument must select at least one parsed file, or the run
    stops. Under `--only-changed`, an argument that selects no file in the diff is checked against a walk of the tree.
-7. `validators::detect_validators` asks `Validator::detect` about each block, once for each validator. It returns
-   either `ValidatorType::Sync` or `ValidatorType::Async`. Async validators, such as `check-ai`, run on Tokio. The Tokio
-   runtime only starts if at least one async validator is needed.
-8. Validators produce `Violation`s, each with a `ViolationRange` and a `BlockSeverity` (error or warning). A symbol
+7. `validators::detect_validators` checks which validators each block turns on with `Validator::is_turned_on_by`, and
+   builds them with `Validator::create`. It returns either `TypedValidator::Sync` or `TypedValidator::Async`. Async
+   validators, such as `check-ai`, run on Tokio. The Tokio runtime only starts if at least one async validator is
+   needed.
+8. Validators produce `Violation`s, each with a `ViolationRange` and a `Severity` (error, warning, info or hint). A
+   symbol
    reference such as `file#/path` is found with `symbols::resolve`. It searches the symbols that
    `LanguageParser::parse_symbols` finds in the target file, once per file. A missing or ambiguous symbol is a
    violation. A target file that doesn't parse stops the run. Addresses given to `--suppress` or `--suppress-from` mark
@@ -257,9 +259,11 @@ The main modules:
 - `src/symbols/mod.rs` — `Symbol`, the `SymbolsParser` trait, and `resolve`, which finds the symbol a path refers to.
   `ensure_no_syntax_error` refuses a file with a syntax error, instead of resolving a path through tree-sitter's error
   recovery.
+- `src/attributes/` — `Attributes`, `AttributeName`, `Severity`, and the typed values for `keep-sorted`, `line-count`,
+  and `same-as`. `Attributes::from_entries` parses each value and checks cross-attribute rules, such as modifier
+  attributes without their main attribute.
 - `src/validators/` — one file for each validator (`affects`, `check_ai`, `check_lua`, `keep_sorted`, `keep_unique`,
-  `line_count`, `line_pattern`, `same_as`). Each file exports a `detect` function. `Validator::detect` in
-  `validators/mod.rs` calls them from one `match`.
+  `line_count`, `line_pattern`, `same_as`). `Validator::create` in `validators/mod.rs` builds them from one `match`.
 - `src/diff_parser.rs` — wraps `unidiff` to produce `LineChange`s, kept in `LineChanges` for a file and in
   `DiffChanges` for the whole diff. `LineChanges::touches` decides whether they touch a range of the file, such as a
   block's start tag or a symbol's definition. A block's content has its own check in `blocks.rs`, because a deletion

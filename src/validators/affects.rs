@@ -5,8 +5,7 @@ use crate::symbol_path::SymbolPath;
 use crate::target_reference::{ResolvedTarget, TargetKind, TargetReference};
 use crate::validators;
 use crate::validators::{
-    TargetFiles, TargetResult, ValidationReport, Validator, ValidatorTrace, ValidatorType,
-    Violation,
+    TargetFiles, TargetResult, ValidationReport, Validator, ValidatorTrace, Violation,
 };
 use anyhow::anyhow;
 use serde::Serialize;
@@ -19,14 +18,14 @@ use std::sync::Arc;
 ///
 /// E.g., catches a constant edited without its documentation, or an enum extended without its
 /// switch statement.
-struct AffectsValidator<Fs: FileSystem> {
+pub(super) struct AffectsValidator<Fs: FileSystem> {
     /// Reads target files that are not already parsed into the validation context.
     file_system: Arc<Fs>,
 }
 
 impl<Fs: FileSystem + 'static> AffectsValidator<Fs> {
     /// Creates the validator over the filesystem it will read excluded target files from.
-    fn new(file_system: Arc<Fs>) -> Self {
+    pub(super) fn new(file_system: Arc<Fs>) -> Self {
         Self { file_system }
     }
 }
@@ -278,20 +277,6 @@ struct AffectsTarget {
     reason: Option<String>,
     /// The target, as the violation shows it.
     target: String,
-}
-
-/// Selects [`AffectsValidator`] for every block that carries an `affects` attribute.
-///
-/// It does not gate on whether the block was modified: the validator also checks that each
-/// referenced target still resolves, and a dangling reference has to be reported even when the
-/// referencing block itself is untouched.
-pub(super) fn detect<Fs: FileSystem + 'static>(
-    block_with_context: &BlockWithContext,
-    file_system: &Arc<Fs>,
-) -> Option<ValidatorType> {
-    Validator::Affects
-        .is_turned_on_by(&block_with_context.block.attributes)
-        .then(|| ValidatorType::Sync(Box::new(AffectsValidator::new(Arc::clone(file_system)))))
 }
 
 fn create_violation(
@@ -1335,10 +1320,10 @@ b = 2
 # </block>"#,
         );
 
-        let report = validator(&[]).validate(Arc::clone(&context))?;
+        let report = validator(&[]).validate(context)?;
 
         // Only the block with the `affects` attribute is checked. The target block is not.
-        assert_eq!(checked_lines(&context, &report), vec![1]);
+        assert_eq!(checked_lines(&report), vec![1]);
         Ok(())
     }
 }
