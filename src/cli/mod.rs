@@ -89,7 +89,7 @@ fn run_explain(args: &flags::Args, address: &BlockAddress) -> anyhow::Result<Exi
     )?;
     let (sync_validators, async_validators) = validators::detect_validators(
         &context,
-        validators::Validator::create,
+        validators::create_validator,
         settings.validator_selection(),
         &file_system,
     )?;
@@ -134,7 +134,7 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<ExitCode> {
     context.apply_block_selection(settings.block_selection(), file_system.as_ref())?;
     let (sync_validators, async_validators) = validators::detect_validators(
         &context,
-        validators::Validator::create,
+        validators::create_validator,
         settings.validator_selection(),
         &file_system,
     )?;

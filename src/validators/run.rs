@@ -103,6 +103,43 @@ pub(crate) fn run(
     Ok(log)
 }
 
+/// Creates `validator`.
+///
+/// The `match` has no `_` arm, so a new validator can't be left out. The result says whether
+/// the validator is sync or async, which lets the caller start a Tokio runtime only when an
+/// async validator exists.
+///
+/// # Errors
+/// Returns an error when the validator can't be set up, such as `check-lua` with an unknown
+/// `BLOCKWATCH_LUA_MODE`.
+pub(crate) fn create_validator<Fs: FileSystem + 'static>(
+    validator: Validator,
+    file_system: &Arc<Fs>,
+) -> anyhow::Result<TypedValidator> {
+    match validator {
+        Validator::Affects => Ok(TypedValidator::Sync(Box::new(
+            super::affects::AffectsValidator::new(Arc::clone(file_system)),
+        ))),
+        Validator::CheckAi => Ok(super::check_ai::validator()),
+        Validator::CheckLua => super::check_lua::validator(file_system),
+        Validator::KeepSorted => Ok(TypedValidator::Sync(Box::new(
+            super::keep_sorted::KeepSortedValidator,
+        ))),
+        Validator::KeepUnique => Ok(TypedValidator::Sync(Box::new(
+            super::keep_unique::KeepUniqueValidator,
+        ))),
+        Validator::LineCount => Ok(TypedValidator::Sync(Box::new(
+            super::line_count::LineCountValidator,
+        ))),
+        Validator::LinePattern => Ok(TypedValidator::Sync(Box::new(
+            super::line_pattern::LinePatternValidator,
+        ))),
+        Validator::SameAs => Ok(TypedValidator::Sync(Box::new(
+            super::same_as::SameAsValidator::new(Arc::clone(file_system)),
+        ))),
+    }
+}
+
 /// Detected validators, each paired with the validator it represents.
 type SyncValidators = Vec<(Validator, Box<dyn SyncValidator>)>;
 type AsyncValidators = Vec<(Validator, Box<dyn AsyncValidator>)>;
@@ -158,7 +195,7 @@ pub(crate) fn diff_gated_block_count(
 ///
 /// Only the validators that `selection` includes are considered.
 ///
-/// `create` instantiates a detected validator, as [`Validator::create`] does. It is a parameter so
+/// `create` instantiates a detected validator, as [`create_validator`] does. It is a parameter so
 /// that a test can use validators that don't call a model or read the environment.
 pub(crate) fn detect_validators<Fs: FileSystem + 'static>(
     context: &ValidationContext,
@@ -529,7 +566,7 @@ x
 
         let (sync_validators, async_validators) = detect_validators(
             &context,
-            Validator::create,
+            validators::create_validator,
             &ValidatorSelection::All,
             &Arc::new(FakeFileSystem::new(HashMap::from([(
                 "example.py".to_string(),

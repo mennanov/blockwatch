@@ -102,7 +102,7 @@ same-as-pattern = '[\w#]+'
 [[block]]
 target = 'src/skill.md#/blockwatch/Where blocks add value'
 name = 'where-blocks-add-value'
-same-as = 'src/validators/mod.rs:validator-registry'
+same-as = 'src/validators/validator.rs:validator-registry'
 same-as-format = 'identifier'
 same-as-pattern = '^\|\s*[^|]+\|\s*`(?P<value>[a-z-]+)`\s*\|'
 

@@ -183,7 +183,7 @@ The whole pipeline is in `src/cli/mod.rs`. `src/main.rs` only calls `blockwatch:
    `validators::ValidationContext`. Each path or glob argument must select at least one parsed file, or the run
    stops. Under `--only-changed`, an argument that selects no file in the diff is checked against a walk of the tree.
 7. `validators::detect_validators` checks which validators each block turns on with `Validator::is_turned_on_by`, and
-   builds them with `Validator::create`. It returns either `TypedValidator::Sync` or `TypedValidator::Async`. Async
+   builds them with `create_validator`. It returns either `TypedValidator::Sync` or `TypedValidator::Async`. Async
    validators, such as `check-ai`, run on Tokio. The Tokio runtime only starts if at least one async validator is
    needed.
 8. Validators produce `Violation`s, each with a `ViolationRange` and a `Severity` (error, warning, info or hint). A
@@ -278,13 +278,14 @@ The main modules:
   keyword, such as `asc`. `Attributes::from_entries` parses each value and checks cross-attribute rules, such as
   modifier attributes without their main attribute.
 - `src/validators/` — one file for each validator (`affects`, `check_ai`, `check_lua`, `keep_sorted`, `keep_unique`,
-  `line_count`, `line_pattern`, `same_as`). `Validator::create` in `validators/mod.rs` builds them from one `match`.
-  The other files hold what the validators share:
+  `line_count`, `line_pattern`, `same_as`). `create_validator` in `validators/run.rs` builds them from one `match`.
+  `mod.rs` holds the traits they implement. The other files hold what the validators share:
 
   | File                   | Holds                                                                  |
   |------------------------|------------------------------------------------------------------------|
+  | `validator.rs`         | `Validator`, and the attributes that turn each one on                  |
   | `context.rs`           | `ValidationContext`, the blocks of a run                               |
-  | `run.rs`               | `detect_validators` and `run`                                          |
+  | `run.rs`               | `create_validator`, `detect_validators` and `run`                      |
   | `log.rs`               | `ValidationReport` of one validator, `ValidationLog` of the whole run  |
   | `violation.rs`         | `Violation`, `ViolationRange` and `SimpleDiagnostic`                   |
   | `violation_address.rs` | `ViolationAddress`, which `--suppress` matches                         |
