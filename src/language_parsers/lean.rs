@@ -11,10 +11,10 @@
 //! Lean's rules for comments are short, so the scanner is small: `--` to the end of the line,
 //! nested `/- -/`, and the strings, chars and `«»` names that can hold comment markers.
 
-use crate::LineIndex;
 use crate::language_parsers::{
     Comment, CommentsParser, LanguageParser, LanguageParserImpl, blank_line_marker, blank_outside,
 };
+use crate::position::LineIndex;
 use std::ops::Range;
 use winnow::Result as PResult;
 use winnow::combinator::{alt, delimited, eof, opt, repeat_till};
@@ -277,7 +277,7 @@ fn char_literal(input: &mut Input<'_>) -> PResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Position;
+    use crate::position::Position;
 
     /// The source text of each comment that [`LeanCommentsParser`] finds in `source`.
     fn comment_sources(source: &str) -> Vec<&str> {

@@ -1,11 +1,12 @@
 use crate::attributes::{SortFormat, SortOrder};
 use crate::blocks::Block;
+use crate::position::Position;
 use crate::repo_path::RepoPath;
+use crate::validators;
 use crate::validators::{
     SyncValidator, ValidationReport, Validator, ValidatorTrace, Violation, ViolationRange,
     line_value,
 };
-use crate::{Position, validators};
 use anyhow::Context;
 use serde::Serialize;
 use std::cmp::Ordering;
@@ -175,7 +176,7 @@ fn create_violation(
 mod validate_tests {
     use super::*;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::validation_context;
+    use crate::validators::test_utils::validation_context;
     use crate::validators::test_utils::{checked_lines, violation_count};
     use serde_json::json;
 
@@ -435,7 +436,7 @@ mod validate_tests {
 
     #[test]
     fn invalid_keep_sorted_value_returns_an_error() {
-        let error = crate::test_utils::try_validation_context(
+        let error = crate::validators::test_utils::try_validation_context(
             "example.py",
             r#"# <block keep-sorted="invalid">
         # </block>"#,
@@ -596,7 +597,7 @@ mod validate_tests {
 
     #[test]
     fn invalid_keep_sorted_pattern_returns_an_error() {
-        let err = crate::test_utils::try_validation_context(
+        let err = crate::validators::test_utils::try_validation_context(
             "example.py",
             r#"# <block keep-sorted="asc" keep-sorted-pattern="(unclosed">
         item1 = 1
@@ -613,7 +614,7 @@ mod validate_tests {
 
     #[test]
     fn pattern_with_a_line_break_returns_an_error() {
-        let err = crate::test_utils::try_validation_context(
+        let err = crate::validators::test_utils::try_validation_context(
             "example.py",
             "# <block keep-sorted=\"asc\" keep-sorted-pattern=\"id = (?P<value>\\w+)\n# ok\">\nid = b ok\nid = a ok\n# </block>",
         )
@@ -969,7 +970,7 @@ mod validate_tests {
 
     #[test]
     fn unknown_keep_sorted_format_value_returns_an_error() {
-        let error = crate::test_utils::try_validation_context(
+        let error = crate::validators::test_utils::try_validation_context(
             "example.py",
             r#"# <block keep-sorted="asc" keep-sorted-format="alphabetical">
         a
@@ -1051,7 +1052,7 @@ mod validate_tests {
 #[cfg(test)]
 mod trace_tests {
     use super::*;
-    use crate::test_utils::validation_context;
+    use crate::validators::test_utils::validation_context;
     use crate::validators::test_utils::{trace_json, with_traces};
     use serde_json::json;
 

@@ -738,7 +738,7 @@ class Config { int W = 4; }
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Position, language_parsers::Comment};
+    use crate::{language_parsers::Comment, position::Position};
 
     #[test]
     fn real_block_is_parsed_while_text_block_marker_is_ignored() -> anyhow::Result<()> {

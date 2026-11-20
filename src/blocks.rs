@@ -1,8 +1,8 @@
 //! The `Block` type and the other types that describe the blocks of a file.
 
-use crate::Position;
 use crate::attributes::Attributes;
 use crate::diff_parser::{self, LineChange, LineChangeKind, LineChanges};
+use crate::position::Position;
 use crate::repo_path::RepoPath;
 use crate::validators::Validator;
 use crate::virtual_blocks::ConfigEntry;
@@ -404,10 +404,10 @@ impl<'a> From<&'a BlockWithContext> for BlockListing<'a> {
 
 #[cfg(test)]
 mod block_address_tests {
-    use crate::Position;
+    use crate::attributes::test_utils::text_attributes;
     use crate::blocks::{Block, BlockAddress, Content, Declaration};
+    use crate::position::Position;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::text_attributes;
 
     fn repo_path(path: &str) -> RepoPath {
         RepoPath::from_reference(path).expect("a valid repository path")
@@ -522,7 +522,7 @@ mod block_listing_tests {
     #[test]
     fn unnamed_block_with_tags_is_written_without_checks_and_config_line() -> anyhow::Result<()> {
         let block = block_with_context(
-            crate::test_utils::text_attributes(&[("keep-sorted", "asc")]),
+            crate::attributes::test_utils::text_attributes(&[("keep-sorted", "asc")]),
             Declaration::Tags,
         );
 

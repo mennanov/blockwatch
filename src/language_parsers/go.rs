@@ -410,7 +410,7 @@ const B = 3
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Position, language_parsers::Comment};
+    use crate::{language_parsers::Comment, position::Position};
 
     #[test]
     fn parses_go_comments_correctly() -> anyhow::Result<()> {

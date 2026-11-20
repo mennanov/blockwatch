@@ -18,7 +18,7 @@ fn comments_parser() -> impl CommentsParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Position, language_parsers::Comment};
+    use crate::{language_parsers::Comment, position::Position};
 
     #[test]
     fn block_marker_inside_nested_comment_is_read_once() -> anyhow::Result<()> {

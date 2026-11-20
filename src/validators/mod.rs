@@ -9,12 +9,12 @@ mod line_count;
 mod line_pattern;
 mod same_as;
 
-use crate::Position;
 use crate::attributes::{AttributeName, Attributes, Severity};
 use crate::blocks::{Block, BlockAddress, BlockKey, BlockListing, BlockWithContext, FileBlocks};
 use crate::diff_parser::DiffChanges;
 use crate::fs::FileSystem;
 use crate::language_parsers::LanguageParsers;
+use crate::position::Position;
 use crate::repo_path::RepoPath;
 use crate::scan::{self, ScanMode};
 use crate::settings::{BlockSelection, ValidatorSelection};
@@ -1072,7 +1072,7 @@ mod parse_number_tests {
 mod target_files_tests {
     use super::*;
     use crate::fs::test_utils::FakeFileSystem;
-    use crate::test_utils::validation_context;
+    use crate::validators::test_utils::validation_context;
 
     /// The error of resolving `path` in `file`, a file on the disk that holds `content`.
     fn resolve_symbol_error(file: &str, content: &str, path: &str) -> anyhow::Result<String> {
@@ -1124,15 +1124,18 @@ mod tests {
     use crate::blocks::{Block, Content, Declaration};
     use crate::fs::FileSystem;
     use crate::fs::test_utils::FakeFileSystem;
+    use crate::position::Position;
     use crate::repo_path::RepoPath;
     use crate::settings::{BlockSelection, ValidatorSelection};
-    use crate::test_utils::{validation_context, virtual_block};
-    use crate::validators::test_utils::{merge_validation_contexts, with_virtual_blocks};
+    use crate::validators;
+    use crate::validators::test_utils::{
+        merge_validation_contexts, validation_context, with_virtual_blocks,
+    };
     use crate::validators::{
         AsyncValidator, SyncValidator, TypedValidator, ValidationContext, ValidationReport,
         Validator, Violation, ViolationRange, detect_validators,
     };
-    use crate::{Position, validators};
+    use crate::virtual_blocks::test_utils::virtual_block;
     use async_trait::async_trait;
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
@@ -1807,13 +1810,80 @@ print("target")
 }
 
 #[cfg(test)]
-mod test_utils {
+pub(crate) mod test_utils {
     use crate::blocks::FileBlocks;
+    use crate::diff_parser::test_utils::diff_changes;
+    use crate::diff_parser::{LineChange, LineChangeKind};
+    use crate::fs::test_utils::{FakeFileSystem, path_filter_all};
     use crate::language_parsers::LanguageParsers;
+    use crate::repo_path::RepoPath;
+    use crate::scan::{Scan, ScanMode};
     use crate::validators::{ValidationContext, ValidationReport};
     use crate::virtual_blocks::VirtualBlock;
     use std::collections::HashMap;
     use std::sync::Arc;
+
+    /// Creates a [`ValidationContext`] for the given `file_name` with `contents` with all lines
+    /// modified.
+    pub(crate) fn validation_context(file_name: &str, contents: &str) -> Arc<ValidationContext> {
+        let line_changes: Vec<LineChange> = contents
+            .lines()
+            .enumerate()
+            .map(|(line, _)| LineChange {
+                line: line + 1,
+                kind: LineChangeKind::Added,
+            })
+            .collect();
+        build_validation_context(file_name, contents, line_changes)
+    }
+
+    /// Builds a [`ValidationContext`] for `file_name` and `contents`, returning any parse error.
+    pub(crate) fn try_validation_context(
+        file_name: &str,
+        contents: &str,
+    ) -> anyhow::Result<Arc<ValidationContext>> {
+        try_build_validation_context(file_name, contents, Vec::new())
+    }
+
+    /// Creates a [`ValidationContext`] for the given `file_name` with `contents` and specified
+    /// `line_changes`, rooted at the current directory.
+    pub(crate) fn validation_context_with_changes(
+        file_name: &str,
+        contents: &str,
+        line_changes: Vec<LineChange>,
+    ) -> Arc<ValidationContext> {
+        build_validation_context(file_name, contents, line_changes)
+    }
+
+    fn build_validation_context(
+        file_name: &str,
+        contents: &str,
+        line_changes: Vec<LineChange>,
+    ) -> Arc<ValidationContext> {
+        try_build_validation_context(file_name, contents, line_changes).unwrap()
+    }
+
+    fn try_build_validation_context(
+        file_name: &str,
+        contents: &str,
+        line_changes: Vec<LineChange>,
+    ) -> anyhow::Result<Arc<ValidationContext>> {
+        let file_system = FakeFileSystem::new(HashMap::from([(
+            file_name.to_string(),
+            contents.to_string(),
+        )]));
+        let line_changes_by_file =
+            diff_changes([(RepoPath::from_reference(file_name)?, line_changes)]);
+        let parsers = LanguageParsers::new();
+        Ok(Arc::new(ValidationContext::new(
+            Scan::new(&file_system, &path_filter_all(), &parsers, &[])
+                .parse_blocks(&line_changes_by_file, ScanMode::OnlyChanged)?
+                .blocks,
+            parsers,
+            line_changes_by_file,
+            Vec::new(),
+        )))
+    }
 
     /// The start line of every block a validator reported checking, in the order it checked them.
     pub(super) fn checked_lines(report: &ValidationReport) -> Vec<usize> {

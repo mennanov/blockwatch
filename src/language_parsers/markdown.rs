@@ -1,8 +1,8 @@
-use crate::LineIndex;
 use crate::language_parsers::{
     Comment, CommentsParser, LanguageParser, LanguageParserImpl, TreeSitterCommentsParser,
     blank_preserving_line_breaks, xml_style_comments_parser,
 };
+use crate::position::LineIndex;
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser};
 use markdown::mdast::{Definition, Node};
@@ -363,9 +363,9 @@ fn title_start(definition: &[u8]) -> usize {
 mod tests {
     use super::*;
     use crate::attributes::SortOrder;
+    use crate::attributes::test_utils::text_attributes;
     use crate::blocks::{Block, Content, Declaration};
-    use crate::test_utils::text_attributes;
-    use crate::{Position, test_utils};
+    use crate::position::{Position, test_utils};
 
     /// The symbols `source` derives, as `(path, value)` pairs in the order they were derived.
     fn derived_symbols(source: &str) -> anyhow::Result<Vec<(SymbolPath, String)>> {

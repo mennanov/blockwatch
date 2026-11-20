@@ -18,9 +18,6 @@
 // module looks the same.
 #![warn(clippy::self_named_module_files)]
 
-use serde::Serialize;
-use std::ops::Range;
-
 mod attributes;
 mod block_parser;
 mod blocks;
@@ -34,6 +31,7 @@ mod language_parsers;
 mod language_resolver;
 mod path_arguments;
 mod paths_glob;
+mod position;
 mod repo_path;
 mod report;
 mod sarif;
@@ -71,80 +69,6 @@ pub fn count_rust_blocks(source: &str) -> anyhow::Result<usize> {
         .try_fold(0, |count, block| block.map(|_| count + 1))
 }
 
-/// A place in a source file.
-#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct Position {
-    /// 1-based line number.
-    pub(crate) line: usize,
-    /// 1-based character (column) number.
-    pub(crate) character: usize,
-}
-
-impl Position {
-    /// Creates a position from a 1-based `line` and `character`.
-    ///
-    /// Callers converting from a 0-based source (tree-sitter rows/columns, diff offsets) must add
-    /// one first.
-    pub(crate) fn new(line: usize, character: usize) -> Self {
-        Self { line, character }
-    }
-}
-
-/// Finds the [`Position`] of a byte offset in a text.
-///
-/// It finds where the lines start once. Counting the line breaks before each offset would scan
-/// the text from its start every time, which is slow for a file with many comments.
-#[derive(Debug)]
-pub(crate) struct LineIndex<'a> {
-    text: &'a str,
-    /// The byte offset where each line of `text` starts, in order.
-    line_starts: Vec<usize>,
-}
-
-impl<'a> LineIndex<'a> {
-    pub(crate) fn new(text: &'a str) -> Self {
-        let line_starts = std::iter::once(0)
-            .chain(text.match_indices('\n').map(|(i, _)| i + 1))
-            .collect();
-        Self { text, line_starts }
-    }
-
-    /// The position of `byte_offset` in the text.
-    ///
-    /// # Panics
-    /// Panics if `byte_offset` is past the end of the text or not on a character boundary.
-    pub(crate) fn position(&self, byte_offset: usize) -> Position {
-        let line = self
-            .line_starts
-            .partition_point(|&start| start <= byte_offset);
-        Position::new(line, character_column_at(self.text, byte_offset))
-    }
-
-    /// The positions of the start and the end of `byte_range`.
-    ///
-    /// # Panics
-    /// Panics if an end of `byte_range` is past the end of the text or not on a character
-    /// boundary.
-    pub(crate) fn range(&self, byte_range: &Range<usize>) -> Range<Position> {
-        self.position(byte_range.start)..self.position(byte_range.end)
-    }
-}
-
-/// The 1-based character column of `byte_offset` within its line in `text`.
-pub(crate) fn character_column_at(text: &str, byte_offset: usize) -> usize {
-    #[expect(
-        clippy::string_slice,
-        reason = "callers give an offset on a character boundary"
-    )]
-    let line_start = text[..byte_offset].rfind('\n').map_or(0, |i| i + 1);
-    #[expect(
-        clippy::string_slice,
-        reason = "`line_start` is right after a `\\n` or at 0"
-    )]
-    let before = &text[line_start..byte_offset];
-    before.chars().count() + 1
-}
-
 #[cfg(test)]
 mod count_rust_blocks_tests {
     use super::count_rust_blocks;
@@ -159,165 +83,5 @@ mod count_rust_blocks_tests {
     #[test]
     fn source_with_an_unclosed_block_returns_an_error() {
         assert!(count_rust_blocks("// <block>\nlet a = 1;\n").is_err());
-    }
-}
-
-#[cfg(test)]
-mod test_utils {
-    use crate::attributes::Attributes;
-    use crate::diff_parser::{DiffChanges, LineChange, LineChangeKind};
-    use crate::fs::test_utils::{FakeFileSystem, path_filter_all};
-    use crate::language_parsers;
-    use crate::repo_path::RepoPath;
-    use crate::scan::{Scan, ScanMode};
-    use crate::symbol_path::SymbolPath;
-    use crate::validators::ValidationContext;
-    use crate::virtual_blocks::{ConfigEntry, Locator, TargetIf, TargetPattern, VirtualBlock};
-    use std::collections::HashMap;
-    use std::ops::Range;
-    use std::path::PathBuf;
-    use std::sync::Arc;
-
-    /// Finds the byte range of the first occurrence of a substring within a string.
-    ///
-    /// # Arguments
-    /// * `input` - The string to search in
-    /// * `substr` - The substring to find
-    pub(crate) fn substr_range(input: &str, substr: &str) -> Range<usize> {
-        let pos = input.find(substr).unwrap();
-        pos..(pos + substr.len())
-    }
-
-    /// The attributes `pairs`, each with a text value, as a tag gives them.
-    ///
-    /// # Panics
-    /// Panics if no attribute has one of the names.
-    pub(crate) fn text_attributes(pairs: &[(&str, &str)]) -> Attributes {
-        Attributes::from_tag(
-            pairs
-                .iter()
-                .map(|(name, value)| (name.to_string(), value.to_string())),
-        )
-        .expect("known attribute names")
-    }
-
-    /// The diff's changes to each of `files`.
-    pub(crate) fn diff_changes(
-        files: impl IntoIterator<Item = (RepoPath, Vec<LineChange>)>,
-    ) -> DiffChanges {
-        files
-            .into_iter()
-            .map(|(file, line_changes)| (file, line_changes.into_iter().collect()))
-            .collect()
-    }
-
-    /// Creates a [`ValidationContext`] for the given `file_name` with `contents` with all lines
-    /// modified.
-    pub(crate) fn validation_context(file_name: &str, contents: &str) -> Arc<ValidationContext> {
-        let line_changes: Vec<LineChange> = contents
-            .lines()
-            .enumerate()
-            .map(|(line, _)| LineChange {
-                line: line + 1,
-                kind: LineChangeKind::Added,
-            })
-            .collect();
-        build_validation_context(file_name, contents, line_changes)
-    }
-
-    /// Builds a [`ValidationContext`] for `file_name` and `contents`, returning any parse error.
-    pub(crate) fn try_validation_context(
-        file_name: &str,
-        contents: &str,
-    ) -> anyhow::Result<Arc<ValidationContext>> {
-        try_build_validation_context(file_name, contents, Vec::new())
-    }
-
-    /// Creates a [`ValidationContext`] for the given `file_name` with `contents` and specified
-    /// `line_changes`, rooted at the current directory.
-    pub(crate) fn validation_context_with_changes(
-        file_name: &str,
-        contents: &str,
-        line_changes: Vec<LineChange>,
-    ) -> Arc<ValidationContext> {
-        build_validation_context(file_name, contents, line_changes)
-    }
-
-    fn build_validation_context(
-        file_name: &str,
-        contents: &str,
-        line_changes: Vec<LineChange>,
-    ) -> Arc<ValidationContext> {
-        try_build_validation_context(file_name, contents, line_changes).unwrap()
-    }
-
-    fn try_build_validation_context(
-        file_name: &str,
-        contents: &str,
-        line_changes: Vec<LineChange>,
-    ) -> anyhow::Result<Arc<ValidationContext>> {
-        let file_system = FakeFileSystem::new(HashMap::from([(
-            file_name.to_string(),
-            contents.to_string(),
-        )]));
-        let line_changes_by_file =
-            diff_changes([(RepoPath::from_reference(file_name)?, line_changes)]);
-        let parsers = language_parsers::LanguageParsers::new();
-        Ok(Arc::new(ValidationContext::new(
-            Scan::new(&file_system, &path_filter_all(), &parsers, &[])
-                .parse_blocks(&line_changes_by_file, ScanMode::OnlyChanged)?
-                .blocks,
-            parsers,
-            line_changes_by_file,
-            Vec::new(),
-        )))
-    }
-
-    /// A virtual block around `target`, with `attributes`. It is declared at line 7 of
-    /// `blockwatch.toml`. A target such as `a.json#/key` wraps a symbol, and one such as `a.txt`
-    /// wraps the whole file.
-    pub(crate) fn virtual_block(
-        target: &str,
-        attributes: &[(&str, &str)],
-    ) -> anyhow::Result<VirtualBlock> {
-        let (file, locator) = match target.split_once('#') {
-            Some((file, path)) => (file, Locator::Symbol(SymbolPath::parse(path)?)),
-            None => (target, Locator::File),
-        };
-        let attributes = text_attributes(attributes);
-        Ok(VirtualBlock {
-            file: RepoPath::from_reference(file)?,
-            locator,
-            attributes,
-            entry: ConfigEntry {
-                file: PathBuf::from("blockwatch.toml"),
-                line: 7,
-                index: 0,
-            },
-            is_entry_modified: false,
-            target_if: None,
-        })
-    }
-
-    /// A [`virtual_block`] around `target`, with `attributes`, whose `target-if` lists
-    /// `target_if_symbols` and `target_if_patterns`.
-    pub(crate) fn virtual_block_with_target_if(
-        target: &str,
-        attributes: &[(&str, &str)],
-        target_if_symbols: &[&str],
-        target_if_patterns: &[&str],
-    ) -> anyhow::Result<VirtualBlock> {
-        let mut block = virtual_block(target, attributes)?;
-        block.target_if = Some(TargetIf {
-            symbols: target_if_symbols
-                .iter()
-                .map(|path| SymbolPath::parse(path))
-                .collect::<anyhow::Result<_>>()?,
-            patterns: target_if_patterns
-                .iter()
-                .map(|pattern| TargetPattern::new(pattern))
-                .collect::<anyhow::Result<_>>()?,
-        });
-        Ok(block)
     }
 }

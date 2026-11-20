@@ -932,7 +932,7 @@ class Unknown
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Position, language_parsers::Comment};
+    use crate::{language_parsers::Comment, position::Position};
 
     #[test]
     fn parses_c_sharp_comments_correctly() -> anyhow::Result<()> {

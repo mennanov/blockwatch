@@ -4,7 +4,6 @@
 //! crates.io, so the `markdown` crate finds those spans, and tree-sitter-javascript finds the
 //! comments in each one.
 
-use crate::LineIndex;
 use crate::block_parser::Blocks;
 use crate::blocks::Block;
 use crate::language_parsers::markdown::{nodes_in_order, section_symbols};
@@ -12,6 +11,7 @@ use crate::language_parsers::{
     Comment, CommentsParser, LanguageParser, SLASH_MARKERS, TreeSitterCommentsParser,
     c_style_comments_parser,
 };
+use crate::position::LineIndex;
 use crate::symbols::Symbols;
 use markdown::mdast::{
     AttributeContent, AttributeValue, AttributeValueExpression, MdxFlowExpression, MdxJsxAttribute,
@@ -231,7 +231,7 @@ fn attribute_span(attribute: &AttributeContent) -> Option<(&str, &[Stop])> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Position;
+    use crate::position::Position;
 
     #[test]
     fn invalid_mdx_is_an_error() -> anyhow::Result<()> {

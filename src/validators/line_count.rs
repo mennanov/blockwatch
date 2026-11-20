@@ -152,7 +152,7 @@ struct LineCountLine {
 mod tests {
     use super::*;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::validation_context;
+    use crate::validators::test_utils::validation_context;
     use crate::validators::test_utils::{checked_lines, violation_count};
     use serde_json::json;
 
@@ -460,7 +460,7 @@ red
 
     #[test]
     fn pattern_with_invalid_regex_returns_an_error() {
-        let err = crate::test_utils::try_validation_context(
+        let err = crate::validators::test_utils::try_validation_context(
             "example.py",
             r#"# <block line-count="==1" line-count-pattern="(unclosed">
 red
@@ -476,7 +476,7 @@ red
 
     #[test]
     fn pattern_with_a_line_break_returns_an_error() {
-        let err = crate::test_utils::try_validation_context(
+        let err = crate::validators::test_utils::try_validation_context(
             "example.py",
             "# <block line-count=\"==1\" line-count-pattern=\"^red\n# $\">\nred\n# </block>",
         )
@@ -490,7 +490,7 @@ red
 
     #[test]
     fn block_with_an_invalid_line_count_returns_an_error() {
-        let error = crate::test_utils::try_validation_context(
+        let error = crate::validators::test_utils::try_validation_context(
             "example.py",
             "# <block line-count=\"50\">\na\n# </block>",
         )
@@ -536,7 +536,7 @@ c = 3
 #[cfg(test)]
 mod trace_tests {
     use super::*;
-    use crate::test_utils::validation_context;
+    use crate::validators::test_utils::validation_context;
     use crate::validators::test_utils::{trace_json, with_traces};
     use serde_json::json;
 

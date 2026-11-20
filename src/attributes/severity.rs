@@ -36,8 +36,8 @@ impl Severity {
 
 #[cfg(test)]
 mod tests {
+    use crate::attributes::test_utils::text_attributes;
     use crate::attributes::{AttributeName, AttributeValue, Attributes, Severity};
-    use crate::test_utils::text_attributes;
 
     #[test]
     fn block_with_valid_severity_attribute_returns_correct_severity() {

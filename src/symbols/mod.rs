@@ -3,8 +3,8 @@
 pub(crate) mod code;
 
 use crate::blocks::Content;
+use crate::position::{LineIndex, Position};
 use crate::symbol_path::{Segment, SymbolPath};
-use crate::{LineIndex, Position};
 use anyhow::bail;
 use std::borrow::Cow;
 use std::collections::HashMap;

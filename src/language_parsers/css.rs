@@ -3,11 +3,11 @@
 //! files, such as one with `@container` or `@media (width <= 700px)`. It also reads `/*` in an
 //! unquoted `url(...)` as the start of a comment, where browsers read it as part of the URL.
 
-use crate::LineIndex;
 use crate::language_parsers::{
     Comment, CommentsParser, LanguageParser, LanguageParserImpl,
     c_style_multiline_comment_processor,
 };
+use crate::position::LineIndex;
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser};
 use cssparser::{
@@ -407,7 +407,7 @@ fn words_in(text: &str) -> impl Iterator<Item = &str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Position;
+    use crate::position::Position;
 
     #[test]
     fn parses_css_comments_correctly() -> anyhow::Result<()> {

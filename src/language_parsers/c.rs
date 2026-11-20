@@ -2,9 +2,9 @@ use crate::language_parsers;
 use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, node_text, tree_sitter_parser,
 };
+use crate::position::{Position, character_column_at};
 use crate::symbols::code::{self, Definition, Value};
 use crate::symbols::{ScalarValue, Symbols, SymbolsParser};
-use crate::{Position, character_column_at};
 use anyhow::{Context, anyhow};
 use std::borrow::Cow;
 use tree_sitter::{Language, Node};
@@ -1127,7 +1127,7 @@ int b = 3;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Position, language_parsers::Comment};
+    use crate::{language_parsers::Comment, position::Position};
 
     #[test]
     fn parses_c_comments_correctly() -> anyhow::Result<()> {

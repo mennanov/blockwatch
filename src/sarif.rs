@@ -371,9 +371,9 @@ fn help_uri(validator: Validator) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Position;
+    use crate::attributes::test_utils::text_attributes;
     use crate::blocks::{Block, Content, Declaration};
-    use crate::test_utils::text_attributes;
+    use crate::position::Position;
     use crate::validators::ViolationRange;
     use assert_json_diff::assert_json_include;
     use serde_json::{Value, json};

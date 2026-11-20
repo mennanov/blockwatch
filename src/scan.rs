@@ -606,6 +606,7 @@ fn reject_duplicate_name(
 mod parse_blocks_tests {
     use super::*;
     use crate::blocks::*;
+    use crate::diff_parser::test_utils::diff_changes;
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::PathFilter;
     use crate::fs::test_utils::{
@@ -613,7 +614,8 @@ mod parse_blocks_tests {
     };
     use crate::language_parsers::LanguageParsers;
     use crate::language_resolver::Language;
-    use crate::test_utils::{self, diff_changes, virtual_block_with_target_if};
+    use crate::position::test_utils::substr_range;
+    use crate::virtual_blocks::test_utils::{self, virtual_block_with_target_if};
     use std::ops::Range;
 
     /// A newly added line.
@@ -753,34 +755,25 @@ mod parse_blocks_tests {
                         // "first" block.
                         line: 2,
                         kind: LineChangeKind::Modified(vec![
-                            test_utils::substr_range(
-                                content_a.lines().nth(1).unwrap(),
-                                "/* <block ",
-                            ),
-                            test_utils::substr_range(
-                                content_a.lines().nth(1).unwrap(),
-                                "name=\"first\"> */",
-                            ),
+                            substr_range(content_a.lines().nth(1).unwrap(), "/* <block "),
+                            substr_range(content_a.lines().nth(1).unwrap(), "name=\"first\"> */"),
                         ]), // The start tag is modified, not the contents.
                     },
                     LineChange {
                         // "second" block.
                         line: 3,
                         kind: LineChangeKind::Modified(vec![
-                            test_utils::substr_range(
+                            substr_range(
                                 content_a.lines().nth(2).unwrap(),
                                 "/* <block name=\"second\"> */ let foo ",
                             ), /* tag and contents*/
-                            test_utils::substr_range(
-                                content_a.lines().nth(2).unwrap(),
-                                " = \"baz\"; ",
-                            ), /* contents only */
+                            substr_range(content_a.lines().nth(2).unwrap(), " = \"baz\"; "), /* contents only */
                         ]),
                     },
                     LineChange {
                         // "third" block.
                         line: 4,
-                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![substr_range(
                             content_a.lines().nth(3).unwrap(),
                             " third block ",
                         )]), // Only the content is modified.
@@ -788,7 +781,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "fourth" block.
                         line: 5,
-                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![substr_range(
                             content_a.lines().nth(4).unwrap(),
                             " fourth block // </block>",
                         )]), // The content and end tag are modified.
@@ -796,7 +789,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "fifth" block.
                         line: 6,
-                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![substr_range(
                             content_a.lines().nth(5).unwrap(),
                             " </block>",
                         )]), // Only the end tag is modified.
@@ -804,7 +797,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "sixth" block.
                         line: 8,
-                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![substr_range(
                             content_a.lines().nth(7).unwrap(),
                             "name=\"sixth\"",
                         )]), // Only the start tag is modified.
@@ -812,7 +805,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "seventh" block.
                         line: 11,
-                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![substr_range(
                             content_a.lines().nth(10).unwrap(),
                             "keep-sorted=\"asc\"> */",
                         )]), // Only the start tag is modified.
@@ -820,7 +813,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "eighth" block.
                         line: 14,
-                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![substr_range(
                             content_a.lines().nth(13).unwrap(),
                             " block eight",
                         )]), // Only the content on the same line as start tag is modified.
@@ -828,7 +821,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "ninth" block.
                         line: 17,
-                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![substr_range(
                             content_a.lines().nth(16).unwrap(),
                             "block nine",
                         )]), // Only the content on a line between start and end tags is modified.
@@ -836,7 +829,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "tenth" block.
                         line: 20,
-                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![substr_range(
                             content_a.lines().nth(19).unwrap(),
                             "block ten ",
                         )]), // Only the content on the same line as end tag is modified.
@@ -844,7 +837,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "eleventh" block.
                         line: 22,
-                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![substr_range(
                             content_a.lines().nth(21).unwrap(),
                             " </block>",
                         )]), // End tag is modified.
@@ -852,7 +845,7 @@ mod parse_blocks_tests {
                     LineChange {
                         // "twelfth" block.
                         line: 25,
-                        kind: LineChangeKind::Modified(vec![test_utils::substr_range(
+                        kind: LineChangeKind::Modified(vec![substr_range(
                             content_a.lines().nth(24).unwrap(),
                             "Some comment.",
                         )]), // Multiline end tag is modified.
@@ -863,7 +856,7 @@ mod parse_blocks_tests {
                 RepoPath::from_reference("b.rs")?,
                 vec![LineChange {
                     line: 1,
-                    kind: LineChangeKind::Modified(vec![test_utils::substr_range(
+                    kind: LineChangeKind::Modified(vec![substr_range(
                         content_b.lines().next().unwrap(),
                         "let foo = \"bar\"; ",
                     )]), // Block's content is modified in a single line file.

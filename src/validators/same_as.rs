@@ -1,7 +1,7 @@
-use crate::LineIndex;
 use crate::attributes::{Format, Formats, Mode, TargetPaths, WHOLE_GROUP};
 use crate::blocks::{Block, FileBlocks};
 use crate::fs::FileSystem;
+use crate::position::LineIndex;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
 use crate::target_reference::{TargetKind, TargetReference};
@@ -793,12 +793,12 @@ mod validate_tests {
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::validation_context;
-    use crate::test_utils::validation_context_with_changes;
-    use crate::test_utils::virtual_block;
+    use crate::validators::test_utils::validation_context;
+    use crate::validators::test_utils::validation_context_with_changes;
     use crate::validators::test_utils::{
         checked_lines, merge_validation_contexts, violation_count, with_virtual_blocks,
     };
+    use crate::virtual_blocks::test_utils::virtual_block;
 
     /// Build a validator with a fake filesystem seeded with `files` (path, contents). Used by every
     /// same-as unit test; pass `&[]` when the target is in-scope (no disk read).
@@ -1382,7 +1382,7 @@ ids = 1, 2
 
     #[test]
     fn pattern_with_a_line_break_returns_an_error() {
-        let err = crate::test_utils::try_validation_context(
+        let err = crate::validators::test_utils::try_validation_context(
             "config.py",
             "# <block same-as=\":b\" same-as-pattern=\"port\n# (?P<value>\\d+)\">\nport 80\n# </block>\n# <block name=\"b\">\n80\n# </block>",
         )
@@ -1829,7 +1829,7 @@ cafe
     fn unknown_same_as_format_value_returns_an_error() {
         // Unlike bad content, an unrecognized `same-as-format` value is an authoring error and
         // aborts the run, mirroring how an unknown `same-as-mode` is handled.
-        let error = crate::test_utils::try_validation_context(
+        let error = crate::validators::test_utils::try_validation_context(
             "a.rs",
             "// <block same-as=\":b\" same-as-format=\"number\">\n1\n// </block>\n// <block name=\"b\">\n1\n// </block>",
         )
@@ -1880,7 +1880,7 @@ red_ball: 1
             "value:numeric, value:flat",
             "value:numeric, value : flat",
         ] {
-            let error = crate::test_utils::try_validation_context(
+            let error = crate::validators::test_utils::try_validation_context(
                 "a.py",
                 &format!(
                     r#"# <block same-as=":b" same-as-format="{value}" same-as-pattern="(?P<value>\d+)">
@@ -1991,7 +1991,7 @@ red-color: 1.0
     fn format_for_a_group_the_pattern_does_not_have_returns_an_error() {
         // A typo in a group name would otherwise compare that group as written, with no sign that
         // its format is lost.
-        let error = crate::test_utils::try_validation_context(
+        let error = crate::validators::test_utils::try_validation_context(
             "a.py",
             r#"# <block same-as=":b" same-as-format="vaule:numeric" same-as-pattern="(?P<name>\w+) = (?P<value>\d+)">
 red = 1
@@ -2013,7 +2013,7 @@ red: 1
 
     #[test]
     fn unknown_format_for_a_group_returns_an_error() {
-        let error = crate::test_utils::try_validation_context(
+        let error = crate::validators::test_utils::try_validation_context(
             "a.py",
             r#"# <block same-as=":b" same-as-format="value:numbr">
 1
@@ -2035,7 +2035,7 @@ red: 1
 
     #[test]
     fn one_format_mixed_with_formats_for_groups_returns_an_error() {
-        let error = crate::test_utils::try_validation_context(
+        let error = crate::validators::test_utils::try_validation_context(
             "a.py",
             r#"# <block same-as=":b" same-as-format="identifier,value:numeric" same-as-pattern="(?P<name>\w+) = (?P<value>\d+)">
 red = 1
@@ -2059,7 +2059,7 @@ red: 1
 
     #[test]
     fn unknown_mode_returns_an_error() {
-        let error = crate::test_utils::try_validation_context(
+        let error = crate::validators::test_utils::try_validation_context(
             "a.rs",
             "// <block same-as=\":b\" same-as-mode=\"sorted\">\n1\n// </block>\n// <block name=\"b\">\n1\n// </block>",
         )
@@ -2483,7 +2483,7 @@ services/auth/
 
     #[test]
     fn paths_target_with_an_invalid_glob_returns_an_error() {
-        let error = crate::test_utils::try_validation_context(
+        let error = crate::validators::test_utils::try_validation_context(
             "README.md",
             r#"<!-- <block same-as-paths="services/[a" same-as-pattern=".+"> -->
 services/auth/
@@ -2547,8 +2547,8 @@ alpha
 mod trace_tests {
     use super::validate_tests::validator;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::validation_context;
     use crate::validators::SyncValidator;
+    use crate::validators::test_utils::validation_context;
     use crate::validators::test_utils::{trace_json, with_traces};
     use serde_json::json;
 

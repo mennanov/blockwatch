@@ -1,7 +1,7 @@
-use crate::LineIndex;
 use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, python_style_comments_parser,
 };
+use crate::position::LineIndex;
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser, extended_past_line_break};
 use anyhow::{Context, anyhow};
@@ -301,7 +301,7 @@ fn merged(mut ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
 mod tests {
     use super::*;
     use crate::symbols::code::test_utils::values_as_written;
-    use crate::{Position, language_parsers::Comment};
+    use crate::{language_parsers::Comment, position::Position};
 
     #[test]
     fn source_with_comments_parse_returns_every_comment() -> anyhow::Result<()> {

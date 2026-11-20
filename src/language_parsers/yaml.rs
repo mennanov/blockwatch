@@ -1,8 +1,8 @@
-use crate::LineIndex;
 use crate::language_parsers::{
     CommentsParser, LanguageParser, LanguageParserImpl, members, node_text,
     python_style_comments_parser, tree_sitter_parser,
 };
+use crate::position::LineIndex;
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{
     ScalarValue, Symbol, Symbols, SymbolsParser, ensure_no_syntax_error, extended_past_line_break,
@@ -655,7 +655,7 @@ fn folded_block_lines(lines: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Position, language_parsers::Comment};
+    use crate::{language_parsers::Comment, position::Position};
 
     #[test]
     fn source_with_comments_parse_returns_every_comment() -> anyhow::Result<()> {

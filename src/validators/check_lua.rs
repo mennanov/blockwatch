@@ -625,10 +625,10 @@ mod tests {
     use super::*;
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::{validation_context, validation_context_with_changes};
     use crate::validators::test_utils::{
         checked_lines, merge_validation_contexts, violation_count,
     };
+    use crate::validators::test_utils::{validation_context, validation_context_with_changes};
     use serde_json::json;
 
     /// Builds a `CheckLuaValidator` backed by a fake filesystem seeded with `scripts`.
@@ -926,7 +926,7 @@ end
 
     #[test]
     fn invalid_check_lua_pattern_returns_an_error() {
-        let err = crate::test_utils::try_validation_context(
+        let err = crate::validators::test_utils::try_validation_context(
             "example.py",
             r#"# <block check-lua="check.lua" check-lua-pattern="[invalid">
 some content
@@ -942,7 +942,7 @@ some content
 
     #[test]
     fn check_lua_pattern_with_a_line_break_returns_an_error() {
-        let err = crate::test_utils::try_validation_context(
+        let err = crate::validators::test_utils::try_validation_context(
             "example.py",
             "# <block check-lua=\"check.lua\" check-lua-pattern=\"port\n# (?P<value>\\d+)\">\nport 80\n# </block>",
         )
@@ -1408,7 +1408,7 @@ end
 
     #[test]
     fn non_numeric_check_lua_timeout_returns_an_error() {
-        let err = crate::test_utils::try_validation_context(
+        let err = crate::validators::test_utils::try_validation_context(
             "example.py",
             r#"# <block check-lua="check.lua" check-lua-timeout="soon">
 some content
@@ -1424,7 +1424,7 @@ some content
 
     #[test]
     fn zero_check_lua_timeout_returns_an_error() {
-        let err = crate::test_utils::try_validation_context(
+        let err = crate::validators::test_utils::try_validation_context(
             "example.py",
             r#"# <block check-lua="check.lua" check-lua-timeout="0">
 some content
@@ -1622,7 +1622,7 @@ text
     #[test]
     fn empty_script_path_returns_an_error() {
         for attr in [r#"check-lua=" ""#, r#"check-lua="""#, "check-lua"] {
-            let err = crate::test_utils::try_validation_context(
+            let err = crate::validators::test_utils::try_validation_context(
                 "example.py",
                 &format!("# <block {attr}>\ntext\n# </block>"),
             )
@@ -1639,8 +1639,8 @@ text
 #[cfg(test)]
 mod trace_tests {
     use super::tests::validator;
-    use crate::test_utils::validation_context;
     use crate::validators::AsyncValidator;
+    use crate::validators::test_utils::validation_context;
     use crate::validators::test_utils::{trace_json, with_traces};
     use serde_json::json;
 

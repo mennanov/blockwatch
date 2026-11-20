@@ -342,16 +342,16 @@ fn affects_violation(
 #[cfg(test)]
 mod validate_tests {
     use super::*;
+    use crate::diff_parser::test_utils::diff_changes;
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::{
-        diff_changes, validation_context, validation_context_with_changes, virtual_block,
-    };
     use crate::validators::SyncValidator;
     use crate::validators::test_utils::{
-        checked_lines, merge_validation_contexts, violation_count, with_virtual_blocks,
+        checked_lines, merge_validation_contexts, validation_context,
+        validation_context_with_changes, violation_count, with_virtual_blocks,
     };
+    use crate::virtual_blocks::test_utils::virtual_block;
 
     /// Builds a validator with a fake filesystem seeded with `files` (path, contents).
     pub(super) fn validator(files: &[(&str, &str)]) -> AffectsValidator<FakeFileSystem> {
@@ -1332,9 +1332,9 @@ b = 2
 mod trace_tests {
     use super::validate_tests::{context_with_changed_files, validator};
     use crate::diff_parser::{LineChange, LineChangeKind};
-    use crate::test_utils::{validation_context, validation_context_with_changes};
     use crate::validators::SyncValidator;
     use crate::validators::test_utils::{trace_json, with_traces};
+    use crate::validators::test_utils::{validation_context, validation_context_with_changes};
     use serde_json::json;
 
     #[test]

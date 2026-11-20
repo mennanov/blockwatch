@@ -1,9 +1,9 @@
 //! Blocks that the config file declares around a symbol, instead of tags in a comment.
 
-use crate::LineIndex;
 use crate::attributes::Attributes;
 use crate::blocks::{Block, BlockWithContext, Content, Declaration};
 use crate::diff_parser::LineChanges;
+use crate::position::LineIndex;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{ResolveError, Symbols};
@@ -414,11 +414,11 @@ impl VirtualBlock {
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
+    use super::test_utils::{virtual_block, virtual_block_with_target_if};
     use super::*;
-    use crate::Position;
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::language_parsers::LanguageParsers;
-    use crate::test_utils::{virtual_block, virtual_block_with_target_if};
+    use crate::position::Position;
     use std::collections::HashMap;
     use std::path::Path;
 
@@ -1042,5 +1042,62 @@ MODELS = [
             assert_eq!(block.is_content_modified, content_modified, "{row}");
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_utils {
+    use super::{ConfigEntry, Locator, TargetIf, TargetPattern, VirtualBlock};
+    use crate::attributes::test_utils::text_attributes;
+    use crate::repo_path::RepoPath;
+    use crate::symbol_path::SymbolPath;
+    use std::path::PathBuf;
+
+    /// A virtual block around `target`, with `attributes`. It is declared at line 7 of
+    /// `blockwatch.toml`. A target such as `a.json#/key` wraps a symbol, and one such as `a.txt`
+    /// wraps the whole file.
+    pub(crate) fn virtual_block(
+        target: &str,
+        attributes: &[(&str, &str)],
+    ) -> anyhow::Result<VirtualBlock> {
+        let (file, locator) = match target.split_once('#') {
+            Some((file, path)) => (file, Locator::Symbol(SymbolPath::parse(path)?)),
+            None => (target, Locator::File),
+        };
+        let attributes = text_attributes(attributes);
+        Ok(VirtualBlock {
+            file: RepoPath::from_reference(file)?,
+            locator,
+            attributes,
+            entry: ConfigEntry {
+                file: PathBuf::from("blockwatch.toml"),
+                line: 7,
+                index: 0,
+            },
+            is_entry_modified: false,
+            target_if: None,
+        })
+    }
+
+    /// A [`virtual_block`] around `target`, with `attributes`, whose `target-if` lists
+    /// `target_if_symbols` and `target_if_patterns`.
+    pub(crate) fn virtual_block_with_target_if(
+        target: &str,
+        attributes: &[(&str, &str)],
+        target_if_symbols: &[&str],
+        target_if_patterns: &[&str],
+    ) -> anyhow::Result<VirtualBlock> {
+        let mut block = virtual_block(target, attributes)?;
+        block.target_if = Some(TargetIf {
+            symbols: target_if_symbols
+                .iter()
+                .map(|path| SymbolPath::parse(path))
+                .collect::<anyhow::Result<_>>()?,
+            patterns: target_if_patterns
+                .iter()
+                .map(|pattern| TargetPattern::new(pattern))
+                .collect::<anyhow::Result<_>>()?,
+        });
+        Ok(block)
     }
 }

@@ -1,6 +1,6 @@
-use crate::Position;
 use crate::blocks::{Block, Content};
 use crate::language_parsers::{Comment, CommentsParser};
+use crate::position::Position;
 use crate::tag_parser::{BlockTag, MalformedTag, WinnowBlockTagParser};
 use std::collections::{HashMap, VecDeque};
 use std::iter::Peekable;
@@ -364,11 +364,12 @@ impl BlockEnd {
 
 #[cfg(test)]
 mod tests {
+    use crate::attributes::test_utils::text_attributes;
     use crate::attributes::{Attributes, SortOrder};
     use crate::blocks::{Block, Content, Declaration};
+    use crate::language_parsers;
     use crate::language_parsers::LanguageParser;
-    use crate::test_utils::text_attributes;
-    use crate::{Position, language_parsers, test_utils};
+    use crate::position::{Position, test_utils};
 
     fn create_parser() -> impl LanguageParser {
         // Reuse existing real blocks parser.

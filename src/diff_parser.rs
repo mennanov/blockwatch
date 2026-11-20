@@ -1,7 +1,7 @@
 //! Reads a unified diff into the per-file line changes that decide which blocks are checked.
 
-use crate::Position;
 use crate::fs::FileSystem;
+use crate::position::Position;
 use crate::repo_path::RepoPath;
 use anyhow::Context;
 use similar::DiffOp;
@@ -1591,5 +1591,21 @@ index 0000000..710d1d9
         let ranges = vec![4..5];
         // Span [5, 6) starts at 1-based column 5.
         assert!(intersects_columns(&ranges, 5, 6));
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_utils {
+    use super::{DiffChanges, LineChange};
+    use crate::repo_path::RepoPath;
+
+    /// The diff's changes to each of `files`.
+    pub(crate) fn diff_changes(
+        files: impl IntoIterator<Item = (RepoPath, Vec<LineChange>)>,
+    ) -> DiffChanges {
+        files
+            .into_iter()
+            .map(|(file, line_changes)| (file, line_changes.into_iter().collect()))
+            .collect()
     }
 }

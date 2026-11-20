@@ -478,8 +478,8 @@ AFTER=2
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Position;
     use crate::language_parsers::Comment;
+    use crate::position::Position;
 
     #[test]
     fn parses_comments_correctly() -> anyhow::Result<()> {

@@ -3,8 +3,8 @@
 
 use super::{ScalarValue, Symbol, Symbols, SymbolsParser};
 use crate::language_parsers::{node_text, tree_sitter_parser, walk_tree};
+use crate::position::{Position, character_column_at};
 use crate::symbol_path::SymbolPath;
-use crate::{Position, character_column_at};
 use anyhow::{Context, anyhow};
 use std::collections::HashMap;
 use std::iter::Peekable;

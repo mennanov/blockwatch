@@ -1,10 +1,11 @@
 use crate::blocks::Block;
+use crate::position::Position;
 use crate::repo_path::RepoPath;
+use crate::validators;
 use crate::validators::{
     SyncValidator, ValidationReport, Validator, ValidatorTrace, Violation, ViolationRange,
     line_value,
 };
-use crate::{Position, validators};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -172,7 +173,7 @@ mod validate_tests {
     use crate::diff_parser::DiffChanges;
     use crate::language_parsers::LanguageParsers;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::validation_context;
+    use crate::validators::test_utils::validation_context;
     use crate::validators::test_utils::{checked_lines, violation_count};
     use std::collections::HashMap;
 
@@ -401,7 +402,7 @@ ID:1 C
 
     #[test]
     fn pattern_with_a_line_break_returns_an_error() {
-        let err = crate::test_utils::try_validation_context(
+        let err = crate::validators::test_utils::try_validation_context(
             "example.py",
             "# <block keep-unique=\"id = (?P<value>\\w+)\n# ok\">\nid = a ok\nid = a ok\n# </block>",
         )
@@ -540,7 +541,7 @@ C
 #[cfg(test)]
 mod trace_tests {
     use super::*;
-    use crate::test_utils::validation_context;
+    use crate::validators::test_utils::validation_context;
     use crate::validators::test_utils::{trace_json, with_traces};
     use serde_json::json;
 

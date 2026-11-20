@@ -1,9 +1,10 @@
 use crate::blocks::Block;
+use crate::position::Position;
 use crate::repo_path::RepoPath;
+use crate::validators;
 use crate::validators::{
     SyncValidator, ValidationReport, Validator, ValidatorTrace, Violation, ViolationRange,
 };
-use crate::{Position, validators};
 use regex::Regex;
 use serde::Serialize;
 use std::ops::Range;
@@ -243,7 +244,7 @@ fn create_violation(
 mod validate_tests {
     use super::*;
     use crate::repo_path::RepoPath;
-    use crate::test_utils::validation_context;
+    use crate::validators::test_utils::validation_context;
     use crate::validators::test_utils::{checked_lines, violation_count};
     use serde_json::json;
 
@@ -470,7 +471,7 @@ red
 
     #[test]
     fn block_with_an_invalid_regex_returns_an_error() {
-        let err = crate::test_utils::try_validation_context(
+        let err = crate::validators::test_utils::try_validation_context(
             "example.py",
             r#"# <block line-pattern="[A-Z+">
         # </block>"#,
@@ -485,7 +486,7 @@ red
 
     #[test]
     fn block_with_an_invalid_forbidden_regex_returns_an_error() {
-        let err = crate::test_utils::try_validation_context(
+        let err = crate::validators::test_utils::try_validation_context(
             "example.py",
             r#"# <block line-pattern-forbidden="[a-z+">
 # </block>"#,
@@ -500,7 +501,7 @@ red
 
     #[test]
     fn block_with_a_line_break_in_the_pattern_returns_an_error() {
-        let err = crate::test_utils::try_validation_context(
+        let err = crate::validators::test_utils::try_validation_context(
             "example.py",
             "# <block line-pattern=\"^[a-z]+\n# $\">\nabc\n# </block>",
         )
@@ -561,7 +562,7 @@ anything
 #[cfg(test)]
 mod trace_tests {
     use super::*;
-    use crate::test_utils::validation_context;
+    use crate::validators::test_utils::validation_context;
     use crate::validators::test_utils::{trace_json, with_traces};
     use serde_json::json;
 

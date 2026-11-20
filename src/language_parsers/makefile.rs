@@ -4,10 +4,10 @@
 //! syntax error on a `(` in a value or a comment, on `:::=` and on `export X != cmd`. It reads
 //! `export define` as a list of names, and every line that starts with a tab as a recipe line.
 
-use crate::LineIndex;
 use crate::language_parsers::{
     Comment, CommentsParser, LanguageParser, LanguageParserImpl, blank_line_marker,
 };
+use crate::position::LineIndex;
 use crate::symbol_path::SymbolPath;
 use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser};
 use anyhow::bail;
@@ -729,7 +729,8 @@ build/app.map: $(APP:.elf=.map)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{LineIndex, Position, language_parsers::Comment};
+    use crate::language_parsers::Comment;
+    use crate::position::{LineIndex, Position};
 
     #[test]
     fn parses_comments_correctly() {

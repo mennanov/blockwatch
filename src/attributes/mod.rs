@@ -1013,6 +1013,19 @@ mod attributes_tests {
 pub(crate) mod test_utils {
     use super::*;
 
+    /// The attributes `pairs`, each with a text value, as a tag gives them.
+    ///
+    /// # Panics
+    /// Panics if no attribute has one of the names.
+    pub(crate) fn text_attributes(pairs: &[(&str, &str)]) -> Attributes {
+        Attributes::from_tag(
+            pairs
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.to_string())),
+        )
+        .expect("known attribute names")
+    }
+
     /// An [`Attributes`] value with every field set to a valid sample.
     pub(crate) fn sample_all_attributes() -> Attributes {
         let refs = |raw| TargetReference::parse_separated(raw).expect("valid sample reference");
