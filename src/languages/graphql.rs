@@ -15,6 +15,7 @@ fn comments_parser() -> impl CommentsParser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::languages::comments::test_utils::comment_sources;
     use crate::{languages::Comment, position::Position};
 
     #[test]
@@ -64,29 +65,16 @@ type Query {
     }
 
     #[test]
-    fn real_block_is_parsed_while_string_markers_are_ignored() -> anyhow::Result<()> {
-        let contents = r##"# <block name="real">
-type Query {
-  hello: String
-}
-# </block>
-
+    fn hash_in_strings_is_not_a_comment() -> anyhow::Result<()> {
+        let contents = r##"# real
 """
-# <block name="fake_description">
-this text lives inside a block string
-# </block>
+# in a block string
 """
 type Other {
-  field(message: "# <block name='fake_string'> x # </block>"): String
+  field(message: "# in a string"): String
 }
 "##;
-        let blocks = crate::blocks::parse_blocks(&mut parser(), contents)
-            .collect::<anyhow::Result<Vec<_>>>()?;
-        let names: Vec<&str> = blocks
-            .iter()
-            .map(|block| block.name().expect("a named block"))
-            .collect();
-        assert_eq!(names, ["real"]);
+        assert_eq!(comment_sources(&mut parser(), contents)?, ["# real"]);
         Ok(())
     }
 }

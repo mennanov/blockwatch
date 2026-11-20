@@ -740,28 +740,20 @@ class Config { int W = 4; }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::languages::comments::test_utils::comment_sources;
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn real_block_is_parsed_while_text_block_marker_is_ignored() -> anyhow::Result<()> {
+    fn comment_markers_in_text_block_are_not_a_comment() -> anyhow::Result<()> {
         let contents = r#"class Example {
-    // <block name="real">
-    int answer = 42;
-    // </block>
+    // real
     String template = """
-        // <block name="fake">
-        this text lives inside a Java text block
-        // </block>
+        // in a text block
+        /* in a text block */
         """;
 }
 "#;
-        let blocks = crate::blocks::parse_blocks(&mut parser(), contents)
-            .collect::<anyhow::Result<Vec<_>>>()?;
-        let names: Vec<&str> = blocks
-            .iter()
-            .map(|block| block.name().expect("a named block"))
-            .collect();
-        assert_eq!(names, ["real"]);
+        assert_eq!(comment_sources(&mut parser(), contents)?, ["// real"]);
         Ok(())
     }
 

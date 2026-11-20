@@ -18,21 +18,20 @@ fn comments_parser() -> impl CommentsParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blocks::parse_blocks;
+    use crate::languages::comments::test_utils::comment_sources;
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn block_marker_inside_nested_comment_is_read_once() -> anyhow::Result<()> {
-        // A marker in a nested Scala block comment must be read once, not once per nesting level.
+    fn nested_comment_is_part_of_the_comment_around_it() -> anyhow::Result<()> {
         let contents = r#"/* wrapper
-   /* <block name="only_once"> */
+   /* nested */
 */
 val value = 1
-// </block>
 "#;
-        let blocks = parse_blocks(&mut parser(), contents).collect::<anyhow::Result<Vec<_>>>()?;
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].name(), Some("only_once"));
+        assert_eq!(
+            comment_sources(&mut parser(), contents)?,
+            ["/* wrapper\n   /* nested */\n*/"]
+        );
         Ok(())
     }
 
@@ -109,13 +108,14 @@ object Main {
     #[test]
     fn unclosed_block_comment_runs_to_end_of_file() -> anyhow::Result<()> {
         // The `*/` in `/*/` overlaps the `/*`, so it does not close the comment.
-        let contents = r#"// <block name="a">
+        let contents = r#"// line
+/*/ unclosed
 val value = 1
-/*/ </block>
 "#;
-        let blocks = parse_blocks(&mut parser(), contents).collect::<anyhow::Result<Vec<_>>>()?;
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].content.text(contents), "\nval value = 1\n");
+        assert_eq!(
+            comment_sources(&mut parser(), contents)?,
+            ["// line", "/*/ unclosed\nval value = 1\n"]
+        );
         Ok(())
     }
 }

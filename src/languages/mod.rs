@@ -476,12 +476,9 @@ mod tests {
 #[cfg(test)]
 mod supported_languages_tests {
     use std::collections::HashMap;
+    use std::path::Path;
 
-    use crate::diff::DiffChanges;
-    use crate::fs::test_utils::FakeFileSystem;
     use crate::languages::LanguageParsers;
-    use crate::repo_path::RepoPath;
-    use crate::scan::{Scan, ScanMode};
 
     // <block name="supported-extensions">
     #[test]
@@ -977,25 +974,16 @@ mod supported_languages_tests {
                 "# <block>\nversion: 1.0.0\n# </block>".to_string(),
             ),
         ]);
-        let file_system = FakeFileSystem::new(files.clone());
-
-        let blocks_by_file = Scan::new(
-            &file_system,
-            &crate::fs::test_utils::path_filter_all(),
-            &parsers,
-            &[],
-        )
-        .parse_blocks(&DiffChanges::default(), ScanMode::All)?
-        .blocks;
-
-        for file_name in files.keys() {
+        for (file_name, contents) in &files {
+            let parser = parsers
+                .parser_for(Path::new(file_name))
+                .unwrap_or_else(|| panic!("{file_name} should have a language"));
+            let mut parser = parser
+                .lock()
+                .expect("a thread panicked while it held the parser");
             assert!(
-                !blocks_by_file
-                    .get(&RepoPath::from_reference(file_name)?)
-                    .unwrap_or_else(|| panic!("No blocks found for file {file_name}"))
-                    .blocks_with_context
-                    .is_empty(),
-                "File {file_name} should have blocks",
+                parser.parse_comments(contents)?.next().is_some(),
+                "{file_name} should have comments",
             );
         }
         Ok(())

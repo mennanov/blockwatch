@@ -174,8 +174,6 @@ fn decode_node(node: &Node, source: &str) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::attributes::SortOrder;
-    use crate::blocks::{Block, parse_blocks};
     use crate::languages::code_symbols::test_utils::values_as_written;
     use crate::position::Position;
     use std::collections::HashMap;
@@ -205,43 +203,24 @@ mod tests {
     }
 
     #[test]
-    fn source_with_block_tags_parse_blocks_returns_blocks() -> anyhow::Result<()> {
+    fn comments_parse_comments_returns_their_text_without_markers() -> anyhow::Result<()> {
         let mut parser = parser();
-
-        let blocks: Vec<Block> = parse_blocks(
-            &mut parser,
-            r#"{
-  // <block name="test">
-  "key": "value"
-  // </block>
+        let contents = r#"{
+  // line
+  /* block */
+  "key": "// in a string",
+  //// banner
+  //! doc
+  "other": 1
 }
-"#,
-        )
-        .collect::<anyhow::Result<Vec<_>>>()?;
+"#;
 
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].name(), Some("test"));
-        Ok(())
-    }
+        let texts: Vec<String> = parser
+            .parse_comments(contents)?
+            .map(|comment| comment.comment_text)
+            .collect();
 
-    #[test]
-    fn start_tag_wrapped_over_longer_markers_parse_blocks_returns_block() -> anyhow::Result<()> {
-        let mut parser = parser();
-
-        let blocks: Vec<Block> = parse_blocks(
-            &mut parser,
-            r#"{
-  //// <block name="test"
-  //! keep-sorted="asc">
-  "key": "value"
-  // </block>
-}
-"#,
-        )
-        .collect::<anyhow::Result<Vec<_>>>()?;
-
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].attributes.keep_sorted(), Some(SortOrder::Asc));
+        assert_eq!(texts, ["   line", "   block   ", "     banner", "    doc"]);
         Ok(())
     }
 

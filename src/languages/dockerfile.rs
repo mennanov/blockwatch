@@ -495,26 +495,6 @@ COPY . /app
 
         Ok(())
     }
-
-    #[test]
-    fn real_block_is_parsed_while_json_array_marker_is_ignored() -> anyhow::Result<()> {
-        let contents = r##"FROM alpine:3.20
-CMD ["sh", "-c", "# <block name='fake'> x # </block>"]
-# <block name="real">
-COPY . /app
-# </block>
-"##;
-        let blocks = crate::blocks::parse_blocks(&mut parser(), contents)
-            .collect::<anyhow::Result<Vec<_>>>()?;
-        let names: Vec<&str> = blocks
-            .iter()
-            .map(|block| block.name().expect("a named block"))
-            .collect();
-
-        assert_eq!(names, ["real"]);
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]

@@ -1279,19 +1279,14 @@ spanning two lines -->
     #[test]
     fn html_comment_after_a_php_island_holding_non_ascii_reports_a_character_column()
     -> anyhow::Result<()> {
-        let mut parser = parser();
+        let mut comments_parser = comments_parser();
         // PHP regions are blanked byte by byte to build the HTML view, which turns one multi-byte
         // character into several spaces; the column must still count the source's characters.
-        let content =
-            "<?php $x = \"café\"; ?><!-- <block name=\"x\"> -->\n<li>a</li>\n<!-- </block> -->\n";
+        let content = "<?php $x = \"café\"; ?><!-- html -->\n";
 
-        let blocks = crate::blocks::parse_blocks(&mut parser, content)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let comments: Vec<Comment> = comments_parser.parse(content).collect();
 
-        assert_eq!(
-            blocks[0].start_tag_position_range.start,
-            Position::new(1, 27)
-        );
+        assert_eq!(comments[0].position_range.start, Position::new(1, 22));
         Ok(())
     }
 

@@ -226,17 +226,16 @@ fn attribute_span(attribute: &AttributeContent) -> Option<(&str, &[Stop])> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blocks::parse_blocks;
+    use crate::languages::comments::test_utils::comment_sources;
     use crate::position::Position;
 
     #[test]
     fn invalid_mdx_is_an_error() -> anyhow::Result<()> {
-        let mut parser = parser();
-
         // MDX 2 and later have no HTML comments.
-        let error = parse_blocks(&mut parser, "<!-- <block> -->\nText\n<!-- </block> -->\n")
-            .collect::<anyhow::Result<Vec<_>>>()
-            .unwrap_err();
+        let error = parser()
+            .parse_comments("<!-- comment -->\nText\n")
+            .err()
+            .expect("an error for invalid MDX");
 
         assert_eq!(
             error.to_string(),
@@ -332,14 +331,13 @@ Text é {/* in text */} and `{/* code span */}`.
     }
 
     #[test]
-    fn block_content_leaves_out_the_braces_around_its_tags() -> anyhow::Result<()> {
-        let mut parser = parser();
-        let content = "{/* <block> */}\n- blue\n- red\n{/* </block> */}\n";
+    fn comment_source_includes_the_braces_around_it() -> anyhow::Result<()> {
+        let contents = "{/* start */}\n- blue\n- red\n{/* end */}\n";
 
-        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
-
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].content.text(content), "\n- blue\n- red\n");
+        assert_eq!(
+            comment_sources(&mut parser(), contents)?,
+            ["{/* start */}", "{/* end */}"]
+        );
 
         Ok(())
     }

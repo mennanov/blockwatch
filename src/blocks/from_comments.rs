@@ -361,7 +361,7 @@ mod tests {
     use crate::attributes::{Attributes, SortOrder};
     use crate::blocks::{Block, Content, Declaration, parse_blocks};
     use crate::languages;
-    use crate::languages::LanguageParser;
+    use crate::languages::{Language, LanguageParser, LanguageParsers};
     use crate::position::{Position, test_utils};
 
     fn create_parser() -> impl LanguageParser {
@@ -859,6 +859,26 @@ println!("hello2");
             }],
         );
         Ok(())
+    }
+
+    #[test]
+    fn comments_parse_error_returns_only_that_error() {
+        let parsers = LanguageParsers::new();
+        let mut parser = parsers
+            .parser(Language::Mdx)
+            .lock()
+            .expect("a thread panicked while it held the parser");
+
+        // MDX 2 and later have no HTML comments.
+        let results: Vec<anyhow::Result<Block>> =
+            parse_blocks(&mut **parser, "<!-- comment -->\n").collect();
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].as_ref().is_err_and(|error| {
+            error
+                .to_string()
+                .contains("markdown-rs:unexpected-character")
+        }));
     }
 
     #[test]

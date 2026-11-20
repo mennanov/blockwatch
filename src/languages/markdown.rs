@@ -362,9 +362,7 @@ fn title_start(definition: &[u8]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::attributes::SortOrder;
-    use crate::attributes::test_utils::text_attributes;
-    use crate::blocks::{Block, Content, Declaration, parse_blocks};
+    use crate::languages::comments::test_utils::comment_sources;
     use crate::position::{Position, test_utils};
 
     /// The symbols `source` derives, as `(path, value)` pairs in the order they were derived.
@@ -388,12 +386,13 @@ mod tests {
             .collect()
     }
 
-    /// The `name` of each block in `content`, in the order of their start tags.
-    fn block_names(content: &str) -> anyhow::Result<Vec<String>> {
-        let mut parser = parser();
-        parse_blocks(&mut parser, content)
-            .map(|block| Ok(block?.name_display().to_string()))
-            .collect()
+    /// The text of each comment in `content`, without the blanks around it. So a `[//]:` comment
+    /// gives its title.
+    fn comment_titles(content: &str) -> anyhow::Result<Vec<String>> {
+        Ok(parser()
+            .parse_comments(content)?
+            .map(|comment| comment.comment_text.trim().to_string())
+            .collect())
     }
 
     // <block name="markdown-section-tests" affects="docs/symbols.md:markdown-paths">
@@ -620,223 +619,152 @@ Two.
     // </block>
 
     #[test]
-    fn parses_markdown_blocks_correctly() -> anyhow::Result<()> {
-        let mut parser = parser();
+    fn link_reference_comment_parse_comments_returns_its_line_with_only_the_title_kept()
+    -> anyhow::Result<()> {
+        let content = "Text\n\n[//]: # (title)\nAfter\n";
 
+        let comments: Vec<Comment> = parser().parse_comments(content)?.collect();
+
+        assert_eq!(
+            comments,
+            [Comment {
+                position_range: Position::new(3, 1)..Position::new(4, 1),
+                source_range: 6..22,
+                comment_text: "         title \n".to_string(),
+            }]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn html_comments_in_html_blocks_parse_comments_returns_each() -> anyhow::Result<()> {
         let content = r#"
 # Header
-[foo]: /url "title"
 
-[//]: # (<block name="md_block">)
-Some text here
+<div>
+<!-- in a div -->
+</div>
 
-[//]: # (</block>)
+<!-- first -->Text<!-- second -->
 
-[//]: # (<block name="md_block_2">)
-Some text here 2
-
-[//]: # (<block name="md_block_3">)
-Some text here 3
-
-[//]: # (</block>)
-[//]: # (</block>)
+<!-- alone -->
 "#;
-        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(
-            blocks,
+            comment_sources(&mut parser(), content)?,
             [
-                Block {
-                    attributes: text_attributes(&[("name", "md_block")]),
-                    start_tag_position_range: Position::new(5, 10)..Position::new(5, 33),
-                    content: Content::source(
-                        test_utils::substr_range(content, "Some text here\n\n"),
-                        Position::new(6, 1)..Position::new(8, 1),
-                    ),
-                    declaration: Declaration::Tags,
-                },
-                Block {
-                    attributes: text_attributes(&[("name", "md_block_2")]),
-                    start_tag_position_range: Position::new(10, 10)..Position::new(10, 35),
-                    content: Content::source(
-                        test_utils::substr_range(
-                            content,
-                            "Some text here 2\n\n[//]: # (<block name=\"md_block_3\">)\nSome text here 3\n\n[//]: # (</block>)\n",
-                        ),
-                        Position::new(11, 1)..Position::new(17, 1),
-                    ),
-                    declaration: Declaration::Tags,
-                },
-                Block {
-                    attributes: text_attributes(&[("name", "md_block_3")]),
-                    start_tag_position_range: Position::new(13, 10)..Position::new(13, 35),
-                    content: Content::source(
-                        test_utils::substr_range(content, "Some text here 3\n\n"),
-                        Position::new(14, 1)..Position::new(16, 1),
-                    ),
-                    declaration: Declaration::Tags,
-                },
-            ],
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn parses_link_reference_comment_with_non_ascii_destination() -> anyhow::Result<()> {
-        let mut parser = parser();
-        let content = "\
-[//]: /café (<block name=\"unicode_title\">)
-Text
-
-[//]: /café (</block>)
-";
-        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
-
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].name(), Some("unicode_title"));
-        assert_eq!(blocks[0].content.text(content), "Text\n\n");
-
-        Ok(())
-    }
-
-    #[test]
-    fn link_reference_comment_with_quote_in_destination_reads_title() -> anyhow::Result<()> {
-        let mut parser = parser();
-        let content = r#"[//]: it's (<block name="a">)
-Text
-
-[//]: # (</block>)
-"#;
-        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
-
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].name(), Some("a"));
-        assert_eq!(blocks[0].content.text(content), "Text\n\n");
-        Ok(())
-    }
-
-    #[test]
-    fn link_reference_comment_with_title_on_next_line_reports_tag_line() -> anyhow::Result<()> {
-        let mut parser = parser();
-        let content = r#"[//]: #
-(<block name="a">)
-Text
-
-[//]: # (</block>)
-"#;
-        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
-
-        assert_eq!(
-            blocks[0].start_tag_position_range,
-            Position::new(2, 2)..Position::new(2, 18)
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn link_reference_without_title_or_with_another_label_is_ignored() -> anyhow::Result<()> {
-        let mut parser = parser();
-        let content = r#"<!-- <block name="a"> -->
-Text
-
-[//]: #
-[other]: /url (<block name="b">)
-
-<!-- </block> -->
-"#;
-        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
-
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].name(), Some("a"));
-        Ok(())
-    }
-
-    #[test]
-    fn link_reference_comment_with_each_title_delimiter_parse_blocks_reads_title()
-    -> anyhow::Result<()> {
-        let content = r#"[//]: # (<block name="a">)
-[//]: # '<block name="b">'
-[//]: # "<block name='c'>"
-
-Text
-
-[//]: # "</block>"
-[//]: # '</block>'
-[//]: # (</block>)
-"#;
-
-        assert_eq!(block_names(content)?, ["a", "b", "c"]);
-        Ok(())
-    }
-
-    #[test]
-    fn start_tag_wrapped_over_link_reference_comments_parse_blocks_reads_whole_tag()
-    -> anyhow::Result<()> {
-        let mut parser = parser();
-        let content = r#"[//]: # (<block name="a")
-[//]: # (keep-sorted="asc">)
-[//]: # '<block name="b"'
-[//]: # 'keep-sorted="asc">'
-[//]: # "<block name='c'"
-[//]: # "keep-sorted='asc'>"
-
-Text
-
-[//]: # "</block>"
-[//]: # '</block>'
-[//]: # (</block>)
-"#;
-
-        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
-
-        let tags: Vec<(&str, SortOrder)> = blocks
-            .iter()
-            .map(|block| {
-                (
-                    block.name().expect("a named block"),
-                    block.attributes.keep_sorted().expect("a keep-sorted block"),
-                )
-            })
-            .collect();
-        assert_eq!(
-            tags,
-            [
-                ("a", SortOrder::Asc),
-                ("b", SortOrder::Asc),
-                ("c", SortOrder::Asc),
+                "<!-- in a div -->",
+                "<!-- first -->",
+                "<!-- second -->",
+                "<!-- alone -->"
             ]
         );
         Ok(())
     }
 
     #[test]
-    fn link_reference_comment_with_escaped_parentheses_parse_blocks_reads_whole_title()
-    -> anyhow::Result<()> {
-        let content = r#"[//]: # (<block name="a\(b\)">)
-Text
+    fn inline_html_comments_parse_comments_returns_each() -> anyhow::Result<()> {
+        // An HTML comment with other text before it on the same line is inline HTML, not an
+        // HTML block. A `<!--` inside inline code is literal text, not a comment.
+        let content = r#"<!-- block level -->
 
-[//]: # (</block>)
+Some text <!-- inline --> and
+more text <!-- inline too --> tail.
+
+Inline code `<!-- in code -->` is not a comment.
 "#;
 
-        assert_eq!(block_names(content)?, [r"a\(b\)"]);
+        assert_eq!(
+            comment_sources(&mut parser(), content)?,
+            [
+                "<!-- block level -->",
+                "<!-- inline -->",
+                "<!-- inline too -->"
+            ]
+        );
         Ok(())
     }
 
     #[test]
-    fn link_reference_comment_with_each_line_ending_parse_blocks_returns_content_from_next_line()
+    fn link_reference_and_html_comments_parse_comments_returns_them_in_source_order()
+    -> anyhow::Result<()> {
+        let content = r#"[//]: # (first)
+
+<!-- second -->
+
+<!-- third -->
+
+[//]: # (fourth)
+"#;
+
+        assert_eq!(
+            comment_sources(&mut parser(), content)?,
+            [
+                "[//]: # (first)\n",
+                "<!-- second -->",
+                "<!-- third -->",
+                "[//]: # (fourth)\n"
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn link_reference_comment_with_each_title_delimiter_parse_comments_returns_only_the_title()
+    -> anyhow::Result<()> {
+        let content = r#"[//]: # (paren)
+[//]: # 'single'
+[//]: # "double"
+"#;
+
+        assert_eq!(comment_titles(content)?, ["paren", "single", "double"]);
+        Ok(())
+    }
+
+    #[test]
+    fn link_reference_comment_with_escaped_parentheses_parse_comments_returns_whole_title()
+    -> anyhow::Result<()> {
+        assert_eq!(comment_titles(r"[//]: # (a\(b\))")?, [r"a\(b\)"]);
+        Ok(())
+    }
+
+    #[test]
+    fn link_reference_comment_with_non_ascii_destination_parse_comments_returns_title()
+    -> anyhow::Result<()> {
+        assert_eq!(comment_titles("[//]: /café (title)\n")?, ["title"]);
+        Ok(())
+    }
+
+    #[test]
+    fn link_reference_comment_with_quote_in_destination_parse_comments_returns_title()
+    -> anyhow::Result<()> {
+        assert_eq!(comment_titles("[//]: it's (title)\n")?, ["title"]);
+        Ok(())
+    }
+
+    #[test]
+    fn link_reference_comment_with_title_on_next_line_parse_comments_keeps_the_line_break()
+    -> anyhow::Result<()> {
+        let content = "[//]: #\n(title)\n";
+
+        let texts: Vec<String> = parser()
+            .parse_comments(content)?
+            .map(|comment| comment.comment_text)
+            .collect();
+
+        assert_eq!(texts, ["       \n title \n"]);
+        Ok(())
+    }
+
+    #[test]
+    fn link_reference_comment_with_each_line_ending_parse_comments_returns_the_line_ending_too()
     -> anyhow::Result<()> {
         for line_ending in ["\n", "\r\n", "\r"] {
-            let mut parser = parser();
-            let content = format!(
-                r#"[//]: # (<block name="a">){line_ending}Text{line_ending}{line_ending}[//]: # (</block>){line_ending}"#
-            );
-
-            let blocks = parse_blocks(&mut parser, &content).collect::<anyhow::Result<Vec<_>>>()?;
+            let content = format!("[//]: # (title){line_ending}Text{line_ending}");
 
             assert_eq!(
-                blocks[0].content.text(&content),
-                format!("Text{line_ending}{line_ending}"),
+                comment_sources(&mut parser(), &content)?,
+                [format!("[//]: # (title){line_ending}")],
                 "{line_ending:?}"
             );
         }
@@ -844,227 +772,70 @@ Text
     }
 
     #[test]
+    fn link_reference_without_title_or_with_another_label_parse_comments_returns_no_comment()
+    -> anyhow::Result<()> {
+        let content = r#"[//]: #
+[other]: /url (title)
+[foo]: /url "title"
+"#;
+
+        assert_eq!(comment_sources(&mut parser(), content)?, Vec::<&str>::new());
+        Ok(())
+    }
+
+    #[test]
     fn inline_comment_after_a_code_span_holding_non_ascii_reports_a_character_column()
     -> anyhow::Result<()> {
-        let mut parser = parser();
         // Code spans are blanked byte by byte before the HTML pass, which turns one multi-byte
         // character into several spaces; the column must still count the source's characters.
-        let content = "`café` <!-- <block name=\"x\"> -->\nText\n\n<!-- </block> -->\n";
+        let content = "`café` <!-- comment -->\n";
 
-        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
+        let comments: Vec<Comment> = parser().parse_comments(content)?.collect();
 
-        assert_eq!(
-            blocks[0].start_tag_position_range.start,
-            Position::new(1, 13)
-        );
+        assert_eq!(comments[0].position_range.start, Position::new(1, 8));
         Ok(())
     }
 
     #[test]
-    fn parses_inline_html_comments_correctly() -> anyhow::Result<()> {
-        let mut parser = parser();
-
-        // An HTML comment with other text before it on the same line is inline HTML, not an
-        // `html_block`. A `<!--` inside inline code is literal text, not a comment.
-        let content = r#"
-# Header
-
-Some text <!-- <block name="inline_block"> --> and
-more content here
-ending text <!-- </block> --> tail.
-
-Inline code `<!-- <block name="ignored"> -->` is not a comment.
-"#;
-        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
-
-        assert_eq!(
-            blocks,
-            [Block {
-                attributes: text_attributes(&[("name", "inline_block")]),
-                start_tag_position_range: Position::new(4, 16)..Position::new(4, 43),
-                content: Content::source(
-                    test_utils::substr_range(content, " and\nmore content here\nending text "),
-                    Position::new(4, 47)..Position::new(6, 13),
-                ),
-                declaration: Declaration::Tags,
-            }],
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn parses_blocks_spanning_block_level_and_inline_html_comments() -> anyhow::Result<()> {
-        let mut parser = parser();
-
-        let content = r#"
-<!-- <block name="mixed"> -->
-Some content.
-Closing text <!-- </block> --> tail.
-"#;
-        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
-
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].name(), Some("mixed"));
-
-        Ok(())
-    }
-
-    #[test]
-    fn parses_blocks_opened_and_closed_inside_table_cells() -> anyhow::Result<()> {
-        let mut parser = parser();
-
+    fn comments_in_table_cells_parse_comments_returns_each_at_its_column() -> anyhow::Result<()> {
         // GitHub-flavored Markdown renders HTML comments inside table cells, so a table is a
         // place a reader can reasonably put a marker and a table of values is exactly the
         // shape a `keep-sorted` rule is written for.
         let content = r#"| item |
 | --- |
-| <!-- <block name="table_rows"> --> first |
-| second |
-| <!-- </block> --> third |
+| <!-- first --> one |
+| two |
+| <!-- second --> three |
 "#;
-        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
 
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].name(), Some("table_rows"));
-        assert_eq!(
-            blocks[0].start_tag_position_range.start,
-            Position::new(3, 8)
-        );
+        let comments: Vec<Comment> = parser().parse_comments(content)?.collect();
 
+        let sources: Vec<&str> = comments
+            .iter()
+            .map(|comment| &content[comment.source_range.clone()])
+            .collect();
+        assert_eq!(sources, ["<!-- first -->", "<!-- second -->"]);
+        assert_eq!(comments[0].position_range.start, Position::new(3, 3));
         Ok(())
     }
 
     #[test]
-    fn comments_in_block_quote_parse_blocks_returns_the_text_between_them() -> anyhow::Result<()> {
-        let mut parser = parser();
-        let content = r#"> <!-- <block name="a"> -->
+    fn comments_in_block_quote_parse_comments_returns_each_without_the_quote_marker()
+    -> anyhow::Result<()> {
+        let content = r#"> <!-- first -->
 > Text
-> <!-- </block> -->
+> <!-- second -->
 "#;
-
-        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
-
-        assert_eq!(blocks[0].content.text(content), "\n> Text\n> ");
-        Ok(())
-    }
-
-    #[test]
-    fn parses_blocks_spanning_link_reference_and_html_comment_syntaxes() -> anyhow::Result<()> {
-        let mut parser = parser();
-
-        // The `[//]:` and `<!--` comments are merged into one source-ordered stream, so a block
-        // can open in one syntax and close in the other, in either direction.
-        let content = r#"
-[//]: # (<block name="a">)
-
-First block content.
-
-<!-- </block> -->
-
-<!-- <block name="b"> -->
-
-Second block content.
-
-[//]: # (</block>)
-"#;
-        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
-
-        assert_eq!(blocks.len(), 2);
-        assert_eq!(blocks[0].name(), Some("a"));
-        assert!(
-            blocks[0]
-                .content
-                .text(content)
-                .contains("First block content")
-        );
-        assert_eq!(blocks[1].name(), Some("b"));
-        assert!(
-            blocks[1]
-                .content
-                .text(content)
-                .contains("Second block content")
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn parses_html_blocks_correctly() -> anyhow::Result<()> {
-        let mut parser = parser();
-
-        let content = r#"
-# Header
-
-<div>
-<!-- <block name="html_block"> -->
-Some html content
-<!-- </block> -->
-</div>
-
-[//]: # (<block name="md_block">)
-Some markdown content
-
-[//]: # (</block>)
-
-<!-- <block name="html_block2"> -->Not wrapped in HTML tags<!-- </block> -->
-
-<!-- <block name="html_block3"> -->
-Not wrapped in HTML tags on multiple lines
-<!-- </block> -->
-"#;
-        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(
-            blocks,
-            [
-                Block {
-                    attributes: text_attributes(&[("name", "html_block")]),
-                    start_tag_position_range: Position::new(5, 6)..Position::new(5, 31),
-                    content: Content::source(
-                        test_utils::substr_range(content, "\nSome html content\n"),
-                        Position::new(5, 35)..Position::new(7, 1),
-                    ),
-                    declaration: Declaration::Tags,
-                },
-                Block {
-                    attributes: text_attributes(&[("name", "md_block")]),
-                    start_tag_position_range: Position::new(10, 10)..Position::new(10, 33),
-                    content: Content::source(
-                        test_utils::substr_range(content, "Some markdown content\n\n"),
-                        Position::new(11, 1)..Position::new(13, 1),
-                    ),
-                    declaration: Declaration::Tags,
-                },
-                Block {
-                    attributes: text_attributes(&[("name", "html_block2")]),
-                    start_tag_position_range: Position::new(15, 6)..Position::new(15, 32),
-                    content: Content::source(
-                        test_utils::substr_range(content, "Not wrapped in HTML tags"),
-                        Position::new(15, 36)..Position::new(15, 60),
-                    ),
-                    declaration: Declaration::Tags,
-                },
-                Block {
-                    attributes: text_attributes(&[("name", "html_block3")]),
-                    start_tag_position_range: Position::new(17, 6)..Position::new(17, 32),
-                    content: Content::source(
-                        test_utils::substr_range(
-                            content,
-                            "\nNot wrapped in HTML tags on multiple lines\n",
-                        ),
-                        Position::new(17, 36)..Position::new(19, 1),
-                    ),
-                    declaration: Declaration::Tags,
-                },
-            ],
+            comment_sources(&mut parser(), content)?,
+            ["<!-- first -->", "<!-- second -->"]
         );
-
         Ok(())
     }
 
     #[test]
-    fn code_block_with_fence_lookalike_parse_blocks_returns_the_block_after_it()
+    fn code_block_with_fence_lookalike_parse_comments_returns_the_comment_after_it()
     -> anyhow::Result<()> {
         // A closing fence is indented by at most 3 spaces, where a tab counts as 4, and only
         // spaces can follow it. So none of these lines ends the code block.
@@ -1074,60 +845,61 @@ Not wrapped in HTML tags on multiple lines
 {lookalike}
 ```
 
-<!-- <block name="a"> -->
-Text
-<!-- </block> -->
+<!-- after -->
 "#
             );
 
-            assert_eq!(block_names(&content)?, ["a"], "{lookalike:?}");
+            assert_eq!(
+                comment_sources(&mut parser(), &content)?,
+                ["<!-- after -->"],
+                "{lookalike:?}"
+            );
         }
         Ok(())
     }
 
     #[test]
-    fn code_block_closed_by_fence_indented_three_spaces_parse_blocks_returns_only_the_block_after_it()
+    fn code_block_closed_by_fence_indented_three_spaces_parse_comments_returns_only_the_comment_after_it()
     -> anyhow::Result<()> {
         let content = r#"```
-<!-- <block name="in_code"> -->
+<!-- in code -->
    ```
-<!-- <block name="a"> -->
-Text
-<!-- </block> -->
+<!-- after -->
 "#;
 
-        assert_eq!(block_names(content)?, ["a"]);
+        assert_eq!(comment_sources(&mut parser(), content)?, ["<!-- after -->"]);
         Ok(())
     }
 
     #[test]
-    fn comment_outside_raw_html_parse_blocks_returns_no_block_from_it() -> anyhow::Result<()> {
+    fn comment_outside_raw_html_parse_comments_returns_no_comment_for_it() -> anyhow::Result<()> {
         // In HTML, the alt text of an image and the title of a link are attribute values, and an
         // escaped `<` is text, so none of these is a comment.
-        let content = r#"<!-- <block name="a"> -->
-![Alt <!-- <block name="in_alt"> -->](image.png)
-[Link](page.md "<!-- <block name='in_title'> -->")
-\<!-- <block name="escaped"> -->
-<!-- </block> -->
+        let content = r#"<!-- before -->
+![Alt <!-- in alt -->](image.png)
+[Link](page.md "<!-- in title -->")
+\<!-- escaped -->
+<!-- after -->
 "#;
 
-        assert_eq!(block_names(content)?, ["a"]);
+        assert_eq!(
+            comment_sources(&mut parser(), content)?,
+            ["<!-- before -->", "<!-- after -->"]
+        );
         Ok(())
     }
 
     #[test]
-    fn frontmatter_parse_blocks_returns_no_block_from_it() -> anyhow::Result<()> {
+    fn frontmatter_parse_comments_returns_no_comment_for_it() -> anyhow::Result<()> {
         // Frontmatter is YAML, where `<!--` starts no comment.
         let content = r#"---
-title: <!-- <block name="in_frontmatter"> -->
+title: <!-- in frontmatter -->
 ---
 
-<!-- <block name="a"> -->
-Text
-<!-- </block> -->
+<!-- after -->
 "#;
 
-        assert_eq!(block_names(content)?, ["a"]);
+        assert_eq!(comment_sources(&mut parser(), content)?, ["<!-- after -->"]);
         Ok(())
     }
 }

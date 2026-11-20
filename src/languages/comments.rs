@@ -496,3 +496,23 @@ pub(super) fn blank_decorative_stars(content: &str) -> String {
     }
     result
 }
+
+#[cfg(test)]
+pub(crate) mod test_utils {
+    use crate::languages::LanguageParser;
+
+    /// The source text of each comment that `parser` finds in `contents`, in the order of the
+    /// comments in `contents`.
+    ///
+    /// # Errors
+    /// Returns the error of [`LanguageParser::parse_comments`].
+    pub(crate) fn comment_sources<'a>(
+        parser: &mut impl LanguageParser,
+        contents: &'a str,
+    ) -> anyhow::Result<Vec<&'a str>> {
+        Ok(parser
+            .parse_comments(contents)?
+            .map(|comment| &contents[comment.source_range])
+            .collect())
+    }
+}
