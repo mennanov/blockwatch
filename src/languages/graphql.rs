@@ -1,0 +1,93 @@
+use crate::languages::{
+    CommentsParser, LanguageParser, LanguageParserImpl, python_style_comments_parser,
+};
+
+/// Returns a [`LanguageParser`] for GraphQL.
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser())
+}
+
+fn comments_parser() -> impl CommentsParser {
+    let graphql_language = tree_sitter_graphql::LANGUAGE.into();
+    python_style_comments_parser(&graphql_language, "comment", &["#"])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{languages::Comment, position::Position};
+
+    #[test]
+    fn parses_comments_correctly() -> anyhow::Result<()> {
+        let mut comments_parser = comments_parser();
+
+        let comments: Vec<Comment> = comments_parser
+            .parse(
+                r#"
+# This is a line comment
+type Query {
+  # Indented comment
+  hello: String # inline comment
+}
+## A section heading repeats the marker.
+"#,
+            )
+            .collect();
+
+        assert_eq!(
+            comments,
+            vec![
+                Comment {
+                    position_range: Position::new(2, 1)..Position::new(2, 25),
+                    source_range: 1..25,
+                    comment_text: "  This is a line comment".to_string()
+                },
+                Comment {
+                    position_range: Position::new(4, 3)..Position::new(4, 21),
+                    source_range: 41..59,
+                    comment_text: "  Indented comment".to_string()
+                },
+                Comment {
+                    position_range: Position::new(5, 17)..Position::new(5, 33),
+                    source_range: 76..92,
+                    comment_text: "  inline comment".to_string()
+                },
+                Comment {
+                    position_range: Position::new(7, 1)..Position::new(7, 41),
+                    source_range: 95..135,
+                    comment_text: "   A section heading repeats the marker.".to_string()
+                },
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn real_block_is_parsed_while_string_markers_are_ignored() -> anyhow::Result<()> {
+        let contents = r##"# <block name="real">
+type Query {
+  hello: String
+}
+# </block>
+
+"""
+# <block name="fake_description">
+this text lives inside a block string
+# </block>
+"""
+type Other {
+  field(message: "# <block name='fake_string'> x # </block>"): String
+}
+"##;
+        let blocks = parser()
+            .parse_blocks(contents)
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let names: Vec<&str> = blocks
+            .iter()
+            .map(|block| block.name().expect("a named block"))
+            .collect();
+        assert_eq!(names, ["real"]);
+        Ok(())
+    }
+}

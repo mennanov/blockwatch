@@ -1,0 +1,164 @@
+use crate::languages;
+use crate::languages::code_symbols::CodeSymbolsParser;
+use crate::languages::typescript::EcmaScript;
+use crate::languages::{CommentsParser, LanguageParser, LanguageParserImpl};
+
+/// Returns a [`LanguageParser`] for JavaScript, with its symbols.
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser()).with_symbols(CodeSymbolsParser::new(
+        &tree_sitter_javascript::LANGUAGE.into(),
+        EcmaScript,
+    ))
+}
+
+fn comments_parser() -> impl CommentsParser {
+    languages::ecmascript_comments_parser(&tree_sitter_javascript::LANGUAGE.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{languages::Comment, position::Position};
+
+    #[test]
+    fn parses_comments_correctly() -> anyhow::Result<()> {
+        let mut comments_parser = comments_parser();
+
+        // The HTML-like comments are single-line: the statement between the `<!--` and `-->`
+        // lines is code, not comment content.
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"
+            /**
+             * This is a JavaScript function demonstration with comments.
+             *
+             * @author Author name
+             */
+            function example() {
+                // This is a single-line comment in JavaScript.
+                console.log("Hello, JavaScript!"); // Inline comment after a statement.
+
+                /*
+                 * This is a multi-line comment.
+                 * It also spans multiple lines.
+                 */
+                let number = 42; /* Inline multi-line comment */
+            }
+/// Triple slash comment.
+let done = 1;
+<!-- html open comment
+let between = 2;
+--> html close comment
+//! Rust and Doxygen read this marker as a doc comment.
+//// A banner line repeats the marker.
+            "#,
+            )
+            .collect();
+
+        assert_eq!(
+            blocks,
+            vec![
+                Comment {
+                    position_range: Position::new(2, 13)..Position::new(6, 16),
+                    source_range: 13..156,
+                    comment_text: "   \n               This is a JavaScript function demonstration with comments.\n              \n               @author Author name\n               ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(8, 17)..Position::new(8, 64),
+                    source_range: 206..253,
+                    comment_text: "   This is a single-line comment in JavaScript."
+                        .to_string()
+                },
+                Comment {
+                    position_range: Position::new(9, 52)..Position::new(9, 88),
+                    source_range: 305..341,
+                    comment_text: "   Inline comment after a statement.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(11, 17)..Position::new(14, 20),
+                    source_range: 359..479,
+                    comment_text: "  \n                   This is a multi-line comment.\n                   It also spans multiple lines.\n                   "
+                        .to_string()
+                },
+                Comment {
+                    position_range: Position::new(15, 34)..Position::new(15, 65),
+                    source_range: 513..544,
+                    comment_text: "   Inline multi-line comment   ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(17, 1)..Position::new(17, 26),
+                    source_range: 559..584,
+                    comment_text: "    Triple slash comment.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(19, 1)..Position::new(19, 23),
+                    source_range: 599..621,
+                    comment_text: "     html open comment".to_string()
+                },
+                Comment {
+                    position_range: Position::new(21, 1)..Position::new(21, 23),
+                    source_range: 639..661,
+                    comment_text: "    html close comment".to_string()
+                },
+                Comment {
+                    position_range: Position::new(22, 1)..Position::new(22, 56),
+                    source_range: 662..717,
+                    comment_text: "    Rust and Doxygen read this marker as a doc comment.".to_string()
+                },
+                Comment {
+                    position_range: Position::new(23, 1)..Position::new(23, 39),
+                    source_range: 718..756,
+                    comment_text: "     A banner line repeats the marker.".to_string()
+                },
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn jsx_expression_holding_only_a_comment_covers_its_braces() -> anyhow::Result<()> {
+        let mut comments_parser = comments_parser();
+
+        let comments: Vec<Comment> = comments_parser
+            .parse(
+                r#"const list = (
+  <ul>
+    {/* lone */}
+    {/* with code */ items}
+    { /* first */ /* second */ }
+  </ul>
+);
+"#,
+            )
+            .collect();
+
+        assert_eq!(
+            comments,
+            vec![
+                Comment {
+                    position_range: Position::new(3, 5)..Position::new(3, 17),
+                    source_range: 26..38,
+                    comment_text: "    lone    ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(4, 6)..Position::new(4, 21),
+                    source_range: 44..59,
+                    comment_text: "   with code   ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(5, 7)..Position::new(5, 18),
+                    source_range: 73..84,
+                    comment_text: "   first   ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(5, 19)..Position::new(5, 31),
+                    source_range: 85..97,
+                    comment_text: "   second   ".to_string()
+                },
+            ]
+        );
+
+        Ok(())
+    }
+}

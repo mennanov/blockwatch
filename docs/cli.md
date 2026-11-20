@@ -215,7 +215,7 @@ Matching is case-sensitive, and the directories don't count. A file that matches
 These are the endings and names that have a language. `*.json` is an extension: `package.json` is JSON. A name
 without `*`, such as `.babelrc` or `Cargo.lock`, is a whole file name.
 
-<!-- <block name="language-table" same-as="src/language_resolver.rs:language-names" same-as-mode="set"
+<!-- <block name="language-table" same-as="src/languages/file_names.rs:language-names" same-as-mode="set"
      same-as-pattern="`(?:\*\.)?(?P<value>[^`]+)`"> -->
 
 | Language | Names |

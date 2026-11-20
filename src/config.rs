@@ -4,7 +4,7 @@ use crate::attributes::{AttributeEntry, Attributes, TargetReference};
 use crate::blocks::{ConfigEntry, Locator, TargetIf, TargetPattern, VirtualBlock};
 use crate::diff::{DiffChanges, LineChanges};
 use crate::fs::{FileSystem, GLOB_CHARACTERS, PathsGlob};
-use crate::language_parsers::toml;
+use crate::languages::toml;
 use crate::position::LineIndex;
 use crate::repo_path::RepoPath;
 use crate::settings::RawSettings;

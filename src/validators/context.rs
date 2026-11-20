@@ -4,7 +4,7 @@ use crate::blocks::VirtualBlock;
 use crate::blocks::{BlockAddress, FileBlocks};
 use crate::diff::DiffChanges;
 use crate::fs::FileSystem;
-use crate::language_parsers::LanguageParsers;
+use crate::languages::LanguageParsers;
 use crate::repo_path::RepoPath;
 use crate::scan::{self, ScanMode};
 use crate::settings::BlockSelection;

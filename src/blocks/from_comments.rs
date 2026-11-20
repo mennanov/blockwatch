@@ -1,6 +1,6 @@
 use super::tags::{BlockTag, MalformedTag, WinnowBlockTagParser};
 use crate::blocks::{Block, Content};
-use crate::language_parsers::{Comment, CommentsParser};
+use crate::languages::{Comment, CommentsParser};
 use crate::position::Position;
 use std::collections::{HashMap, VecDeque};
 use std::iter::Peekable;
@@ -367,13 +367,13 @@ mod tests {
     use crate::attributes::test_utils::text_attributes;
     use crate::attributes::{Attributes, SortOrder};
     use crate::blocks::{Block, Content, Declaration};
-    use crate::language_parsers;
-    use crate::language_parsers::LanguageParser;
+    use crate::languages;
+    use crate::languages::LanguageParser;
     use crate::position::{Position, test_utils};
 
     fn create_parser() -> impl LanguageParser {
         // Reuse existing real blocks parser.
-        language_parsers::rust::parser()
+        languages::rust::parser()
     }
 
     /// Drains the parser into a `Vec`, failing on the first parse error.

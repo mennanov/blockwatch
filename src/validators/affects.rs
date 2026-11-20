@@ -391,7 +391,7 @@ mod validate_tests {
         line_changes: HashMap<RepoPath, Vec<LineChange>>,
     ) -> anyhow::Result<Arc<validators::ValidationContext>> {
         let line_changes = diff_changes(line_changes);
-        let parsers = crate::language_parsers::LanguageParsers::new();
+        let parsers = crate::languages::LanguageParsers::new();
         let parsed = crate::scan::Scan::new(
             file_system,
             &crate::fs::test_utils::path_filter_only("source.py"),
@@ -988,7 +988,7 @@ pass
             );
         }
         let line_changes = diff_changes(line_changes);
-        let parsers = crate::language_parsers::LanguageParsers::new();
+        let parsers = crate::languages::LanguageParsers::new();
         let parsed = crate::scan::Scan::new(
             &file_system,
             &crate::fs::test_utils::path_filter_all(),

@@ -10,7 +10,7 @@ use crate::blocks::VirtualBlock;
 use crate::config;
 use crate::diff::{self, DiffChanges};
 use crate::fs::FileSystem;
-use crate::language_parsers;
+use crate::languages;
 use crate::output::{
     self, Explanation, write_json, write_json_violations, write_line, write_sarif_violations,
 };
@@ -176,7 +176,7 @@ struct Prepared {
 fn prepare(args: &flags::Args) -> anyhow::Result<Prepared> {
     let file_system = Arc::new(crate::fs::FileSystemImpl::new(&repository_root()?)?);
     let (scan_mode, line_changes) = run_inputs(args, file_system.as_ref())?;
-    let language_parsers = language_parsers::LanguageParsers::new();
+    let language_parsers = languages::LanguageParsers::new();
     let (settings, virtual_blocks) = read_config(args, file_system.as_ref(), &line_changes)?;
     let (context, scan_stats) = build_context(
         args,
@@ -287,7 +287,7 @@ fn build_context(
     virtual_blocks: Vec<VirtualBlock>,
     scan_mode: scan::ScanMode,
     modified_lines_by_file: DiffChanges,
-    language_parsers: language_parsers::LanguageParsers,
+    language_parsers: languages::LanguageParsers,
     file_system: &impl FileSystem,
 ) -> anyhow::Result<(validators::ValidationContext, scan::ScanStats)> {
     let path_arguments = PathArguments::resolve(args.path_arguments(), file_system)?;

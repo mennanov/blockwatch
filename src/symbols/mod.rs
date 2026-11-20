@@ -1,11 +1,8 @@
 //! Derives the symbols of a file: the elements a symbol reference can address.
 
-pub(crate) mod code;
-
 use crate::blocks::Content;
 use crate::position::{LineIndex, Position};
 use crate::symbol_path::{Segment, SymbolPath};
-use anyhow::bail;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
@@ -126,10 +123,10 @@ pub(crate) struct Symbols {
     pub(crate) symbols: Vec<Symbol>,
     /// The paths whose definition or value blockwatch can't read reliably, each with the reason to
     /// report, such as a syntax error in the definition. A path here can also be in `symbols`.
-    unreadable: HashMap<SymbolPath, String>,
+    pub(crate) unreadable: HashMap<SymbolPath, String>,
     /// The words in the text that the parser had to skip, each with the reason to report. That
     /// text could define any of them, so every path with one of them as a segment is unreadable.
-    skipped: HashMap<String, String>,
+    pub(crate) skipped: HashMap<String, String>,
 }
 
 impl From<Vec<Symbol>> for Symbols {
@@ -528,49 +525,6 @@ pub(crate) trait SymbolsParser: Send + Sync {
     /// Returns an error if no symbol of `source` can be derived reliably, such as when a data file
     /// has a syntax error. The error mentions the position of the problem when there is one.
     fn parse(&mut self, source: &str) -> anyhow::Result<Symbols>;
-}
-
-/// Refuses `tree`, parsed from `source`, if it has a syntax error.
-///
-/// # Errors
-/// Returns an error that shows the line and column of the first syntax error.
-pub(crate) fn ensure_no_syntax_error(tree: &tree_sitter::Tree, source: &str) -> anyhow::Result<()> {
-    // tree-sitter recovers from a syntax error by guessing what the source meant, and a path
-    // resolved through a guess can land on a wrong value. A missing value, for one, is recovered
-    // as an empty one.
-    match first_syntax_error(tree) {
-        Some(error) => {
-            let position = LineIndex::new(source).position(error.start_byte());
-            bail!(
-                "file has a syntax error at line {}, column {}, and a path into it could resolve to the wrong value",
-                position.line,
-                position.character,
-            )
-        }
-        None => Ok(()),
-    }
-}
-
-/// The first syntax error in `tree`, in document order, or `None` if the source parsed cleanly.
-///
-/// The node is the innermost one that error recovery produced there: a span it skipped, or a token
-/// it assumed was missing.
-fn first_syntax_error(tree: &tree_sitter::Tree) -> Option<tree_sitter::Node<'_>> {
-    let mut node = tree.root_node();
-    if !node.has_error() {
-        return None;
-    }
-    // `has_error` also holds for every ancestor of an error, so descending into the first child
-    // that has one leads to the first error. A token that error recovery skipped is an error node
-    // without `has_error`, so it is matched on its own.
-    let mut cursor = tree.walk();
-    while let Some(child) = node
-        .children(&mut cursor)
-        .find(|child| child.is_error() || child.has_error())
-    {
-        node = child;
-    }
-    Some(node)
 }
 
 #[cfg(test)]
@@ -1403,71 +1357,6 @@ mod symbol_tests {
                 Position::new(1, 1)..Position::new(2, 1),
                 Position::new(3, 1)..Position::new(4, 1),
             ]
-        );
-    }
-}
-
-#[cfg(test)]
-mod syntax_error_tests {
-    // Any grammar shows how error recovery shapes a tree. JSON's has the shortest sources.
-    use super::*;
-    use crate::language_parsers::tree_sitter_parser;
-    use anyhow::Context;
-
-    /// What [`ensure_no_syntax_error`] gives for `source`, a JSON file.
-    fn ensure_no_syntax_error_in_json(source: &str) -> anyhow::Result<()> {
-        let tree = tree_sitter_parser(&tree_sitter_json::LANGUAGE.into())
-            .parse(source, None)
-            .context("failed to parse syntax tree")?;
-        ensure_no_syntax_error(&tree, source)
-    }
-
-    #[test]
-    fn missing_token_returns_syntax_error_where_it_belongs() {
-        // The value of "b" is missing, so error recovery assumes one right after the colon.
-        let err = ensure_no_syntax_error_in_json(r#"{"a": 1, "b": , "c": 3}"#).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("syntax error at line 1, column 14,"),
-            "unexpected error message: {err}"
-        );
-    }
-
-    #[test]
-    fn unexpected_token_returns_syntax_error_at_the_token() {
-        // The value of "a" lacks its closing quote. It ends at the quote that should open the next
-        // key, which leaves the `b` after it unexpected.
-        let err = ensure_no_syntax_error_in_json(r#"{"a": "1, "b": "2"}"#).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("syntax error at line 1, column 12,"),
-            "unexpected error message: {err}"
-        );
-    }
-
-    #[test]
-    fn unparsable_span_returns_syntax_error_at_its_start() {
-        // A trailing comma, which JSONC allows and JSON does not, is left over as a span that does
-        // not parse.
-        let err = ensure_no_syntax_error_in_json(r#"{"a": 1,}"#).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("syntax error at line 1, column 8,"),
-            "unexpected error message: {err}"
-        );
-    }
-
-    #[test]
-    fn source_with_several_syntax_errors_returns_the_first() {
-        let source = r#"{
-  "a": 1 "b": 2,
-  "c": ,
-}"#;
-        let err = ensure_no_syntax_error_in_json(source).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("syntax error at line 2, column 3,"),
-            "unexpected error message: {err}"
         );
     }
 }

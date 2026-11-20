@@ -2,7 +2,7 @@
 
 use crate::blocks::BlockAddress;
 use crate::fs::glob_builder;
-use crate::language_resolver::Language;
+use crate::languages::Language;
 use crate::validators::Validator;
 use anyhow::{Context, bail};
 use globset::{Glob, GlobSet, GlobSetBuilder};

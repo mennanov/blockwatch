@@ -171,7 +171,7 @@ fn create_violation(
 mod validate_tests {
     use super::*;
     use crate::diff::DiffChanges;
-    use crate::language_parsers::LanguageParsers;
+    use crate::languages::LanguageParsers;
     use crate::repo_path::RepoPath;
     use crate::validators::test_utils::validation_context;
     use crate::validators::test_utils::{checked_lines, violation_count};

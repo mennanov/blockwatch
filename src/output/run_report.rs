@@ -160,7 +160,7 @@ mod tests {
     use crate::blocks::test_utils::virtual_block;
     use crate::diff::DiffChanges;
     use crate::fs::test_utils::{FakeFileSystem, path_filter_all};
-    use crate::language_parsers::LanguageParsers;
+    use crate::languages::LanguageParsers;
     use crate::position::Position;
     use crate::repo_path::RepoPath;
     use crate::scan::{Scan, ScanMode};

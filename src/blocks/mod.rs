@@ -358,7 +358,7 @@ mod supported_languages_tests {
     use crate::blocks::*;
     use crate::diff::DiffChanges;
     use crate::fs::test_utils::FakeFileSystem;
-    use crate::language_parsers::LanguageParsers;
+    use crate::languages::LanguageParsers;
     use crate::scan::{Scan, ScanMode};
 
     // <block name="supported-extensions">

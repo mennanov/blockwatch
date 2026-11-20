@@ -4,7 +4,7 @@ use crate::blocks::{Block, BlockWithContext, Declaration, FileBlocks};
 use crate::blocks::{ConfigEntry, Locator, VirtualBlock};
 use crate::diff::{DiffChanges, LineChanges};
 use crate::fs::{FileSystem, PathFilter};
-use crate::language_parsers::{LanguageParsers, SharedLanguageParser};
+use crate::languages::{LanguageParsers, SharedLanguageParser};
 use crate::repo_path::RepoPath;
 use crate::symbols::Symbols;
 use anyhow::{Context, anyhow, bail};
@@ -613,8 +613,8 @@ mod parse_blocks_tests {
     use crate::fs::test_utils::{
         FakeFileSystem, path_filter_all, path_filter_ignoring, path_filter_only,
     };
-    use crate::language_parsers::LanguageParsers;
-    use crate::language_resolver::Language;
+    use crate::languages::Language;
+    use crate::languages::LanguageParsers;
     use crate::output::BlockListing;
     use crate::position::test_utils::substr_range;
     use std::ops::Range;

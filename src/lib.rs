@@ -24,8 +24,7 @@ mod cli;
 mod config;
 mod diff;
 mod fs;
-mod language_parsers;
-mod language_resolver;
+mod languages;
 mod output;
 mod position;
 mod repo_path;
@@ -54,8 +53,8 @@ pub use cli::run;
 /// # Ok::<(), anyhow::Error>(())
 /// ```
 pub fn count_rust_blocks(source: &str) -> anyhow::Result<usize> {
-    let mut parser = language_parsers::rust::parser();
-    language_parsers::LanguageParser::parse_blocks(&mut parser, source)
+    let mut parser = languages::rust::parser();
+    languages::LanguageParser::parse_blocks(&mut parser, source)
         .try_fold(0, |count, block| block.map(|_| count + 1))
 }
 

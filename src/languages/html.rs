@@ -1,0 +1,88 @@
+use crate::languages::{
+    CommentsParser, LanguageParser, LanguageParserImpl, xml_style_comments_parser,
+};
+
+/// Returns a [`LanguageParser`] for HTML.
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser())
+}
+
+fn comments_parser() -> impl CommentsParser {
+    let html_language = tree_sitter_html::LANGUAGE.into();
+    xml_style_comments_parser(&html_language, "comment")
+        .with_break_at_node_kinds(&["quoted_attribute_value"])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{languages::Comment, position::Position};
+
+    #[test]
+    fn parses_html_comments_correctly() -> anyhow::Result<()> {
+        let mut comments_parser = comments_parser();
+
+        let blocks: Vec<Comment> = comments_parser
+            .parse(
+                r#"<!DOCTYPE html>
+            <!-- Simple comment -->
+            <div>
+                <!-- Another comment -->
+                <p>Some text</p>
+                <!--
+                Multi-line comment
+                with multiple lines
+                -->
+            </div>
+            <!-- Final comment -->
+            "#,
+            )
+            .collect();
+
+        assert_eq!(
+            blocks,
+            vec![
+                Comment {
+                    position_range: Position::new(2, 13)..Position::new(2, 36),
+                    source_range: 28..51,
+                    comment_text: "     Simple comment    ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(4, 17)..Position::new(4, 41),
+                    source_range: 86..110,
+                    comment_text: "     Another comment    ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(6, 17)..Position::new(9, 20),
+                    source_range: 160..255,
+                    comment_text: "    \n                Multi-line comment\n                with multiple lines\n                   ".to_string()
+                },
+                Comment {
+                    position_range: Position::new(11, 13)..Position::new(11, 35),
+                    source_range: 287..309,
+                    comment_text: "     Final comment    ".to_string()
+                },
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn comment_syntax_inside_an_attribute_value_is_not_a_comment() -> anyhow::Result<()> {
+        let mut comments_parser = comments_parser();
+
+        let comments: Vec<String> = comments_parser
+            .parse(
+                r#"<div data-template="<!-- not a comment -->">text</div>
+<!-- The only comment here -->
+"#,
+            )
+            .map(|comment| comment.comment_text)
+            .collect();
+
+        assert_eq!(comments, vec!["     The only comment here    ".to_string()]);
+
+        Ok(())
+    }
+}

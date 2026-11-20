@@ -261,7 +261,7 @@ pub(crate) mod test_utils {
     use crate::diff::test_utils::diff_changes;
     use crate::diff::{LineChange, LineChangeKind};
     use crate::fs::test_utils::{FakeFileSystem, path_filter_all};
-    use crate::language_parsers::LanguageParsers;
+    use crate::languages::LanguageParsers;
     use crate::repo_path::RepoPath;
     use crate::scan::{Scan, ScanMode};
     use crate::validators::{ValidationContext, ValidationReport};

@@ -417,7 +417,7 @@ mod tests {
     use super::test_utils::{virtual_block, virtual_block_with_target_if};
     use super::*;
     use crate::diff::{LineChange, LineChangeKind};
-    use crate::language_parsers::LanguageParsers;
+    use crate::languages::LanguageParsers;
     use crate::position::Position;
     use std::collections::HashMap;
     use std::path::Path;

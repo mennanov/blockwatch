@@ -173,7 +173,7 @@ The whole pipeline is in `src/cli/mod.rs`. `src/main.rs` only calls `blockwatch:
    from the command line select, and that don't match the settings' ignore globs. `PathArguments::resolve` turns an
    existing file or directory into a glob first, so `src` selects `src/**`. `LanguageResolver::resolve` picks each
    file's `Language` from its name, using the settings' extension mappings too.
-6. For each file, the matching `language_parsers::<lang>` (usually a tree-sitter grammar) finds the comments.
+6. For each file, the matching `languages::<lang>` (usually a tree-sitter grammar) finds the comments.
    `blocks::tags` and `blocks::from_comments` turn the comment text into `Block` values, with their attributes and
    their byte and line ranges.
    `VirtualBlock::resolve` finds each virtual block in the file, by its `Locator`, and adds it as a `Block` too. A file
@@ -235,16 +235,17 @@ The main modules:
 - `src/repo_path.rs` — `RepoPath`, the one way to write a path relative to the repository root. A diff header
   (`b/src/main.rs`), a path found in the walk and a `file:name` attribute all become a `RepoPath`. So the same file is
   always the same map key.
-- `src/language_resolver.rs` — `Language`, with one variant for each parser, and `LanguageResolver`, which picks a
-  file's `Language` from its name. `NAMES` lists each extension and whole file name with its `Language`.
-  `COPY_SUFFIXES` lists the suffixes, such as `.example`, that are stripped when no ending of the whole name has a
-  language.
-  `NAME_RULES` lists the names whose variants, such as `Dockerfile.ci`, keep their language. The settings turn each
-  extension mapping's value into a `Language` with `Language::from_key`.
-- `src/language_parsers/` — one parser for each language, most of them a tree-sitter grammar. Markdown and MDX use
-  the `markdown` crate, Makefile uses the `makefile-lossless` crate, and Lean has its own scanner. Each language has
-  a `parser()` that returns a `LanguageParser`, which knows which syntax nodes are comments.
-  `src/blocks/from_comments.rs` turns those comments into blocks. `LanguageParsers::new` in `language_parsers/mod.rs`
+- `src/languages/file_names.rs` — `LanguageResolver`, which picks a file's `Language` from its name. `NAMES` lists
+  each extension and whole file name with its `Language`. `COPY_SUFFIXES` lists the suffixes, such as `.example`,
+  that are stripped when no ending of the whole name has a language. `NAME_RULES` lists the names whose variants, such
+  as `Dockerfile.ci`, keep their language. The settings turn each extension mapping's value into a `Language` with
+  `Language::from_key`.
+- `src/languages/` — `Language`, with one variant for each parser, in `mod.rs`, and one parser for each language,
+  most of them a tree-sitter grammar. Markdown and MDX use the `markdown` crate, Makefile uses the
+  `makefile-lossless` crate, and Lean has its own scanner. Each language has a `parser()` that returns a
+  `LanguageParser`, which knows which syntax nodes are comments. `comments.rs` holds `Comment` and the comment styles
+  that several languages share, and `syntax_tree.rs` the tree-sitter helpers.
+  `src/blocks/from_comments.rs` turns those comments into blocks. `LanguageParsers::new` in `languages/mod.rs`
   builds one parser for each `Language`. A grammar that tree-sitter can't load is a build bug, so it panics.
   `parser_for` asks the resolver for a file's `Language`, then returns its parser.
   **To add a language, add a module here. Then add a `Language` variant, its rows in `NAMES`, a field in
@@ -253,7 +254,11 @@ The main modules:
   Some languages also have symbols. Such a language has a `SymbolsParser`, which its `parser()` passes to
   `.with_symbols(...)`:
 
+  - A programming language implements `CodeLanguage`, and `CodeSymbolsParser` in `code_symbols.rs` finds its symbols
+    with the rules that every programming language shares.
   - JSON, YAML and XML walk their syntax trees themselves, and refuse a file with a syntax error.
+    `ensure_no_syntax_error` in `syntax_tree.rs` refuses it, instead of resolving a path through tree-sitter's error
+    recovery.
   - TOML finds its symbols with `toml_edit`. What a TOML key means depends on the order of the headers, not on how the
     syntax tree is nested.
   - Markdown finds its sections with the `markdown` crate, the same parser that finds its comments.
@@ -261,12 +266,10 @@ The main modules:
     one version. Its known bugs are listed in `docs/symbols.md`, not worked around.
 
   Each language's tests list every symbol it finds. When you give a language symbols, also document its paths in
-  `docs/symbols.md` and add the language to "Files with symbols" in `src/skill.md`. A test in `language_parsers/mod.rs`
+  `docs/symbols.md` and add the language to "Files with symbols" in `src/skill.md`. A test in `languages/mod.rs`
   and the repository's own blocks keep the list of file types with symbols, and each language's section in
   `docs/symbols.md`, in sync with the code.
 - `src/symbols/mod.rs` — `Symbol`, the `SymbolsParser` trait, and `resolve`, which finds the symbol a path refers to.
-  `ensure_no_syntax_error` refuses a file with a syntax error, instead of resolving a path through tree-sitter's error
-  recovery.
 - `src/attributes/` — `Attributes`, `AttributeName`, `Severity`, and the typed values for `keep-sorted`, `line-count`,
   and `same-as`. `TargetReference` is a reference that `affects`, `check-lua` or `same-as` holds, such as
   `a.json#/version`. `parse_number` reads a number for the `numeric` format. `Attributes::from_entries` parses each

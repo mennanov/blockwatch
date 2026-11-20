@@ -1,0 +1,69 @@
+use crate::languages;
+use crate::languages::{CommentsParser, LanguageParser, LanguageParserImpl};
+
+/// Returns a [`LanguageParser`] for Nix.
+pub(super) fn parser() -> impl LanguageParser {
+    LanguageParserImpl::new(comments_parser())
+}
+
+fn comments_parser() -> impl CommentsParser {
+    let nix_language = tree_sitter_nix::LANGUAGE.into();
+    // `//` is the attrset-merge operator in Nix, not a comment.
+    languages::c_style_comments_parser(&nix_language, &["comment"], &["#"])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{languages::Comment, position::Position};
+
+    #[test]
+    fn parses_comments_correctly() -> anyhow::Result<()> {
+        let mut comments_parser = comments_parser();
+
+        let comments: Vec<Comment> = comments_parser
+            .parse(
+                r#"
+# This is a hash comment
+{
+  region = "us-east-1"; # inline comment
+
+  /* This is a block comment
+  spanning multiple lines
+  */
+}
+## A section heading repeats the marker.
+"#,
+            )
+            .collect();
+
+        assert_eq!(
+            comments,
+            vec![
+                Comment {
+                    position_range: Position::new(2, 1)..Position::new(2, 25),
+                    source_range: 1..25,
+                    comment_text: "  This is a hash comment".to_string()
+                },
+                Comment {
+                    position_range: Position::new(4, 25)..Position::new(4, 41),
+                    source_range: 52..68,
+                    comment_text: "  inline comment".to_string()
+                },
+                Comment {
+                    position_range: Position::new(6, 3)..Position::new(8, 5),
+                    source_range: 72..129,
+                    comment_text: "   This is a block comment\n  spanning multiple lines\n    "
+                        .to_string()
+                },
+                Comment {
+                    position_range: Position::new(10, 1)..Position::new(10, 41),
+                    source_range: 132..172,
+                    comment_text: "   A section heading repeats the marker.".to_string()
+                },
+            ]
+        );
+
+        Ok(())
+    }
+}
