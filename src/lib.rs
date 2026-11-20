@@ -40,7 +40,6 @@ mod settings;
 mod symbol_path;
 mod symbols;
 mod tag_parser;
-mod target_reference;
 mod validators;
 mod virtual_blocks;
 

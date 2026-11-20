@@ -1,6 +1,6 @@
 //! Attribute values for `keep-sorted` and `keep-sorted-format`.
 
-use crate::validators::parse_number;
+use super::parse_number;
 use anyhow::anyhow;
 use serde::Serialize;
 use std::cmp::Ordering;

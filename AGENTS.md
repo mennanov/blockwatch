@@ -259,8 +259,9 @@ The main modules:
   `ensure_no_syntax_error` refuses a file with a syntax error, instead of resolving a path through tree-sitter's error
   recovery.
 - `src/attributes/` — `Attributes`, `AttributeName`, `Severity`, and the typed values for `keep-sorted`, `line-count`,
-  and `same-as`. `Attributes::from_entries` parses each value and checks cross-attribute rules, such as modifier
-  attributes without their main attribute.
+  and `same-as`. `TargetReference` is a reference that `affects`, `check-lua` or `same-as` holds, such as
+  `a.json#/version`. `parse_number` reads a number for the `numeric` format. `Attributes::from_entries` parses each
+  value and checks cross-attribute rules, such as modifier attributes without their main attribute.
 - `src/validators/` — one file for each validator (`affects`, `check_ai`, `check_lua`, `keep_sorted`, `keep_unique`,
   `line_count`, `line_pattern`, `same_as`). `Validator::create` in `validators/mod.rs` builds them from one `match`.
   The other files hold what the validators share:

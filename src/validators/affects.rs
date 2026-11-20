@@ -1,8 +1,8 @@
+use crate::attributes::{ResolvedTarget, TargetKind, TargetReference};
 use crate::blocks::{Block, BlockWithContext, FileBlocks};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
-use crate::target_reference::{ResolvedTarget, TargetKind, TargetReference};
 use crate::validators;
 use crate::validators::{
     TargetFiles, TargetResult, ValidationReport, Validator, ValidatorTrace, Violation,

@@ -1,9 +1,8 @@
-use crate::attributes::{AttributeName, AttributeValue, parse_keyword_value};
+use crate::attributes::{AttributeName, AttributeValue, TargetKind, parse_keyword_value};
 use crate::blocks::{Block, BlockWithContext, FileBlocks};
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
-use crate::target_reference::TargetKind;
 use crate::validators::{
     AsyncValidator, PatternContent, TargetFiles, TypedValidator, ValidationContext,
     ValidationReport, Validator, ValidatorTrace, Violation, block_content_for_pattern,

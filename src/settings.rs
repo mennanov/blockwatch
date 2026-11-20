@@ -166,7 +166,7 @@ fn validator_selection(settings: &RawSettings) -> anyhow::Result<ValidatorSelect
     let parse = |names: &[String]| {
         names
             .iter()
-            .map(|name| parse_validator(name))
+            .map(|name| Validator::parse(name))
             .collect::<anyhow::Result<HashSet<_>>>()
     };
     let enable = parse(&settings.enable)?;
@@ -229,11 +229,6 @@ pub(crate) enum BlockSelection {
     Only(Vec<BlockAddress>),
     /// Every block except the ones that an address selects.
     Skip(Vec<BlockAddress>),
-}
-
-/// Looks up the validator called `value`. Returns an error if there is no validator with that name.
-pub(crate) fn parse_validator(value: &str) -> anyhow::Result<Validator> {
-    Validator::parse(value)
 }
 
 #[cfg(test)]

@@ -1,13 +1,14 @@
-use crate::attributes::{Format, Formats, Mode, TargetPaths, WHOLE_GROUP};
+use crate::attributes::{
+    Format, Formats, Mode, TargetKind, TargetPaths, TargetReference, WHOLE_GROUP, parse_number,
+};
 use crate::blocks::{Block, FileBlocks};
 use crate::fs::FileSystem;
 use crate::position::LineIndex;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
-use crate::target_reference::{TargetKind, TargetReference};
 use crate::validators::{
     self, SyncValidator, TargetFiles, TargetResult, ValidationReport, Validator, ValidatorTrace,
-    Violation, parse_number,
+    Violation,
 };
 use anyhow::{Context, anyhow};
 use heck::ToSnakeCase;

@@ -1,6 +1,6 @@
 //! Reads the settings from the config file, `blockwatch.toml`.
 
-use crate::attributes::{AttributeEntry, Attributes};
+use crate::attributes::{AttributeEntry, Attributes, TargetReference};
 use crate::diff_parser::{DiffChanges, LineChanges};
 use crate::fs::FileSystem;
 use crate::language_parsers::toml;
@@ -10,7 +10,6 @@ use crate::repo_path::RepoPath;
 use crate::settings::RawSettings;
 use crate::symbol_path::SymbolPath;
 use crate::symbols::Symbols;
-use crate::target_reference::TargetReference;
 use crate::virtual_blocks::{ConfigEntry, Locator, TargetIf, TargetPattern, VirtualBlock};
 use anyhow::{Context, anyhow, bail};
 use serde::Deserialize;
@@ -505,7 +504,6 @@ mod tests {
     use crate::diff_parser::test_utils::diff_changes;
     use crate::diff_parser::{LineChange, LineChangeKind};
     use crate::fs::test_utils::FakeFileSystem;
-    use crate::target_reference::TargetReference;
     use std::path::PathBuf;
 
     /// Reads `text` as the default config file, with no diff.

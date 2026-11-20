@@ -1,16 +1,19 @@
 //! Block attributes, their names, and their parsed values.
 
 mod line_count;
+mod number;
 mod same_as;
 mod severity;
 mod sort;
+mod target_reference;
 
 pub(crate) use line_count::Constraint;
+pub(crate) use number::parse_number;
 pub(crate) use same_as::{Format, Formats, Mode, TargetPaths, WHOLE_GROUP};
 pub(crate) use severity::Severity;
 pub(crate) use sort::{SortFormat, SortOrder};
+pub(crate) use target_reference::{ResolvedTarget, TargetKind, TargetReference};
 
-use crate::target_reference::TargetReference;
 use anyhow::{Context, anyhow, bail};
 use regex::Regex;
 use serde::Serialize;

@@ -2,7 +2,7 @@
 
 use crate::blocks::BlockAddress;
 use crate::report::RunMode;
-use crate::settings::{RawSettings, parse_validator};
+use crate::settings::RawSettings;
 use crate::validators::{Validator, ViolationAddress};
 use anyhow::Context;
 use clap::{Parser, builder::ValueParser, crate_version};
@@ -183,7 +183,7 @@ pub(crate) struct ValidationFlags {
         long = "disable",
         value_name = "VALIDATOR",
         action = clap::ArgAction::Append,
-        value_parser = ValueParser::new(parse_validator),
+        value_parser = ValueParser::new(Validator::parse),
     )]
     disabled_validators: Vec<Validator>,
 
@@ -193,7 +193,7 @@ pub(crate) struct ValidationFlags {
         long = "enable",
         value_name = "VALIDATOR",
         action = clap::ArgAction::Append,
-        value_parser = ValueParser::new(parse_validator),
+        value_parser = ValueParser::new(Validator::parse),
     )]
     enabled_validators: Vec<Validator>,
 
