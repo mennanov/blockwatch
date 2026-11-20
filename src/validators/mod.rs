@@ -16,9 +16,9 @@ mod targets;
 mod violation;
 mod violation_address;
 
-pub(crate) use context::ValidationContext;
+pub(crate) use context::{BlockSelection, ValidationContext};
 pub(crate) use log::{ValidationLog, ValidationReport, ValidatorTrace};
-pub(crate) use run::{detect_validators, diff_gated_block_count, run};
+pub(crate) use run::{ValidatorSelection, detect_validators, diff_gated_block_count, run};
 pub(crate) use violation::{SimpleDiagnostic, Violation, ViolationRange};
 pub(crate) use violation_address::ViolationAddress;
 

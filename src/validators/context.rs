@@ -7,7 +7,6 @@ use crate::fs::FileSystem;
 use crate::languages::LanguageParsers;
 use crate::repo_path::RepoPath;
 use crate::scan::{self, ScanMode};
-use crate::settings::BlockSelection;
 use anyhow::bail;
 use std::collections::HashMap;
 
@@ -37,6 +36,17 @@ impl std::fmt::Debug for ValidationContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ValidationContext").finish_non_exhaustive()
     }
+}
+
+/// Which blocks a run checks. Each address is `FILE:BLOCK_NAME`.
+#[derive(Debug, PartialEq)]
+pub(crate) enum BlockSelection {
+    /// Every block.
+    All,
+    /// Only the blocks that an address selects.
+    Only(Vec<BlockAddress>),
+    /// Every block except the ones that an address selects.
+    Skip(Vec<BlockAddress>),
 }
 
 impl ValidationContext {

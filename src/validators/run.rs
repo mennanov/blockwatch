@@ -4,7 +4,7 @@ use super::{
     AsyncValidator, SyncValidator, TypedValidator, ValidationContext, ValidationLog, Validator,
 };
 use crate::fs::FileSystem;
-use crate::settings::ValidatorSelection;
+use std::collections::HashSet;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 
@@ -107,6 +107,28 @@ pub(crate) fn run(
 type SyncValidators = Vec<(Validator, Box<dyn SyncValidator>)>;
 type AsyncValidators = Vec<(Validator, Box<dyn AsyncValidator>)>;
 
+/// Which validators a run uses.
+#[derive(Debug, PartialEq)]
+pub(crate) enum ValidatorSelection {
+    /// Every validator.
+    All,
+    /// Only these validators.
+    Only(HashSet<Validator>),
+    /// Every validator except these.
+    Skip(HashSet<Validator>),
+}
+
+impl ValidatorSelection {
+    /// Whether the run uses `validator`.
+    pub(crate) fn includes(&self, validator: Validator) -> bool {
+        match self {
+            ValidatorSelection::All => true,
+            ValidatorSelection::Only(validators) => validators.contains(&validator),
+            ValidatorSelection::Skip(validators) => !validators.contains(&validator),
+        }
+    }
+}
+
 /// Counts the blocks in `context` carrying a rule that cannot fire unless a diff is supplied; see
 /// [`Validator::needs_diff`]. A validator that `selection` leaves out does not count.
 pub(crate) fn diff_gated_block_count(
@@ -184,12 +206,11 @@ mod tests {
     use crate::fs::test_utils::FakeFileSystem;
     use crate::position::Position;
     use crate::repo_path::RepoPath;
-    use crate::settings::ValidatorSelection;
     use crate::validators;
     use crate::validators::test_utils::{merge_validation_contexts, validation_context};
     use crate::validators::{
         AsyncValidator, SyncValidator, TypedValidator, ValidationContext, ValidationReport,
-        Validator, Violation, ViolationRange, detect_validators,
+        Validator, ValidatorSelection, Violation, ViolationRange, detect_validators,
     };
     use async_trait::async_trait;
     use std::collections::{HashMap, HashSet};

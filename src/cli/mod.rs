@@ -16,9 +16,9 @@ use crate::output::{
 };
 use crate::repo_path::RepoPath;
 use crate::scan;
-use crate::settings::{BlockSelection, Settings};
+use crate::settings::Settings;
 use crate::validators;
-use crate::validators::{Violation, ViolationAddress};
+use crate::validators::{BlockSelection, Violation, ViolationAddress};
 use anyhow::Context;
 use clap::Parser;
 use path_arguments::PathArguments;

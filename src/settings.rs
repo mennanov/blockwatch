@@ -3,7 +3,7 @@
 use crate::blocks::BlockAddress;
 use crate::fs::glob_builder;
 use crate::languages::Language;
-use crate::validators::Validator;
+use crate::validators::{BlockSelection, Validator, ValidatorSelection};
 use anyhow::{Context, bail};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::collections::{HashMap, HashSet};
@@ -196,39 +196,6 @@ fn block_selection(settings: &RawSettings) -> anyhow::Result<BlockSelection> {
         (true, false) => Ok(BlockSelection::Skip(skip)),
         (false, false) => bail!("`only-block` and `skip-block` must not both be set"),
     }
-}
-
-/// Which validators a run uses.
-#[derive(Debug, PartialEq)]
-pub(crate) enum ValidatorSelection {
-    /// Every validator.
-    All,
-    /// Only these validators.
-    Only(HashSet<Validator>),
-    /// Every validator except these.
-    Skip(HashSet<Validator>),
-}
-
-impl ValidatorSelection {
-    /// Whether the run uses `validator`.
-    pub(crate) fn includes(&self, validator: Validator) -> bool {
-        match self {
-            ValidatorSelection::All => true,
-            ValidatorSelection::Only(validators) => validators.contains(&validator),
-            ValidatorSelection::Skip(validators) => !validators.contains(&validator),
-        }
-    }
-}
-
-/// Which blocks a run checks. Each address is `FILE:BLOCK_NAME`.
-#[derive(Debug, PartialEq)]
-pub(crate) enum BlockSelection {
-    /// Every block.
-    All,
-    /// Only the blocks that an address selects.
-    Only(Vec<BlockAddress>),
-    /// Every block except the ones that an address selects.
-    Skip(Vec<BlockAddress>),
 }
 
 #[cfg(test)]
