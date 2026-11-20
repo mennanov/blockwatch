@@ -257,6 +257,7 @@ mod tests {
 #[cfg(test)]
 pub(crate) mod test_utils {
     use crate::blocks::FileBlocks;
+    use crate::blocks::VirtualBlock;
     use crate::diff::test_utils::diff_changes;
     use crate::diff::{LineChange, LineChangeKind};
     use crate::fs::test_utils::{FakeFileSystem, path_filter_all};
@@ -264,7 +265,6 @@ pub(crate) mod test_utils {
     use crate::repo_path::RepoPath;
     use crate::scan::{Scan, ScanMode};
     use crate::validators::{ValidationContext, ValidationReport};
-    use crate::virtual_blocks::VirtualBlock;
     use std::collections::HashMap;
     use std::sync::Arc;
 

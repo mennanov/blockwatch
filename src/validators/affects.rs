@@ -342,6 +342,7 @@ fn affects_violation(
 #[cfg(test)]
 mod validate_tests {
     use super::*;
+    use crate::blocks::test_utils::virtual_block;
     use crate::diff::test_utils::diff_changes;
     use crate::diff::{LineChange, LineChangeKind};
     use crate::fs::test_utils::FakeFileSystem;
@@ -351,7 +352,6 @@ mod validate_tests {
         checked_lines, merge_validation_contexts, validation_context,
         validation_context_with_changes, violation_count, with_virtual_blocks,
     };
-    use crate::virtual_blocks::test_utils::virtual_block;
 
     /// Builds a validator with a fake filesystem seeded with `files` (path, contents).
     pub(super) fn validator(files: &[(&str, &str)]) -> AffectsValidator<FakeFileSystem> {

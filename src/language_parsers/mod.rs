@@ -42,8 +42,8 @@ mod typescript;
 mod xml;
 mod yaml;
 
-use crate::block_parser::BlocksFromCommentsParser;
 use crate::blocks::Block;
+use crate::blocks::BlocksFromCommentsParser;
 use crate::language_resolver::{Language, LanguageResolver};
 use crate::position::{Position, character_column_at};
 use crate::symbols::{Symbols, SymbolsParser};

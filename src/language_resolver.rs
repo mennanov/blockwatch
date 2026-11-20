@@ -9,7 +9,7 @@ use std::sync::LazyLock;
 ///
 /// Two names that need different parsers are two variants, even when people call them one
 /// language: `Bash` and `Zsh`, `TypeScript` and `Tsx`, `Go` and `GoModule`.
-// <block name="languages" affects="src/blocks.rs:supported-extensions, README.md:supported-grammar">
+// <block name="languages" affects="src/blocks/mod.rs:supported-extensions, README.md:supported-grammar">
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Language {
     Bash,

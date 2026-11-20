@@ -1,6 +1,7 @@
 //! Reads the settings from the config file, `blockwatch.toml`.
 
 use crate::attributes::{AttributeEntry, Attributes, TargetReference};
+use crate::blocks::{ConfigEntry, Locator, TargetIf, TargetPattern, VirtualBlock};
 use crate::diff::{DiffChanges, LineChanges};
 use crate::fs::{FileSystem, GLOB_CHARACTERS, PathsGlob};
 use crate::language_parsers::toml;
@@ -9,7 +10,6 @@ use crate::repo_path::RepoPath;
 use crate::settings::RawSettings;
 use crate::symbol_path::SymbolPath;
 use crate::symbols::Symbols;
-use crate::virtual_blocks::{ConfigEntry, Locator, TargetIf, TargetPattern, VirtualBlock};
 use anyhow::{Context, anyhow, bail};
 use serde::Deserialize;
 use serde::de::IgnoredAny;

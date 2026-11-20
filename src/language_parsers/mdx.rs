@@ -4,8 +4,8 @@
 //! crates.io, so the `markdown` crate finds those spans, and tree-sitter-javascript finds the
 //! comments in each one.
 
-use crate::block_parser::Blocks;
 use crate::blocks::Block;
+use crate::blocks::Blocks;
 use crate::language_parsers::markdown::{nodes_in_order, section_symbols};
 use crate::language_parsers::{
     Comment, CommentsParser, LanguageParser, SLASH_MARKERS, TreeSitterCommentsParser,

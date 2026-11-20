@@ -1,5 +1,6 @@
 //! The blocks of a run, and what the validators need to read more files.
 
+use crate::blocks::VirtualBlock;
 use crate::blocks::{BlockAddress, BlockListing, FileBlocks};
 use crate::diff::DiffChanges;
 use crate::fs::FileSystem;
@@ -7,7 +8,6 @@ use crate::language_parsers::LanguageParsers;
 use crate::repo_path::RepoPath;
 use crate::scan::{self, ScanMode};
 use crate::settings::BlockSelection;
-use crate::virtual_blocks::VirtualBlock;
 use anyhow::bail;
 use std::collections::{BTreeMap, HashMap};
 
@@ -172,11 +172,11 @@ impl ValidationContext {
 mod tests {
     use super::*;
     use crate::blocks::test_utils::block_addresses;
+    use crate::blocks::test_utils::virtual_block;
     use crate::fs::test_utils::FakeFileSystem;
     use crate::validators::test_utils::{
         merge_validation_contexts, validation_context, with_virtual_blocks,
     };
-    use crate::virtual_blocks::test_utils::virtual_block;
     use std::sync::Arc;
 
     #[test]

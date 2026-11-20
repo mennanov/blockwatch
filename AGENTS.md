@@ -174,8 +174,8 @@ The whole pipeline is in `src/cli.rs`. `src/main.rs` only calls `blockwatch::run
    existing file or directory into a glob first, so `src` selects `src/**`. `LanguageResolver::resolve` picks each
    file's `Language` from its name, using the settings' extension mappings too.
 6. For each file, the matching `language_parsers::<lang>` (usually a tree-sitter grammar) finds the comments.
-   `tag_parser` and `block_parser` turn the comment text into `Block` values, with their attributes and their byte and
-   line ranges.
+   `blocks::tags` and `blocks::from_comments` turn the comment text into `Block` values, with their attributes and
+   their byte and line ranges.
    `VirtualBlock::resolve` finds each virtual block in the file, by its `Locator`, and adds it as a `Block` too. A file
    without a grammar is read as plain text: it has no tags, only its virtual blocks. A target that does not resolve
    stops the run. `--only-changed` also parses the file of a virtual block whose entry the diff
@@ -213,8 +213,10 @@ The main modules:
 - `src/config.rs` — reads the config file into a `RawSettings` and the virtual blocks, using `toml_edit`'s serde
   support. Only the errors that `toml_edit` raises itself, such as an unknown key, show a line and column. An error
   about a `[[block]]` entry shows the line of its header, which `serde_spanned` gives.
-- `src/virtual_blocks.rs` — `VirtualBlock`, a block that the config file declares in one file, instead of tags in a
-  comment. A file that can't or must not hold a tag, such as `package.json` or a prompt, can only get blocks this way.
+- `src/blocks/` — `Block` and the types that describe the blocks of a file, in `mod.rs`. `tags.rs` parses one tag,
+  `from_comments.rs` turns a file's comments into blocks, and `address.rs` holds `BlockAddress`, `FILE:BLOCK_NAME`.
+- `src/blocks/virtual_block.rs` — `VirtualBlock`, a block that the config file declares in one file, instead of tags
+  in a comment. A file that can't or must not hold a tag, such as `package.json` or a prompt, can only get blocks this way.
   It is a block of the file it wraps. Its `Locator` says how to find it:
   - `Symbol`: the content is what a reference to the symbol reads: its value, or else the definition's text. A value
     written as is, such as a number or a Markdown section, keeps its place in the file. A value with quotes or escapes
@@ -236,10 +238,10 @@ The main modules:
   extension mapping's value into a `Language` with `Language::from_key`.
 - `src/language_parsers/` — one parser for each language, most of them a tree-sitter grammar. Markdown and MDX use
   the `markdown` crate, Makefile uses the `makefile-lossless` crate, and Lean has its own scanner. Each language has
-  a `parser()` that returns a `LanguageParser`, which knows which syntax nodes are comments. `src/block_parser.rs`
-  turns those comments into blocks. `LanguageParsers::new` in `language_parsers/mod.rs` builds one parser for each
-  `Language`. A grammar that tree-sitter can't load is a build bug, so it panics. `parser_for` asks the resolver for a
-  file's `Language`, then returns its parser.
+  a `parser()` that returns a `LanguageParser`, which knows which syntax nodes are comments.
+  `src/blocks/from_comments.rs` turns those comments into blocks. `LanguageParsers::new` in `language_parsers/mod.rs`
+  builds one parser for each `Language`. A grammar that tree-sitter can't load is a build bug, so it panics.
+  `parser_for` asks the resolver for a file's `Language`, then returns its parser.
   **To add a language, add a module here. Then add a `Language` variant, its rows in `NAMES`, a field in
   `LanguageParsers`, its arm in `LanguageParsers::parser`, and its parser in `LanguageParsers::new`.**
 
@@ -282,7 +284,7 @@ The main modules:
 - `src/diff/` — `LineChange`s, kept in `LineChanges` for a file and in `DiffChanges` for the whole diff, in
   `mod.rs`. `unified.rs` wraps `unidiff` to read them from a unified diff. `LineChanges::touches` decides whether
   they touch a range of the file, such as a block's start tag or a symbol's definition. A block's content has its own
-  check in `blocks.rs`, because a deletion right where the content starts removes content. The results end up in
+  check in `blocks/mod.rs`, because a deletion right where the content starts removes content. The results end up in
   `is_content_modified` and `is_start_tag_modified` on `BlockWithContext`, which decide which blocks count as
   changed.
 

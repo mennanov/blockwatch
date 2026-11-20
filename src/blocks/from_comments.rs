@@ -1,7 +1,7 @@
+use super::tags::{BlockTag, MalformedTag, WinnowBlockTagParser};
 use crate::blocks::{Block, Content};
 use crate::language_parsers::{Comment, CommentsParser};
 use crate::position::Position;
-use crate::tag_parser::{BlockTag, MalformedTag, WinnowBlockTagParser};
 use std::collections::{HashMap, VecDeque};
 use std::iter::Peekable;
 use std::ops::Range;

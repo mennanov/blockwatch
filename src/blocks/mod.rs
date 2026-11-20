@@ -1,12 +1,20 @@
 //! The `Block` type and the other types that describe the blocks of a file.
 
+mod address;
+mod from_comments;
+mod tags;
+mod virtual_block;
+
+pub(crate) use address::BlockAddress;
+pub(crate) use from_comments::{Blocks, BlocksFromCommentsParser};
+pub(crate) use virtual_block::{ConfigEntry, Locator, TargetIf, TargetPattern, VirtualBlock};
+
 use crate::attributes::Attributes;
 use crate::diff::{self, LineChange, LineChangeKind, LineChanges};
 use crate::position::Position;
 use crate::repo_path::RepoPath;
 use crate::validators::Validator;
-use crate::virtual_blocks::ConfigEntry;
-use anyhow::{Context, anyhow, bail};
+use anyhow::anyhow;
 use serde::Serialize;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
@@ -103,48 +111,6 @@ pub(crate) struct BlockKey {
     /// can start at the same place, such as TOML's `/a` and `/a/b` in `a.b = 1`, but they never
     /// share a config line.
     config_line: Option<usize>,
-}
-
-/// What tells a named block apart from every other block in the repository: `FILE:BLOCK_NAME`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct BlockAddress {
-    file: RepoPath,
-    name: String,
-}
-
-impl BlockAddress {
-    /// The address of the block called `name` in `file`.
-    pub(crate) fn new(file: RepoPath, name: String) -> Self {
-        Self { file, name }
-    }
-
-    /// Parses `FILE:BLOCK_NAME`.
-    ///
-    /// Returns an error for any other address, such as `FILE` alone, an empty segment, or a file
-    /// outside the repository.
-    pub(crate) fn parse(address: &str) -> anyhow::Result<Self> {
-        // `FILE` alone could select every block in a file, but a path argument or `--ignore`
-        // already does that.
-        match address.split(':').collect::<Vec<_>>().as_slice() {
-            [file, name] if !file.is_empty() && !name.is_empty() => Ok(Self {
-                file: RepoPath::from_reference(file)
-                    .with_context(|| format!("invalid file in the block address \"{address}\""))?,
-                name: name.to_string(),
-            }),
-            _ => bail!("expected FILE:BLOCK_NAME, got \"{address}\""),
-        }
-    }
-
-    /// The file the block is in.
-    pub(crate) fn file(&self) -> &RepoPath {
-        &self.file
-    }
-}
-
-impl fmt::Display for BlockAddress {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{}:{}", self.file, self.name)
-    }
 }
 
 impl Content {
@@ -405,7 +371,7 @@ impl<'a> From<&'a BlockWithContext> for BlockListing<'a> {
 #[cfg(test)]
 mod block_address_tests {
     use crate::attributes::test_utils::text_attributes;
-    use crate::blocks::{Block, BlockAddress, Content, Declaration};
+    use crate::blocks::{Block, Content, Declaration};
     use crate::position::Position;
     use crate::repo_path::RepoPath;
 
@@ -439,35 +405,6 @@ mod block_address_tests {
         let block = block_with_attributes(&[("keep-sorted", "asc")]);
 
         assert_eq!(block.address(&repo_path("a.py")), None);
-    }
-
-    #[test]
-    fn parsed_address_equals_the_address_of_that_block() -> anyhow::Result<()> {
-        let address = BlockAddress::parse("./a.md:n")?;
-        assert_eq!(
-            address,
-            BlockAddress::new(repo_path("a.md"), "n".to_string())
-        );
-        assert_ne!(
-            address,
-            BlockAddress::new(repo_path("a.md"), "other".to_string())
-        );
-        assert_ne!(
-            address,
-            BlockAddress::new(repo_path("b.md"), "n".to_string())
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn address_without_two_non_empty_segments_is_rejected() {
-        for address in ["a.md", "a.md:n:keep-unique", "a.md:", ":n"] {
-            let error = BlockAddress::parse(address).expect_err("the address must be rejected");
-            assert!(
-                format!("{error:#}").contains("expected FILE:BLOCK_NAME"),
-                "{address}: {error:#}"
-            );
-        }
     }
 }
 
@@ -1068,6 +1005,10 @@ mod supported_languages_tests {
 #[cfg(test)]
 pub(crate) mod test_utils {
     use super::*;
+
+    pub(crate) use super::virtual_block::test_utils::{
+        virtual_block, virtual_block_with_target_if,
+    };
 
     /// The 1-based start line of `key`.
     pub(crate) fn block_key_start_line(key: &BlockKey) -> usize {

@@ -1,12 +1,12 @@
 //! The repository scan that turns source files into the blocks to validate.
 
 use crate::blocks::{Block, BlockWithContext, Declaration, FileBlocks};
+use crate::blocks::{ConfigEntry, Locator, VirtualBlock};
 use crate::diff::{DiffChanges, LineChanges};
 use crate::fs::{FileSystem, PathFilter};
 use crate::language_parsers::{LanguageParsers, SharedLanguageParser};
 use crate::repo_path::RepoPath;
 use crate::symbols::Symbols;
-use crate::virtual_blocks::{ConfigEntry, Locator, VirtualBlock};
 use anyhow::{Context, anyhow, bail};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -605,6 +605,7 @@ fn reject_duplicate_name(
 #[allow(clippy::single_range_in_vec_init)]
 mod parse_blocks_tests {
     use super::*;
+    use crate::blocks::test_utils::{self, virtual_block_with_target_if};
     use crate::blocks::*;
     use crate::diff::test_utils::diff_changes;
     use crate::diff::{LineChange, LineChangeKind};
@@ -615,7 +616,6 @@ mod parse_blocks_tests {
     use crate::language_parsers::LanguageParsers;
     use crate::language_resolver::Language;
     use crate::position::test_utils::substr_range;
-    use crate::virtual_blocks::test_utils::{self, virtual_block_with_target_if};
     use std::ops::Range;
 
     /// A newly added line.

@@ -157,6 +157,7 @@ fn counted(count: usize, one: &str, many: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blocks::test_utils::virtual_block;
     use crate::diff::DiffChanges;
     use crate::fs::test_utils::{FakeFileSystem, path_filter_all};
     use crate::language_parsers::LanguageParsers;
@@ -167,7 +168,6 @@ mod tests {
     use crate::validators::{
         ValidationLog, ValidationReport, Validator, Violation, ViolationRange,
     };
-    use crate::virtual_blocks::test_utils::virtual_block;
     use std::collections::HashMap;
 
     const CONTENTS: &str = r#"# <block name="both" keep-sorted="asc" line-count="<=2">

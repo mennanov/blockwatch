@@ -8,7 +8,7 @@ use winnow::token::{any, literal, take_till, take_while};
 
 /// Represents a parsed block tag.
 #[derive(Debug)]
-pub(crate) enum BlockTag {
+pub(super) enum BlockTag {
     /// A start tag.
     Start {
         /// Position of the start tag in a comment.
@@ -26,13 +26,13 @@ pub(crate) enum BlockTag {
 /// A start or end tag that was recognized as an attempt (see [`looks_like_tag_attempt`]) but
 /// failed to parse as a complete tag, for example, a missing closing `>`.
 #[derive(Debug)]
-pub(crate) struct MalformedTag {
+pub(super) struct MalformedTag {
     /// Byte offset of the offending `<` within the comment text passed to the parser.
-    pub(crate) position: usize,
+    pub(super) position: usize,
 }
 
 /// A winnow-based parser for block tags.
-pub(crate) struct WinnowBlockTagParser<'source> {
+pub(super) struct WinnowBlockTagParser<'source> {
     source: &'source str,
     cursor: usize,
 }
@@ -43,12 +43,12 @@ impl<'source> WinnowBlockTagParser<'source> {
     ///
     /// Callers resume scanning a comment they have already partly consumed by passing back the
     /// [`Self::cursor`] of the previous parser.
-    pub(crate) fn new(source: &'source str, cursor: usize) -> Self {
+    pub(super) fn new(source: &'source str, cursor: usize) -> Self {
         Self { source, cursor }
     }
 
     /// The byte offset just past the last tag returned, for resuming the scan.
-    pub(crate) fn cursor(&self) -> usize {
+    pub(super) fn cursor(&self) -> usize {
         self.cursor
     }
 

@@ -19,7 +19,6 @@
 #![warn(clippy::self_named_module_files)]
 
 mod attributes;
-mod block_parser;
 mod blocks;
 mod cli;
 mod config;
@@ -38,9 +37,7 @@ mod scan;
 mod settings;
 mod symbol_path;
 mod symbols;
-mod tag_parser;
 mod validators;
-mod virtual_blocks;
 
 pub use cli::run;
 

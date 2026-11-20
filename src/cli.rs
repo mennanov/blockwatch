@@ -3,6 +3,7 @@
 
 use crate::attributes::Severity;
 use crate::blocks::BlockAddress;
+use crate::blocks::VirtualBlock;
 use crate::config;
 use crate::diff::{self, DiffChanges};
 use crate::explain::Explanation;
@@ -17,7 +18,6 @@ use crate::scan;
 use crate::settings::{BlockSelection, Settings};
 use crate::validators;
 use crate::validators::{Violation, ViolationAddress};
-use crate::virtual_blocks::VirtualBlock;
 use anyhow::Context;
 use clap::Parser;
 use std::collections::BTreeMap;

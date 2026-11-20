@@ -791,6 +791,7 @@ struct PathsTrace {
 #[cfg(test)]
 mod validate_tests {
     use super::*;
+    use crate::blocks::test_utils::virtual_block;
     use crate::diff::{LineChange, LineChangeKind};
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
@@ -799,7 +800,6 @@ mod validate_tests {
     use crate::validators::test_utils::{
         checked_lines, merge_validation_contexts, violation_count, with_virtual_blocks,
     };
-    use crate::virtual_blocks::test_utils::virtual_block;
 
     /// Build a validator with a fake filesystem seeded with `files` (path, contents). Used by every
     /// same-as unit test; pass `&[]` when the target is in-scope (no disk read).
