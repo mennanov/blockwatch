@@ -56,7 +56,7 @@ const PATH_UNSAFE: &AsciiSet = &CONTROLS
 
 /// A blockwatch run, in the shape a SARIF log is serialized in.
 #[derive(Serialize, Debug)]
-pub(crate) struct SarifLog<'a> {
+pub(super) struct SarifLog<'a> {
     #[serde(rename = "$schema")]
     schema: &'static str,
     version: &'static str,
@@ -69,7 +69,7 @@ impl<'a> SarifLog<'a> {
     /// The log always has exactly one run, and it describes only the validators that reported
     /// something. Its results come out in a fixed order, so two runs over an unchanged tree will
     /// produce identical outputs.
-    pub(crate) fn new(violations: &'a BTreeMap<RepoPath, Vec<Violation>>) -> Self {
+    pub(super) fn new(violations: &'a BTreeMap<RepoPath, Vec<Violation>>) -> Self {
         let diagnostics = diagnostics_in_stable_order(violations);
         let rules = rules_that_fired(&diagnostics);
         let results = sarif_results(&diagnostics, &rules);

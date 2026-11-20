@@ -1,6 +1,6 @@
 # CI & Git Hooks Integration
 
-<!-- <block affects="src/flags.rs:help-text"> -->
+<!-- <block affects="src/cli/flags.rs:help-text"> -->
 
 The hooks and the GitHub Action check every block in the repository. They pass the diff with `--diff`, so that the rules
 about changes, such as [`affects`](validators/affects.md), can fire. A change can break a block in a file it never

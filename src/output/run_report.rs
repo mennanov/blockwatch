@@ -1,7 +1,7 @@
 //! Builds the report that `--verbosity` prints: the files a run scanned, the blocks it found, and
 //! the validators that checked them.
 
-use crate::blocks::BlockListing;
+use super::BlockListing;
 use crate::repo_path::RepoPath;
 use crate::scan::ScanStats;
 use crate::validators::{ValidationContext, ValidationLog};

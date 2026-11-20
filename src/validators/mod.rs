@@ -378,7 +378,7 @@ pub(crate) mod test_utils {
 
     /// Combines several single-file contexts into one, so a test can exercise a validator that
     /// resolves references across files.
-    pub(super) fn merge_validation_contexts(
+    pub(crate) fn merge_validation_contexts(
         contexts: Vec<Arc<ValidationContext>>,
     ) -> Arc<ValidationContext> {
         let parsers = LanguageParsers::new();

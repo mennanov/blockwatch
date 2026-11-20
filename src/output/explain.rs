@@ -1,6 +1,6 @@
 //! The output of the `explain` subcommand.
 
-use crate::blocks::{BlockListing, ContentListing};
+use super::listing::{BlockListing, ContentListing};
 use crate::repo_path::RepoPath;
 use crate::settings::Settings;
 use crate::validators::{ValidationContext, ValidationLog, Validator, ValidatorTrace};
@@ -55,7 +55,7 @@ impl<'a> Explanation<'a> {
                 .flatten()
                 .map(|(validator, trace)| (*validator, trace))
                 .collect(),
-            content: block.content.listing(&file_blocks.file_content),
+            content: ContentListing::new(&block.content, &file_blocks.file_content),
             disabled: Validator::iter()
                 .filter(|validator| {
                     validator.is_turned_on_by(&block.attributes)

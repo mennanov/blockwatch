@@ -1,7 +1,7 @@
 //! The blocks of a run, and what the validators need to read more files.
 
 use crate::blocks::VirtualBlock;
-use crate::blocks::{BlockAddress, BlockListing, FileBlocks};
+use crate::blocks::{BlockAddress, FileBlocks};
 use crate::diff::DiffChanges;
 use crate::fs::FileSystem;
 use crate::language_parsers::LanguageParsers;
@@ -9,7 +9,7 @@ use crate::repo_path::RepoPath;
 use crate::scan::{self, ScanMode};
 use crate::settings::BlockSelection;
 use anyhow::bail;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 /// Everything the validators are given to work with, shared read-only across all of them.
 ///
@@ -150,22 +150,6 @@ impl ValidationContext {
     pub(super) fn line_changes(&self) -> &DiffChanges {
         &self.line_changes
     }
-
-    /// Describes every block, with the files sorted by path. The blocks of a file are in source
-    /// order, as [`scan::parse_file`] keeps them.
-    pub(crate) fn listings(&self) -> BTreeMap<&RepoPath, Vec<BlockListing<'_>>> {
-        self.blocks
-            .iter()
-            .map(|(path, file_blocks)| {
-                let listings = file_blocks
-                    .blocks_with_context
-                    .iter()
-                    .map(BlockListing::from)
-                    .collect();
-                (path, listings)
-            })
-            .collect()
-    }
 }
 
 #[cfg(test)]
@@ -178,90 +162,6 @@ mod tests {
         merge_validation_contexts, validation_context, with_virtual_blocks,
     };
     use std::sync::Arc;
-
-    #[test]
-    fn listings_returns_correct_listings() -> anyhow::Result<()> {
-        let contents = r#"/* <block name="top"> */ let a = "cc"; /* </block> Block on the first line. */
-// <block name="first"> Block on the second line.
-fn a() {}
-// </block>
-//     <block name="second"> Block with indent.
-fn b() {}
-// </block>
-/* <block name="bottom"> */ fn c() {} /* </block> Block on the last line. */"#;
-        let context = validation_context("example.rs", contents);
-        let report = context.listings();
-
-        assert_eq!(report.len(), 1);
-        let listings = &report[&RepoPath::from_reference("example.rs")?];
-        assert_eq!(listings.len(), 4);
-        assert_eq!(
-            serde_json::to_value(listings)?,
-            serde_json::json!([
-                {
-                    "name": "top",
-                    "line": 1,
-                    "column": 4,
-                    "is_content_modified": true,
-                    "attributes": {
-                        "name": "top"
-                    }
-                },
-                {
-                    "name": "first",
-                    "line": 2,
-                    "column": 4,
-                    "is_content_modified": true,
-                    "attributes": {
-                        "name": "first",
-                    }
-                },
-                {
-                    "name": "second",
-                    "line": 5,
-                    "column": 8,
-                    "is_content_modified": true,
-                    "attributes": {
-                        "name": "second"
-                    }
-                },
-                {
-                    "name": "bottom",
-                    "line": 8,
-                    "column": 4,
-                    "is_content_modified": true,
-                    "attributes": {
-                        "name": "bottom"
-                    }
-                }
-            ])
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn listings_lists_files_sorted_by_path() {
-        let names = [
-            "c.rs", "a.rs", "j.rs", "e.rs", "b.rs", "h.rs", "d.rs", "g.rs", "i.rs", "f.rs",
-        ];
-        let context = merge_validation_contexts(
-            names
-                .iter()
-                .map(|name| validation_context(name, "// <block>\n// </block>\n"))
-                .collect(),
-        );
-
-        let paths: Vec<String> = context
-            .listings()
-            .into_keys()
-            .map(|path| path.to_string())
-            .collect();
-
-        let mut sorted = names.to_vec();
-        sorted.sort();
-        assert_eq!(paths, sorted);
-    }
 
     /// The files of the block selection tests, as paths and contents. `a.py` has two named blocks
     /// and an unnamed one. `b.py` has a block with the same name as one in `a.py`.

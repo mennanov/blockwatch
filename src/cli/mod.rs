@@ -1,25 +1,27 @@
 //! The whole run: reads the flags and the input, runs the validators, `list` or `explain`, and
 //! writes the output.
 
+mod flags;
+mod path_arguments;
+
 use crate::attributes::Severity;
 use crate::blocks::BlockAddress;
 use crate::blocks::VirtualBlock;
 use crate::config;
 use crate::diff::{self, DiffChanges};
-use crate::explain::Explanation;
-use crate::flags;
 use crate::fs::FileSystem;
 use crate::language_parsers;
-use crate::path_arguments::PathArguments;
+use crate::output::{
+    self, Explanation, write_json, write_json_violations, write_line, write_sarif_violations,
+};
 use crate::repo_path::RepoPath;
-use crate::report;
-use crate::sarif;
 use crate::scan;
 use crate::settings::{BlockSelection, Settings};
 use crate::validators;
 use crate::validators::{Violation, ViolationAddress};
 use anyhow::Context;
 use clap::Parser;
+use path_arguments::PathArguments;
 use std::collections::BTreeMap;
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
@@ -63,7 +65,7 @@ pub fn run() -> ExitCode {
 fn run_skill() -> anyhow::Result<()> {
     // The skill is built into the binary, so the text always matches this version. The version is
     // filled in here rather than written in the file, so it can't fall behind `Cargo.toml`.
-    let skill = include_str!("skill.md").replace("{{version}}", env!("CARGO_PKG_VERSION"));
+    let skill = include_str!("../skill.md").replace("{{version}}", env!("CARGO_PKG_VERSION"));
     // `write_line` adds the newline that ends the output, so the file's own one is dropped.
     write_line(std::io::stdout(), skill.trim_end())
 }
@@ -112,7 +114,7 @@ fn run_explain(args: &flags::Args, address: &BlockAddress) -> anyhow::Result<Exi
 /// Runs the `list` subcommand: parses every block in scope and writes a JSON report to stdout.
 fn run_list(args: &flags::Args) -> anyhow::Result<()> {
     let Prepared { context, .. } = prepare(args)?;
-    let report = context.listings();
+    let report = output::listings(&context);
     write_json(std::io::stdout(), &report).context("failed to list blocks")
 }
 
@@ -224,7 +226,7 @@ fn apply_suppressions(
 /// Writes the run report to stdout at the given verbosity, and flushes it.
 fn write_report(
     verbosity: flags::Verbosity,
-    mode: report::RunMode,
+    mode: output::RunMode,
     blocks_needing_diff: Option<usize>,
     scan_stats: scan::ScanStats,
     context: &validators::ValidationContext,
@@ -234,31 +236,11 @@ fn write_report(
         // Building the report walks every block, so skip it when nothing will be printed.
         return Ok(());
     }
-    let report = report::RunReport::new(mode, blocks_needing_diff, scan_stats, context, log);
+    let report = output::RunReport::new(mode, blocks_needing_diff, scan_stats, context, log);
     match verbosity {
         flags::Verbosity::None => Ok(()),
         flags::Verbosity::Summary => write_line(std::io::stdout(), &report.summary_line()),
         flags::Verbosity::Full => write_json(std::io::stdout(), &report),
-    }
-}
-
-/// Writes `document` to `output` as pretty-printed JSON, followed by a newline, and flushes it.
-///
-/// Like [`write_line`], returns `Ok` when the reader has closed the pipe.
-fn write_json(output: impl Write, document: &impl serde::Serialize) -> anyhow::Result<()> {
-    write_line(output, &serde_json::to_string_pretty(document)?)
-}
-
-/// Writes `text` to `output`, followed by a newline, and flushes it.
-///
-/// Returns `Ok` without writing the rest when the reader has closed the pipe, as `head` does after
-/// reading enough. Returns an error for any other failed write.
-fn write_line(mut output: impl Write, text: &str) -> anyhow::Result<()> {
-    match writeln!(output, "{text}").and_then(|()| output.flush()) {
-        // Rust ignores SIGPIPE, so a write to a closed pipe returns this error instead of ending
-        // the process. A reader that closed the pipe wants no more output, so it is not a failure.
-        Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
-        result => Ok(result?),
     }
 }
 
@@ -383,27 +365,6 @@ fn process_violations(
         flags::OutputFormat::Sarif => write_sarif_violations(violations)?,
     }
     Ok(has_error_severity)
-}
-
-/// Writes the violations to stderr as one JSON object of diagnostics grouped by file, with the
-/// files sorted by path.
-fn write_json_violations(violations: &BTreeMap<RepoPath, Vec<Violation>>) -> anyhow::Result<()> {
-    let diagnostics: BTreeMap<&RepoPath, Vec<_>> = violations
-        .iter()
-        .map(|(file_path, file_violations)| {
-            let file_diagnostics = file_violations
-                .iter()
-                .map(Violation::as_simple_diagnostic)
-                .collect();
-            (file_path, file_diagnostics)
-        })
-        .collect();
-    write_json(std::io::stderr(), &diagnostics)
-}
-
-/// Writes the violations to stderr as a SARIF log.
-fn write_sarif_violations(violations: &BTreeMap<RepoPath, Vec<Violation>>) -> anyhow::Result<()> {
-    write_json(std::io::stderr(), &sarif::SarifLog::new(violations))
 }
 
 /// Finds the repository root by walking up from `current_path` to the nearest ancestor carrying a

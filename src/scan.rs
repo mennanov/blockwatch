@@ -615,6 +615,7 @@ mod parse_blocks_tests {
     };
     use crate::language_parsers::LanguageParsers;
     use crate::language_resolver::Language;
+    use crate::output::BlockListing;
     use crate::position::test_utils::substr_range;
     use std::ops::Range;
 

@@ -151,9 +151,9 @@ This means:
 
 ## Architecture
 
-The whole pipeline is in `src/cli.rs`. `src/main.rs` only calls `blockwatch::run`:
+The whole pipeline is in `src/cli/mod.rs`. `src/main.rs` only calls `blockwatch::run`:
 
-1. Parse the command-line flags (`flags.rs`, built with clap). The flags that `list` also takes are `global`, so they
+1. Parse the command-line flags (`cli/flags.rs`, built with clap). The flags that `list` also takes are `global`, so they
    can go before or after `list`. The flags only validation uses are in `ValidationFlags`, so `list --help` doesn't
    show them. `Args::validate` rejects them for `list` and `skill`. A validation run then reads the `--suppress-from`
    files, once. Both happen before stdin or the config file is read, so a bad flag is reported first.
@@ -200,6 +200,11 @@ address as the only path. It then writes that block to stdout as JSON.
 
 The main modules:
 
+- `src/cli/` — the pipeline above, in `mod.rs`. `flags.rs` holds the clap flags, and `path_arguments.rs` turns the
+  paths and globs given on the command line into globs.
+- `src/output/` — everything a run writes: the JSON diagnostics and the SARIF log (`sarif.rs`), the JSON of a block
+  that `list`, `explain` and the report share (`listing.rs`), the `explain` output (`explain.rs`), and the
+  `--verbosity` report (`run_report.rs`).
 - `src/fs/` — the `FileSystem` trait and its real implementation, in `mod.rs`. `path_filter.rs` holds `PathFilter`,
   which decides whether a run reads a path: it must match an allow glob and no ignore glob. `glob.rs` holds
   `PathsGlob`, a glob that lists the repository paths it matches. Tests swap in `FakeFileSystem` from

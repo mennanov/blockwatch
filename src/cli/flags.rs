@@ -1,7 +1,7 @@
 //! Command-line arguments and the accessors that turn them into globs, filters, and extension maps.
 
 use crate::blocks::BlockAddress;
-use crate::report::RunMode;
+use crate::output::RunMode;
 use crate::settings::RawSettings;
 use crate::validators::{Validator, ViolationAddress};
 use anyhow::Context;

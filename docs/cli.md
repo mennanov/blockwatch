@@ -4,7 +4,7 @@ For command-line flag documentation directly in your terminal, run `blockwatch -
 
 ## Quick Options Reference
 
-<!-- <block name="cli-docs" same-as="src/flags.rs:cli-flags" same-as-mode="subset"
+<!-- <block name="cli-docs" same-as="src/cli/flags.rs:cli-flags" same-as-mode="subset"
      same-as-pattern='blockwatch --(?P<value>[a-z-]+)'> -->
 
 - **Select Files**: `blockwatch src/main.rs docs "**/*.md"` checks only those files, directories and globs. An
@@ -308,7 +308,7 @@ copy it from there.
 blockwatch --only-block docs/cli.md:cli-docs
 
 # Check every block but these two
-blockwatch --skip-block docs/cli.md:cli-docs --skip-block src/flags.rs:cli-flags
+blockwatch --skip-block docs/cli.md:cli-docs --skip-block src/cli/flags.rs:cli-flags
 ```
 
 - Repeat a flag to list more blocks. `--only-block` and `--skip-block` can't be combined.

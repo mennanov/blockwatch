@@ -13,10 +13,8 @@ use crate::attributes::Attributes;
 use crate::diff::{self, LineChange, LineChangeKind, LineChanges};
 use crate::position::Position;
 use crate::repo_path::RepoPath;
-use crate::validators::Validator;
 use anyhow::anyhow;
-use serde::Serialize;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::fmt;
 use std::ops::Range;
 
@@ -76,7 +74,7 @@ pub(crate) enum Declaration {
 
 impl Declaration {
     /// The line of the `[[block]]` entry that declared the block, or `None` when declared by tags.
-    fn config_line(&self) -> Option<usize> {
+    pub(crate) fn config_line(&self) -> Option<usize> {
         match self {
             Self::Tags => None,
             Self::ConfigEntry(entry) => Some(entry.line),
@@ -132,13 +130,9 @@ impl Content {
         }
     }
 
-    /// Describes the content for JSON. `source` must be the text of the block's file.
-    pub(crate) fn listing<'a>(&'a self, source: &'a str) -> ContentListing<'a> {
-        ContentListing {
-            start: self.positions.start,
-            end: self.positions.end,
-            text: self.text(source),
-        }
+    /// Where the content is written in the block's file.
+    pub(crate) fn positions(&self) -> &Range<Position> {
+        &self.positions
     }
 
     /// Returns the content's text. `source` must be the text of the block's file.
@@ -317,57 +311,6 @@ pub(crate) struct BlockWithContext {
     pub(crate) is_content_modified: bool,
 }
 
-// <block name="block-listing" affects="docs/cli.md:list-output-example">
-/// A block, as it is written in JSON.
-///
-/// serde writes the keys in the order the fields are declared, and the output keeps its keys
-/// sorted. So declare the fields in alphabetical order.
-#[derive(Serialize, Debug)]
-pub(crate) struct BlockListing<'a> {
-    attributes: &'a Attributes,
-    /// The validators that checked the block. `None` leaves the key out.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) checks: Option<BTreeSet<Validator>>,
-    column: usize,
-    /// The line of the `[[block]]` entry that declares a virtual block. `None` for a block with
-    /// tags.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    config_line: Option<usize>,
-    is_content_modified: bool,
-    line: usize,
-    name: &'a str,
-}
-// </block>
-
-/// The content of a block, as it is written in JSON: its text, and where the block's file writes
-/// it.
-#[derive(Serialize, Debug)]
-pub(crate) struct ContentListing<'a> {
-    /// The position of the content's first character.
-    start: Position,
-    /// The first position after the content.
-    end: Position,
-    /// The text the validators read. For a virtual block around a quoted or escaped value, it is
-    /// the decoded value.
-    text: &'a str,
-}
-
-impl<'a> From<&'a BlockWithContext> for BlockListing<'a> {
-    /// Describes the block, with no `checks`.
-    fn from(block_with_context: &'a BlockWithContext) -> Self {
-        let block = &block_with_context.block;
-        Self {
-            attributes: &block.attributes,
-            checks: None,
-            column: block.start_tag_position_range.start.character,
-            config_line: block.declaration.config_line(),
-            is_content_modified: block_with_context.is_content_modified,
-            line: block.start_tag_position_range.start.line,
-            name: block.name_display(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod block_address_tests {
     use crate::attributes::test_utils::text_attributes;
@@ -405,69 +348,6 @@ mod block_address_tests {
         let block = block_with_attributes(&[("keep-sorted", "asc")]);
 
         assert_eq!(block.address(&repo_path("a.py")), None);
-    }
-}
-
-#[cfg(test)]
-mod block_listing_tests {
-    use super::*;
-    use crate::attributes::AttributeEntry;
-    use std::path::PathBuf;
-
-    fn block_with_context(attributes: Attributes, declaration: Declaration) -> BlockWithContext {
-        BlockWithContext {
-            block: Block {
-                attributes,
-                start_tag_position_range: Position::new(2, 4)..Position::new(2, 30),
-                content: Content::source(0..0, Position::new(3, 1)..Position::new(3, 1)),
-                declaration,
-            },
-            is_start_tag_modified: false,
-            is_content_modified: true,
-        }
-    }
-
-    #[test]
-    fn virtual_block_with_checks_is_written_with_its_keys_sorted() -> anyhow::Result<()> {
-        let attributes = Attributes::from_entries([
-            ("name".into(), AttributeEntry::Text("n".into())),
-            ("line-count".into(), AttributeEntry::Text("<=3".into())),
-            ("keep-sorted".into(), AttributeEntry::Text("asc".into())),
-            (
-                "affects".into(),
-                AttributeEntry::List(vec!["a.md:b".into(), "c.md".into()]),
-            ),
-        ])?;
-        let block = block_with_context(
-            attributes,
-            Declaration::ConfigEntry(ConfigEntry {
-                file: PathBuf::from("blockwatch.toml"),
-                line: 7,
-                index: 0,
-            }),
-        );
-        let mut listing = BlockListing::from(&block);
-        listing.checks = Some(BTreeSet::from([Validator::KeepSorted]));
-
-        assert_eq!(
-            serde_json::to_string(&listing)?,
-            r#"{"attributes":{"affects":["a.md:b","c.md"],"keep-sorted":"asc","line-count":"<=3","name":"n"},"checks":["keep-sorted"],"column":4,"config_line":7,"is_content_modified":true,"line":2,"name":"n"}"#
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn unnamed_block_with_tags_is_written_without_checks_and_config_line() -> anyhow::Result<()> {
-        let block = block_with_context(
-            crate::attributes::test_utils::text_attributes(&[("keep-sorted", "asc")]),
-            Declaration::Tags,
-        );
-
-        assert_eq!(
-            serde_json::to_string(&BlockListing::from(&block))?,
-            r#"{"attributes":{"keep-sorted":"asc"},"column":4,"is_content_modified":true,"line":2,"name":"(unnamed)"}"#
-        );
-        Ok(())
     }
 }
 
