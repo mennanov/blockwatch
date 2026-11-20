@@ -353,6 +353,27 @@ impl BlockWithContext {
 }
 
 #[cfg(test)]
+mod content_tests {
+    use super::*;
+    use crate::symbols::SymbolPath;
+
+    #[test]
+    fn symbol_with_several_ranges_of_symbol_puts_each_line_at_the_first_range() {
+        let source = "first\nunrelated\nsecond\n";
+        let symbol = Symbol {
+            path: SymbolPath::parse("/a").expect("the path is valid"),
+            def_byte_ranges: vec![0..6, 16..23],
+            value: None,
+        };
+
+        let content = Content::of_symbol(&symbol, source, &LineIndex::new(source));
+
+        assert_eq!(content.text(source), "first\nsecond\n");
+        assert_eq!(content.position(1, 0), Position::new(1, 1));
+    }
+}
+
+#[cfg(test)]
 mod block_address_tests {
     use crate::attributes::test_utils::text_attributes;
     use crate::blocks::{Block, Content, Declaration};

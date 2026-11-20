@@ -1291,7 +1291,6 @@ mod resolve_tests {
 #[cfg(test)]
 mod symbol_tests {
     use super::*;
-    use crate::blocks::Content;
 
     /// A source whose first and third lines hold a symbol written in two places, and the symbol.
     fn symbol_written_twice() -> (&'static str, Symbol) {
@@ -1309,16 +1308,6 @@ mod symbol_tests {
         let (source, symbol) = symbol_written_twice();
 
         assert_eq!(symbol.value_or_definition(source), "first\nsecond\n");
-    }
-
-    #[test]
-    fn symbol_with_several_ranges_content_puts_each_line_at_the_first_range() {
-        let (source, symbol) = symbol_written_twice();
-
-        let content = Content::of_symbol(&symbol, source, &LineIndex::new(source));
-
-        assert_eq!(content.text(source), "first\nsecond\n");
-        assert_eq!(content.position(1, 0), Position::new(1, 1));
     }
 
     #[test]

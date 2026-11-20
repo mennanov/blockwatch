@@ -605,24 +605,7 @@ mod attribute_names_tests {
         AttributeName, Attributes,
         test_utils::{sample_all_attributes, sample_entries},
     };
-    use crate::validators::Validator;
     use strum::IntoEnumIterator;
-
-    #[test]
-    fn single_attribute_returns_an_error_only_when_it_needs_another() {
-        // A new attribute must either work alone or stop the run alone. Otherwise a block with
-        // only that attribute would pass without being checked.
-        let needs_no_other: Vec<AttributeName> = Validator::iter()
-            .flat_map(Validator::attributes)
-            .copied()
-            .chain([AttributeName::Name, AttributeName::Severity])
-            .collect();
-        for (name, entry) in sample_entries() {
-            let result = Attributes::from_entries([(name.as_str().to_string(), entry)]);
-
-            assert_eq!(result.is_ok(), needs_no_other.contains(&name), "{name}");
-        }
-    }
 
     #[test]
     fn known_names_are_in_alphabetical_order() {
@@ -668,31 +651,6 @@ mod attribute_names_tests {
             .map(|(name, entry)| (name.as_str().to_string(), entry));
         assert_eq!(Attributes::from_entries(entries)?, sample);
         Ok(())
-    }
-
-    #[test]
-    fn required_with_lists_the_attributes_that_turn_on_the_modified_validator() {
-        // A modifier's name starts with its validator's name, such as `keep-sorted-format`.
-        for name in AttributeName::iter() {
-            let required = name.required_with();
-            if required.is_empty() {
-                continue;
-            }
-            let validator = Validator::iter()
-                .find(|validator| {
-                    name.as_str()
-                        .starts_with(&format!("{}-", validator.as_str()))
-                })
-                .unwrap_or_else(|| panic!("no validator for `{name}`"));
-            // A block with a `name` can be a `same-as` target, which reads its own pattern.
-            let main: Vec<AttributeName> = required
-                .iter()
-                .copied()
-                .filter(|&main| main != AttributeName::Name)
-                .collect();
-
-            assert_eq!(main, validator.attributes(), "{name}");
-        }
     }
 }
 

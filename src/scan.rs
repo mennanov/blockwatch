@@ -613,7 +613,6 @@ mod parse_blocks_tests {
     };
     use crate::languages::Language;
     use crate::languages::LanguageParsers;
-    use crate::output::BlockListing;
     use crate::position::test_utils::substr_range;
 
     #[test]
@@ -1573,18 +1572,13 @@ mod parse_blocks_tests {
         let blocks =
             parse_with_virtual_blocks(&[("a.json", source)], &path_filter_all(), &virtual_blocks)?;
 
-        let mut listed = Vec::new();
-        for block in &blocks[&RepoPath::from_reference("a.json")?].blocks_with_context {
-            let listing = serde_json::to_value(BlockListing::from(block))?;
-            listed.push((listing["name"].clone(), listing.get("config_line").cloned()));
-        }
-        assert_eq!(
-            listed,
-            vec![
-                (serde_json::json!("virtual"), Some(serde_json::json!(7))),
-                (serde_json::json!("tag"), None),
-            ]
-        );
+        let listed: Vec<(Option<&str>, Option<usize>)> = blocks
+            [&RepoPath::from_reference("a.json")?]
+            .blocks_with_context
+            .iter()
+            .map(|block| (block.block.name(), block.block.declaration.config_line()))
+            .collect();
+        assert_eq!(listed, [(Some("virtual"), Some(7)), (Some("tag"), None)]);
         Ok(())
     }
 

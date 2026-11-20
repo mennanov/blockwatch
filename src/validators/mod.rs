@@ -241,6 +241,53 @@ mod tests {
     }
 
     #[test]
+    fn validator_attribute_alone_returns_ok_and_modifier_alone_returns_error() {
+        // A new attribute must either work alone or stop the run alone. Otherwise a block with
+        // only that attribute would pass without being checked.
+        let needs_no_other: Vec<AttributeName> = Validator::iter()
+            .flat_map(Validator::attributes)
+            .copied()
+            .chain([AttributeName::Name, AttributeName::Severity])
+            .collect();
+        for (name, entry) in crate::attributes::test_utils::sample_entries() {
+            let result = Attributes::from_entries([(name.as_str().to_string(), entry)]);
+
+            assert_eq!(result.is_ok(), needs_no_other.contains(&name), "{name}");
+        }
+    }
+
+    #[test]
+    fn modifier_with_one_other_attribute_returns_ok_only_when_that_one_turns_on_its_validator() {
+        let entries = crate::attributes::test_utils::sample_entries();
+        let modifiers = entries.iter().filter(|(name, _)| {
+            !matches!(name, AttributeName::Name | AttributeName::Severity)
+                && Validator::iter().all(|validator| !validator.attributes().contains(name))
+        });
+        for (modifier, modifier_entry) in modifiers {
+            // A modifier's name starts with its validator's name, such as `keep-sorted-format`.
+            let validator = Validator::iter()
+                .find(|validator| {
+                    modifier
+                        .as_str()
+                        .starts_with(&format!("{}-", validator.as_str()))
+                })
+                .unwrap_or_else(|| panic!("no validator for `{modifier}`"));
+            for (other, other_entry) in entries.iter().filter(|(other, _)| other != modifier) {
+                // A block with a `name` can be a `same-as` target, which reads its own pattern.
+                let expected = validator.attributes().contains(other)
+                    || (*modifier == AttributeName::SameAsPattern && *other == AttributeName::Name);
+
+                let result = Attributes::from_entries([
+                    (modifier.as_str().to_string(), modifier_entry.clone()),
+                    (other.as_str().to_string(), other_entry.clone()),
+                ]);
+
+                assert_eq!(result.is_ok(), expected, "`{modifier}` with `{other}`");
+            }
+        }
+    }
+
+    #[test]
     fn validator_lists_its_own_name_first() {
         // An error such as "`keep-sorted-format` without `keep-sorted`" shows the validator's own
         // name first.
