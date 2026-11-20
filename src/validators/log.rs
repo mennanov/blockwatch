@@ -1,0 +1,124 @@
+//! What validators report: the violations they found, the blocks they checked, and what they saw
+//! in each block.
+
+use super::{
+    Validator, Violation, affects, check_ai, check_lua, keep_sorted, keep_unique, line_count,
+    line_pattern, same_as,
+};
+use crate::blocks::{Block, BlockKey};
+use crate::repo_path::RepoPath;
+use serde::Serialize;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+/// What a single validator found, and which blocks it looked at.
+///
+/// A block is identified by its [`BlockKey`], because a block may have no name.
+#[derive(Debug, Default)]
+pub(crate) struct ValidationReport {
+    /// Violations grouped by the file they were found in. A file without violations has no entry,
+    /// so the map is empty when the validator found nothing.
+    pub(super) violations: HashMap<RepoPath, Vec<Violation>>,
+    /// The key of every block this validator checked.
+    pub(super) checked_blocks: Vec<(RepoPath, BlockKey)>,
+    /// What the validator saw in each block it checked. Empty unless the context asks for
+    /// traces.
+    pub(super) traces: Vec<(RepoPath, BlockKey, ValidatorTrace)>,
+}
+
+impl ValidationReport {
+    /// Adds a checked block together with the violations found in it.
+    pub(crate) fn add_all(&mut self, file: &RepoPath, block: &Block, violations: Vec<Violation>) {
+        self.add_checked_block(file, block);
+        self.add_violations(file, violations);
+    }
+
+    /// Adds `block` in `file` to the blocks this validator checked.
+    pub(super) fn add_checked_block(&mut self, file: &RepoPath, block: &Block) {
+        self.checked_blocks.push((file.clone(), block.key()));
+    }
+
+    /// Adds what the validator saw in `block` in `file`.
+    pub(crate) fn add_trace(&mut self, file: &RepoPath, block: &Block, trace: ValidatorTrace) {
+        self.traces.push((file.clone(), block.key(), trace));
+    }
+
+    /// Stores violations found in `file`.
+    pub(super) fn add_violations(&mut self, file: &RepoPath, violations: Vec<Violation>) {
+        if !violations.is_empty() {
+            self.violations
+                .entry(file.clone())
+                .or_default()
+                .extend(violations);
+        }
+    }
+}
+
+/// What a whole run found: which validators checked which blocks, and every violation.
+///
+/// Checked blocks are keyed by file, then by the [`BlockKey`] of the block, then by the names of
+/// the validators that checked it.
+#[derive(Debug, Default)]
+pub(crate) struct ValidationLog {
+    /// Violations grouped by the file they were found in. BTreeMap is used so every output lists
+    /// the files in the same order on every run.
+    pub(crate) violations: BTreeMap<RepoPath, Vec<Violation>>,
+    /// Every block that was examined, and by which validators. BTreeMap is used so the
+    /// `--verbosity` report comes out in a stable order regardless of the validators order.
+    pub(crate) checked_blocks: BTreeMap<RepoPath, BTreeMap<BlockKey, BTreeSet<Validator>>>,
+    /// What each validator saw in each block, by file and block. Empty unless the context asks
+    /// for traces.
+    pub(crate) traces: BTreeMap<(RepoPath, BlockKey), BTreeMap<Validator, ValidatorTrace>>,
+}
+
+impl ValidationLog {
+    /// Adds one validator's `report` for the corresponding `validator`.
+    pub(crate) fn add_validation_report(&mut self, validator: Validator, report: ValidationReport) {
+        for (file, key) in report.checked_blocks {
+            self.checked_blocks
+                .entry(file)
+                .or_default()
+                .entry(key)
+                .or_default()
+                .insert(validator);
+        }
+        for (file, key, trace) in report.traces {
+            self.traces
+                .entry((file, key))
+                .or_default()
+                .insert(validator, trace);
+        }
+        for (file, violations) in report.violations {
+            self.violations.entry(file).or_default().extend(violations);
+        }
+    }
+
+    /// Adds every checked block and violation from `other` to this log.
+    pub(super) fn merge(&mut self, other: ValidationLog) {
+        for (file, blocks) in other.checked_blocks {
+            let checked_in_file = self.checked_blocks.entry(file).or_default();
+            for (key, validators) in blocks {
+                checked_in_file.entry(key).or_default().extend(validators);
+            }
+        }
+        for (block, traces) in other.traces {
+            self.traces.entry(block).or_default().extend(traces);
+        }
+        for (file, violations) in other.violations {
+            self.violations.entry(file).or_default().extend(violations);
+        }
+    }
+}
+
+/// What one validator saw in one block. Each variant is the trace of one [`Validator`].
+#[derive(Serialize, Debug)]
+#[serde(untagged)]
+pub(crate) enum ValidatorTrace {
+    Affects(affects::AffectsTrace),
+    CheckAi(check_ai::CheckAiTrace),
+    CheckLua(check_lua::CheckLuaTrace),
+    KeepSorted(keep_sorted::KeepSortedTrace),
+    KeepUnique(keep_unique::KeepUniqueTrace),
+    LineCount(line_count::LineCountTrace),
+    LinePattern(line_pattern::LinePatternTrace),
+    SameAs(same_as::SameAsTrace),
+}

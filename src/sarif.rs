@@ -2,8 +2,7 @@
 
 use crate::attributes::Severity;
 use crate::repo_path::RepoPath;
-use crate::validators::{SimpleDiagnostic, Validator, Violation};
-use crate::violation_address::ViolationAddress;
+use crate::validators::{SimpleDiagnostic, Validator, Violation, ViolationAddress};
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};

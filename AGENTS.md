@@ -263,6 +263,19 @@ The main modules:
   attributes without their main attribute.
 - `src/validators/` — one file for each validator (`affects`, `check_ai`, `check_lua`, `keep_sorted`, `keep_unique`,
   `line_count`, `line_pattern`, `same_as`). `Validator::create` in `validators/mod.rs` builds them from one `match`.
+  The other files hold what the validators share:
+
+  | File                   | Holds                                                                  |
+  |------------------------|------------------------------------------------------------------------|
+  | `context.rs`           | `ValidationContext`, the blocks of a run                               |
+  | `run.rs`               | `detect_validators` and `run`                                          |
+  | `log.rs`               | `ValidationReport` of one validator, `ValidationLog` of the whole run  |
+  | `violation.rs`         | `Violation`, `ViolationRange` and `SimpleDiagnostic`                   |
+  | `violation_address.rs` | `ViolationAddress`, which `--suppress` matches                         |
+  | `targets.rs`           | `TargetFiles`, which reads the files that references point into        |
+  | `pattern_values.rs`    | the values a `*-pattern` attribute picks out                           |
+
+  `mod.rs` re-exports what the rest of the crate uses, such as `validators::ValidationContext`.
 - `src/diff_parser.rs` — wraps `unidiff` to produce `LineChange`s, kept in `LineChanges` for a file and in
   `DiffChanges` for the whole diff. `LineChanges::touches` decides whether they touch a range of the file, such as a
   block's start tag or a symbol's definition. A block's content has its own check in `blocks.rs`, because a deletion

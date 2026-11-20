@@ -42,7 +42,6 @@ mod symbols;
 mod tag_parser;
 mod target_reference;
 mod validators;
-mod violation_address;
 mod virtual_blocks;
 
 pub use cli::run;

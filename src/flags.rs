@@ -3,8 +3,7 @@
 use crate::blocks::BlockAddress;
 use crate::report::RunMode;
 use crate::settings::{RawSettings, parse_validator};
-use crate::validators::Validator;
-use crate::violation_address::ViolationAddress;
+use crate::validators::{Validator, ViolationAddress};
 use anyhow::Context;
 use clap::{Parser, builder::ValueParser, crate_version};
 use std::path::{Path, PathBuf};

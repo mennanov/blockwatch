@@ -865,10 +865,10 @@ mod validate_tests {
         assert!(
             violations[0]
                 .as_simple_diagnostic()
-                .message
+                .message()
                 .ends_with("disagrees with config.py:nope: target block not found"),
             "unexpected message: {}",
-            violations[0].as_simple_diagnostic().message
+            violations[0].as_simple_diagnostic().message()
         );
         Ok(())
     }
