@@ -1,38 +1,31 @@
 use super::tags::{BlockTag, MalformedTag, WinnowBlockTagParser};
 use crate::blocks::{Block, Content};
-use crate::languages::{Comment, CommentsParser};
+use crate::languages::{Comment, LanguageParser};
 use crate::position::Position;
 use std::collections::{HashMap, VecDeque};
 use std::iter::Peekable;
 use std::ops::Range;
 use std::rc::Rc;
 
-/// Parses the blocks out of one language's comments. Block syntax is identical everywhere, so only
-/// the extraction of comment text is language-specific, and that part is delegated to `C`.
-pub(crate) struct BlocksFromCommentsParser<C: CommentsParser> {
-    comments_parser: C,
-}
-
-impl<C: CommentsParser> BlocksFromCommentsParser<C> {
-    /// Wraps a language's comment parser so it produces blocks.
-    pub(crate) fn new(comments_parser: C) -> Self {
-        Self { comments_parser }
-    }
-
-    /// Returns an iterator over the [`Block`]s found in `contents`, sorted by where they start.
-    ///
-    /// The iteration stops at the first error: whatever follows a malformed or unbalanced tag
-    /// cannot be trusted to belong to the block the source intended.
-    pub(crate) fn parse_blocks<'a>(
-        &'a mut self,
-        contents: &'a str,
-    ) -> impl Iterator<Item = anyhow::Result<Block>> + 'a {
-        Blocks::new(self.comments_parser.parse(contents), contents)
+/// Returns an iterator over the [`Block`]s in the comments that `parser` finds in `contents`,
+/// sorted by where they start. Block syntax is the same in every language, so only the comments
+/// come from `parser`.
+///
+/// The iteration stops at the first error: whatever follows a malformed or unbalanced tag cannot
+/// be trusted to belong to the block the source intended. When `parser` can't find the comments,
+/// that error is the only item.
+pub(crate) fn parse_blocks<'a, P: LanguageParser + ?Sized>(
+    parser: &'a mut P,
+    contents: &'a str,
+) -> Box<dyn Iterator<Item = anyhow::Result<Block>> + 'a> {
+    match parser.parse_comments(contents) {
+        Ok(comments) => Box::new(Blocks::new(comments, contents)),
+        Err(error) => Box::new(std::iter::once(Err(error))),
     }
 }
 
 /// Assembles [`Block`]s out of a comment stream.
-pub(crate) struct Blocks<'source, I: Iterator<Item = Comment>> {
+struct Blocks<'source, I: Iterator<Item = Comment>> {
     partial_blocks: Tags<'source, I>,
     /// Start tags still waiting for their end tag, outermost first.
     open_blocks: Vec<BlockStart>,
@@ -46,7 +39,7 @@ pub(crate) struct Blocks<'source, I: Iterator<Item = Comment>> {
 
 impl<'source, I: Iterator<Item = Comment>> Blocks<'source, I> {
     /// Starts the block stream over the comments of `contents`, which must be in source order.
-    pub(crate) fn new(comments: I, contents: &'source str) -> Self {
+    fn new(comments: I, contents: &'source str) -> Self {
         Self {
             partial_blocks: Tags::new(comments, contents),
             open_blocks: Vec::new(),
@@ -366,7 +359,7 @@ impl BlockEnd {
 mod tests {
     use crate::attributes::test_utils::text_attributes;
     use crate::attributes::{Attributes, SortOrder};
-    use crate::blocks::{Block, Content, Declaration};
+    use crate::blocks::{Block, Content, Declaration, parse_blocks};
     use crate::languages;
     use crate::languages::LanguageParser;
     use crate::position::{Position, test_utils};
@@ -378,7 +371,7 @@ mod tests {
 
     /// Drains the parser into a `Vec`, failing on the first parse error.
     fn parse_all(parser: &mut impl LanguageParser, contents: &str) -> anyhow::Result<Vec<Block>> {
-        parser.parse_blocks(contents).collect()
+        parse_blocks(parser, contents).collect()
     }
 
     #[test]
@@ -1085,7 +1078,7 @@ println!("hello2");
         let mut parser = create_parser();
         let contents = "// <block name=\"closed\">\n// </block>\n// <block name=\"open\">";
 
-        let mut blocks = parser.parse_blocks(contents);
+        let mut blocks = parse_blocks(&mut parser, contents);
 
         assert_eq!(
             blocks
@@ -1113,7 +1106,7 @@ println!("hello2");
         // just as well have been mispaired by the missing ones, so it is not handed over.
         let contents = "// <block name=\"outer\">\n// <block name=\"middle\">\n// <block name=\"inner\">\n// </block>";
 
-        let mut blocks = parser.parse_blocks(contents);
+        let mut blocks = parse_blocks(&mut parser, contents);
 
         assert_eq!(
             blocks
@@ -1132,7 +1125,7 @@ println!("hello2");
         // The stray end tag has nothing to close, so the block following it is never reached.
         let contents = "// </block>\n// <block>\n// </block>";
 
-        let mut blocks = parser.parse_blocks(contents);
+        let mut blocks = parse_blocks(&mut parser, contents);
 
         assert!(blocks.next().expect("an error").is_err());
         assert!(blocks.next().is_none());

@@ -504,8 +504,7 @@ CMD ["sh", "-c", "# <block name='fake'> x # </block>"]
 COPY . /app
 # </block>
 "##;
-        let blocks = parser()
-            .parse_blocks(contents)
+        let blocks = crate::blocks::parse_blocks(&mut parser(), contents)
             .collect::<anyhow::Result<Vec<_>>>()?;
         let names: Vec<&str> = blocks
             .iter()

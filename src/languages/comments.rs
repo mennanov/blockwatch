@@ -6,7 +6,7 @@ use std::ops::Range;
 use tree_sitter::{Node, Parser, Tree, TreeCursor};
 
 /// Parses comment string from a source code by returning an iterator of `Comment`s.
-pub(crate) trait CommentsParser: Send + Sync {
+pub(super) trait CommentsParser: Send + Sync {
     /// Returns an iterator of `Comment`s from the source code.
     fn parse<'source>(
         &'source mut self,

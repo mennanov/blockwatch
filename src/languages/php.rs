@@ -1285,8 +1285,7 @@ spanning two lines -->
         let content =
             "<?php $x = \"café\"; ?><!-- <block name=\"x\"> -->\n<li>a</li>\n<!-- </block> -->\n";
 
-        let blocks = parser
-            .parse_blocks(content)
+        let blocks = crate::blocks::parse_blocks(&mut parser, content)
             .collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(

@@ -6,7 +6,7 @@ mod tags;
 mod virtual_block;
 
 pub(crate) use address::BlockAddress;
-pub(crate) use from_comments::{Blocks, BlocksFromCommentsParser};
+pub(crate) use from_comments::parse_blocks;
 pub(crate) use virtual_block::{ConfigEntry, Locator, TargetIf, TargetPattern, VirtualBlock};
 
 use crate::attributes::Attributes;
@@ -396,7 +396,6 @@ mod block_address_tests {
 mod block_with_context_tests {
     use super::*;
     use crate::diff::test_utils::{added, deleted, modified, modified_range};
-    use crate::languages::LanguageParser;
 
     /// The one block in `content`, Rust source, with what `line_changes` touched in it.
     fn block_with_context(
@@ -404,9 +403,7 @@ mod block_with_context_tests {
         line_changes: Vec<LineChange>,
     ) -> anyhow::Result<BlockWithContext> {
         let mut parser = crate::languages::rust::parser();
-        let mut blocks = parser
-            .parse_blocks(content)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let mut blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
         assert_eq!(blocks.len(), 1);
         let line_changes: LineChanges = line_changes.into_iter().collect();
         Ok(BlockWithContext::new(blocks.remove(0), &line_changes))

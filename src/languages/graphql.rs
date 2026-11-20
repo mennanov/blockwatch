@@ -80,8 +80,7 @@ type Other {
   field(message: "# <block name='fake_string'> x # </block>"): String
 }
 "##;
-        let blocks = parser()
-            .parse_blocks(contents)
+        let blocks = crate::blocks::parse_blocks(&mut parser(), contents)
             .collect::<anyhow::Result<Vec<_>>>()?;
         let names: Vec<&str> = blocks
             .iter()

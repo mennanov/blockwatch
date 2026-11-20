@@ -1,6 +1,6 @@
 //! The repository scan that turns source files into the blocks to validate.
 
-use crate::blocks::{Block, BlockWithContext, Declaration, FileBlocks};
+use crate::blocks::{self, Block, BlockWithContext, Declaration, FileBlocks};
 use crate::blocks::{ConfigEntry, Locator, VirtualBlock};
 use crate::diff::{DiffChanges, LineChanges};
 use crate::fs::{FileSystem, PathFilter};
@@ -491,22 +491,24 @@ fn tag_blocks(
     // Blocks are filtered as the parser yields them, so only the ones this run will validate are
     // ever held. The parser's lock lives until the end of the statement, which is as long as the
     // iterator borrowing it does.
-    parser
-        .lock()
-        .expect("a thread panicked while it held the parser")
-        .parse_blocks(source)
-        .map(|block| {
-            let block = block?;
-            reject_duplicate_name(&block, file_path, names_seen)?;
-            Ok(BlockWithContext::new(block, line_changes))
-        })
-        .filter(|result| match result {
-            Ok(block_with_context) => scan_mode.keeps(block_with_context),
-            // An error is kept, so that collecting the blocks stops at it.
-            Err(_) => true,
-        })
-        .collect::<anyhow::Result<Vec<_>>>()
-        .with_context(|| format!("failed to parse file \"{}\"", file_path.display()))
+    blocks::parse_blocks(
+        &mut **parser
+            .lock()
+            .expect("a thread panicked while it held the parser"),
+        source,
+    )
+    .map(|block| {
+        let block = block?;
+        reject_duplicate_name(&block, file_path, names_seen)?;
+        Ok(BlockWithContext::new(block, line_changes))
+    })
+    .filter(|result| match result {
+        Ok(block_with_context) => scan_mode.keeps(block_with_context),
+        // An error is kept, so that collecting the blocks stops at it.
+        Err(_) => true,
+    })
+    .collect::<anyhow::Result<Vec<_>>>()
+    .with_context(|| format!("failed to parse file \"{}\"", file_path.display()))
 }
 
 /// The blocks that `virtual_blocks` declare in `source`, the text of `file_path`, with what

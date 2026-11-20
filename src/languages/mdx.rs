@@ -4,8 +4,6 @@
 //! crates.io, so the `markdown` crate finds those spans, and tree-sitter-javascript finds the
 //! comments in each one.
 
-use crate::blocks::Block;
-use crate::blocks::Blocks;
 use crate::languages::markdown::{nodes_in_order, section_symbols};
 use crate::languages::{
     Comment, CommentsParser, LanguageParser, SLASH_MARKERS, TreeSitterCommentsParser,
@@ -75,14 +73,11 @@ impl MdxParser {
 }
 
 impl LanguageParser for MdxParser {
-    fn parse_blocks<'a>(
+    fn parse_comments<'a>(
         &'a mut self,
         contents: &'a str,
-    ) -> Box<dyn Iterator<Item = anyhow::Result<Block>> + 'a> {
-        match self.comments(contents) {
-            Ok(comments) => Box::new(Blocks::new(comments.into_iter(), contents)),
-            Err(error) => Box::new(std::iter::once(Err(error))),
-        }
+    ) -> anyhow::Result<Box<dyn Iterator<Item = Comment> + 'a>> {
+        Ok(Box::new(self.comments(contents)?.into_iter()))
     }
 
     fn parse_symbols(&mut self, contents: &str) -> anyhow::Result<Symbols> {
@@ -231,6 +226,7 @@ fn attribute_span(attribute: &AttributeContent) -> Option<(&str, &[Stop])> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blocks::parse_blocks;
     use crate::position::Position;
 
     #[test]
@@ -238,8 +234,7 @@ mod tests {
         let mut parser = parser();
 
         // MDX 2 and later have no HTML comments.
-        let error = parser
-            .parse_blocks("<!-- <block> -->\nText\n<!-- </block> -->\n")
+        let error = parse_blocks(&mut parser, "<!-- <block> -->\nText\n<!-- </block> -->\n")
             .collect::<anyhow::Result<Vec<_>>>()
             .unwrap_err();
 
@@ -341,9 +336,7 @@ Text é {/* in text */} and `{/* code span */}`.
         let mut parser = parser();
         let content = "{/* <block> */}\n- blue\n- red\n{/* </block> */}\n";
 
-        let blocks = parser
-            .parse_blocks(content)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].content.text(content), "\n- blue\n- red\n");

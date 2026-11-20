@@ -46,17 +46,15 @@ mod typescript;
 mod xml;
 mod yaml;
 
-pub(crate) use comments::{Comment, CommentsParser};
+pub(crate) use comments::Comment;
 
-use crate::blocks::Block;
-use crate::blocks::BlocksFromCommentsParser;
 use crate::symbols::{Symbols, SymbolsParser};
 use comments::{
-    DOXYGEN_MARKERS, SLASH_AND_HASH_MARKERS, SLASH_MARKERS, TreeSitterCommentsParser,
-    blank_decorative_stars, blank_line_marker, blank_outside, blank_preserving_line_breaks,
-    c_style_comment_text, c_style_comments_parser, c_style_multiline_comment_processor,
-    comment_visitor, ecmascript_comments_parser, python_style_comments_parser,
-    xml_style_comments_parser,
+    CommentsParser, DOXYGEN_MARKERS, SLASH_AND_HASH_MARKERS, SLASH_MARKERS,
+    TreeSitterCommentsParser, blank_decorative_stars, blank_line_marker, blank_outside,
+    blank_preserving_line_breaks, c_style_comment_text, c_style_comments_parser,
+    c_style_multiline_comment_processor, comment_visitor, ecmascript_comments_parser,
+    python_style_comments_parser, xml_style_comments_parser,
 };
 use file_names::{LanguageResolver, NAMES};
 use std::collections::HashMap;
@@ -130,19 +128,18 @@ impl Language {
 
 /// Parses the source files of one language.
 pub(crate) trait LanguageParser: Send + Sync {
-    /// Returns an iterator over the [`Block`]s found in the given `contents` string.
-    ///
-    /// The blocks are required to be yielded sorted by the `starts_at` field in ascending order.
-    ///
-    /// The iteration stops at the first error: whatever follows a malformed or unbalanced tag
-    /// cannot be trusted to belong to the block the source intended.
+    /// Returns the comments in `contents`, in source order.
     ///
     /// Returned boxed rather than as an `impl Iterator` because the trait is used as
     /// `dyn LanguageParser`, which a return-position `impl Trait` would rule out.
-    fn parse_blocks<'a>(
+    ///
+    /// # Errors
+    /// Returns an error if the comments can't be found, such as in an MDX file that is not valid
+    /// MDX.
+    fn parse_comments<'a>(
         &'a mut self,
         contents: &'a str,
-    ) -> Box<dyn Iterator<Item = anyhow::Result<Block>> + 'a>;
+    ) -> anyhow::Result<Box<dyn Iterator<Item = Comment> + 'a>>;
 
     /// Returns the addressable symbols defined in `contents`, and the names a reference must not
     /// resolve in it.
@@ -153,10 +150,10 @@ pub(crate) trait LanguageParser: Send + Sync {
     fn parse_symbols(&mut self, contents: &str) -> anyhow::Result<Symbols>;
 }
 
-/// A [`LanguageParser`] that finds blocks in the comments `C` extracts, and symbols if the language
-/// has a [`SymbolsParser`].
+/// A [`LanguageParser`] whose comments `C` extracts, with symbols if the language has a
+/// [`SymbolsParser`].
 struct LanguageParserImpl<C: CommentsParser> {
-    blocks_parser: BlocksFromCommentsParser<C>,
+    comments_parser: C,
     symbols_parser: Option<Box<dyn SymbolsParser>>,
 }
 
@@ -165,7 +162,7 @@ impl<C: CommentsParser> LanguageParserImpl<C> {
     /// no symbols.
     fn new(comments_parser: C) -> Self {
         Self {
-            blocks_parser: BlocksFromCommentsParser::new(comments_parser),
+            comments_parser,
             symbols_parser: None,
         }
     }
@@ -180,11 +177,11 @@ impl<C: CommentsParser> LanguageParserImpl<C> {
 }
 
 impl<C: CommentsParser> LanguageParser for LanguageParserImpl<C> {
-    fn parse_blocks<'a>(
+    fn parse_comments<'a>(
         &'a mut self,
         contents: &'a str,
-    ) -> Box<dyn Iterator<Item = anyhow::Result<Block>> + 'a> {
-        Box::new(self.blocks_parser.parse_blocks(contents))
+    ) -> anyhow::Result<Box<dyn Iterator<Item = Comment> + 'a>> {
+        Ok(Box::new(self.comments_parser.parse(contents)))
     }
 
     fn parse_symbols(&mut self, contents: &str) -> anyhow::Result<Symbols> {

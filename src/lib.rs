@@ -53,8 +53,7 @@ pub use cli::run;
 /// ```
 pub fn count_rust_blocks(source: &str) -> anyhow::Result<usize> {
     let mut parser = languages::rust::parser();
-    languages::LanguageParser::parse_blocks(&mut parser, source)
-        .try_fold(0, |count, block| block.map(|_| count + 1))
+    blocks::parse_blocks(&mut parser, source).try_fold(0, |count, block| block.map(|_| count + 1))
 }
 
 #[cfg(test)]

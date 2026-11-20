@@ -364,7 +364,7 @@ mod tests {
     use super::*;
     use crate::attributes::SortOrder;
     use crate::attributes::test_utils::text_attributes;
-    use crate::blocks::{Block, Content, Declaration};
+    use crate::blocks::{Block, Content, Declaration, parse_blocks};
     use crate::position::{Position, test_utils};
 
     /// The symbols `source` derives, as `(path, value)` pairs in the order they were derived.
@@ -391,8 +391,7 @@ mod tests {
     /// The `name` of each block in `content`, in the order of their start tags.
     fn block_names(content: &str) -> anyhow::Result<Vec<String>> {
         let mut parser = parser();
-        parser
-            .parse_blocks(content)
+        parse_blocks(&mut parser, content)
             .map(|block| Ok(block?.name_display().to_string()))
             .collect()
     }
@@ -642,9 +641,7 @@ Some text here 3
 [//]: # (</block>)
 [//]: # (</block>)
 "#;
-        let blocks = parser
-            .parse_blocks(content)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(
             blocks,
@@ -694,9 +691,7 @@ Text
 
 [//]: /café (</block>)
 ";
-        let blocks = parser
-            .parse_blocks(content)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].name(), Some("unicode_title"));
@@ -713,9 +708,7 @@ Text
 
 [//]: # (</block>)
 "#;
-        let blocks = parser
-            .parse_blocks(content)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].name(), Some("a"));
@@ -732,9 +725,7 @@ Text
 
 [//]: # (</block>)
 "#;
-        let blocks = parser
-            .parse_blocks(content)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(
             blocks[0].start_tag_position_range,
@@ -754,9 +745,7 @@ Text
 
 <!-- </block> -->
 "#;
-        let blocks = parser
-            .parse_blocks(content)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].name(), Some("a"));
@@ -799,9 +788,7 @@ Text
 [//]: # (</block>)
 "#;
 
-        let blocks = parser
-            .parse_blocks(content)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
 
         let tags: Vec<(&str, SortOrder)> = blocks
             .iter()
@@ -845,9 +832,7 @@ Text
                 r#"[//]: # (<block name="a">){line_ending}Text{line_ending}{line_ending}[//]: # (</block>){line_ending}"#
             );
 
-            let blocks = parser
-                .parse_blocks(&content)
-                .collect::<anyhow::Result<Vec<_>>>()?;
+            let blocks = parse_blocks(&mut parser, &content).collect::<anyhow::Result<Vec<_>>>()?;
 
             assert_eq!(
                 blocks[0].content.text(&content),
@@ -866,9 +851,7 @@ Text
         // character into several spaces; the column must still count the source's characters.
         let content = "`café` <!-- <block name=\"x\"> -->\nText\n\n<!-- </block> -->\n";
 
-        let blocks = parser
-            .parse_blocks(content)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(
             blocks[0].start_tag_position_range.start,
@@ -892,9 +875,7 @@ ending text <!-- </block> --> tail.
 
 Inline code `<!-- <block name="ignored"> -->` is not a comment.
 "#;
-        let blocks = parser
-            .parse_blocks(content)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(
             blocks,
@@ -921,9 +902,7 @@ Inline code `<!-- <block name="ignored"> -->` is not a comment.
 Some content.
 Closing text <!-- </block> --> tail.
 "#;
-        let blocks = parser
-            .parse_blocks(content)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].name(), Some("mixed"));
@@ -944,9 +923,7 @@ Closing text <!-- </block> --> tail.
 | second |
 | <!-- </block> --> third |
 "#;
-        let blocks = parser
-            .parse_blocks(content)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].name(), Some("table_rows"));
@@ -966,9 +943,7 @@ Closing text <!-- </block> --> tail.
 > <!-- </block> -->
 "#;
 
-        let blocks = parser
-            .parse_blocks(content)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks[0].content.text(content), "\n> Text\n> ");
         Ok(())
@@ -993,9 +968,7 @@ Second block content.
 
 [//]: # (</block>)
 "#;
-        let blocks = parser
-            .parse_blocks(content)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(blocks.len(), 2);
         assert_eq!(blocks[0].name(), Some("a"));
@@ -1040,9 +1013,7 @@ Some markdown content
 Not wrapped in HTML tags on multiple lines
 <!-- </block> -->
 "#;
-        let blocks = parser
-            .parse_blocks(content)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parse_blocks(&mut parser, content).collect::<anyhow::Result<Vec<_>>>()?;
 
         assert_eq!(
             blocks,

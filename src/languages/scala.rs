@@ -18,6 +18,7 @@ fn comments_parser() -> impl CommentsParser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blocks::parse_blocks;
     use crate::{languages::Comment, position::Position};
 
     #[test]
@@ -29,9 +30,7 @@ mod tests {
 val value = 1
 // </block>
 "#;
-        let blocks = parser()
-            .parse_blocks(contents)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parse_blocks(&mut parser(), contents).collect::<anyhow::Result<Vec<_>>>()?;
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].name(), Some("only_once"));
         Ok(())
@@ -114,9 +113,7 @@ object Main {
 val value = 1
 /*/ </block>
 "#;
-        let blocks = parser()
-            .parse_blocks(contents)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let blocks = parse_blocks(&mut parser(), contents).collect::<anyhow::Result<Vec<_>>>()?;
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].content.text(contents), "\nval value = 1\n");
         Ok(())
