@@ -1,5 +1,6 @@
 //! Block attributes, their names, and their parsed values.
 
+mod keyword;
 mod line_count;
 mod number;
 mod same_as;
@@ -7,6 +8,7 @@ mod severity;
 mod sort;
 mod target_reference;
 
+pub(crate) use keyword::parse_keyword_value;
 pub(crate) use line_count::Constraint;
 pub(crate) use number::parse_number;
 pub(crate) use same_as::{Format, Formats, Mode, TargetPaths, WHOLE_GROUP};
@@ -449,23 +451,6 @@ pub(crate) enum AttributeValue {
     Text(String),
     /// The target references of `affects` or `same-as`.
     List(Vec<String>),
-}
-
-/// Parses `value` as one of the keywords of `T`.
-///
-/// # Errors
-/// Returns `"\"value\" (expected ...)"` when `value` does not match a variant of `T`.
-pub(crate) fn parse_keyword_value<T>(value: &str) -> anyhow::Result<T>
-where
-    T: FromStr + IntoEnumIterator + ToString,
-{
-    T::from_str(value).map_err(|_| {
-        let keywords: Vec<String> = T::iter().map(|keyword| keyword.to_string()).collect();
-        let (last, others) = keywords
-            .split_last()
-            .expect("a keyword type has at least one keyword");
-        anyhow!("\"{value}\" (expected {} or {last})", others.join(", "))
-    })
 }
 
 /// Parses `raw`, after trimming whitespace, as one of the keywords of `T`. An empty value gives
