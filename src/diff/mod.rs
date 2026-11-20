@@ -1,6 +1,7 @@
 //! The changes a diff makes to the files of the repository, line by line, and whether they touch a
 //! range of a file.
 
+mod target_path;
 mod unified;
 
 pub(crate) use unified::{line_changes_from_diff, validate_diff_input};

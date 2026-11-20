@@ -1,8 +1,8 @@
 //! Reads a unified diff into the per-file line changes that decide which blocks are checked.
 
+use super::target_path::target_path;
 use super::{DiffChanges, LineChange, LineChangeKind, LineChanges};
 use crate::fs::FileSystem;
-use crate::repo_path::RepoPath;
 use anyhow::Context;
 use similar::DiffOp;
 use std::collections::HashMap;
@@ -43,7 +43,7 @@ pub(crate) fn line_changes_from_diff(
             // Deleted files are ignored.
             continue;
         }
-        let Some(target_path) = RepoPath::from_diff_target(
+        let Some(target_path) = target_path(
             &patched_file.source_file,
             &patched_file.target_file,
             file_system,
@@ -485,6 +485,7 @@ index 1234567..0000000\n\
 mod tests {
     use super::*;
     use crate::diff::test_utils::{added, deleted};
+    use crate::repo_path::RepoPath;
     use std::collections::HashSet;
     use std::path::Path;
 

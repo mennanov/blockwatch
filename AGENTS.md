@@ -291,7 +291,8 @@ The main modules:
 
   `mod.rs` re-exports what the rest of the crate uses, such as `validators::ValidationContext`.
 - `src/diff/` — `LineChange`s, kept in `LineChanges` for a file and in `DiffChanges` for the whole diff, in
-  `mod.rs`. `unified.rs` wraps `unidiff` to read them from a unified diff. `LineChanges::touches` decides whether
+  `mod.rs`. `unified.rs` wraps `unidiff` to read them from a unified diff. `target_path.rs` turns the path in a
+  file's header, such as `b/src/main.rs`, into a `RepoPath`. `LineChanges::touches` decides whether
   they touch a range of the file, such as a block's start tag or a symbol's definition. A block's content has its own
   check in `blocks/mod.rs`, because a deletion right where the content starts removes content. The results end up in
   `is_content_modified` and `is_start_tag_modified` on `BlockWithContext`, which decide which blocks count as
