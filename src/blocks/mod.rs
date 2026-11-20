@@ -201,7 +201,7 @@ impl Content {
     }
 
     /// Whether any of the `line_changes` touch where the content is written.
-    pub(super) fn intersects_any(&self, line_changes: &LineChanges) -> bool {
+    fn intersects_any(&self, line_changes: &LineChanges) -> bool {
         line_changes
             .on_lines(self.positions.start.line, self.positions.end.line)
             .any(|line_change| self.intersects(line_change))
@@ -340,6 +340,18 @@ pub(crate) struct BlockWithContext {
     pub(crate) is_content_modified: bool,
 }
 
+impl BlockWithContext {
+    /// `block`, a block with tags, with whether `line_changes`, the diff's changes to its file,
+    /// touch its start tag and its content.
+    pub(crate) fn new(block: Block, line_changes: &LineChanges) -> Self {
+        Self {
+            is_content_modified: block.content.intersects_any(line_changes),
+            is_start_tag_modified: line_changes.touches(&block.start_tag_position_range),
+            block,
+        }
+    }
+}
+
 #[cfg(test)]
 mod block_address_tests {
     use crate::attributes::test_utils::text_attributes;
@@ -377,6 +389,252 @@ mod block_address_tests {
         let block = block_with_attributes(&[("keep-sorted", "asc")]);
 
         assert_eq!(block.address(&repo_path("a.py")), None);
+    }
+}
+
+#[cfg(test)]
+mod block_with_context_tests {
+    use super::*;
+    use crate::diff::test_utils::{added, deleted, modified, modified_range};
+    use crate::languages::LanguageParser;
+
+    /// The one block in `content`, Rust source, with what `line_changes` touched in it.
+    fn block_with_context(
+        content: &str,
+        line_changes: Vec<LineChange>,
+    ) -> anyhow::Result<BlockWithContext> {
+        let mut parser = crate::languages::rust::parser();
+        let mut blocks = parser
+            .parse_blocks(content)
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        assert_eq!(blocks.len(), 1);
+        let line_changes: LineChanges = line_changes.into_iter().collect();
+        Ok(BlockWithContext::new(blocks.remove(0), &line_changes))
+    }
+
+    #[test]
+    fn modified_start_tag_line_without_content_leaves_the_content_unmodified() -> anyhow::Result<()>
+    {
+        // The start tag's comment ends its line, so the content begins on the next one. Rewriting
+        // every character of the line still reaches nothing the content owns.
+        let tag_line = "// <block name=\"first\">";
+        let block = block_with_context(
+            &format!("{tag_line}\none\n// </block>\n"),
+            vec![modified(1, tag_line.chars().count())],
+        )?;
+
+        assert!(block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_start_tag_line_carrying_content_modifies_the_content() -> anyhow::Result<()> {
+        let tag_line = "/* <block name=\"first\"> */ one";
+        let block = block_with_context(
+            &format!("{tag_line}\n// </block>\n"),
+            vec![modified(1, tag_line.chars().count())],
+        )?;
+
+        assert!(block.is_start_tag_modified);
+        assert!(block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn added_start_tag_line_modifies_the_content() -> anyhow::Result<()> {
+        // An inserted line brings a new line break too, and that break is the first thing the
+        // content owns, so the block's content did change.
+        let block = block_with_context(
+            "// <block name=\"first\">\none\n// </block>\n",
+            vec![added(1)],
+        )?;
+
+        assert!(block.is_start_tag_modified);
+        assert!(block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn deleted_lines_above_the_start_tag_leave_the_block_unmodified() -> anyhow::Result<()> {
+        // A deletion is anchored at the line that took the removed lines' place, so it lands on
+        // column 1 of the start tag's line. The removed text sat above the block, and the block
+        // starts further right on that line, so neither the tag nor the content lost anything.
+        let block = block_with_context(
+            "// <block name=\"first\">\none\n// </block>\n",
+            vec![deleted(1)],
+        )?;
+
+        assert!(!block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn deleted_lines_above_a_start_tag_at_column_one_leave_the_block_unmodified()
+    -> anyhow::Result<()> {
+        // The tag opens a continuation line of a block comment, so it starts at column 1 and the
+        // deletion's gap lands exactly on the tag's first character. The gap still sits before
+        // that character, so the tag kept every character it had.
+        let block = block_with_context(
+            "/*\n<block name=\"first\">\n*/\none\n// </block>\n",
+            vec![deleted(2)],
+        )?;
+
+        assert!(!block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn deleted_line_inside_a_multi_line_start_tag_modifies_the_start_tag() -> anyhow::Result<()> {
+        // The gap sits between two lines the tag spans, so the tag itself lost a line. The content
+        // begins after the tag's comment ends, which the gap never reaches.
+        let block = block_with_context(
+            "/* <block\n   name=\"first\"> */\none\n/* </block> */\n",
+            vec![deleted(2)],
+        )?;
+
+        assert!(block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn deleting_every_content_line_modifies_the_content() -> anyhow::Result<()> {
+        // Nothing is left between the tags, so the deletion is anchored at the end tag's line,
+        // which is where the content range ends. The content lost every line it had.
+        let block =
+            block_with_context("// <block name=\"first\">\n// </block>\n", vec![deleted(2)])?;
+
+        assert!(!block.is_start_tag_modified);
+        assert!(block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_column_before_start_tag_leaves_the_start_tag_unmodified() -> anyhow::Result<()> {
+        // The start tag begins at 0-based index 7 (column 8). Index 6 (column 7) is the space
+        // before the tag, which sits outside the start tag range.
+        let code = "    // <block name=\"first\">\none\n// </block>\n";
+        let block = block_with_context(code, vec![modified_range(1, 6..7)])?;
+
+        assert!(!block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_first_column_of_start_tag_modifies_the_start_tag() -> anyhow::Result<()> {
+        // The start tag begins at 0-based index 7 (column 8). Index 7 is the '<' character,
+        // which sits at the inclusive start of the start tag range.
+        let code = "    // <block name=\"first\">\none\n// </block>\n";
+        let block = block_with_context(code, vec![modified_range(1, 7..8)])?;
+
+        assert!(block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_column_after_multiline_start_tag_leaves_the_start_tag_unmodified()
+    -> anyhow::Result<()> {
+        // The start tag's closing delimiter '>' is at 0-based index 15 (column 16), making column 17
+        // the exclusive end. Index 16 (column 17) is the space after '>', which sits outside the tag.
+        let code = "/* <block\n   name=\"first\"> */\none\n/* </block> */\n";
+        let block = block_with_context(code, vec![modified_range(2, 16..17)])?;
+
+        assert!(!block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_last_column_of_multiline_start_tag_modifies_the_start_tag() -> anyhow::Result<()> {
+        // The start tag's closing delimiter '>' is at 0-based index 15 (column 16). That character
+        // sits immediately before the exclusive end, inside the tag.
+        let code = "/* <block\n   name=\"first\"> */\none\n/* </block> */\n";
+        let block = block_with_context(code, vec![modified_range(2, 15..16)])?;
+
+        assert!(block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_start_tag_comment_before_inline_content_leaves_the_content_unmodified()
+    -> anyhow::Result<()> {
+        // The start tag comment '/* ... */' ends at index 26 (column 27), where content begins.
+        // Index 25 (column 26) is the closing '/' of '*/', outside the content range.
+        let code = "/* <block name=\"first\"> */ one\n// </block>\n";
+        let block = block_with_context(code, vec![modified_range(1, 25..26)])?;
+
+        assert!(!block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_first_column_of_inline_content_modifies_the_content() -> anyhow::Result<()> {
+        // Content begins at 0-based index 26 (column 27). That character sits at the inclusive
+        // start of the content range.
+        let code = "/* <block name=\"first\"> */ one\n// </block>\n";
+        let block = block_with_context(code, vec![modified_range(1, 26..27)])?;
+
+        assert!(!block.is_start_tag_modified);
+        assert!(block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_end_tag_comment_after_inline_content_leaves_the_content_unmodified()
+    -> anyhow::Result<()> {
+        // Content ends at 0-based index 4 (column 5), where the closing comment begins.
+        // Index 4 is the opening '/' of '/*', outside the content range.
+        let code = "/* <block name=\"first\"> */\none /* </block> */\n";
+        let block = block_with_context(code, vec![modified_range(2, 4..5)])?;
+
+        assert!(!block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_last_column_of_inline_content_modifies_the_content() -> anyhow::Result<()> {
+        // Content ends at 0-based index 4 (column 5). Index 3 (column 4) is the space after 'one',
+        // which sits immediately before the exclusive end, inside content.
+        let code = "/* <block name=\"first\"> */\none /* </block> */\n";
+        let block = block_with_context(code, vec![modified_range(2, 3..4)])?;
+
+        assert!(!block.is_start_tag_modified);
+        assert!(block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_column_one_on_continuation_line_of_start_tag_modifies_the_start_tag()
+    -> anyhow::Result<()> {
+        // Line 2 is a continuation line of a multi-line start tag. A modification at column 1
+        // of line 2 touches the start tag since continuation lines start at column 1.
+        let code = "/* <block\nname=\"first\"> */\none\n/* </block> */\n";
+        let block = block_with_context(code, vec![modified_range(2, 0..1)])?;
+
+        assert!(block.is_start_tag_modified);
+        assert!(!block.is_content_modified);
+        Ok(())
+    }
+
+    #[test]
+    fn modified_column_one_on_continuation_line_of_content_modifies_the_content()
+    -> anyhow::Result<()> {
+        // The content starts on line 1 after an inline tag. A modification at column 1 of line 2
+        // touches the content since continuation lines start at column 1.
+        let code = "/* <block name=\"first\"> */ first\nsecond\n/* </block> */\n";
+        let block = block_with_context(code, vec![modified_range(2, 0..1)])?;
+
+        assert!(!block.is_start_tag_modified);
+        assert!(block.is_content_modified);
+        Ok(())
     }
 }
 

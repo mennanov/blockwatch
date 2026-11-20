@@ -241,6 +241,7 @@ mod tests {
 pub(crate) mod test_utils {
     use super::{DiffChanges, LineChange, LineChangeKind};
     use crate::repo_path::RepoPath;
+    use std::ops::Range;
 
     /// The diff's changes to each of `files`.
     pub(crate) fn diff_changes(
@@ -253,15 +254,32 @@ pub(crate) mod test_utils {
     }
 
     /// A newly added line.
-    pub(super) fn added(line: usize) -> LineChange {
+    pub(crate) fn added(line: usize) -> LineChange {
         LineChange {
             line,
             kind: LineChangeKind::Added,
         }
     }
 
-    /// A deleted line.
-    pub(super) fn deleted(line: usize) -> LineChange {
+    /// A modified line with `length` chars modified.
+    #[allow(clippy::single_range_in_vec_init)]
+    pub(crate) fn modified(line: usize, length: usize) -> LineChange {
+        LineChange {
+            line,
+            kind: LineChangeKind::Modified(vec![0..length]),
+        }
+    }
+
+    /// A modified line with character range `range` (0-based) modified.
+    pub(crate) fn modified_range(line: usize, range: Range<usize>) -> LineChange {
+        LineChange {
+            line,
+            kind: LineChangeKind::Modified(vec![range]),
+        }
+    }
+
+    /// A deletion anchored at `line`, the line that now occupies the gap the removed lines left.
+    pub(crate) fn deleted(line: usize) -> LineChange {
         LineChange {
             line,
             kind: LineChangeKind::Deleted,
