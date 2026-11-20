@@ -269,7 +269,8 @@ The main modules:
   `docs/symbols.md` and add the language to "Files with symbols" in `src/skill.md`. A test in `languages/mod.rs`
   and the repository's own blocks keep the list of file types with symbols, and each language's section in
   `docs/symbols.md`, in sync with the code.
-- `src/symbols/mod.rs` — `Symbol`, the `SymbolsParser` trait, and `resolve`, which finds the symbol a path refers to.
+- `src/symbols/` — `Symbol`, the `SymbolsParser` trait, and `resolve`, which finds the symbol a path refers to, in
+  `mod.rs`. `path.rs` holds `SymbolPath`, the parsed path after the `#` of a reference, such as `/version`.
 - `src/attributes/` — `Attributes`, `AttributeName`, `Severity`, and the typed values for `keep-sorted`, `line-count`,
   and `same-as`. `TargetReference` is a reference that `affects`, `check-lua` or `same-as` holds, such as
   `a.json#/version`. `parse_number` reads a number for the `numeric` format. `Attributes::from_entries` parses each

@@ -535,8 +535,8 @@ mod symbols_tests {
     use crate::languages::code_symbols::test_utils::{
         decode_error, symbol, symbols, syntax_error, unresolved, value, values,
     };
-    use crate::symbol_path::SymbolPath;
     use crate::symbols::ResolveError;
+    use crate::symbols::SymbolPath;
 
     /// The symbols of `source`, a C file.
     fn c(source: &str) -> anyhow::Result<Symbols> {

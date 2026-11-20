@@ -8,7 +8,7 @@ use crate::languages::{
     c_style_multiline_comment_processor,
 };
 use crate::position::LineIndex;
-use crate::symbol_path::SymbolPath;
+use crate::symbols::SymbolPath;
 use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser};
 use cssparser::{
     AtRuleParser, CowRcStr, DeclarationParser, ParseError, Parser, ParserState,
@@ -543,7 +543,7 @@ mod symbols_tests {
     use crate::languages::code_symbols::test_utils::{
         symbol, symbols, syntax_error, text_of, unresolved, value, values,
     };
-    use crate::symbol_path::SymbolPath;
+    use crate::symbols::SymbolPath;
     use anyhow::Context;
 
     /// The symbols of `source`, a CSS file.

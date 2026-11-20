@@ -2,7 +2,7 @@ use crate::languages::{
     LanguageParser, LanguageParserImpl, SLASH_MARKERS, c_style_comments_parser,
     ensure_no_syntax_error, members, node_text, tree_sitter_parser,
 };
-use crate::symbol_path::SymbolPath;
+use crate::symbols::SymbolPath;
 use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser};
 use anyhow::{Context, bail};
 use tree_sitter::Node;

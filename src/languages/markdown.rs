@@ -3,7 +3,7 @@ use crate::languages::{
     blank_preserving_line_breaks, xml_style_comments_parser,
 };
 use crate::position::LineIndex;
-use crate::symbol_path::SymbolPath;
+use crate::symbols::SymbolPath;
 use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser};
 use markdown::mdast::{Definition, Node};
 use markdown::{Constructs, ParseOptions};

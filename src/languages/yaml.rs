@@ -3,7 +3,7 @@ use crate::languages::{
     python_style_comments_parser, tree_sitter_parser,
 };
 use crate::position::LineIndex;
-use crate::symbol_path::SymbolPath;
+use crate::symbols::SymbolPath;
 use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser, extended_past_line_break};
 use anyhow::{Context, bail};
 use std::ops::Range;

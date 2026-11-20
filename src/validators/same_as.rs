@@ -1,11 +1,11 @@
 use crate::attributes::{
     Format, Formats, Mode, TargetKind, TargetPaths, TargetReference, WHOLE_GROUP, parse_number,
 };
-use crate::blocks::{Block, FileBlocks};
+use crate::blocks::{Block, Content, FileBlocks};
 use crate::fs::FileSystem;
 use crate::position::LineIndex;
 use crate::repo_path::RepoPath;
-use crate::symbol_path::SymbolPath;
+use crate::symbols::SymbolPath;
 use crate::validators::{
     self, SyncValidator, TargetFiles, TargetResult, ValidationReport, Validator, ValidatorTrace,
     Violation,
@@ -537,7 +537,7 @@ impl<'a, Fs: FileSystem> TargetRecords<'a, Fs> {
         let (content, resolution) = self.files.resolve_symbol(target_file, path)?;
         match resolution {
             Ok(symbol) => {
-                let symbol_content = symbol.content(content, &LineIndex::new(content));
+                let symbol_content = Content::of_symbol(symbol, content, &LineIndex::new(content));
                 Ok(Ok(extract_records_from(
                     symbol_content.text(content),
                     pattern,

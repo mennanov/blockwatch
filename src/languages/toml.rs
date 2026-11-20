@@ -2,7 +2,7 @@ use crate::languages::{
     CommentsParser, LanguageParser, LanguageParserImpl, python_style_comments_parser,
 };
 use crate::position::LineIndex;
-use crate::symbol_path::SymbolPath;
+use crate::symbols::SymbolPath;
 use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser, extended_past_line_break};
 use anyhow::{Context, anyhow};
 use std::ops::Range;

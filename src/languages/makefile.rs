@@ -8,7 +8,7 @@ use crate::languages::{
     Comment, CommentsParser, LanguageParser, LanguageParserImpl, blank_line_marker,
 };
 use crate::position::LineIndex;
-use crate::symbol_path::SymbolPath;
+use crate::symbols::SymbolPath;
 use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser};
 use anyhow::bail;
 use makefile_lossless::{

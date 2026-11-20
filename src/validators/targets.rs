@@ -3,7 +3,7 @@
 use super::ValidationContext;
 use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
-use crate::symbol_path::SymbolPath;
+use crate::symbols::SymbolPath;
 use crate::symbols::{ResolveError, Symbol, Symbols};
 use anyhow::{Context, anyhow};
 use std::collections::HashMap;

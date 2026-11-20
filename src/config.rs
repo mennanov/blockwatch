@@ -8,7 +8,7 @@ use crate::languages::toml;
 use crate::position::LineIndex;
 use crate::repo_path::RepoPath;
 use crate::settings::RawSettings;
-use crate::symbol_path::SymbolPath;
+use crate::symbols::SymbolPath;
 use crate::symbols::Symbols;
 use anyhow::{Context, anyhow, bail};
 use serde::Deserialize;

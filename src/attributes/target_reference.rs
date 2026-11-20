@@ -2,7 +2,7 @@
 //! an attribute, and the target it points at.
 
 use crate::repo_path::RepoPath;
-use crate::symbol_path::SymbolPath;
+use crate::symbols::SymbolPath;
 use anyhow::{Context, bail};
 use std::fmt;
 
@@ -216,7 +216,7 @@ impl fmt::Display for ResolvedTarget {
 mod parse_target_references_tests {
     use super::TargetReference;
     use crate::repo_path::RepoPath;
-    use crate::symbol_path::SymbolPath;
+    use crate::symbols::SymbolPath;
 
     /// The references in `value`, written as a tag writes them.
     fn parse_text(value: &str) -> anyhow::Result<Vec<TargetReference>> {

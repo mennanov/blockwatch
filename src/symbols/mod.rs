@@ -1,8 +1,11 @@
 //! Derives the symbols of a file: the elements a symbol reference can address.
 
-use crate::blocks::Content;
+mod path;
+
+pub(crate) use path::SymbolPath;
+
 use crate::position::{LineIndex, Position};
-use crate::symbol_path::{Segment, SymbolPath};
+use path::Segment;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
@@ -61,36 +64,6 @@ impl Symbol {
             )]
             (None, ranges) => {
                 Cow::Owned(ranges.iter().map(|range| &source[range.clone()]).collect())
-            }
-        }
-    }
-
-    /// What a reference to the symbol reads, as the content of a block, with `lines` indexing
-    /// `source`. `source` must be the text the symbol was derived from.
-    ///
-    /// A value written as is, such as a number or a Markdown section, keeps the position of each
-    /// of its lines. Any other text, such as a value with quotes or escapes, or the text of a
-    /// symbol written in several places, is not a part of the source. Each of its lines is at the
-    /// start of the symbol.
-    ///
-    /// # Panics
-    /// Panics if a byte range does not fit `source`.
-    pub(crate) fn content(&self, source: &str, lines: &LineIndex) -> Content {
-        match (&self.value, self.def_byte_ranges.as_slice()) {
-            (Some(value), _) if source.get(value.byte_range.clone()) == Some(&value.text) => {
-                Content::source(value.byte_range.clone(), lines.range(&value.byte_range))
-            }
-            (Some(value), _) => {
-                Content::decoded(value.text.clone(), lines.range(&value.byte_range))
-            }
-            (None, [definition]) => Content::source(definition.clone(), lines.range(definition)),
-            (None, ranges) => {
-                let start = ranges.first().expect("a symbol is written somewhere").start;
-                let end = ranges.last().expect("a symbol is written somewhere").end;
-                Content::decoded(
-                    self.value_or_definition(source).into_owned(),
-                    lines.range(&(start..end)),
-                )
             }
         }
     }
@@ -1318,6 +1291,7 @@ mod resolve_tests {
 #[cfg(test)]
 mod symbol_tests {
     use super::*;
+    use crate::blocks::Content;
 
     /// A source whose first and third lines hold a symbol written in two places, and the symbol.
     fn symbol_written_twice() -> (&'static str, Symbol) {
@@ -1341,7 +1315,7 @@ mod symbol_tests {
     fn symbol_with_several_ranges_content_puts_each_line_at_the_first_range() {
         let (source, symbol) = symbol_written_twice();
 
-        let content = symbol.content(source, &LineIndex::new(source));
+        let content = Content::of_symbol(&symbol, source, &LineIndex::new(source));
 
         assert_eq!(content.text(source), "first\nsecond\n");
         assert_eq!(content.position(1, 0), Position::new(1, 1));

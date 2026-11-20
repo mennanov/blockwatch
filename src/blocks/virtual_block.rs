@@ -5,7 +5,7 @@ use crate::blocks::{Block, BlockWithContext, Content, Declaration};
 use crate::diff::LineChanges;
 use crate::position::LineIndex;
 use crate::repo_path::RepoPath;
-use crate::symbol_path::SymbolPath;
+use crate::symbols::SymbolPath;
 use crate::symbols::{ResolveError, Symbols};
 use anyhow::{anyhow, bail};
 use regex::{Captures, Regex, RegexBuilder};
@@ -293,7 +293,10 @@ impl VirtualBlock {
             }
         };
         // The content is what a reference to the symbol reads, so that the two always agree.
-        Ok((definition.clone(), symbol.content(source, lines)))
+        Ok((
+            definition.clone(),
+            Content::of_symbol(symbol, source, lines),
+        ))
     }
 
     /// Finds the one place in `source` that `pattern` matches, with `lines` indexing `source`.
@@ -1050,7 +1053,7 @@ pub(crate) mod test_utils {
     use super::{ConfigEntry, Locator, TargetIf, TargetPattern, VirtualBlock};
     use crate::attributes::test_utils::text_attributes;
     use crate::repo_path::RepoPath;
-    use crate::symbol_path::SymbolPath;
+    use crate::symbols::SymbolPath;
     use std::path::PathBuf;
 
     /// A virtual block around `target`, with `attributes`. It is declared at line 7 of

@@ -3,7 +3,7 @@
 
 use super::{node_text, tree_sitter_parser, walk_tree};
 use crate::position::{Position, character_column_at};
-use crate::symbol_path::SymbolPath;
+use crate::symbols::SymbolPath;
 use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser};
 use anyhow::{Context, anyhow};
 use std::collections::HashMap;
@@ -639,7 +639,7 @@ pub(crate) fn string_from_utf16(units: Vec<u16>) -> anyhow::Result<String> {
 /// file gives, and why a path does not resolve.
 #[cfg(test)]
 pub(crate) mod test_utils {
-    use crate::symbol_path::SymbolPath;
+    use crate::symbols::SymbolPath;
     use crate::symbols::Symbols;
     use anyhow::Context;
 

@@ -30,7 +30,6 @@ mod position;
 mod repo_path;
 mod scan;
 mod settings;
-mod symbol_path;
 mod symbols;
 mod validators;
 
