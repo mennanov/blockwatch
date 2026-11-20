@@ -1,7 +1,7 @@
 //! Blocks that the config file declares around a symbol, instead of tags in a comment.
 
 use crate::attributes::Attributes;
-use crate::blocks::{Block, BlockWithContext, Content, Declaration};
+use crate::blocks::{Block, BlockWithContext, ConfigEntry, Content, Declaration};
 use crate::diff::LineChanges;
 use crate::position::LineIndex;
 use crate::repo_path::RepoPath;
@@ -9,10 +9,8 @@ use crate::symbols::SymbolPath;
 use crate::symbols::{ResolveError, Symbols};
 use anyhow::{anyhow, bail};
 use regex::{Captures, Regex, RegexBuilder};
-use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
-use std::path::PathBuf;
 
 /// A block that a `[[block]]` entry of the config file declares in one file, instead of tags in a
 /// comment. It is a block of that file.
@@ -151,37 +149,6 @@ impl Eq for TargetPattern {}
 impl Hash for TargetPattern {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.as_str().hash(state);
-    }
-}
-
-/// A `[[block]]` entry of the config file. It shows as `line 7 of "blockwatch.toml"`.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct ConfigEntry {
-    /// The config file.
-    pub(crate) file: PathBuf,
-    /// The line of the entry's `[[block]]` header.
-    pub(crate) line: usize,
-    /// The entry's position in the config file's `block` array, starting at 0. Inline tables can
-    /// put two entries on one line, so only this tells them apart.
-    pub(crate) index: usize,
-}
-
-impl ConfigEntry {
-    /// The first line of an error about the entry, such as
-    /// `invalid block at line 7 of "blockwatch.toml"`.
-    pub(crate) fn error_context(&self) -> String {
-        format!("invalid block at {self}")
-    }
-}
-
-impl fmt::Display for ConfigEntry {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "line {} of \"{}\"",
-            self.line,
-            self.file.display()
-        )
     }
 }
 

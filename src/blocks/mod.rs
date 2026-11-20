@@ -7,7 +7,7 @@ mod virtual_block;
 
 pub(crate) use address::BlockAddress;
 pub(crate) use from_comments::parse_blocks;
-pub(crate) use virtual_block::{ConfigEntry, Locator, TargetIf, TargetPattern, VirtualBlock};
+pub(crate) use virtual_block::{Locator, TargetIf, TargetPattern, VirtualBlock};
 
 use crate::attributes::Attributes;
 use crate::diff::{self, LineChange, LineChangeKind, LineChanges};
@@ -18,6 +18,7 @@ use anyhow::anyhow;
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::Range;
+use std::path::PathBuf;
 
 const UNNAMED_BLOCK_LABEL: &str = "(unnamed)";
 
@@ -80,6 +81,37 @@ impl Declaration {
             Self::Tags => None,
             Self::ConfigEntry(entry) => Some(entry.line),
         }
+    }
+}
+
+/// A `[[block]]` entry of the config file. It shows as `line 7 of "blockwatch.toml"`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct ConfigEntry {
+    /// The config file.
+    pub(crate) file: PathBuf,
+    /// The line of the entry's `[[block]]` header.
+    pub(crate) line: usize,
+    /// The entry's position in the config file's `block` array, starting at 0. Inline tables can
+    /// put two entries on one line, so only this tells them apart.
+    pub(crate) index: usize,
+}
+
+impl ConfigEntry {
+    /// The first line of an error about the entry, such as
+    /// `invalid block at line 7 of "blockwatch.toml"`.
+    pub(crate) fn error_context(&self) -> String {
+        format!("invalid block at {self}")
+    }
+}
+
+impl fmt::Display for ConfigEntry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "line {} of \"{}\"",
+            self.line,
+            self.file.display()
+        )
     }
 }
 
