@@ -245,11 +245,12 @@ The main modules:
   `makefile-lossless` crate, and Lean has its own scanner. Each language has a `parser()` that returns a
   `LanguageParser`, which knows which syntax nodes are comments. `comments.rs` holds `Comment` and the comment styles
   that several languages share, and `syntax_tree.rs` the tree-sitter helpers.
-  `src/blocks/from_comments.rs` turns those comments into blocks. `LanguageParsers::new` in `languages/mod.rs`
+  `src/blocks/from_comments.rs` turns those comments into blocks. `LanguageParsers::new` in `languages/parsers.rs`
   builds one parser for each `Language`. A grammar that tree-sitter can't load is a build bug, so it panics.
   `parser_for` asks the resolver for a file's `Language`, then returns its parser.
   **To add a language, add a module here. Then add a `Language` variant, its rows in `NAMES`, a field in
-  `LanguageParsers`, its arm in `LanguageParsers::parser`, and its parser in `LanguageParsers::new`.**
+  `LanguageParsers`, its arm in `LanguageParsers::parser`, and its parser in `LanguageParsers::new`, all in
+  `parsers.rs`.**
 
   Some languages also have symbols. Such a language has a `SymbolsParser`, which its `parser()` passes to
   `.with_symbols(...)`:
@@ -266,7 +267,7 @@ The main modules:
     one version. Its known bugs are listed in `docs/symbols.md`, not worked around.
 
   Each language's tests list every symbol it finds. When you give a language symbols, also document its paths in
-  `docs/symbols.md` and add the language to "Files with symbols" in `src/skill.md`. A test in `languages/mod.rs`
+  `docs/symbols.md` and add the language to "Files with symbols" in `src/skill.md`. A test in `languages/parsers.rs`
   and the repository's own blocks keep the list of file types with symbols, and each language's section in
   `docs/symbols.md`, in sync with the code.
 - `src/symbols/` — `Symbol`, the `SymbolsParser` trait, and `resolve`, which finds the symbol a path refers to, in

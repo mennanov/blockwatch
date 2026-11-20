@@ -4,6 +4,18 @@ use super::Language;
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
+use std::sync::LazyLock;
+
+impl Language {
+    /// The language of `key`, an extension without its dot (`rs`) or a whole file name
+    /// (`Dockerfile`). Returns `None` when no parser reads such files.
+    pub(crate) fn from_key(key: &str) -> Option<Self> {
+        // The lookup runs several times for every file in the walk.
+        static BY_NAME: LazyLock<HashMap<&str, Language>> =
+            LazyLock::new(|| NAMES.iter().copied().collect());
+        BY_NAME.get(key).copied()
+    }
+}
 
 /// Each extension without its dot, such as `rs`, or whole file name, such as `Dockerfile`, with
 /// the language of the files it fits.

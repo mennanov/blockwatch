@@ -21,7 +21,7 @@ declares, instead of tags in a comment.
 
 ## Files with symbols
 
-<!-- <block name="languages-with-symbols" same-as="src/languages/mod.rs:languages-with-symbols"
+<!-- <block name="languages-with-symbols" same-as="src/languages/parsers.rs:languages-with-symbols"
      same-as-pattern="^\| (?P<value>[^|]+?) +\|.*\]\(#"> -->
 
 | Language         | Files, for example                                                     | Paths                                                   |
