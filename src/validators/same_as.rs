@@ -791,7 +791,7 @@ struct PathsTrace {
 #[cfg(test)]
 mod validate_tests {
     use super::*;
-    use crate::diff_parser::{LineChange, LineChangeKind};
+    use crate::diff::{LineChange, LineChangeKind};
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
     use crate::validators::test_utils::validation_context;

@@ -170,7 +170,7 @@ fn create_violation(
 #[cfg(test)]
 mod validate_tests {
     use super::*;
-    use crate::diff_parser::DiffChanges;
+    use crate::diff::DiffChanges;
     use crate::language_parsers::LanguageParsers;
     use crate::repo_path::RepoPath;
     use crate::validators::test_utils::validation_context;

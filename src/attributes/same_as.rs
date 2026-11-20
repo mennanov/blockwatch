@@ -1,8 +1,7 @@
 //! Attribute values for `same-as-format`, `same-as-mode`, and `same-as-paths`.
 
 use super::parse_keyword_value;
-use crate::fs::FileSystem;
-use crate::paths_glob::PathsGlob;
+use crate::fs::{FileSystem, PathsGlob};
 use anyhow::{anyhow, bail};
 use regex::Regex;
 use serde::Serialize;

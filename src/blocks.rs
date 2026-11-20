@@ -1,7 +1,7 @@
 //! The `Block` type and the other types that describe the blocks of a file.
 
 use crate::attributes::Attributes;
-use crate::diff_parser::{self, LineChange, LineChangeKind, LineChanges};
+use crate::diff::{self, LineChange, LineChangeKind, LineChanges};
 use crate::position::Position;
 use crate::repo_path::RepoPath;
 use crate::validators::Validator;
@@ -223,7 +223,7 @@ impl Content {
     fn intersects(&self, line_change: &LineChange) -> bool {
         match &line_change.kind {
             LineChangeKind::Deleted => {
-                let point = diff_parser::deletion_point(line_change.line);
+                let point = diff::deletion_point(line_change.line);
                 // The end is included even though the range excludes it: a gap sitting exactly at
                 // the range's exclusive end is where the range's last character used to be. A
                 // whole-line deletion never lands there, since its gap is always at column 1, so
@@ -246,7 +246,7 @@ impl Content {
                     self.positions.end.character
                 };
 
-                diff_parser::intersects_columns(ranges, start_col, end_col)
+                diff::intersects_columns(ranges, start_col, end_col)
             }
         }
     }
@@ -539,7 +539,7 @@ mod supported_languages_tests {
     use std::collections::HashMap;
 
     use crate::blocks::*;
-    use crate::diff_parser::DiffChanges;
+    use crate::diff::DiffChanges;
     use crate::fs::test_utils::FakeFileSystem;
     use crate::language_parsers::LanguageParsers;
     use crate::scan::{Scan, ScanMode};

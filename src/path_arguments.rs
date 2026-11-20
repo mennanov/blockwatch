@@ -1,7 +1,6 @@
 //! The paths and globs given on the command line, and the check that each selects a file.
 
-use crate::fs::{Entry, FileSystem};
-use crate::paths_glob::glob_builder;
+use crate::fs::{Entry, FileSystem, glob_builder};
 use crate::repo_path::RepoPath;
 use anyhow::{Context, bail};
 use globset::{GlobSet, GlobSetBuilder};

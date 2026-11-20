@@ -157,7 +157,7 @@ fn counted(count: usize, one: &str, many: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diff_parser::DiffChanges;
+    use crate::diff::DiffChanges;
     use crate::fs::test_utils::{FakeFileSystem, path_filter_all};
     use crate::language_parsers::LanguageParsers;
     use crate::position::Position;

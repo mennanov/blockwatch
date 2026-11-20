@@ -1,8 +1,8 @@
 //! Project settings: how they are validated, and how the flags and the config file are merged.
 
 use crate::blocks::BlockAddress;
+use crate::fs::glob_builder;
 use crate::language_resolver::Language;
-use crate::paths_glob::glob_builder;
 use crate::validators::Validator;
 use anyhow::{Context, bail};
 use globset::{Glob, GlobSet, GlobSetBuilder};

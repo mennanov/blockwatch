@@ -4,7 +4,7 @@
 use crate::attributes::Severity;
 use crate::blocks::BlockAddress;
 use crate::config;
-use crate::diff_parser::{self, DiffChanges};
+use crate::diff::{self, DiffChanges};
 use crate::explain::Explanation;
 use crate::flags;
 use crate::fs::FileSystem;
@@ -359,8 +359,8 @@ fn read_diff_from_stdin(file_system: &impl FileSystem) -> anyhow::Result<DiffCha
     // A diff of a file that is not UTF-8 carries the file's bytes as they are. Only line numbers
     // are taken from a diff, so those bytes can be replaced.
     let diff = String::from_utf8_lossy(&diff);
-    diff_parser::validate_diff_input(&diff)?;
-    diff_parser::line_changes_from_diff(&diff, file_system)
+    diff::validate_diff_input(&diff)?;
+    diff::line_changes_from_diff(&diff, file_system)
 }
 
 /// Writes the violations to stderr in the requested format. Returns true if any violation has error
@@ -414,7 +414,7 @@ fn write_sarif_violations(violations: &BTreeMap<RepoPath, Vec<Violation>>) -> an
 fn repository_root_path(current_path: &Path) -> anyhow::Result<PathBuf> {
     current_path
         .ancestors()
-        /* <block same-as="src/fs.rs:vcs-metadata-directories" same-as-mode="subset"
+        /* <block same-as="src/fs/mod.rs:vcs-metadata-directories" same-as-mode="subset"
         same-as-pattern='"(?P<value>\.[a-z]+)"'> */
         .find(|path| path.join(".git").exists() || path.join(".hg").exists())
         // </block>

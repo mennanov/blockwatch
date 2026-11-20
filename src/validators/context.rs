@@ -1,7 +1,7 @@
 //! The blocks of a run, and what the validators need to read more files.
 
 use crate::blocks::{BlockAddress, BlockListing, FileBlocks};
-use crate::diff_parser::DiffChanges;
+use crate::diff::DiffChanges;
 use crate::fs::FileSystem;
 use crate::language_parsers::LanguageParsers;
 use crate::repo_path::RepoPath;

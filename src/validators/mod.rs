@@ -257,8 +257,8 @@ mod tests {
 #[cfg(test)]
 pub(crate) mod test_utils {
     use crate::blocks::FileBlocks;
-    use crate::diff_parser::test_utils::diff_changes;
-    use crate::diff_parser::{LineChange, LineChangeKind};
+    use crate::diff::test_utils::diff_changes;
+    use crate::diff::{LineChange, LineChangeKind};
     use crate::fs::test_utils::{FakeFileSystem, path_filter_all};
     use crate::language_parsers::LanguageParsers;
     use crate::repo_path::RepoPath;

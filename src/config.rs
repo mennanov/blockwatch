@@ -1,10 +1,9 @@
 //! Reads the settings from the config file, `blockwatch.toml`.
 
 use crate::attributes::{AttributeEntry, Attributes, TargetReference};
-use crate::diff_parser::{DiffChanges, LineChanges};
-use crate::fs::FileSystem;
+use crate::diff::{DiffChanges, LineChanges};
+use crate::fs::{FileSystem, GLOB_CHARACTERS, PathsGlob};
 use crate::language_parsers::toml;
-use crate::paths_glob::{GLOB_CHARACTERS, PathsGlob};
 use crate::position::LineIndex;
 use crate::repo_path::RepoPath;
 use crate::settings::RawSettings;
@@ -501,8 +500,8 @@ mod tests {
     use super::*;
     use crate::attributes::Severity;
     use crate::attributes::test_utils::text_attributes;
-    use crate::diff_parser::test_utils::diff_changes;
-    use crate::diff_parser::{LineChange, LineChangeKind};
+    use crate::diff::test_utils::diff_changes;
+    use crate::diff::{LineChange, LineChangeKind};
     use crate::fs::test_utils::FakeFileSystem;
     use std::path::PathBuf;
 

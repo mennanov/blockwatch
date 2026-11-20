@@ -160,7 +160,7 @@ The whole pipeline is in `src/cli.rs`. `src/main.rs` only calls `blockwatch::run
 2. Find the repository root and build a `fs::FileSystemImpl` limited to it. Every file read goes through it, so a path
    in a block attribute can't reach outside the repository.
 3. Decide what the run works on. With `--diff`, a unified diff is read from stdin, and
-   `diff_parser::line_changes_from_diff` turns it into `DiffChanges`: a sorted `LineChanges` for each file.
+   `diff::line_changes_from_diff` turns it into `DiffChanges`: a sorted `LineChanges` for each file.
    `--only-changed` also limits the run to the files in that diff. Without `--diff`, stdin is never read and no block
    counts as changed.
 4. Resolve the run's settings. `config::read` reads `blockwatch.toml` from the repository root, or the file given by
@@ -168,7 +168,7 @@ The whole pipeline is in `src/cli.rs`. `src/main.rs` only calls `blockwatch::run
    with the same rules and merges them: the ignore globs, the extension mappings and the validator selection.
    `config::read` also returns the file's virtual blocks: its `[[block]]` entries, each around a symbol, the text a
    `target-pattern` matches, or a whole file. A target whose file is a glob gives one virtual block for each file it
-   matches, found with `paths_glob::PathsGlob`. `config::read` marks the blocks whose entry the diff touches.
+   matches, found with `fs::PathsGlob`. `config::read` marks the blocks whose entry the diff touches.
 5. Walk the repository with the `ignore` crate, which respects `.gitignore`. Keep the files that the paths and globs
    from the command line select, and that don't match the settings' ignore globs. `PathArguments::resolve` turns an
    existing file or directory into a glob first, so `src` selects `src/**`. `LanguageResolver::resolve` picks each
@@ -200,9 +200,11 @@ address as the only path. It then writes that block to stdout as JSON.
 
 The main modules:
 
-- `src/fs.rs` — the `FileSystem` trait and its real implementation, and `PathFilter`, which decides whether a run
-  reads a path: it must match an allow glob and no ignore glob. Tests swap in `FakeFileSystem` from `fs::test_utils`.
-  They build a real `PathFilter` with `PathFilter::allow_all()`, `allow_only` or `with_ignored_paths`.
+- `src/fs/` — the `FileSystem` trait and its real implementation, in `mod.rs`. `path_filter.rs` holds `PathFilter`,
+  which decides whether a run reads a path: it must match an allow glob and no ignore glob. `glob.rs` holds
+  `PathsGlob`, a glob that lists the repository paths it matches. Tests swap in `FakeFileSystem` from
+  `fs::test_utils`. They build a real `PathFilter` with `path_filter_all`, `path_filter_only` or
+  `path_filter_ignoring` from there.
 - `src/settings.rs` — `RawSettings` holds the settings read from one place: the config file or the flags. `Settings` is
   the validated and merged result. `RawSettings::parse` is the only place the rules for a setting live, so the flags
   and the config file can't drift apart. It returns the parsed values, so nothing is parsed twice. Its errors quote the
@@ -277,11 +279,12 @@ The main modules:
   | `pattern_values.rs`    | the values a `*-pattern` attribute picks out                           |
 
   `mod.rs` re-exports what the rest of the crate uses, such as `validators::ValidationContext`.
-- `src/diff_parser.rs` — wraps `unidiff` to produce `LineChange`s, kept in `LineChanges` for a file and in
-  `DiffChanges` for the whole diff. `LineChanges::touches` decides whether they touch a range of the file, such as a
-  block's start tag or a symbol's definition. A block's content has its own check in `blocks.rs`, because a deletion
-  right where the content starts removes content. The results end up in `is_content_modified` and
-  `is_start_tag_modified` on `BlockWithContext`, which decide which blocks count as changed.
+- `src/diff/` — `LineChange`s, kept in `LineChanges` for a file and in `DiffChanges` for the whole diff, in
+  `mod.rs`. `unified.rs` wraps `unidiff` to read them from a unified diff. `LineChanges::touches` decides whether
+  they touch a range of the file, such as a block's start tag or a symbol's definition. A block's content has its own
+  check in `blocks.rs`, because a deletion right where the content starts removes content. The results end up in
+  `is_content_modified` and `is_start_tag_modified` on `BlockWithContext`, which decide which blocks count as
+  changed.
 
 A block counts as changed only when its content or its start tag overlaps a `LineChange`. With
 `--diff --only-changed`, only changed blocks are validated. With `--diff` alone, every block is validated, but rules

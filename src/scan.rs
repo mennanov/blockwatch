@@ -1,7 +1,7 @@
 //! The repository scan that turns source files into the blocks to validate.
 
 use crate::blocks::{Block, BlockWithContext, Declaration, FileBlocks};
-use crate::diff_parser::{DiffChanges, LineChanges};
+use crate::diff::{DiffChanges, LineChanges};
 use crate::fs::{FileSystem, PathFilter};
 use crate::language_parsers::{LanguageParsers, SharedLanguageParser};
 use crate::repo_path::RepoPath;
@@ -606,8 +606,8 @@ fn reject_duplicate_name(
 mod parse_blocks_tests {
     use super::*;
     use crate::blocks::*;
-    use crate::diff_parser::test_utils::diff_changes;
-    use crate::diff_parser::{LineChange, LineChangeKind};
+    use crate::diff::test_utils::diff_changes;
+    use crate::diff::{LineChange, LineChangeKind};
     use crate::fs::PathFilter;
     use crate::fs::test_utils::{
         FakeFileSystem, path_filter_all, path_filter_ignoring, path_filter_only,

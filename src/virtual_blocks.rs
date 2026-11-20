@@ -2,7 +2,7 @@
 
 use crate::attributes::Attributes;
 use crate::blocks::{Block, BlockWithContext, Content, Declaration};
-use crate::diff_parser::LineChanges;
+use crate::diff::LineChanges;
 use crate::position::LineIndex;
 use crate::repo_path::RepoPath;
 use crate::symbol_path::SymbolPath;
@@ -416,7 +416,7 @@ impl VirtualBlock {
 mod tests {
     use super::test_utils::{virtual_block, virtual_block_with_target_if};
     use super::*;
-    use crate::diff_parser::{LineChange, LineChangeKind};
+    use crate::diff::{LineChange, LineChangeKind};
     use crate::language_parsers::LanguageParsers;
     use crate::position::Position;
     use std::collections::HashMap;

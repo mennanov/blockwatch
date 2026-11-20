@@ -342,8 +342,8 @@ fn affects_violation(
 #[cfg(test)]
 mod validate_tests {
     use super::*;
-    use crate::diff_parser::test_utils::diff_changes;
-    use crate::diff_parser::{LineChange, LineChangeKind};
+    use crate::diff::test_utils::diff_changes;
+    use crate::diff::{LineChange, LineChangeKind};
     use crate::fs::test_utils::FakeFileSystem;
     use crate::repo_path::RepoPath;
     use crate::validators::SyncValidator;
@@ -1331,7 +1331,7 @@ b = 2
 #[cfg(test)]
 mod trace_tests {
     use super::validate_tests::{context_with_changed_files, validator};
-    use crate::diff_parser::{LineChange, LineChangeKind};
+    use crate::diff::{LineChange, LineChangeKind};
     use crate::validators::SyncValidator;
     use crate::validators::test_utils::{trace_json, with_traces};
     use crate::validators::test_utils::{validation_context, validation_context_with_changes};
