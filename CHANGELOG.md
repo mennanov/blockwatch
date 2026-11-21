@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.20.0] - 2026-11-21
+
 ### Changed
 
 - **Breaking:** `blockwatch list`, `blockwatch explain`, `--verbosity full`, and `ctx.attrs` in `check-lua` now output
