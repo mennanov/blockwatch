@@ -1,365 +1,101 @@
 # AGENTS.md
 
-This file tells AI coding agents how to work in this repository. Every agent reads the same file. `CLAUDE.md` is a
-symlink to it, because Claude Code only looks for `CLAUDE.md`.
+blockwatch is a linter written in Rust. It works with any language. Rules are `<block ...>` tags inside code comments.
+`CLAUDE.md` is a symlink to this file, because Claude Code only reads `CLAUDE.md`.
 
-## Project
+Every rule below says why it exists. Use the reason to decide the cases the rule doesn't cover. When a rule gets in
+your way, ask the human. Don't work around it.
 
-blockwatch is a linter written in Rust and published on crates.io. It works with any language. Rules are written as
-HTML-like `<block ...>` tags inside code comments, and blockwatch checks them. It can check the whole repository, or
-only the lines changed in a unified diff piped into it.
-
-## Common commands
+## Commands
 
 ```shell
-cargo run -- list '<path or glob>'         # print the blocks parsed from matching files, as JSON
-cargo llvm-cov                             # run the tests and report coverage
-cargo clippy --all-targets -- -D warnings  # lint
-cargo test --doc                           # run the examples in the doc comments (cargo llvm-cov skips them)
-RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items  # check the doc comments
-markdownlint-cli2                          # lint Markdown (config: .markdownlint-cli2.yaml)
-pre-commit run --all-files                 # run every hook the repository installs
+pre-commit run --all-files         # fmt, clippy, docs, tests, markdownlint, and this repository's own blocks
+cargo llvm-cov                     # tests with coverage
+cargo run                          # check this repository's own blocks
+cargo run -- list '<path or glob>' # print the blocks parsed from matching files, as JSON
 ```
 
-Fuzzing lives in `fuzz/`. It needs the nightly toolchain and `cargo-afl`. See `fuzz/README.md`.
+## Ask the human
 
-Integration tests use `assert_cmd` to run the built binary on the fixtures in `tests/testdata/`. Many of them also pipe
-a made-up diff into stdin. When you add a test, follow the pattern in `tests/<validator>.rs`. Build the command with
-`common::cargo_bin_cmd!`. It passes an empty config, because this repository's `blockwatch.toml` skips
-`tests/testdata/`. Clippy rejects `assert_cmd::cargo_bin_cmd!`, so a test can't read that file by mistake.
+- Ask when the task is unclear, and before a change that affects UX, security or performance. Describe the problem,
+  list the options, and let the human choose. These are the human's decisions.
+- Stop and ask as soon as a fix starts to look complicated. A complicated workaround usually means the plan is wrong.
+- Never commit on your own. A human reviews every change first. When asked to commit, commit on the current branch.
+  Write a title and one to three sentences. Don't list what the diff changed. The diff already shows that.
 
-## Rules for agents
+## Design
 
-You *must* follow every rule below, at all times.
+- Write the simplest code that does the job. Don't add a helper, an accessor, a type alias or a test whose only payoff
+  is slightly nicer output or a rare edge case. Reword the message to fit the simple code instead. For example, join a
+  list with `", "` rather than write a helper that prints "a, b or c". Every extra line is code someone must read and
+  keep working.
+- Make failures loud. When a value can't be computed, or an input can't be handled as asked, return an error that says
+  the cause and, where possible, the fix. Never fall back to a default, and never skip a bad input with only a
+  warning. Users don't notice warnings, so a silent fallback gives a wrong result that looks right. Output may be empty
+  or zero when that is the true result.
+- Handle an enum with an exhaustive `match`, never with `let ... else` or an `if` plus one catch-all branch. Then the
+  compiler makes you decide what each new variant does. `Option` and `Result` can't get new variants, so
+  `let ... else` on them is fine. A `match` on another crate's enum may end with `_` when it picks out a few variants
+  that no new variant could be. Say why in a comment next to the `_`.
+- Never add a dependency loop, between the modules in `src/` or between the files of one module. If `a` uses `b`, then
+  `b` must not use `a`, directly or through other files. Tests count too: a test may use only what its file's code may
+  use. A `mod.rs` doesn't use an item it only re-exports. To break a loop, move the item that both sides need into its
+  own file.
+- Give each item the narrowest visibility that compiles: private, then `pub(super)`, then `pub(crate)`. blockwatch is
+  a program, not a library.
+- Rename or move Rust symbols with a tool that understands Rust, such as rust-analyzer. Never use `sed`, `perl` or a
+  bulk find-and-replace. Text replacement misses references and changes unrelated text.
 
-### Writing style
-
-These rules apply to everything you write, with no exceptions: code comments, doc comments, `--help` text, error
-messages, docs, `CHANGELOG.md`, commit messages, and your replies to the human in chat.
-
-- *Always* write so that each sentence is understood on the first read. If a sentence needs a second read, split it or
-  say it more simply.
-- *Always* use short sentences, one idea each, and everyday words.
-- *Always* say the concrete thing. Name the file, flag or value instead of describing it in the abstract.
-- *Always* say what happens, such as what passes or fails, rather than naming a property like "order-insensitive".
-- *Never* use jargon or formal framing, such as "hold for", "as opposed to", "govern" or "self-describes". Use the plain
-  word instead.
-- *Prefer* an example when it is shorter than the explanation.
-- *Prefer* a short list or a table to a long sentence with several clauses.
-
-For example:
-
-| Hard to follow                                                                             | Easy to follow                                                                                     |
-|--------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
-| The settings that hold for a whole project, as opposed to the flags that describe one run. | The validated settings for a run: the config file merged with the flags.                           |
-| A file whose extension is a key is parsed as if its extension were the value.              | Maps an extension to a supported one. For example, `cu` to `cpp` makes `.cu` files parse as C++.   |
-| Validates the arguments that describe one run, as opposed to the project-wide settings.    | Validates the flags that are not settings, such as `--format` and `--suppress`.                    |
-
-### Reading and editing code
-
-- *Always* read and edit Rust with a tool that understands the language, such as an LSP client, an IDE plugin or an MCP
-  server. Use it to find references, jump to definitions and rename symbols.
-- *Never* rename or move Rust symbols with text replacement, such as `sed`, `perl` or a bulk find-and-replace. Use the
-  tool's rename. If you can't, list every reference first, then edit them one at a time.
-- *Prefer* the harness's editing tools to one-off scripts.
-- *Always* handle the variants of an enum with an exhaustive `match`. A `let ... else`, or an `if` that handles one
-  variant and sends the rest to a single branch, quietly gives any new variant whatever that branch does. With a
-  `match`, the compiler makes you decide what to do with each new variant. One exception: a `match` on another
-  crate's enum can end with `_` when it only picks out one or a few variants, and no new variant could be one of
-  them. For example, every Markdown heading is `mdast::Node::Heading`, so the other node types can go to
-  `_ => None`. Say why in a comment next to the `_`.
-- *Always* give an item the narrowest visibility that compiles: private, then `pub(super)`, then `pub(crate)`.
-  blockwatch is a program, not a library. Only `run` and `count_rust_blocks` in `lib.rs` are `pub`, for `main.rs` and
-  the fuzz target. The `unreachable_pub` lint makes `cargo clippy -- -D warnings` fail on any other `pub`.
-
-### Asking the human
-
-- *Always* ask the human when something is unclear, and when a change affects UX, security or performance. Describe
-  the problem, list the options, and let the human choose.
-- *Never* dig deeper and deeper to get around a blocker. As soon as a solution starts to look complicated, stop and ask.
-
-### Writing comments
-
-These rules apply to doc comments, inline comments and docs.
-
-- *Always* explain *why* the code is written this way. *Never* describe what it does. The code already shows that. If
-  the reason is too unusual to explain, ask the human.
-- *Never* write a comment that only makes sense to someone working on today's task. Write for a future reader who
-  knows neither the task nor this project.
-- *Always* put a doc comment on the symbol it describes. Say what the symbol is, what a function takes and returns, and
-  what a caller needs to know: the order of results, when a value can be missing, and when it panics or returns an
-  error.
-- *Always* explain an implementation detail inside the function body, next to the code it explains. A caller shouldn't
-  need to read about the internals to use the function.
-- *Never* describe how other modules or callers use a symbol. Describe only the symbol itself.
-- *Always* check that the tests in a module follow one structure. Put the most important tests first. Name every test
-  `state_action_expected_result`. You can leave out `action` when it is obvious.
-- *Always* ask the human before you restructure tests to keep them consistent.
-
-### Writing and running tests
+## Tests
 
 The goal is a test suite that fails when behavior changes. Running every line is not the goal.
 
-- *Always* start with a test that fails, and check that it fails for the reason you expect.
-- *Always* work out again why each code path your change touches is correct, and give each path its own test.
-- *Always* find the inputs whose result your change changes, and test the edges of that group. A change can be right
-  for the obvious input and wrong just next to it, and a reviewer can miss that.
-- *Always* mutation-test a new test before you call the work done. For example, flip each comparison or boundary the
-  change touched, run the tests, check that one fails, then undo the flip. If the tests pass either way, they are too
-  weak.
-- *Always* delete a scratch copy you made for mutation testing, with its own `target/` directory, as soon as the
-  mutation run ends. A `target/` directory takes gigabytes.
-- *Always* run the tests with coverage as the last check before you call the work done.
-- *Prefer* to read a coverage report (`cargo llvm-cov`) as a list of questions, not as a number to raise. An uncovered
-  branch asks why nobody needed it. The answer is either a case worth testing or code worth deleting. *Never* add a
-  test only to turn a line in the coverage report green.
+- Write a failing test first. Check that it fails for the reason you expect.
+- Find the inputs whose result your change changes, and test the edges of that group. A change can be right for the
+  obvious input and wrong just next to it.
+- Mutation-test each new test: flip each comparison or boundary the change touched, and check that a test fails. Do it
+  in a scratch copy with its own `target/`, and delete both right after. A `target/` takes gigabytes.
+- Read the coverage report as questions. An uncovered branch is either a case worth testing or code worth deleting.
+  Never add a test only to cover a line.
+- Name tests `state_action_expected_result`. Put the most important tests first.
+- Integration tests run the binary on `tests/testdata/`. Follow `tests/<validator>.rs`, and build the command with
+  `common::cargo_bin_cmd!`. It passes an empty config, because `blockwatch.toml` skips `tests/testdata/`.
 
-### Committing
+## Comments
 
-- *Never* commit on your own. A human reviews every change first.
-- *Always* commit on the current branch, usually `main`, rather than on a new branch. If you think a new branch is really
-  needed, ask the human.
-- *Always* keep the commit message short: a title, and one to three sentences of description.
-- *Never* repeat the diff in a commit message, such as which files changed and how. The diff already shows that.
+- Explain why the code is written this way. Never describe what it does. The code shows that.
+- Write for a reader who doesn't know today's task. Never refer to a plan, a stage or an issue.
+- A doc comment says what the symbol is, what it takes and returns, the order of results, when a value can be missing,
+  and when it errors or panics. It doesn't say how callers use it. Implementation details go in the body, next to the
+  code.
 
-## The repository lints itself
+## Writing style
 
-Source files here contain real `<block ...>` tags. Two runs check them:
+This applies to everything you write: comments, `--help`, error messages, docs, `CHANGELOG.md`, commit messages and
+chat.
 
-- The `commit-msg` hook builds the linter from the working tree and runs it on the whole repository. It pipes in the
-  staged diff with `--diff`, so rules that need a change, such as `affects`, fire for the blocks the commit touches.
-- CI runs the release that `mennanov/blockwatch-action` pins on the whole repository. That release can be older than
-  the code here.
+- Use short sentences, one idea each, and everyday words. Each sentence must make sense on the first read.
+- Say the concrete thing: the file, flag or value. Say what passes or fails, not a property like "order-insensitive".
+- No jargon or formal framing, such as "hold for", "as opposed to" or "govern".
+- Use an example or a table when it is shorter than the explanation.
 
-The hook and CI read `blockwatch.toml`. It skips `tests/testdata/`, where the fixtures break rules on purpose. It also
-skips the `latest-model` block, because its `check-lua` script needs the network. `.github/workflows/trusted-checks.yml`
-runs that block on a schedule. The `[[block]]` entries in `blockwatch.toml` hold rules too, with no tag in the file
-they check, such as the version and the dependencies in `Cargo.toml`.
+| Hard to follow                                                                          | Easy to follow                                                                                   |
+|-----------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------|
+| A file whose extension is a key is parsed as if its extension were the value.           | Maps an extension to a supported one. For example, `cu` to `cpp` makes `.cu` files parse as C++. |
+| Validates the arguments that describe one run, as opposed to the project-wide settings. | Validates the flags that are not settings, such as `--format` and `--suppress`.                  |
 
-No test checks these blocks, so `cargo test` can pass while the hook fails. `tests/general.rs` also runs the linter on
-the whole tree, but with an empty config, so the fixtures fail that run on purpose. To check the blocks before you
-commit, run `cargo run`.
+## Traps in this repository
 
-This means:
-
-- In a source comment, tag text counts. The release that CI runs reads it even inside backticks. A full tag becomes a
-  block, and a partial one can fail the run as a malformed tag. Describe a tag in words instead, such as "the start
-  tag" or "an end tag with a space before its slash". Tag text is safe in a Rust string literal. In Markdown, it is
-  safe outside `<!-- -->` and `[//]: #` comments.
-- When a commit fails, it is usually the linter reporting a rule that the change broke. The hook itself is usually
-  fine. Read the violation before you work around it.
-
-## Architecture
-
-The whole pipeline is in `src/cli/mod.rs`. `src/main.rs` only calls `blockwatch::run`:
-
-1. Parse the command-line flags (`cli/flags.rs`, built with clap). The flags that `list` also takes are `global`, so they
-   can go before or after `list`. The flags only validation uses are in `ValidationFlags`, so `list --help` doesn't
-   show them. `Args::validate` rejects them for `list` and `skill`. A validation run then reads the `--suppress-from`
-   files, once. Both happen before stdin or the config file is read, so a bad flag is reported first.
-2. Find the repository root and build a `fs::FileSystemImpl` limited to it. Every file read goes through it, so a path
-   in a block attribute can't reach outside the repository.
-3. Decide what the run works on. With `--diff`, a unified diff is read from stdin, and
-   `diff::line_changes_from_diff` turns it into `DiffChanges`: a sorted `LineChanges` for each file.
-   `--only-changed` also limits the run to the files in that diff. Without `--diff`, stdin is never read and no block
-   counts as changed.
-4. Resolve the run's settings. `config::read` reads `blockwatch.toml` from the repository root, or the file given by
-   `--config`. `Args::raw_settings` returns the settings given as flags. `settings::Settings::resolve` validates both
-   with the same rules and merges them: the ignore globs, the extension mappings and the validator selection.
-   `config::read` also returns the file's virtual blocks: its `[[block]]` entries, each around a symbol, the text a
-   `target-pattern` matches, or a whole file. A target whose file is a glob gives one virtual block for each file it
-   matches, found with `fs::PathsGlob`. `config::read` marks the blocks whose entry the diff touches.
-5. Walk the repository with the `ignore` crate, which respects `.gitignore`. Keep the files that the paths and globs
-   from the command line select, and that don't match the settings' ignore globs. `PathArguments::resolve` turns an
-   existing file or directory into a glob first, so `src` selects `src/**`. `LanguageResolver::resolve` picks each
-   file's `Language` from its name, using the settings' extension mappings too.
-6. For each file, the matching `languages::<lang>` (usually a tree-sitter grammar) finds the comments.
-   `blocks::tags` and `blocks::from_comments` turn the comment text into `Block` values, with their attributes and
-   their byte and line ranges.
-   `VirtualBlock::resolve` finds each virtual block in the file, by its `Locator`, and adds it as a `Block` too. A file
-   without a grammar is read as plain text: it has no tags, only its virtual blocks. A target that does not resolve
-   stops the run. `--only-changed` also parses the file of a virtual block whose entry the diff
-   touches, even when the diff does not touch that file. The result is a `blocks::FileBlocks` for each file, kept in a
-   `validators::ValidationContext`. Each path or glob argument must select at least one parsed file, or the run
-   stops. Under `--only-changed`, an argument that selects no file in the diff is checked against a walk of the tree.
-7. `validators::detect_validators` checks which validators each block turns on with `Validator::is_turned_on_by`, and
-   builds them with `create_validator`. It returns either `TypedValidator::Sync` or `TypedValidator::Async`. Async
-   validators, such as `check-ai`, run on Tokio. The Tokio runtime only starts if at least one async validator is
-   needed.
-8. Validators produce `Violation`s, each with a `ViolationRange` and a `Severity` (error, warning, info or hint). A
-   symbol reference such as `file#/path` is found with `symbols::resolve`. It searches the symbols that
-   `LanguageParser::parse_symbols` finds in the target file, once per file. A missing or ambiguous symbol is a
-   violation. A target file that doesn't parse stops the run. Addresses given to `--suppress` or `--suppress-from` mark
-   the violations they cover as suppressed. Those are still reported, but they no longer fail the run.
-9. Violations go to stderr, as JSON diagnostics or as a SARIF 2.1.0 log, depending on `--format`. The `--verbosity`
-   report goes to stdout. The exit code depends on the error-severity violations that are not suppressed.
-
-The `list` subcommand stops after step 6 and writes the blocks it found to stdout as JSON. The `skill` subcommand
-prints `src/skill.md` right after step 1. The `explain` subcommand runs like `--only-block` with the file of its
-address as the only path. It then writes that block to stdout as JSON.
-
-The main modules:
-
-- `src/cli/` — the pipeline above, in `mod.rs`. `flags.rs` holds the clap flags, and `path_arguments.rs` turns the
-  paths and globs given on the command line into globs.
-- `src/output/` — everything a run writes: the JSON diagnostics and the SARIF log (`sarif.rs`), the JSON of a block
-  that `list`, `explain` and the report share (`listing.rs`), the `explain` output (`explain.rs`), and the
-  `--verbosity` report (`run_report.rs`).
-- `src/fs/` — the `FileSystem` trait and its real implementation, in `mod.rs`. `path_filter.rs` holds `PathFilter`,
-  which decides whether a run reads a path: it must match an allow glob and no ignore glob. `glob.rs` holds
-  `PathsGlob`, a glob that lists the repository paths it matches. Tests swap in `FakeFileSystem` from
-  `fs::test_utils`. They build a real `PathFilter` with `path_filter_all`, `path_filter_only` or
-  `path_filter_ignoring` from there.
-- `src/settings.rs` — `RawSettings` holds the settings read from one place: the config file or the flags. `Settings` is
-  the validated and merged result. `RawSettings::parse` is the only place the rules for a setting live, so the flags
-  and the config file can't drift apart. It returns the parsed values, so nothing is parsed twice. Its errors quote the
-  bad value but don't show a line and column. Tracking where each value is written would cost more code than it saves
-  the reader.
-- `src/config.rs` — reads the config file into a `RawSettings` and the virtual blocks, using `toml_edit`'s serde
-  support. Only the errors that `toml_edit` raises itself, such as an unknown key, show a line and column. An error
-  about a `[[block]]` entry shows the line of its header, which `serde_spanned` gives.
-- `src/blocks/` — `Block` and the types that describe the blocks of a file, in `mod.rs`. `tags.rs` parses one tag,
-  `from_comments.rs` turns a file's comments into blocks, and `address.rs` holds `BlockAddress`, `FILE:BLOCK_NAME`.
-- `src/blocks/virtual_block.rs` — `VirtualBlock`, a block that the config file declares in one file, instead of tags
-  in a comment. A file that can't or must not hold a tag, such as `package.json` or a prompt, can only get blocks this way.
-  It is a block of the file it wraps. Its `Locator` says how to find it:
-  - `Symbol`: the content is what a reference to the symbol reads: its value, or else the definition's text. A value
-    written as is, such as a number or a Markdown section, keeps its place in the file. A value with quotes or escapes
-    is decoded (`ContentText::Decoded`), so every line of it reports the value's start.
-  - `Pattern`: the `target-pattern` regex must match once. The content is its `value` group, or else the whole match.
-  - `File`: the content is the whole file.
-
-  Its `Block::declaration` is the config entry, so every message about it shows that line, through
-  `Block::declared_at`. `ValidationContext` keeps every virtual block's declaration. So when `affects` or `same-as`
-  reads a file the run did not keep, `ValidationContext::parse_file` adds that file's virtual blocks, as the run does.
-- `src/repo_path.rs` — `RepoPath`, the one way to write a path relative to the repository root. A diff header
-  (`b/src/main.rs`), a path found in the walk and a `file:name` attribute all become a `RepoPath`. So the same file is
-  always the same map key.
-- `src/languages/file_names.rs` — `LanguageResolver`, which picks a file's `Language` from its name. `NAMES` lists
-  each extension and whole file name with its `Language`. `COPY_SUFFIXES` lists the suffixes, such as `.example`,
-  that are stripped when no ending of the whole name has a language. `NAME_RULES` lists the names whose variants, such
-  as `Dockerfile.ci`, keep their language. The settings turn each extension mapping's value into a `Language` with
-  `Language::from_key`.
-- `src/languages/` — `Language`, with one variant for each parser, in `mod.rs`, and one parser for each language,
-  most of them a tree-sitter grammar. Markdown and MDX use the `markdown` crate, Makefile uses the
-  `makefile-lossless` crate, and Lean has its own scanner. Each language has a `parser()` that returns a
-  `LanguageParser`, which knows which syntax nodes are comments. `comments.rs` holds `Comment` and the comment styles
-  that several languages share, and `syntax_tree.rs` the tree-sitter helpers.
-  `src/blocks/from_comments.rs` turns those comments into blocks. `LanguageParsers::new` in `languages/parsers.rs`
-  builds one parser for each `Language`. A grammar that tree-sitter can't load is a build bug, so it panics.
-  `parser_for` asks the resolver for a file's `Language`, then returns its parser.
-  **To add a language, add a module here. Then add a `Language` variant, its rows in `NAMES`, a field in
-  `LanguageParsers`, its arm in `LanguageParsers::parser`, and its parser in `LanguageParsers::new`, all in
-  `parsers.rs`.**
-
-  Some languages also have symbols. Such a language has a `SymbolsParser`, which its `parser()` passes to
-  `.with_symbols(...)`:
-
-  - A programming language implements `CodeLanguage`, and `CodeSymbolsParser` in `code_symbols.rs` finds its symbols
-    with the rules that every programming language shares.
-  - JSON, YAML and XML walk their syntax trees themselves, and refuse a file with a syntax error.
-    `ensure_no_syntax_error` in `syntax_tree.rs` refuses it, instead of resolving a path through tree-sitter's error
-    recovery.
-  - TOML finds its symbols with `toml_edit`. What a TOML key means depends on the order of the headers, not on how the
-    syntax tree is nested.
-  - Markdown finds its sections with the `markdown` crate, the same parser that finds its comments.
-  - Makefile finds its symbols with `makefile-lossless`, the same crate that finds its comments. The crate is pinned to
-    one version. Its known bugs are listed in `docs/symbols.md`, not worked around.
-
-  Each language's tests list every symbol it finds. When you give a language symbols, also document its paths in
-  `docs/symbols.md` and add the language to "Files with symbols" in `src/skill.md`. A test in `languages/parsers.rs`
-  and the repository's own blocks keep the list of file types with symbols, and each language's section in
-  `docs/symbols.md`, in sync with the code.
-- `src/symbols/` — `Symbol`, the `SymbolsParser` trait, and `resolve`, which finds the symbol a path refers to, in
-  `mod.rs`. `path.rs` holds `SymbolPath`, the parsed path after the `#` of a reference, such as `/version`.
-- `src/attributes/` — `Attributes`, `AttributeName`, `Severity`, and the typed values for `keep-sorted`, `line-count`,
-  and `same-as`. `TargetReference` is a reference that `affects`, `check-lua` or `same-as` holds, such as
-  `a.json#/version`. `parse_number` reads a number for the `numeric` format, and `parse_keyword_value` reads a
-  keyword, such as `asc`. `Attributes::from_entries` parses each value and checks cross-attribute rules, such as
-  modifier attributes without their main attribute.
-- `src/validators/` — one file for each validator (`affects`, `check_ai`, `check_lua`, `keep_sorted`, `keep_unique`,
-  `line_count`, `line_pattern`, `same_as`). `create_validator` in `validators/run.rs` builds them from one `match`.
-  `mod.rs` holds the traits they implement. The other files hold what the validators share:
-
-  | File                   | Holds                                                                  |
-  |------------------------|------------------------------------------------------------------------|
-  | `validator.rs`         | `Validator`, and the attributes that turn each one on                  |
-  | `context.rs`           | `ValidationContext`, the blocks of a run                               |
-  | `run.rs`               | `create_validator`, `detect_validators` and `run`                      |
-  | `log.rs`               | `ValidationReport` of one validator, `ValidationLog` of the whole run  |
-  | `violation.rs`         | `Violation`, `ViolationRange` and `SimpleDiagnostic`                   |
-  | `violation_address.rs` | `ViolationAddress`, which `--suppress` matches                         |
-  | `targets.rs`           | `TargetFiles`, which reads the files that references point into        |
-  | `pattern_values.rs`    | the values a `*-pattern` attribute picks out                           |
-
-  `mod.rs` re-exports what the rest of the crate uses, such as `validators::ValidationContext`.
-- `src/diff/` — `LineChange`s, kept in `LineChanges` for a file and in `DiffChanges` for the whole diff, in
-  `mod.rs`. `unified.rs` wraps `unidiff` to read them from a unified diff. `target_path.rs` turns the path in a
-  file's header, such as `b/src/main.rs`, into a `RepoPath`. `LineChanges::touches` decides whether
-  they touch a range of the file, such as a block's start tag or a symbol's definition. A block's content has its own
-  check in `blocks/mod.rs`, because a deletion right where the content starts removes content. The results end up in
-  `is_content_modified` and `is_start_tag_modified` on `BlockWithContext`, which decide which blocks count as
-  changed.
-
-A block counts as changed only when its content or its start tag overlaps a `LineChange`. With
-`--diff --only-changed`, only changed blocks are validated. With `--diff` alone, every block is validated, but rules
-that need a change, such as `affects`, only fire for changed blocks. This is the most common source of surprises. If a
-rule didn't fire, check whether the diff actually touched the block's lines. The same goes for an `affects` target that
-is a symbol, and for a virtual block. They count as changed only when the diff touches the symbol's definition, or the
-whole match of a `target-pattern`, not anything else in its file. A virtual block around a whole file counts as
-changed when the diff touches any part of the file. A virtual block also counts as changed when the diff touches its
-`[[block]]` entry, which plays the part of its start tag, or the definition of one of its `target-if` symbols.
-
-The `check-ai` validator calls an OpenAI-compatible API. It is configured with `BLOCKWATCH_AI_API_KEY`,
-`BLOCKWATCH_AI_MODEL` and `BLOCKWATCH_AI_API_URL`. The `check-lua` validator embeds Lua 5.4 through `mlua`. The
-`BLOCKWATCH_LUA_MODE` environment variable decides which standard libraries a script can use: `sandboxed` (the
-default), `safe` or `unsafe`.
-
-## What ships to users and what is guidance
-
-`src/skill.md`, `.agents/skills/blockwatch/SKILL.md` and `.claude-plugin/` are part of the *product*. They make up the
-skill this project ships, so that agents can add blocks to **other** repositories:
-
-- `src/skill.md` is the skill. `blockwatch skill` prints it with the version filled in. Its section "Installing this
-  skill" holds the stub that users save in their projects. The stub runs `blockwatch skill` each time an agent loads
-  it.
-- `.agents/skills/blockwatch/SKILL.md` is that stub, for the plugin in `.claude-plugin/`. `tests/skill.rs` checks that
-  it is the stub in `src/skill.md`, and that its description matches the one at the top of `src/skill.md`.
-
-They are not instructions for working on blockwatch, and changing them changes what users get. This file is the
-guidance for working on blockwatch.
-
-`src/skill.md` must not hold block tags. A project that saves the skill parses it too, so each tag would become a block
-in that project. To point a block at a section of the skill, use the section's headings, such as
-`src/skill.md#/blockwatch/Validator reference`. To point at only a part of a section, give that part a heading of its own.
-When the section needs a rule of its own, such as a `same-as-pattern`, add a `[[block]]` entry for it to
-`blockwatch.toml`, next to the others for `src/skill.md`.
-
-Each agent's local config directory is left out of git on purpose: `.claude/`, `.cursor/`, `.gemini/`, `.windsurf/`,
-`.aider*`, and the others listed in `.gitignore`. Don't commit agent-specific settings. Anything a future contributor
-needs belongs in this file.
-
-## Release
-
-The GitHub Actions workflows in `.github/workflows/` build releases with `cargo-dist`, configured in
-`dist-workspace.toml`. `cargo release` bumps the version in `Cargo.toml`, in a commit titled `chore: Release`, and
-tags that commit `vX.Y.Z`.
-
-`release.yml` is generated. Change `dist-workspace.toml`, then run `dist generate`. It calls `sign-archives.yml`,
-which signs each archive with minisign. The secret key is `MINISIGN_SECRET_KEY` in the `release` environment, which
-only `v*` tags can use. The public key is in `Cargo.toml`, where `cargo binstall` reads it, and in `SECURITY.md`. If
-signing fails, no GitHub release is created, but the crate is already on crates.io. Fix the cause and release a new
-patch version.
-
-Each workflow uses an action by its exact tag, such as `actions/checkout@v7.0.1`. `.github/workflows/actions.lock`
-pins each tag to a commit. GitHub refuses to start a workflow that uses an action the lockfile doesn't list, so run
-`gh actions-lock` after changing a workflow. Dependabot bumps the workflows and the lockfile, except in `release.yml`,
-whose tags are in `dist-workspace.toml`.
-
-`pypi.yml` builds the same tag for PyPI, as `blockwatch-cli`. The pre-commit hooks install that package through the
-root `setup.py`. So if the upload for a tag fails, the hooks at that tag can't install.
-
-A user-facing change gets a `CHANGELOG.md` entry under `## [Unreleased]`, in the same commit as the change.
-Refactors, tests and CI changes get no entry. `cargo release` renames that heading to the new version (see the
-replacements in `release.toml`). `dist` then publishes that section as the GitHub release notes. So if `Unreleased` is
-empty at release time, the release has no notes.
+- **The repository lints itself.** Tag text in a source comment becomes a block, or fails the run as a malformed tag,
+  even inside backticks. Describe a tag in words instead, such as "the start tag". Tag text is safe in a Rust string
+  literal, and in Markdown outside `<!-- -->` and `[//]: #` comments. `cargo test` doesn't check these blocks, so run
+  `cargo run`. When the commit hook fails, read the violation. It is usually a rule your change broke.
+- **A block counts as changed only when the diff touches its content or its start tag.** If a rule such as `affects`
+  didn't fire, check that first.
+- **`src/skill.md`, `.agents/skills/blockwatch/SKILL.md` and `.claude-plugin/` ship to users.** They are not guidance
+  for working here. `src/skill.md` must not hold block tags, because each project that saves the skill would parse
+  them. Point a block at its headings instead, such as `src/skill.md#/blockwatch/Validator reference`.
+- **A user-facing change gets a `CHANGELOG.md` entry** under `## [Unreleased]`, in the same commit. It becomes the
+  release notes. Refactors, tests and CI changes get no entry.
+- **`.github/workflows/release.yml` is generated.** Change `dist-workspace.toml`, then run `dist generate`. After
+  changing any workflow, run `gh actions-lock`, or GitHub refuses to start it.
