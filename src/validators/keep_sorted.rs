@@ -4,8 +4,7 @@ use crate::position::Position;
 use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{
-    SyncValidator, ValidationReport, Validator, ValidatorTrace, Violation, ViolationRange,
-    line_value,
+    SyncValidator, ValidationReport, Validator, Violation, ViolationRange, line_value,
 };
 use anyhow::Context;
 use serde::Serialize;
@@ -44,7 +43,7 @@ impl SyncValidator for KeepSortedValidator {
                 )?;
                 report.add_all(file_path, block, violation.into_iter().collect());
                 if let Some(trace) = trace {
-                    report.add_trace(file_path, block, ValidatorTrace::KeepSorted(trace));
+                    report.add_trace(file_path, block, &trace)?;
                 }
             }
         }
@@ -118,11 +117,8 @@ fn check_block(
 }
 
 /// What `keep-sorted` saw in one block.
-///
-/// serde writes the keys in the order the fields are declared, and the output keeps its keys
-/// sorted. So declare the fields in alphabetical order.
 #[derive(Serialize, Debug)]
-pub(crate) struct KeepSortedTrace {
+struct KeepSortedTrace {
     format: SortFormat,
     /// The lines that aren't blank, up to the first one out of order, where the validator stops.
     lines: Vec<KeepSortedLine>,
@@ -1117,7 +1113,7 @@ id: 3 green
 
         let report = KeepSortedValidator.validate(context)?;
 
-        assert!(report.traces.is_empty());
+        assert_eq!(report.traces, []);
         Ok(())
     }
 }

@@ -7,8 +7,7 @@ use crate::position::LineIndex;
 use crate::repo_path::RepoPath;
 use crate::symbols::SymbolPath;
 use crate::validators::{
-    self, SyncValidator, TargetFiles, TargetResult, ValidationReport, Validator, ValidatorTrace,
-    Violation,
+    self, SyncValidator, TargetFiles, TargetResult, ValidationReport, Validator, Violation,
 };
 use anyhow::{Context, anyhow};
 use heck::ToSnakeCase;
@@ -65,11 +64,7 @@ impl<Fs: FileSystem + 'static> SyncValidator for SameAsValidator<Fs> {
                 )?;
                 report.add_all(file_path, &block_with_context.block, violations);
                 if let Some(trace) = trace {
-                    report.add_trace(
-                        file_path,
-                        &block_with_context.block,
-                        ValidatorTrace::SameAs(trace),
-                    );
+                    report.add_trace(file_path, &block_with_context.block, &trace)?;
                 }
             }
         }
@@ -751,7 +746,7 @@ fn create_violation(
 /// serde writes the keys in the order the fields are declared, and the output keeps its keys
 /// sorted. So declare the fields in alphabetical order.
 #[derive(Serialize, Debug)]
-pub(crate) struct SameAsTrace {
+struct SameAsTrace {
     mode: Mode,
     /// What `same-as-paths` saw. `None` for a block without it.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2819,7 +2814,7 @@ ten
 
         let report = validator(&[]).validate(context)?;
 
-        assert!(report.traces.is_empty());
+        assert_eq!(report.traces, []);
         Ok(())
     }
 }

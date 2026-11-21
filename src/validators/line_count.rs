@@ -2,9 +2,7 @@ use crate::attributes::Constraint;
 use crate::blocks::Block;
 use crate::repo_path::RepoPath;
 use crate::validators;
-use crate::validators::{
-    SyncValidator, ValidationReport, Validator, ValidatorTrace, Violation, line_value,
-};
+use crate::validators::{SyncValidator, ValidationReport, Validator, Violation, line_value};
 use regex::Regex;
 use serde::Serialize;
 use std::sync::Arc;
@@ -43,13 +41,13 @@ impl SyncValidator for LineCountValidator {
                     .transpose()?;
                 report.add_all(file_path, block, violation.into_iter().collect());
                 if let Some(lines) = lines {
-                    let trace = ValidatorTrace::LineCount(LineCountTrace {
+                    let trace = LineCountTrace {
                         actual,
                         expected: constraint.expected(),
                         lines,
                         op: constraint.op_str(),
-                    });
-                    report.add_trace(file_path, block, trace);
+                    };
+                    report.add_trace(file_path, block, &trace)?;
                 }
             }
         }
@@ -123,11 +121,8 @@ fn create_violation(
 }
 
 /// What `line-count` saw in one block. The keys are those of its violation.
-///
-/// serde writes the keys in the order the fields are declared, and the output keeps its keys
-/// sorted. So declare the fields in alphabetical order.
 #[derive(Serialize, Debug)]
-pub(crate) struct LineCountTrace {
+struct LineCountTrace {
     /// The lines of the content that aren't blank, or that `line-count-pattern` gives a value for.
     actual: usize,
     expected: usize,
@@ -604,7 +599,7 @@ mod trace_tests {
 
         let report = LineCountValidator.validate(context)?;
 
-        assert!(report.traces.is_empty());
+        assert_eq!(report.traces, []);
         Ok(())
     }
 }

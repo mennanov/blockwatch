@@ -3,7 +3,7 @@
 use super::listing::{BlockListing, ContentListing};
 use crate::repo_path::RepoPath;
 use crate::settings::Settings;
-use crate::validators::{ValidationContext, ValidationLog, Validator, ValidatorTrace};
+use crate::validators::{ValidationContext, ValidationLog, Validator};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use strum::IntoEnumIterator;
@@ -18,7 +18,7 @@ pub(crate) struct Explanation<'a> {
     /// The block, as `list` writes it.
     block: BlockListing<'a>,
     /// What each validator saw in the block, by validator.
-    checks: BTreeMap<Validator, &'a ValidatorTrace>,
+    checks: BTreeMap<Validator, &'a serde_json::Value>,
     content: ContentListing<'a>,
     /// The validators that the block's attributes ask for, but the settings turn off.
     disabled: BTreeSet<Validator>,

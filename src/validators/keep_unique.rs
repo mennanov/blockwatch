@@ -3,8 +3,7 @@ use crate::position::Position;
 use crate::repo_path::RepoPath;
 use crate::validators;
 use crate::validators::{
-    SyncValidator, ValidationReport, Validator, ValidatorTrace, Violation, ViolationRange,
-    line_value,
+    SyncValidator, ValidationReport, Validator, Violation, ViolationRange, line_value,
 };
 use serde::Serialize;
 use std::collections::HashSet;
@@ -37,7 +36,7 @@ impl SyncValidator for KeepUniqueValidator {
                 );
                 report.add_all(file_path, block, violation.into_iter().collect());
                 if let Some(trace) = trace {
-                    report.add_trace(file_path, block, ValidatorTrace::KeepUnique(trace));
+                    report.add_trace(file_path, block, &trace)?;
                 }
             }
         }
@@ -94,7 +93,7 @@ fn check_block(
 
 /// What `keep-unique` saw in one block.
 #[derive(Serialize, Debug)]
-pub(crate) struct KeepUniqueTrace {
+struct KeepUniqueTrace {
     /// The lines that aren't blank, up to the first repeat, where the validator stops.
     lines: Vec<KeepUniqueLine>,
 }
@@ -121,9 +120,6 @@ impl KeepUniqueTrace {
 }
 
 /// One line that `keep-unique` read.
-///
-/// serde writes the keys in the order the fields are declared, and the output keeps its keys
-/// sorted. So declare the fields in alphabetical order.
 #[derive(Serialize, Debug)]
 struct KeepUniqueLine {
     /// The line where the value first appeared. `None` for a value seen for the first time.
@@ -602,7 +598,7 @@ ID:7 blue
 
         let report = KeepUniqueValidator.validate(context)?;
 
-        assert!(report.traces.is_empty());
+        assert_eq!(report.traces, []);
         Ok(())
     }
 }

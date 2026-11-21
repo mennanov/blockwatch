@@ -5,7 +5,7 @@ use crate::repo_path::RepoPath;
 use crate::symbols::SymbolPath;
 use crate::validators::{
     AsyncValidator, PatternContent, TargetFiles, TypedValidator, ValidationContext,
-    ValidationReport, Validator, ValidatorTrace, Violation, block_content_for_pattern,
+    ValidationReport, Validator, Violation, block_content_for_pattern,
 };
 use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
@@ -137,7 +137,7 @@ impl<Fs: FileSystem + 'static> AsyncValidator for CheckLuaValidator<Fs> {
                 task_result.context("check-lua task failed")??;
             if let Some(trace) = trace {
                 let block = &context.blocks[&file_path].blocks_with_context[block_idx].block;
-                report.add_trace(&file_path, block, trace);
+                report.add_trace(&file_path, block, &trace)?;
             }
             report.add_violations(&file_path, violations);
         }
@@ -156,7 +156,7 @@ async fn check_block<Fs: FileSystem>(
     context: &ValidationContext,
     file_path: &RepoPath,
     block_idx: usize,
-) -> anyhow::Result<(Vec<Violation>, Option<ValidatorTrace>)> {
+) -> anyhow::Result<(Vec<Violation>, Option<CheckLuaTrace>)> {
     let file_blocks = &context.blocks[file_path];
     let block_with_context = &file_blocks.blocks_with_context[block_idx];
     let block = &block_with_context.block;
@@ -193,12 +193,10 @@ async fn check_block<Fs: FileSystem>(
         .as_deref()
         .map(|message| create_violation(file_path, block, script_path, message))
         .transpose()?;
-    let trace = traced_content.map(|content| {
-        ValidatorTrace::CheckLua(CheckLuaTrace {
-            affects: affected_targets,
-            content,
-            lua_error,
-        })
+    let trace = traced_content.map(|content| CheckLuaTrace {
+        affects: affected_targets,
+        content,
+        lua_error,
     });
     Ok((Vec::from_iter(violation), trace))
 }
@@ -501,11 +499,8 @@ struct AffectedTarget {
 }
 
 /// What `check-lua` gave its script, and what the script returned.
-///
-/// serde writes the keys in the order the fields are declared, and the output keeps its keys
-/// sorted. So declare the fields in alphabetical order.
 #[derive(Debug, Serialize)]
-pub(crate) struct CheckLuaTrace {
+struct CheckLuaTrace {
     /// The targets in `ctx.affects`. `None` when the block has no `affects` attribute.
     #[serde(skip_serializing_if = "Option::is_none")]
     affects: Option<Vec<AffectedTarget>>,
@@ -1717,7 +1712,7 @@ red
             .validate(context)
             .await?;
 
-        assert!(report.traces.is_empty());
+        assert_eq!(report.traces, []);
         Ok(())
     }
 }

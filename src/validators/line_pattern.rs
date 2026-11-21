@@ -2,9 +2,7 @@ use crate::blocks::Block;
 use crate::position::Position;
 use crate::repo_path::RepoPath;
 use crate::validators;
-use crate::validators::{
-    SyncValidator, ValidationReport, Validator, ValidatorTrace, Violation, ViolationRange,
-};
+use crate::validators::{SyncValidator, ValidationReport, Validator, Violation, ViolationRange};
 use regex::Regex;
 use serde::Serialize;
 use std::ops::Range;
@@ -57,8 +55,7 @@ impl SyncValidator for LinePatternValidator {
                 )?;
                 report.add_all(file_path, block, violation.into_iter().collect());
                 if let Some(lines) = lines {
-                    let trace = ValidatorTrace::LinePattern(LinePatternTrace { lines });
-                    report.add_trace(file_path, block, trace);
+                    report.add_trace(file_path, block, &LinePatternTrace { lines })?;
                 }
             }
         }
@@ -178,15 +175,12 @@ fn source_range(
 
 /// What `line-pattern` saw in one block.
 #[derive(Serialize, Debug)]
-pub(crate) struct LinePatternTrace {
+struct LinePatternTrace {
     /// The lines that aren't blank, up to the first one that fails, where the validator stops.
     lines: Vec<LinePatternLine>,
 }
 
 /// One line that `line-pattern` checked.
-///
-/// serde writes the keys in the order the fields are declared, and the output keeps its keys
-/// sorted. So declare the fields in alphabetical order.
 #[derive(Serialize, Debug)]
 struct LinePatternLine {
     /// The attribute whose check the line fails. `None` when the line passes.
@@ -620,7 +614,7 @@ mod trace_tests {
 
         let report = LinePatternValidator.validate(context)?;
 
-        assert!(report.traces.is_empty());
+        assert_eq!(report.traces, []);
         Ok(())
     }
 }

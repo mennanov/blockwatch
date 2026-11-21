@@ -1,12 +1,10 @@
 //! What validators report: the violations they found, the blocks they checked, and what they saw
 //! in each block.
 
-use super::{
-    Validator, Violation, affects, check_ai, check_lua, keep_sorted, keep_unique, line_count,
-    line_pattern, same_as,
-};
+use super::{Validator, Violation};
 use crate::blocks::{Block, BlockKey};
 use crate::repo_path::RepoPath;
+use anyhow::Context;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -20,9 +18,12 @@ pub(crate) struct ValidationReport {
     pub(super) violations: BTreeMap<RepoPath, Vec<Violation>>,
     /// The key of every block this validator checked.
     pub(super) checked_blocks: Vec<(RepoPath, BlockKey)>,
-    /// What the validator saw in each block it checked. Empty unless the context asks for
-    /// traces.
-    pub(super) traces: Vec<(RepoPath, BlockKey, ValidatorTrace)>,
+    /// What the validator saw in each block it checked, as JSON. Empty unless the context asks
+    /// for traces.
+    ///
+    /// JSON, rather than each validator's own trace type, because every validator uses this file,
+    /// so this file can't use them.
+    pub(super) traces: Vec<(RepoPath, BlockKey, serde_json::Value)>,
 }
 
 impl ValidationReport {
@@ -38,8 +39,19 @@ impl ValidationReport {
     }
 
     /// Adds what the validator saw in `block` in `file`.
-    pub(crate) fn add_trace(&mut self, file: &RepoPath, block: &Block, trace: ValidatorTrace) {
-        self.traces.push((file.clone(), block.key(), trace));
+    ///
+    /// # Errors
+    /// Returns an error if `trace` can't be written as JSON, such as a map whose keys are not
+    /// strings.
+    pub(crate) fn add_trace(
+        &mut self,
+        file: &RepoPath,
+        block: &Block,
+        trace: &impl Serialize,
+    ) -> anyhow::Result<()> {
+        let json = serde_json::to_value(trace).context("failed to write a trace as JSON")?;
+        self.traces.push((file.clone(), block.key(), json));
+        Ok(())
     }
 
     /// Stores violations found in `file`.
@@ -65,9 +77,9 @@ pub(crate) struct ValidationLog {
     /// Every block that was examined, and by which validators. `BTreeMap` is used so the
     /// `--verbosity` report comes out in a stable order regardless of the validators order.
     pub(crate) checked_blocks: BTreeMap<RepoPath, BTreeMap<BlockKey, BTreeSet<Validator>>>,
-    /// What each validator saw in each block, by file and block. Empty unless the context asks
-    /// for traces.
-    pub(crate) traces: BTreeMap<(RepoPath, BlockKey), BTreeMap<Validator, ValidatorTrace>>,
+    /// What each validator saw in each block, as JSON, by file and block. Empty unless the context
+    /// asks for traces.
+    pub(crate) traces: BTreeMap<(RepoPath, BlockKey), BTreeMap<Validator, serde_json::Value>>,
 }
 
 impl ValidationLog {
@@ -107,18 +119,4 @@ impl ValidationLog {
             self.violations.entry(file).or_default().extend(violations);
         }
     }
-}
-
-/// What one validator saw in one block. Each variant is the trace of one [`Validator`].
-#[derive(Serialize, Debug)]
-#[serde(untagged)]
-pub(crate) enum ValidatorTrace {
-    Affects(affects::AffectsTrace),
-    CheckAi(check_ai::CheckAiTrace),
-    CheckLua(check_lua::CheckLuaTrace),
-    KeepSorted(keep_sorted::KeepSortedTrace),
-    KeepUnique(keep_unique::KeepUniqueTrace),
-    LineCount(line_count::LineCountTrace),
-    LinePattern(line_pattern::LinePatternTrace),
-    SameAs(same_as::SameAsTrace),
 }

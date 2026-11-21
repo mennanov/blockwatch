@@ -4,9 +4,7 @@ use crate::fs::FileSystem;
 use crate::repo_path::RepoPath;
 use crate::symbols::SymbolPath;
 use crate::validators;
-use crate::validators::{
-    TargetFiles, TargetResult, ValidationReport, Validator, ValidatorTrace, Violation,
-};
+use crate::validators::{TargetFiles, TargetResult, ValidationReport, Validator, Violation};
 use anyhow::anyhow;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -65,8 +63,7 @@ impl<Fs: FileSystem + 'static> validators::SyncValidator for AffectsValidator<Fs
                 )?;
                 report.add_all(file_path, &block_with_context.block, violations);
                 if let Some(trace) = trace {
-                    let trace = ValidatorTrace::Affects(trace);
-                    report.add_trace(file_path, &block_with_context.block, trace);
+                    report.add_trace(file_path, &block_with_context.block, &trace)?;
                 }
             }
         }
@@ -256,7 +253,7 @@ fn name_index(file_blocks: &FileBlocks) -> HashMap<String, bool> {
 
 /// What `affects` saw in one block.
 #[derive(Serialize, Debug)]
-pub(crate) struct AffectsTrace {
+struct AffectsTrace {
     /// Whether the diff changed the block's content. Only then must its targets change too.
     block_changed: bool,
     /// One entry for each reference in `affects`, in the order the attribute lists them.
@@ -264,9 +261,6 @@ pub(crate) struct AffectsTrace {
 }
 
 /// What `affects` saw in one target. Exactly one of `changed` and `reason` is set.
-///
-/// serde writes the keys in the order the fields are declared, and the output keeps its keys
-/// sorted. So declare the fields in alphabetical order.
 #[derive(Serialize, Debug)]
 struct AffectsTarget {
     /// Whether the diff changed the target. `None` when the target doesn't resolve.
@@ -1440,7 +1434,7 @@ red
 
         let report = validator(&[]).validate(context)?;
 
-        assert!(report.traces.is_empty());
+        assert_eq!(report.traces, []);
         Ok(())
     }
 }

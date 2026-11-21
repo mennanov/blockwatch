@@ -18,7 +18,7 @@ mod violation;
 mod violation_address;
 
 pub(crate) use context::{BlockSelection, ValidationContext};
-pub(crate) use log::{ValidationLog, ValidationReport, ValidatorTrace};
+pub(crate) use log::{ValidationLog, ValidationReport};
 pub(crate) use run::{
     ValidatorSelection, create_validator, detect_validators, diff_gated_block_count, run,
 };
@@ -148,7 +148,7 @@ pub(crate) mod test_utils {
         let [(_, _, trace)] = report.traces.as_slice() else {
             panic!("expected one trace, got {}", report.traces.len());
         };
-        serde_json::to_value(trace).expect("a trace serializes")
+        trace.clone()
     }
 
     /// `context` with traces requested.
