@@ -37,6 +37,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   path. Before, the file shown could change from run to run.
 - An invalid number in `line-count` now says why it is invalid, as in `invalid number: number too large to fit in
   target type`. Before, the error said only `invalid number`.
+- With `--diff`, a source path in a `---` line that is quoted badly, such as `"a/x\9.py"`, is now an error. Before, it
+  was read as `/dev/null`, so the file could resolve to the wrong path.
 
 ## [0.19.2] - 2026-11-14
 

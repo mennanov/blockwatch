@@ -39,7 +39,7 @@ pub(super) fn target_path(
     let decoded_source = if source == DEV_NULL {
         None
     } else {
-        unquote_git_path(source).ok()
+        Some(unquote_git_path(source)?)
     };
     // A header repeating one prefix on both sides carries none.
     let repeats_prefix = decoded_source.as_ref().is_some_and(|source| {
@@ -317,6 +317,17 @@ mod tests {
             "café.py"
         );
         Ok(())
+    }
+
+    #[test]
+    fn badly_quoted_source_returns_error() {
+        // Read as "/dev/null", the source would make "b/x.py" an added file kept unstripped.
+        let files = tree(&["b/x.py"]);
+        let error = target_path(r#""a/x\9.py""#, "b/x.py", &files).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("is not validly quoted"),
+            "unexpected error: {error:#}"
+        );
     }
 
     #[test]
