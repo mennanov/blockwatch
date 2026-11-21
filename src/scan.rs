@@ -9,7 +9,7 @@ use crate::repo_path::RepoPath;
 use crate::symbols::Symbols;
 use anyhow::{Context, anyhow, bail};
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 /// Counts of the files a scan looked at.
@@ -299,7 +299,8 @@ impl<'a, F: FileSystem> Scan<'a, F> {
                     .any(|virtual_block| virtual_block.is_entry_modified)
             })
             .map(|(file_path, _)| *file_path);
-        let files: HashSet<&RepoPath> = line_changes_by_file.files().chain(entry_files).collect();
+        // Sorted, so that with several broken files the same one is reported on every run.
+        let files: BTreeSet<&RepoPath> = line_changes_by_file.files().chain(entry_files).collect();
         let mut parsed = ParsedBlocks::default();
         for file_path in files {
             if !self.path_filter.is_selected(file_path.as_path()) {
@@ -1250,6 +1251,25 @@ mod parse_blocks_tests {
         assert_eq!(
             scan_error(&[], &line_changes, ScanMode::All),
             "diff target \"a.py\" does not exist in the repository root"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn only_changed_diff_with_several_broken_files_reports_the_lowest_path() -> anyhow::Result<()> {
+        // The same diff must still give the same error on every run.
+        let names = ["e.py", "c.py", "a.py", "d.py", "b.py"];
+        let line_changes = diff_changes(
+            names
+                .iter()
+                .map(|name| Ok((RepoPath::from_reference(name)?, vec![added(1)])))
+                .collect::<anyhow::Result<Vec<_>>>()?,
+        );
+        let files = names.map(|name| (name, "# <block name=\"open\">\nx = 1\n"));
+        let message = scan_error(&files, &line_changes, ScanMode::OnlyChanged);
+        assert!(
+            message.starts_with("failed to parse file \"a.py\""),
+            "unexpected error: {message}"
         );
         Ok(())
     }
