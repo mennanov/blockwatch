@@ -54,7 +54,7 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_comments_correctly() -> anyhow::Result<()> {
+    fn parses_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
@@ -114,25 +114,23 @@ value = 42  # Comment after code
                 },
             ]
         );
-
-        Ok(())
     }
 
     #[test]
-    fn preserves_content_of_multiline_comments() -> anyhow::Result<()> {
+    fn preserves_content_of_multiline_comments() {
         let mut comments_parser = comments_parser();
 
         // The `=begin`/`=end` markers are blanked; everything else — including a `#` and the
         // text after `=begin` — is content and must be preserved.
         let blocks: Vec<Comment> = comments_parser
             .parse(
-                r#"
+                r"
 =begin rdoc
 This mentions # a hash and
 pattern ^# stays intact
 =end
 value = 1
-"#,
+",
             )
             .collect();
 
@@ -146,7 +144,5 @@ value = 1
                         .to_string()
             }]
         );
-
-        Ok(())
     }
 }

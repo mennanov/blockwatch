@@ -317,7 +317,7 @@ fn list_subcommand_finishes_without_waiting_for_stdin() {
             break status;
         }
         if Instant::now() >= deadline {
-            child.kill().ok();
+            child.kill().expect("failed to kill blockwatch");
             panic!("blockwatch list is still running; it appears to be waiting on stdin");
         }
         std::thread::sleep(Duration::from_millis(20));

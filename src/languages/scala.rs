@@ -23,11 +23,11 @@ mod tests {
 
     #[test]
     fn nested_comment_is_part_of_the_comment_around_it() -> anyhow::Result<()> {
-        let contents = r#"/* wrapper
+        let contents = r"/* wrapper
    /* nested */
 */
 val value = 1
-"#;
+";
         assert_eq!(
             comment_sources(&mut parser(), contents)?,
             ["/* wrapper\n   /* nested */\n*/"]
@@ -36,14 +36,14 @@ val value = 1
     }
 
     #[test]
-    fn parses_comments_correctly() -> anyhow::Result<()> {
+    fn parses_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         // The grammar reads the shebang, which must start the file, as a comment with no marker
         // to blank. So its text stays as written.
         let comments: Vec<Comment> = comments_parser
             .parse(
-                r#"#!/usr/bin/env -S scala-cli shebang
+                r"#!/usr/bin/env -S scala-cli shebang
 // This is a single line comment
 object Main {
   val x = 42 // inline comment
@@ -55,7 +55,7 @@ object Main {
 /// Triple slash comment.
 //! Rust and Doxygen read this marker as a doc comment.
 //// A banner line repeats the marker.
-"#,
+",
             )
             .collect();
 
@@ -101,17 +101,15 @@ object Main {
                 },
             ]
         );
-
-        Ok(())
     }
 
     #[test]
     fn unclosed_block_comment_runs_to_end_of_file() -> anyhow::Result<()> {
         // The `*/` in `/*/` overlaps the `/*`, so it does not close the comment.
-        let contents = r#"// line
+        let contents = r"// line
 /*/ unclosed
 val value = 1
-"#;
+";
         assert_eq!(
             comment_sources(&mut parser(), contents)?,
             ["// line", "/*/ unclosed\nval value = 1\n"]

@@ -226,11 +226,11 @@ fn b() {}
 
         let paths: Vec<String> = listings(&context)
             .into_keys()
-            .map(|path| path.to_string())
+            .map(std::string::ToString::to_string)
             .collect();
 
         let mut sorted = names.to_vec();
-        sorted.sort();
+        sorted.sort_unstable();
         assert_eq!(paths, sorted);
     }
 }

@@ -42,7 +42,7 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_comments_correctly() -> anyhow::Result<()> {
+    fn parses_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
@@ -95,12 +95,10 @@ let s = "(* not a comment *)" ^ {|(* not a comment *)|}
                 },
             ]
         );
-
-        Ok(())
     }
 
     #[test]
-    fn nested_comment_is_one_comment() -> anyhow::Result<()> {
+    fn nested_comment_is_one_comment() {
         let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
@@ -119,12 +117,10 @@ let x = 1
                 comment_text: r#"   outer (* inner *) "*)" still outer   "#.to_string()
             }]
         );
-
-        Ok(())
     }
 
     #[test]
-    fn unclosed_comment_end_is_kept() -> anyhow::Result<()> {
+    fn unclosed_comment_end_is_kept() {
         let mut comments_parser = comments_parser();
 
         // In `(*)`, the `*` belongs to the opener, so the `)` does not close the comment, and the
@@ -139,7 +135,5 @@ let x = 1
                 comment_text: "  )".to_string()
             }]
         );
-
-        Ok(())
     }
 }

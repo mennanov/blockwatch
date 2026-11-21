@@ -337,7 +337,7 @@ fn joined_lines(node: &Node, source: &str) -> String {
 /// have its lines joined already, as [`joined_lines`] does.
 fn unescape(text: &str, escape_char: char, is_escaped: impl Fn(char) -> bool) -> String {
     let mut result = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
+    let mut chars = text.chars();
     while let Some(ch) = chars.next() {
         if ch == escape_char {
             match chars.next() {
@@ -382,7 +382,7 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_comments_correctly() -> anyhow::Result<()> {
+    fn parses_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         // The `#` in the `RUN` instruction belongs to the shell command and must not be
@@ -390,7 +390,7 @@ mod tests {
         // each comment node.
         let comments: Vec<Comment> = comments_parser
             .parse(
-                r#"
+                r"
 # syntax=docker/dockerfile:1
 FROM alpine:3.20
 
@@ -400,7 +400,7 @@ RUN echo hi # not a comment
   # Indented comment
 COPY . /app
 ## A section heading repeats the marker.
-"#,
+",
             )
             .collect();
 
@@ -429,12 +429,10 @@ COPY . /app
                 },
             ]
         );
-
-        Ok(())
     }
 
     #[test]
-    fn hash_inside_a_double_quoted_argument_is_not_a_comment() -> anyhow::Result<()> {
+    fn hash_inside_a_double_quoted_argument_is_not_a_comment() {
         let mut comments_parser = comments_parser();
 
         let comments: Vec<String> = comments_parser
@@ -450,33 +448,29 @@ COPY . /app
             .collect();
 
         assert_eq!(comments, vec!["  The only comment here\n".to_string()]);
-
-        Ok(())
     }
 
     #[test]
-    fn hash_inside_a_single_quoted_argument_is_not_a_comment() -> anyhow::Result<()> {
+    fn hash_inside_a_single_quoted_argument_is_not_a_comment() {
         let mut comments_parser = comments_parser();
 
         let comments: Vec<String> = comments_parser
             .parse(
-                r##"FROM alpine:3.20
+                r"FROM alpine:3.20
 LABEL summary='# also not a comment'
 
 # The only comment here
 COPY . /app
-"##,
+",
             )
             .map(|comment| comment.comment_text)
             .collect();
 
         assert_eq!(comments, vec!["  The only comment here\n".to_string()]);
-
-        Ok(())
     }
 
     #[test]
-    fn hash_opening_a_json_array_argument_is_not_a_comment() -> anyhow::Result<()> {
+    fn hash_opening_a_json_array_argument_is_not_a_comment() {
         let mut comments_parser = comments_parser();
 
         let comments: Vec<String> = comments_parser
@@ -492,8 +486,6 @@ COPY . /app
             .collect();
 
         assert_eq!(comments, vec!["  The only comment here\n".to_string()]);
-
-        Ok(())
     }
 }
 
@@ -580,11 +572,11 @@ ENTRYPOINT ["/app"]
 
     #[test]
     fn file_with_one_unnamed_stage_parse_symbols_puts_symbols_at_top_level() -> anyhow::Result<()> {
-        let source = r#"FROM alpine:3.20
+        let source = r"FROM alpine:3.20
 ARG PORT=8080
 ENV HOST=localhost
 LABEL maintainer=team
-"#;
+";
 
         assert_eq!(
             symbols(&dockerfile(source)?, source),
@@ -601,12 +593,12 @@ LABEL maintainer=team
     #[test]
     fn two_unnamed_stages_setting_one_name_parse_symbols_marks_it_unresolved() -> anyhow::Result<()>
     {
-        let source = r#"FROM alpine:3.20
+        let source = r"FROM alpine:3.20
 ENV PORT=8080
 
 FROM alpine:3.20
 ENV PORT=9090
-"#;
+";
 
         assert_eq!(
             unresolved(&dockerfile(source)?, source, "/PORT")?,
@@ -619,11 +611,11 @@ ENV PORT=9090
     #[test]
     fn name_before_first_from_and_in_unnamed_stage_parse_symbols_marks_it_unresolved()
     -> anyhow::Result<()> {
-        let source = r#"ARG PORT=8080
+        let source = r"ARG PORT=8080
 
 FROM alpine:3.20
 ARG PORT=9090
-"#;
+";
 
         assert_eq!(
             unresolved(&dockerfile(source)?, source, "/PORT")?,
@@ -664,10 +656,10 @@ ARG PORT=9090
 
     #[test]
     fn arg_and_env_with_one_name_parse_symbols_marks_it_unresolved() -> anyhow::Result<()> {
-        let source = r#"FROM alpine:3.20 AS app
+        let source = r"FROM alpine:3.20 AS app
 ARG VERSION=1.0
 ENV VERSION=1.0
-"#;
+";
 
         assert_eq!(
             unresolved(&dockerfile(source)?, source, "/app/VERSION")?,
@@ -679,10 +671,10 @@ ENV VERSION=1.0
 
     #[test]
     fn both_env_forms_parse_symbols_returns_both() -> anyhow::Result<()> {
-        let source = r#"FROM alpine:3.20
+        let source = r"FROM alpine:3.20
 ENV KEY_EQUALS=val1
 ENV KEY_SPACE val2
-"#;
+";
 
         assert_eq!(
             symbols(&dockerfile(source)?, source),
@@ -816,9 +808,9 @@ b"
 
     #[test]
     fn syntax_error_on_the_next_line_parse_symbols_keeps_the_value() -> anyhow::Result<()> {
-        let source = r#"ENV NEXT=1
+        let source = r"ENV NEXT=1
 UNKNOWN instruction
-"#;
+";
 
         assert_eq!(
             symbols(&dockerfile(source)?, source),
@@ -900,10 +892,10 @@ line2"
                 symbol(
                     "/BACKSLASH",
                     r#"BACKSLASH="hello\\world""#,
-                    Some(r#"hello\world"#)
+                    Some(r"hello\world")
                 ),
                 symbol("/DOLLAR", r#"DOLLAR="cost\$5""#, Some("cost$5")),
-                symbol("/KEPT", r#"KEPT="a\nb""#, Some(r#"a\nb"#)),
+                symbol("/KEPT", r#"KEPT="a\nb""#, Some(r"a\nb")),
                 symbol(
                     "/CONTINUATION",
                     "CONTINUATION=\"line1\\\nline2\"",
@@ -917,15 +909,15 @@ line2"
 
     #[test]
     fn single_quoted_string_parse_symbols_reads_no_escapes() -> anyhow::Result<()> {
-        let source = r#"ENV SINGLE='hello\world'
+        let source = r"ENV SINGLE='hello\world'
 ENV CONTINUATION='line1\
 line2'
-"#;
+";
 
         assert_eq!(
             symbols(&dockerfile(source)?, source),
             vec![
-                symbol("/SINGLE", r#"SINGLE='hello\world'"#, Some(r#"hello\world"#)),
+                symbol("/SINGLE", r"SINGLE='hello\world'", Some(r"hello\world")),
                 symbol(
                     "/CONTINUATION",
                     "CONTINUATION='line1\\\nline2'",
@@ -953,8 +945,8 @@ line2"
             vec![
                 symbol(
                     "/WIN_PATH",
-                    r#"WIN_PATH=C:\Windows\Temp"#,
-                    Some(r#"C:\Windows\Temp"#)
+                    r"WIN_PATH=C:\Windows\Temp",
+                    Some(r"C:\Windows\Temp")
                 ),
                 symbol(
                     "/ESCAPED",
@@ -962,7 +954,7 @@ line2"
                     Some(r#"hello"world"#)
                 ),
                 symbol("/BACKTICK", r#"BACKTICK="a``b""#, Some("a`b")),
-                symbol("/KEPT", r#"KEPT="a`nb\c""#, Some(r#"a`nb\c"#)),
+                symbol("/KEPT", r#"KEPT="a`nb\c""#, Some(r"a`nb\c")),
                 symbol(
                     "/CONTINUATION",
                     "CONTINUATION=\"line1`\nline2\"",
@@ -1099,9 +1091,9 @@ ENV UNQUOTED_BRACED=${FOO:-default}
 
     #[test]
     fn single_quoted_string_with_dollar_parse_symbols_keeps_dollar() -> anyhow::Result<()> {
-        let source = r#"ENV SINGLE='$FOO'
+        let source = r"ENV SINGLE='$FOO'
 ENV SINGLE_BRACED='${FOO}'
-"#;
+";
 
         assert_eq!(
             symbols(&dockerfile(source)?, source),

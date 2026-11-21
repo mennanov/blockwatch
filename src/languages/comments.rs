@@ -86,10 +86,11 @@ impl TreeSitterCommentsParser {
 
 impl CommentsParser for TreeSitterCommentsParser {
     fn parse<'a>(&'a mut self, source_code: &'a str) -> impl Iterator<Item = Comment> + 'a {
-        let tree = self.parser.parse(source_code, None).unwrap();
-        self.tree = Some(tree);
-        // It is safe to unwrap here because we just set self.tree
-        Comments::new(self.tree.as_ref().unwrap(), &self.node_visitor, source_code)
+        let tree = self
+            .parser
+            .parse(source_code, None)
+            .expect("tree-sitter returns a tree when no timeout or cancel flag is set");
+        Comments::new(self.tree.insert(tree), &self.node_visitor, source_code)
     }
 }
 
@@ -160,7 +161,7 @@ impl<'source> Comments<'source> {
     }
 }
 
-impl<'source> Iterator for Comments<'source> {
+impl Iterator for Comments<'_> {
     type Item = Comment;
 
     /// Yields comments in pre-order, and keeps yielding `None` once the tree is exhausted.
@@ -169,14 +170,14 @@ impl<'source> Iterator for Comments<'source> {
             return None;
         }
         loop {
-            if !self.start_visited {
-                self.start_visited = true;
-            } else {
+            if self.start_visited {
                 let descend = !self.skip_children;
                 if !self.goto_next(descend) {
                     self.done = true;
                     return None;
                 }
+            } else {
+                self.start_visited = true;
             }
             self.skip_children = false;
             match (self.node_visitor)(&self.cursor.node(), self.source_code) {

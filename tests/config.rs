@@ -1,8 +1,10 @@
 //! Tests that the config file is found and that its settings are used.
 
-// These tests check how a run reads its config file, so they can't use `common::cargo_bin_cmd!`,
-// which replaces that file with an empty one.
-#![allow(clippy::disallowed_macros)]
+#![expect(
+    clippy::disallowed_macros,
+    reason = "these tests check how a run reads its config file, so they can't use \
+              `common::cargo_bin_cmd!`, which replaces that file with an empty one"
+)]
 
 use assert_cmd::assert::OutputAssertExt;
 use assert_cmd::cargo_bin_cmd;
@@ -65,10 +67,10 @@ fn virtual_block_violation_is_reported_in_the_file_it_wraps() -> anyhow::Result<
     std::fs::write(root.join("package.json"), "{\n  \"version\": \"1.2\"\n}\n")?;
     std::fs::write(
         root.join("blockwatch.toml"),
-        r#"[[block]]
+        r"[[block]]
 target = 'package.json#/version'
 line-pattern = '^\d+\.\d+\.\d+$'
-"#,
+",
     )?;
 
     let mut cmd = cargo_bin_cmd!();

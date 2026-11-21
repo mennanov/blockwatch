@@ -122,24 +122,24 @@ fn push_escape(characters: &mut Peekable<Chars>, units: &mut Vec<u16>) -> anyhow
 /// Adds the definitions of the members of `body`, the root of a file or the body of a type, to
 /// `walk`. `parents` are the names of the types that `body` belongs to. Adds the body of each type
 /// in `body` to `walk`, with its own parents.
-fn push_members<'tree>(body: Node<'tree>, parents: Vec<Node<'tree>>, walk: &mut NestedWalk<'tree>) {
+fn push_members<'tree>(body: Node<'tree>, parents: &[Node<'tree>], walk: &mut NestedWalk<'tree>) {
     let mut cursor = body.walk();
     for member in body.named_children(&mut cursor) {
         let name = match member.kind() {
             "class_declaration" | "object_declaration" => {
-                push_type(member, &parents, walk);
+                push_type(member, parents, walk);
                 continue;
             }
             // Code reads a companion's members through the type, as `Config.MAX`, even when the
             // companion has a name.
             "companion_object" => {
                 if let Some(body) = child(member, "class_body") {
-                    walk.add_body(body, parents.clone());
+                    walk.add_body(body, parents.to_vec());
                 }
                 continue;
             }
             "property_declaration" => {
-                push_property(member, &parents, walk);
+                push_property(member, parents, walk);
                 continue;
             }
             "function_declaration" => member.child_by_field_name("name"),
@@ -153,7 +153,7 @@ fn push_members<'tree>(body: Node<'tree>, parents: Vec<Node<'tree>>, walk: &mut 
             _ => continue,
         };
         if let Some(name) = name {
-            walk.add_definition(&parents, name, member.byte_range(), None);
+            walk.add_definition(parents, name, member.byte_range(), None);
         }
     }
 }
@@ -464,12 +464,12 @@ class Helper
 
     #[test]
     fn names_in_backticks_parse_symbols_returns_them_without_the_backticks() -> anyhow::Result<()> {
-        let source = r#"class `Config` {
+        let source = r"class `Config` {
     fun `parses empty input`() {}
 
     val `is` = 1
 }
-"#;
+";
 
         assert_eq!(
             symbols(&kotlin(source)?, source),
@@ -621,14 +621,14 @@ val FINE = "ok"
     fn syntax_error_parse_symbols_makes_the_definitions_that_hold_it_unreadable()
     -> anyhow::Result<()> {
         // The parser skips `= )`. A second error in the file would make it skip the whole file.
-        let source = r#"class A {
+        let source = r"class A {
     val x = 1
     fun broken() { val q = ) }
     val y = 2
 }
 
 val after = 5
-"#;
+";
 
         assert_eq!(
             symbols(&kotlin(source)?, source),
@@ -653,13 +653,13 @@ val after = 5
     fn span_that_swallows_a_definition_parse_symbols_makes_its_name_unreadable()
     -> anyhow::Result<()> {
         // The unclosed `(` makes the parser skip `= (3` and `val w`, up to the `=` of `w`.
-        let source = r#"class B {
+        let source = r"class B {
     val z = (3
     val w = 4
 }
 
 val after = 5
-"#;
+";
 
         assert_eq!(
             symbols(&kotlin(source)?, source),
@@ -680,11 +680,11 @@ val after = 5
     fn name_in_backticks_in_a_skipped_span_parse_symbols_makes_it_unreadable() -> anyhow::Result<()>
     {
         // The unclosed `(` makes the parser skip the function.
-        let source = r#"class B {
+        let source = r"class B {
     val z = (3
     fun `has spaces`() = 1
 }
-"#;
+";
 
         assert_eq!(
             unresolved(&kotlin(source)?, source, "/B/has spaces")?,
@@ -716,7 +716,7 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_kotlin_comments_correctly() -> anyhow::Result<()> {
+    fn parses_kotlin_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
@@ -788,7 +788,5 @@ mod tests {
                 },
             ]
         );
-
-        Ok(())
     }
 }

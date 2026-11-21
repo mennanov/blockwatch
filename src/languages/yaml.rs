@@ -67,6 +67,7 @@ impl SymbolsParser for YamlSymbolsParser {
 }
 
 /// What a YAML value holds, ignoring its anchor and tag.
+#[derive(Clone, Copy)]
 enum Content<'tree> {
     Mapping(Node<'tree>),
     Sequence(Node<'tree>),
@@ -114,6 +115,7 @@ enum ScalarStyle {
 }
 
 /// A member of a mapping or a list, whose symbols the walk still has to add.
+#[derive(Clone, Copy)]
 enum Member<'tree> {
     /// An entry of a mapping, such as `a: 1`.
     Entry(Node<'tree>),
@@ -559,13 +561,13 @@ impl Chomping {
     /// last line of text has one, and `empty_lines` how many empty lines follow it.
     fn apply(&self, mut text: String, ends_in_line_break: bool, empty_lines: usize) -> String {
         match self {
-            Chomping::Strip => {}
-            Chomping::Clip => {
+            Self::Strip => {}
+            Self::Clip => {
                 if ends_in_line_break {
                     text.push('\n');
                 }
             }
-            Chomping::Keep => {
+            Self::Keep => {
                 if ends_in_line_break {
                     text.push('\n');
                 }
@@ -656,12 +658,12 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn source_with_comments_parse_returns_every_comment() -> anyhow::Result<()> {
+    fn source_with_comments_parse_returns_every_comment() {
         let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(
-                r#"
+                r"
 # This is a YAML comment
 key: value  # Inline comment on a key-value pair
 
@@ -671,7 +673,7 @@ list:
   - item2
 # End of comments
 ## @param image.tag Bitnami Helm charts document each value this way.
-"#,
+",
             )
             .collect();
 
@@ -712,8 +714,6 @@ list:
                 },
             ]
         );
-
-        Ok(())
     }
 
     /// A symbol as `(path, value, the text of its range)`.
@@ -1041,18 +1041,17 @@ list:
     }
 
     #[test]
-    fn several_documents_parse_symbols_returns_error() -> anyhow::Result<()> {
+    fn several_documents_parse_symbols_returns_error() {
         let err = parser().parse_symbols("v: 1\n---\nv: 2\n").unwrap_err();
 
         assert_eq!(
             err.to_string(),
             "files with several YAML documents are not supported yet; use a named block instead"
         );
-        Ok(())
     }
 
     #[test]
-    fn syntax_error_parse_symbols_returns_error_with_its_position() -> anyhow::Result<()> {
+    fn syntax_error_parse_symbols_returns_error_with_its_position() {
         let err = parser().parse_symbols("v: [1, 2\nw: 3\n").unwrap_err();
 
         assert!(
@@ -1060,23 +1059,20 @@ list:
                 .starts_with("file has a syntax error at line "),
             "unexpected error message: {err}"
         );
-        Ok(())
     }
 
     #[test]
-    fn escape_for_no_character_parse_symbols_returns_error_with_its_position() -> anyhow::Result<()>
-    {
+    fn escape_for_no_character_parse_symbols_returns_error_with_its_position() {
         let err = parser().parse_symbols("v: \"\\ud800\"\n").unwrap_err();
 
         assert_eq!(
             format!("{err:#}"),
             "the string at line 1, column 4 is not valid YAML: `d800` stands for no character"
         );
-        Ok(())
     }
 
     #[test]
-    fn several_invalid_strings_parse_symbols_returns_error_for_the_first() -> anyhow::Result<()> {
+    fn several_invalid_strings_parse_symbols_returns_error_for_the_first() {
         let source = r#"a:
   b: "\U00110000"
 c: "\U00110000"
@@ -1088,6 +1084,5 @@ c: "\U00110000"
             format!("{err:#}"),
             "the string at line 2, column 6 is not valid YAML: `00110000` stands for no character"
         );
-        Ok(())
     }
 }

@@ -21,14 +21,14 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_tsx_comments_correctly() -> anyhow::Result<()> {
+    fn parses_tsx_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         // The HTML-like comments are single-line: the statement between the `<!--` and `-->`
         // lines is code, not comment content.
         let blocks: Vec<Comment> = comments_parser
             .parse(
-                r#"
+                r"
                 /**
                  * This is a TSX component with comments.
                  *
@@ -63,7 +63,7 @@ let between = 2;
 --> html close comment
 //! Rust and Doxygen read this marker as a doc comment.
 //// A banner line repeats the marker.
-                "#,
+                ",
             )
             .collect();
 
@@ -136,7 +136,5 @@ let between = 2;
                 },
             ]
         );
-
-        Ok(())
     }
 }

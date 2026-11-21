@@ -57,7 +57,10 @@ impl PhpCommentsParser {
     fn php_comments(&mut self, source: &str, mut html_view: Option<&mut Vec<u8>>) -> Vec<Comment> {
         // A single PHP parse yields both the PHP `comment` nodes and the `text` regions that make
         // up the HTML view.
-        let tree = self.php_tree_sitter_parser.parse(source, None).unwrap();
+        let tree = self
+            .php_tree_sitter_parser
+            .parse(source, None)
+            .expect("tree-sitter returns a tree when no timeout or cancel flag is set");
         let mut query_cursor = tree_sitter::QueryCursor::new();
         let mut matches =
             query_cursor.matches(&self.regions_query, tree.root_node(), source.as_bytes());
@@ -133,7 +136,7 @@ impl CodeLanguage for Php {
     /// or a method is a top-level definition.
     fn definitions<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Definition<'tree>> {
         code_symbols::nested_definitions(root, |body, parents, walk| {
-            push_members(body, &parents, walk, source);
+            push_members(body, parents, walk, source);
         })
     }
 
@@ -724,7 +727,7 @@ enum Suit
 
     #[test]
     fn blocks_outside_functions_parse_symbols_returns_their_definitions() -> anyhow::Result<()> {
-        let source = r#"<?php
+        let source = r"<?php
 if (!function_exists('money')) {
     function money() {}
 } elseif (PHP_OS === 'Linux') {
@@ -762,7 +765,7 @@ declare(ticks=1) {
 namespace Braced {
     $inNamespace = 1;
 }
-"#;
+";
 
         assert_eq!(
             values(&php(source)?, source),
@@ -788,7 +791,7 @@ namespace Braced {
 
     #[test]
     fn loops_parse_symbols_skips_their_definitions() -> anyhow::Result<()> {
-        let source = r#"<?php
+        let source = r"<?php
 for ($i = 0; $i < 1; $i++) {
     $inFor = 1;
 }
@@ -801,7 +804,7 @@ while (false) {
 do {
     $inDo = 1;
 } while (false);
-"#;
+";
 
         assert_eq!(values(&php(source)?, source), []);
         Ok(())
@@ -809,7 +812,7 @@ do {
 
     #[test]
     fn copies_in_if_branches_parse_symbols_returns_each_copy() -> anyhow::Result<()> {
-        let source = r#"<?php
+        let source = r"<?php
 if (PHP_VERSION_ID >= 80000) {
     class Client { public function get() { return 8; } }
     function helper() { return 8; }
@@ -817,7 +820,7 @@ if (PHP_VERSION_ID >= 80000) {
     class Client { public function get() { return 7; } }
     function helper() { return 7; }
 }
-"#;
+";
 
         assert_eq!(
             values(&php(source)?, source),
@@ -835,14 +838,14 @@ if (PHP_VERSION_ID >= 80000) {
 
     #[test]
     fn namespaces_parse_symbols_leaves_them_out_of_the_path() -> anyhow::Result<()> {
-        let source = r#"<?php
+        let source = r"<?php
 namespace First;
 const LEVEL = 1;
 class Config {}
 
 namespace Second;
 const LEVEL = 2;
-"#;
+";
 
         assert_eq!(
             values(&php(source)?, source),
@@ -857,7 +860,7 @@ const LEVEL = 2;
 
     #[test]
     fn define_in_functions_parse_symbols_returns_it_at_the_top_level() -> anyhow::Result<()> {
-        let source = r#"<?php
+        let source = r"<?php
 function init() {
     $local = 1;
     static $cache = 2;
@@ -878,7 +881,7 @@ function init() {
 class Boot {
     public function run() { define('IN_METHOD', 10); }
 }
-"#;
+";
 
         assert_eq!(
             values(&php(source)?, source),
@@ -920,7 +923,7 @@ defined('OR_FORM') or define('OR_FORM', 1);
 
     #[test]
     fn assignment_to_anything_but_a_variable_parse_symbols_skips_it() -> anyhow::Result<()> {
-        let source = r#"<?php
+        let source = r"<?php
 $items['key'] = 1;
 $object->property = 1;
 Config::$shared = 1;
@@ -929,7 +932,7 @@ list($first) = [1];
 $$dynamic = 1;
 $text .= 'more';
 $alias = &$items;
-"#;
+";
 
         assert_eq!(values(&php(source)?, source), []);
         Ok(())
@@ -937,9 +940,9 @@ $alias = &$items;
 
     #[test]
     fn chained_assignment_parse_symbols_returns_the_first_variable() -> anyhow::Result<()> {
-        let source = r#"<?php
+        let source = r"<?php
 $a = $b = 1;
-"#;
+";
 
         assert_eq!(values(&php(source)?, source), [value("/$a", "$b = 1")]);
         Ok(())
@@ -947,14 +950,14 @@ $a = $b = 1;
 
     #[test]
     fn template_with_html_parse_symbols_returns_the_php_definitions() -> anyhow::Result<()> {
-        let source = r#"<html>
+        let source = r"<html>
 <?php $title = 'Home'; ?>
 <h1><?= $title ?></h1>
 <?php if ($show): ?>
 <p><?php define('SHOWN', 1); ?></p>
 <?php endif; ?>
 </html>
-"#;
+";
 
         assert_eq!(
             values(&php(source)?, source),
@@ -966,7 +969,7 @@ $a = $b = 1;
     #[test]
     fn syntax_error_parse_symbols_makes_the_definitions_that_hold_it_unreadable()
     -> anyhow::Result<()> {
-        let source = r#"<?php
+        let source = r"<?php
 class Cart {
     public $items = [];
     public function broken() { $x = ; }
@@ -974,7 +977,7 @@ class Cart {
 }
 
 $after = 5;
-"#;
+";
 
         assert_eq!(
             symbols(&php(source)?, source),
@@ -998,11 +1001,11 @@ $after = 5;
     #[test]
     fn variable_in_a_skipped_span_parse_symbols_makes_it_unreadable() -> anyhow::Result<()> {
         // The parser skips `$x = ) $total`.
-        let source = r#"<?php
+        let source = r"<?php
 class Cart {
     public function f() { $x = ) $total }
 }
-"#;
+";
 
         assert_eq!(
             unresolved(&php(source)?, source, "/Cart/$total")?,
@@ -1016,11 +1019,11 @@ class Cart {
     -> anyhow::Result<()> {
         // PHP reads `readonly int $id` as a property. The parser reads `readonly` as a type and
         // skips `int`, so the class holds a syntax error.
-        let source = r#"<?php
+        let source = r"<?php
 class Order {
     public function __construct(readonly int $id = 3) {}
 }
-"#;
+";
 
         assert_eq!(
             unresolved(&php(source)?, source, "/Order")?,
@@ -1222,12 +1225,12 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_html_comments_in_template_sections_correctly() -> anyhow::Result<()> {
+    fn parses_html_comments_in_template_sections_correctly() {
         let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(
-                r#"<?php
+                r"<?php
 $colors = ['blue']; // php comment
 ?><!-- same-line html comment -->
 <!-- multi-line html comment
@@ -1237,7 +1240,7 @@ spanning two lines -->
 </ul>
 <!-- html comment before php -->
 <?php # trailing php comment ?>
-"#,
+",
             )
             .collect();
 
@@ -1272,13 +1275,10 @@ spanning two lines -->
                 },
             ]
         );
-
-        Ok(())
     }
 
     #[test]
-    fn html_comment_after_a_php_island_holding_non_ascii_reports_a_character_column()
-    -> anyhow::Result<()> {
+    fn html_comment_after_a_php_island_holding_non_ascii_reports_a_character_column() {
         let mut comments_parser = comments_parser();
         // PHP regions are blanked byte by byte to build the HTML view, which turns one multi-byte
         // character into several spaces; the column must still count the source's characters.
@@ -1287,11 +1287,10 @@ spanning two lines -->
         let comments: Vec<Comment> = comments_parser.parse(content).collect();
 
         assert_eq!(comments[0].position_range.start, Position::new(1, 22));
-        Ok(())
     }
 
     #[test]
-    fn extracts_html_comment_split_by_a_php_island() -> anyhow::Result<()> {
+    fn extracts_html_comment_split_by_a_php_island() {
         let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
@@ -1306,12 +1305,10 @@ spanning two lines -->
                 comment_text: "     <block name=\"x\">                  </block>   ".to_string()
             }]
         );
-
-        Ok(())
     }
 
     #[test]
-    fn parses_php_comments_correctly() -> anyhow::Result<()> {
+    fn parses_php_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
@@ -1399,7 +1396,5 @@ spanning two lines -->
                 },
             ]
         );
-
-        Ok(())
     }
 }

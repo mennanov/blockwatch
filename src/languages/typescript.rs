@@ -535,13 +535,13 @@ const FINE = "ok";
 
     #[test]
     fn syntax_errors_parse_symbols_makes_the_names_near_them_unreadable() -> anyhow::Result<()> {
-        let source = r#"const PORTS = 8;
+        let source = r"const PORTS = 8;
 function helper() {
   return = 1;
 }
 const BROKEN = = 1;
 const AFTER = 3;
-"#;
+";
 
         assert_eq!(
             symbols(&typescript(source)?, source),
@@ -565,12 +565,12 @@ const AFTER = 3;
     fn span_that_swallows_definitions_parse_symbols_makes_their_names_unreadable()
     -> anyhow::Result<()> {
         // The unclosed `{` makes the parser skip the lines after it, `AFTER` included.
-        let source = r#"const PORTS = 8;
+        let source = r"const PORTS = 8;
 const CONFIG = {
   a: 1,
 
 const AFTER = 3;
-"#;
+";
 
         assert_eq!(
             symbols(&typescript(source)?, source),
@@ -592,14 +592,14 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_typescript_comments_correctly() -> anyhow::Result<()> {
+    fn parses_typescript_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         // The HTML-like comments are single-line: the statement between the `<!--` and `-->`
         // lines is code, not comment content.
         let blocks: Vec<Comment> = comments_parser
             .parse(
-                r#"
+                r"
             /**
              * This is a TypeScript class example with comments.
              *
@@ -629,7 +629,7 @@ let between = 2;
 --> html close comment
 //! Rust and Doxygen read this marker as a doc comment.
 //// A banner line repeats the marker.
-            "#,
+            ",
             )
             .collect();
 
@@ -697,7 +697,5 @@ let between = 2;
                 },
             ]
         );
-
-        Ok(())
     }
 }

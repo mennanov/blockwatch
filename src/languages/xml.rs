@@ -343,12 +343,12 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_xml_comments_correctly() -> anyhow::Result<()> {
+    fn parses_xml_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(
-                r#"
+                r"
             <!-- This is a comment -->
             <root>
                 <!-- Another comment -->
@@ -359,7 +359,7 @@ mod tests {
                 -->
             </root>
             <!-- Final comment -->
-            "#,
+            ",
             )
             .collect();
 
@@ -388,8 +388,6 @@ mod tests {
                 }
             ]
         );
-
-        Ok(())
     }
 }
 
@@ -596,10 +594,10 @@ mod symbols_tests {
 
     #[test]
     fn cdata_parse_symbols_keeps_its_text_as_written() -> anyhow::Result<()> {
-        let source = r#"<r>
+        let source = r"<r>
   <t>a<![CDATA[<b>&amp;</b>]]>c</t>
   <empty><![CDATA[]]></empty>
-</r>"#;
+</r>";
 
         assert_eq!(
             values(&xml(source)?, source),
@@ -615,11 +613,11 @@ mod symbols_tests {
     #[test]
     fn comments_and_processing_instructions_in_text_parse_symbols_leaves_them_out()
     -> anyhow::Result<()> {
-        let source = r#"<r>
+        let source = r"<r>
   <comment>1<!-- x -->.2</comment>
   <instruction>3<?pi?>.4</instruction>
   <only><!-- x --></only>
-</r>"#;
+</r>";
 
         assert_eq!(
             values(&xml(source)?, source),

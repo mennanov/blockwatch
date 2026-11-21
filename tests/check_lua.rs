@@ -167,7 +167,7 @@ fn unknown_mode_with_check_lua_disabled_succeeds() {
 fn ctx_affects_exposes_in_sync_affected_blocks_succeeds() {
     // The diff touches both the check-lua block and the affected docs block so the `affects`
     // validator is satisfied and the check-lua script runs against an in-sync pair.
-    let diff_content = r#"
+    let diff_content = r"
 diff --git a/tests/testdata/check_lua/affects.py b/tests/testdata/check_lua/affects.py
 index 1111111..2222222 100644
 --- a/tests/testdata/check_lua/affects.py
@@ -182,7 +182,7 @@ index 1111111..2222222 100644
 -    'yellow',
 +    'green',
      'red',
-"#;
+";
 
     let mut cmd = cargo_bin_cmd!();
     cmd.args(["--diff", "--only-changed"]);
@@ -195,7 +195,7 @@ index 1111111..2222222 100644
 fn ctx_affects_detects_out_of_sync_affected_block_fails() {
     // Both blocks are touched (so the `affects` validator passes), but their content has drifted
     // apart on disk, so the check-lua script reports the mismatch via ctx.affects.
-    let diff_content = r#"
+    let diff_content = r"
 diff --git a/tests/testdata/check_lua/affects_drift.py b/tests/testdata/check_lua/affects_drift.py
 index 1111111..2222222 100644
 --- a/tests/testdata/check_lua/affects_drift.py
@@ -210,7 +210,7 @@ index 1111111..2222222 100644
 -    'orange',
 +    'purple',
      'red',
-"#;
+";
 
     let mut cmd = cargo_bin_cmd!();
     cmd.args(["--diff", "--only-changed"]);

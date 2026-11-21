@@ -291,7 +291,7 @@ mod tests {
     fn parses_comments_correctly() {
         let comments: Vec<Comment> = LeanCommentsParser
             .parse(
-                r#"
+                r"
 -- line comment
 def x : ℕ := 1 -- trailing
 /- block comment
@@ -299,7 +299,7 @@ def x : ℕ := 1 -- trailing
 /-- doc comment -/
 /-! module doc -/
 --- A separator line repeats the marker.
-"#,
+",
             )
             .collect();
 
@@ -470,9 +470,13 @@ def t := "C:\\" -- also real"#
     }
 
     #[test]
+    #[expect(
+        clippy::needless_raw_string_hashes,
+        reason = "the text holds a quote and then a hash, so it needs two hashes, but clippy says one"
+    )]
     fn raw_string_comment_markers_are_ignored() {
         assert_eq!(
-            comment_sources(r###"def s := r#"say "-- hi""# -- real"###),
+            comment_sources(r##"def s := r#"say "-- hi""# -- real"##),
             ["-- real"]
         );
     }

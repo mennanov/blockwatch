@@ -9,7 +9,7 @@ use crate::repo_path::RepoPath;
 use crate::symbols::Symbols;
 use anyhow::{Context, anyhow, bail};
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 /// Counts of the files a scan looked at.
@@ -25,7 +25,7 @@ pub(crate) struct ScanStats {
 #[derive(Debug, Default)]
 pub(crate) struct ParsedBlocks {
     /// The blocks to validate, grouped by the file they were found in.
-    pub(crate) blocks: HashMap<RepoPath, FileBlocks>,
+    pub(crate) blocks: BTreeMap<RepoPath, FileBlocks>,
     /// File counts for the run report; carried alongside the blocks because only the scan knows
     /// how many files it looked at but produced no blocks for.
     pub(crate) stats: ScanStats,
@@ -181,11 +181,10 @@ impl<'a, F: FileSystem> Scan<'a, F> {
                 continue;
             }
             match scan_mode {
-                ScanMode::All => {}
                 // In `--only-changed`, an entry whose definition didn't change may match a glob
                 // whose covered files were untouched by the diff.
                 ScanMode::OnlyChanged if !virtual_block.is_entry_modified => continue,
-                ScanMode::OnlyChanged => {}
+                ScanMode::All | ScanMode::OnlyChanged => {}
             }
             if !covered_entries.contains(&virtual_block.entry) {
                 return Err(anyhow!("no file the glob matches passes target-if")
@@ -601,7 +600,6 @@ fn reject_duplicate_name(
 }
 
 #[cfg(test)]
-#[allow(clippy::single_range_in_vec_init)]
 mod parse_blocks_tests {
     use super::*;
     use crate::blocks::test_utils::{self, virtual_block_with_target_if};
@@ -657,7 +655,7 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn walk_error_checkable_files_returns_it() -> anyhow::Result<()> {
+    fn walk_error_checkable_files_returns_it() {
         // The fake walk fails on a path that escapes the repository.
         let file_system = FakeFileSystem::new(HashMap::from([(
             "../outside.py".to_string(),
@@ -674,7 +672,6 @@ mod parse_blocks_tests {
         .collect::<anyhow::Result<Vec<_>>>();
 
         assert!(files.is_err(), "the walk error was dropped: {files:?}");
-        Ok(())
     }
 
     #[test]
@@ -886,7 +883,7 @@ mod parse_blocks_tests {
     /// # Panics
     /// Panics if `file` has no blocks or a block has no name.
     fn content_modified<'a>(
-        blocks_by_file: &'a HashMap<RepoPath, FileBlocks>,
+        blocks_by_file: &'a BTreeMap<RepoPath, FileBlocks>,
         file: &str,
     ) -> Vec<(&'a str, bool)> {
         let file = RepoPath::from_reference(file).expect("a valid path");
@@ -1416,7 +1413,7 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn unknown_attribute_in_block_fails_with_error() -> anyhow::Result<()> {
+    fn unknown_attribute_in_block_fails_with_error() {
         let file_system = FakeFileSystem::new(HashMap::from([(
             "a.py".to_string(),
             "# <block name=\"x\" unknown-attr=\"value\">\n1\n# </block>".to_string(),
@@ -1436,11 +1433,10 @@ mod parse_blocks_tests {
             file_blocks.unwrap_err().source().unwrap().to_string(),
             "block x at line 1 contains unrecognized attribute `unknown-attr`"
         );
-        Ok(())
     }
 
     #[test]
-    fn unknown_severity_value_in_block_fails_with_error() -> anyhow::Result<()> {
+    fn unknown_severity_value_in_block_fails_with_error() {
         let file_system = FakeFileSystem::new(HashMap::from([(
             "a.py".to_string(),
             "# <block severity=\"invalid-severity\">\n1\n# </block>".to_string(),
@@ -1460,11 +1456,10 @@ mod parse_blocks_tests {
             file_blocks.unwrap_err().source().unwrap().to_string(),
             "block (unnamed) at line 1 contains invalid `severity`: \"invalid-severity\" (expected error, warning, info or hint)"
         );
-        Ok(())
     }
 
     #[test]
-    fn duplicate_block_name_in_the_same_file_fails_with_error() -> anyhow::Result<()> {
+    fn duplicate_block_name_in_the_same_file_fails_with_error() {
         let file_system = FakeFileSystem::new(HashMap::from([(
             "a.py".to_string(),
             "# <block name=\"x\">\n1\n# </block>\n# <block name=\"x\">\n2\n# </block>".to_string(),
@@ -1484,11 +1479,10 @@ mod parse_blocks_tests {
             file_blocks.unwrap_err().source().unwrap().to_string(),
             "block a.py:x at line 4 duplicates the name of the block at line 1"
         );
-        Ok(())
     }
 
     #[test]
-    fn end_tag_without_a_start_tag_fails_with_error() -> anyhow::Result<()> {
+    fn end_tag_without_a_start_tag_fails_with_error() {
         // A file without a start tag must still be parsed, so that its end tag fails the run.
         let file_system = FakeFileSystem::new(HashMap::from([(
             "a.py".to_string(),
@@ -1509,11 +1503,10 @@ mod parse_blocks_tests {
             file_blocks.unwrap_err().source().unwrap().to_string(),
             "unexpected closed block at line 2, column 3. If this is not meant as a tag, put it in backticks"
         );
-        Ok(())
     }
 
     #[test]
-    fn start_tag_without_an_end_tag_fails_with_error() -> anyhow::Result<()> {
+    fn start_tag_without_an_end_tag_fails_with_error() {
         // A file without an end tag must still be parsed, so that its start tag fails the run.
         let file_system = FakeFileSystem::new(HashMap::from([(
             "a.py".to_string(),
@@ -1534,7 +1527,6 @@ mod parse_blocks_tests {
             file_blocks.unwrap_err().source().unwrap().to_string(),
             "block at line 1, column 3 is not closed. If this is not meant as a tag, put it in backticks"
         );
-        Ok(())
     }
 
     #[test]
@@ -1565,7 +1557,7 @@ mod parse_blocks_tests {
         files: &[(&str, &str)],
         path_filter: &PathFilter,
         virtual_blocks: &[VirtualBlock],
-    ) -> anyhow::Result<HashMap<RepoPath, FileBlocks>> {
+    ) -> anyhow::Result<BTreeMap<RepoPath, FileBlocks>> {
         let files = files
             .iter()
             .map(|(path, content)| (path.to_string(), content.to_string()))

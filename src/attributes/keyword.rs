@@ -8,6 +8,10 @@ use strum::IntoEnumIterator;
 ///
 /// # Errors
 /// Returns `"\"value\" (expected ...)"` when `value` does not match a variant of `T`.
+#[expect(
+    clippy::map_err_ignore,
+    reason = "strum's error only says that no keyword matched, and the message lists the keywords"
+)]
 pub(crate) fn parse_keyword_value<T>(value: &str) -> anyhow::Result<T>
 where
     T: FromStr + IntoEnumIterator + ToString,

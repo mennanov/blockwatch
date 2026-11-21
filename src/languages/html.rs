@@ -19,12 +19,12 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_html_comments_correctly() -> anyhow::Result<()> {
+    fn parses_html_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(
-                r#"<!DOCTYPE html>
+                r"<!DOCTYPE html>
             <!-- Simple comment -->
             <div>
                 <!-- Another comment -->
@@ -35,7 +35,7 @@ mod tests {
                 -->
             </div>
             <!-- Final comment -->
-            "#,
+            ",
             )
             .collect();
 
@@ -64,12 +64,10 @@ mod tests {
                 },
             ]
         );
-
-        Ok(())
     }
 
     #[test]
-    fn comment_syntax_inside_an_attribute_value_is_not_a_comment() -> anyhow::Result<()> {
+    fn comment_syntax_inside_an_attribute_value_is_not_a_comment() {
         let mut comments_parser = comments_parser();
 
         let comments: Vec<String> = comments_parser
@@ -82,7 +80,5 @@ mod tests {
             .collect();
 
         assert_eq!(comments, vec!["     The only comment here    ".to_string()]);
-
-        Ok(())
     }
 }

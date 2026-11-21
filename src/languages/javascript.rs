@@ -21,7 +21,7 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_comments_correctly() -> anyhow::Result<()> {
+    fn parses_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         // The HTML-like comments are single-line: the statement between the `<!--` and `-->`
@@ -112,24 +112,22 @@ let between = 2;
                 },
             ]
         );
-
-        Ok(())
     }
 
     #[test]
-    fn jsx_expression_holding_only_a_comment_covers_its_braces() -> anyhow::Result<()> {
+    fn jsx_expression_holding_only_a_comment_covers_its_braces() {
         let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
             .parse(
-                r#"const list = (
+                r"const list = (
   <ul>
     {/* lone */}
     {/* with code */ items}
     { /* first */ /* second */ }
   </ul>
 );
-"#,
+",
             )
             .collect();
 
@@ -158,7 +156,5 @@ let between = 2;
                 },
             ]
         );
-
-        Ok(())
     }
 }

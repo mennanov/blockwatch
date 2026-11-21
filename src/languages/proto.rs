@@ -41,32 +41,30 @@ impl CodeLanguage for Proto {
 /// `walk`, with its own parents.
 fn push_members<'tree>(
     body: Node<'tree>,
-    parents: Vec<Node<'tree>>,
+    parents: &[Node<'tree>],
     source: &str,
     walk: &mut NestedWalk<'tree>,
 ) {
     let mut cursor = body.walk();
     for member in body.named_children(&mut cursor) {
         match member.kind() {
-            "enum_field" => walk
-                .definitions
-                .extend(enum_value(member, &parents, source)),
+            "enum_field" => walk.definitions.extend(enum_value(member, parents, source)),
             // protoc puts the fields of a oneof in its message, so they share the oneof's
             // parents.
             "oneof" => {
                 if let Some(name) = child(member, "identifier") {
-                    walk.add_definition(&parents, name, member.byte_range(), None);
+                    walk.add_definition(parents, name, member.byte_range(), None);
                 }
-                walk.add_body(member, parents.clone());
+                walk.add_body(member, parents.to_vec());
             }
             // protoc puts an extension field where its `extend` is written, not in the message
             // it extends.
             "extend" => {
                 if let Some(body) = child(member, "message_body") {
-                    walk.add_body(body, parents.clone());
+                    walk.add_body(body, parents.to_vec());
                 }
             }
-            _ => push_definition(member, &parents, walk),
+            _ => push_definition(member, parents, walk),
         }
     }
 }
@@ -117,7 +115,7 @@ fn enum_value<'tree>(
     let start = field
         .children(&mut cursor)
         .find(|token| token.kind() == "-")
-        .map_or(number.start_byte(), |sign| sign.start_byte());
+        .map_or_else(|| number.start_byte(), |sign| sign.start_byte());
     let byte_range = start..number.end_byte();
     #[expect(
         clippy::string_slice,
@@ -280,11 +278,11 @@ extend Other {
     #[test]
     fn negative_enum_value_with_a_space_parse_symbols_returns_it_as_written() -> anyhow::Result<()>
     {
-        let source = r#"enum Sign {
+        let source = r"enum Sign {
   ZERO = 0;
   NEGATIVE = - 2;
 }
-"#;
+";
 
         assert_eq!(
             symbols(&proto(source)?, source),
@@ -314,14 +312,14 @@ extend Other {
     fn syntax_error_parse_symbols_makes_the_definitions_that_hold_it_unreadable()
     -> anyhow::Result<()> {
         // The field has no number, so the parser assumes one is missing before the `;`.
-        let source = r#"message A {
+        let source = r"message A {
   int32 x = 1;
   int32 broken = ;
   int32 y = 2;
 }
 
 message After {}
-"#;
+";
 
         assert_eq!(
             symbols(&proto(source)?, source),
@@ -349,7 +347,7 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_comments_correctly() -> anyhow::Result<()> {
+    fn parses_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
@@ -409,7 +407,5 @@ spanning multiple lines
                 },
             ]
         );
-
-        Ok(())
     }
 }

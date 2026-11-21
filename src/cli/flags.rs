@@ -243,8 +243,16 @@ pub(crate) struct ValidationFlags {
     /// The address is FILE[:BLOCK_NAME[:VALIDATOR[:HASH]]]: the shorter it is, the more it covers,
     /// from a single violation down to every violation in a file. The violations are still
     /// reported. Repeat the flag to suppress more.
-    // clap prints this doc comment as the `--help` text, so the brackets can't be escaped.
-    #[allow(rustdoc::broken_intra_doc_links)]
+    // An `expect` fails a plain `cargo doc`, which skips private items and so never sees this link.
+    #[expect(clippy::allow_attributes, reason = "see the comment above")]
+    #[expect(
+        clippy::doc_markdown,
+        reason = "clap prints this doc comment as the `--help` text, where backticks show as they are"
+    )]
+    #[allow(
+        rustdoc::broken_intra_doc_links,
+        reason = "clap prints this doc comment as the `--help` text, so the brackets can't be escaped"
+    )]
     #[arg(
         long = "suppress",
         value_name = "ADDRESS",
@@ -299,25 +307,25 @@ impl Args {
                 .validation
                 .enabled_validators
                 .iter()
-                .map(|name| name.to_string())
+                .map(std::string::ToString::to_string)
                 .collect(),
             disable: self
                 .validation
                 .disabled_validators
                 .iter()
-                .map(|name| name.to_string())
+                .map(std::string::ToString::to_string)
                 .collect(),
             only_blocks: self
                 .validation
                 .only_blocks
                 .iter()
-                .map(|address| address.to_string())
+                .map(std::string::ToString::to_string)
                 .collect(),
             skip_blocks: self
                 .validation
                 .skip_blocks
                 .iter()
-                .map(|address| address.to_string())
+                .map(std::string::ToString::to_string)
                 .collect(),
         }
     }

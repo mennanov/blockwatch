@@ -21,13 +21,13 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_comments_correctly() -> anyhow::Result<()> {
+    fn parses_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         // The shebang line is a separate node kind and must not be extracted as a comment.
         let comments: Vec<Comment> = comments_parser
             .parse(
-                r#"#!/usr/bin/env groovy
+                r"#!/usr/bin/env groovy
 // This is a line comment
 def x = 42 // inline comment
 
@@ -38,7 +38,7 @@ println(x)
 /// Triple slash comment.
 //! Rust and Doxygen read this marker as a doc comment.
 //// A banner line repeats the marker.
-"#,
+",
             )
             .collect();
 
@@ -79,7 +79,5 @@ println(x)
                 },
             ]
         );
-
-        Ok(())
     }
 }

@@ -8,7 +8,7 @@ use super::{
 use crate::blocks::{Block, BlockKey};
 use crate::repo_path::RepoPath;
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// What a single validator found, and which blocks it looked at.
 ///
@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 pub(crate) struct ValidationReport {
     /// Violations grouped by the file they were found in. A file without violations has no entry,
     /// so the map is empty when the validator found nothing.
-    pub(super) violations: HashMap<RepoPath, Vec<Violation>>,
+    pub(super) violations: BTreeMap<RepoPath, Vec<Violation>>,
     /// The key of every block this validator checked.
     pub(super) checked_blocks: Vec<(RepoPath, BlockKey)>,
     /// What the validator saw in each block it checked. Empty unless the context asks for
@@ -59,10 +59,10 @@ impl ValidationReport {
 /// the validators that checked it.
 #[derive(Debug, Default)]
 pub(crate) struct ValidationLog {
-    /// Violations grouped by the file they were found in. BTreeMap is used so every output lists
+    /// Violations grouped by the file they were found in. `BTreeMap` is used so every output lists
     /// the files in the same order on every run.
     pub(crate) violations: BTreeMap<RepoPath, Vec<Violation>>,
-    /// Every block that was examined, and by which validators. BTreeMap is used so the
+    /// Every block that was examined, and by which validators. `BTreeMap` is used so the
     /// `--verbosity` report comes out in a stable order regardless of the validators order.
     pub(crate) checked_blocks: BTreeMap<RepoPath, BTreeMap<BlockKey, BTreeSet<Validator>>>,
     /// What each validator saw in each block, by file and block. Empty unless the context asks
@@ -93,7 +93,7 @@ impl ValidationLog {
     }
 
     /// Adds every checked block and violation from `other` to this log.
-    pub(super) fn merge(&mut self, other: ValidationLog) {
+    pub(super) fn merge(&mut self, other: Self) {
         for (file, blocks) in other.checked_blocks {
             let checked_in_file = self.checked_blocks.entry(file).or_default();
             for (key, validators) in blocks {

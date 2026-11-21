@@ -168,11 +168,9 @@ fn hex_digits(characters: &mut Peekable<Chars>, count: usize) -> String {
 /// Adds the definitions in `body` to `walk`. `body` is the root of a file, the body of a namespace
 /// or a type, or a branch of `#if`. `parents` are the names of the namespaces and types that
 /// `body` sits in. Adds each body in `body` to `walk`, with its own parents.
-fn push_members<'tree>(
-    body: Node<'tree>,
-    mut parents: Vec<Node<'tree>>,
-    walk: &mut NestedWalk<'tree>,
-) {
+fn push_members<'tree>(body: Node<'tree>, parents: &[Node<'tree>], walk: &mut NestedWalk<'tree>) {
+    // A file-scoped namespace adds to the parents of the declarations after it.
+    let mut parents = parents.to_vec();
     let mut cursor = body.walk();
     for member in body.named_children(&mut cursor) {
         match member.kind() {
@@ -507,7 +505,7 @@ public class Config
 
     #[test]
     fn explicit_interface_members_parse_symbols_skips_them() -> anyhow::Result<()> {
-        let source = r#"class Items : IEnumerator, INotifyPropertyChanged
+        let source = r"class Items : IEnumerator, INotifyPropertyChanged
 {
     public object Current => null;
     object IEnumerator.Current => null;
@@ -518,7 +516,7 @@ public class Config
         remove { }
     }
 }
-"#;
+";
 
         assert_eq!(
             symbols(&c_sharp(source)?, source)[1..],
@@ -533,12 +531,12 @@ public class Config
 
     #[test]
     fn comment_before_a_value_parse_symbols_returns_the_value_after_it() -> anyhow::Result<()> {
-        let source = r#"class Config
+        let source = r"class Config
 {
     int Size = /* bytes */ 5;
     int Limit => /* items */ 6;
 }
-"#;
+";
 
         assert_eq!(
             values(&c_sharp(source)?, source)[1..],
@@ -550,7 +548,7 @@ public class Config
     #[test]
     fn namespaces_parse_symbols_returns_each_part_of_their_names_as_a_segment() -> anyhow::Result<()>
     {
-        let source = r#"class Top { }
+        let source = r"class Top { }
 
 namespace Acme.Billing
 {
@@ -564,7 +562,7 @@ namespace Acme
         class Config { }
     }
 }
-"#;
+";
 
         assert_eq!(
             symbols(&c_sharp(source)?, source),
@@ -580,7 +578,7 @@ namespace Acme
     #[test]
     fn file_scoped_namespace_parse_symbols_puts_every_type_after_it_under_its_name()
     -> anyhow::Result<()> {
-        let source = r#"using System;
+        let source = r"using System;
 
 namespace Acme.Billing;
 
@@ -589,7 +587,7 @@ class Config { }
 #if DEBUG
 class Probe { }
 #endif
-"#;
+";
 
         assert_eq!(
             symbols(&c_sharp(source)?, source),
@@ -604,7 +602,7 @@ class Probe { }
     #[test]
     fn conditional_definitions_parse_symbols_returns_every_copy() -> anyhow::Result<()> {
         // The grammar reads an enum member in `#if` only without a comma after it.
-        let source = r#"namespace Acme
+        let source = r"namespace Acme
 {
 #if NET8_0
     class Platform { }
@@ -631,7 +629,7 @@ class Probe { }
 #endif
     }
 }
-"#;
+";
         let config = text_of(source, "class Config", "\n    }")?;
         let mode = text_of(source, "enum Mode", "\n    }")?;
 
@@ -654,14 +652,14 @@ class Probe { }
 
     #[test]
     fn top_level_statements_parse_symbols_skips_their_definitions() -> anyhow::Result<()> {
-        let source = r#"using System;
+        let source = r"using System;
 
 const int Limit = 1;
 int Twice(int x) => x * 2;
 Console.WriteLine(Twice(Limit));
 
 class Helper { }
-"#;
+";
 
         assert_eq!(
             symbols(&c_sharp(source)?, source),
@@ -887,7 +885,7 @@ class Unknown
     fn syntax_errors_parse_symbols_makes_the_definitions_that_hold_them_unreadable()
     -> anyhow::Result<()> {
         // The parser skips the `(` after `Broken`, and the second `=` of `Z`.
-        let source = r#"namespace Acme
+        let source = r"namespace Acme
 {
     class A
     {
@@ -902,7 +900,7 @@ class Unknown
         int W = 4;
     }
 }
-"#;
+";
 
         assert_eq!(
             symbols(&c_sharp(source)?, source),
@@ -938,7 +936,7 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_c_sharp_comments_correctly() -> anyhow::Result<()> {
+    fn parses_c_sharp_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let code = r#"
@@ -1018,7 +1016,5 @@ namespace HelloWorld
                 },
             ]
         );
-
-        Ok(())
     }
 }

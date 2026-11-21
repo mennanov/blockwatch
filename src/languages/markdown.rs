@@ -644,7 +644,7 @@ Two.
 
     #[test]
     fn html_comments_in_html_blocks_parse_comments_returns_each() -> anyhow::Result<()> {
-        let content = r#"
+        let content = r"
 # Header
 
 <div>
@@ -654,7 +654,7 @@ Two.
 <!-- first -->Text<!-- second -->
 
 <!-- alone -->
-"#;
+";
 
         assert_eq!(
             comment_sources(&mut parser(), content)?,
@@ -672,13 +672,13 @@ Two.
     fn inline_html_comments_parse_comments_returns_each() -> anyhow::Result<()> {
         // An HTML comment with other text before it on the same line is inline HTML, not an
         // HTML block. A `<!--` inside inline code is literal text, not a comment.
-        let content = r#"<!-- block level -->
+        let content = r"<!-- block level -->
 
 Some text <!-- inline --> and
 more text <!-- inline too --> tail.
 
 Inline code `<!-- in code -->` is not a comment.
-"#;
+";
 
         assert_eq!(
             comment_sources(&mut parser(), content)?,
@@ -694,14 +694,14 @@ Inline code `<!-- in code -->` is not a comment.
     #[test]
     fn link_reference_and_html_comments_parse_comments_returns_them_in_source_order()
     -> anyhow::Result<()> {
-        let content = r#"[//]: # (first)
+        let content = r"[//]: # (first)
 
 <!-- second -->
 
 <!-- third -->
 
 [//]: # (fourth)
-"#;
+";
 
         assert_eq!(
             comment_sources(&mut parser(), content)?,
@@ -807,12 +807,12 @@ Inline code `<!-- in code -->` is not a comment.
         // GitHub-flavored Markdown renders HTML comments inside table cells, so a table is a
         // place a reader can reasonably put a marker and a table of values is exactly the
         // shape a `keep-sorted` rule is written for.
-        let content = r#"| item |
+        let content = r"| item |
 | --- |
 | <!-- first --> one |
 | two |
 | <!-- second --> three |
-"#;
+";
 
         let comments: Vec<Comment> = parser().parse_comments(content)?.collect();
 
@@ -828,10 +828,10 @@ Inline code `<!-- in code -->` is not a comment.
     #[test]
     fn comments_in_block_quote_parse_comments_returns_each_without_the_quote_marker()
     -> anyhow::Result<()> {
-        let content = r#"> <!-- first -->
+        let content = r"> <!-- first -->
 > Text
 > <!-- second -->
-"#;
+";
 
         assert_eq!(
             comment_sources(&mut parser(), content)?,
@@ -847,12 +847,12 @@ Inline code `<!-- in code -->` is not a comment.
         // spaces can follow it. So none of these lines ends the code block.
         for lookalike in ["    ```", "\t```", "text```", "``` text"] {
             let content = format!(
-                r#"```
+                r"```
 {lookalike}
 ```
 
 <!-- after -->
-"#
+"
             );
 
             assert_eq!(
@@ -867,11 +867,11 @@ Inline code `<!-- in code -->` is not a comment.
     #[test]
     fn code_block_closed_by_fence_indented_three_spaces_parse_comments_returns_only_the_comment_after_it()
     -> anyhow::Result<()> {
-        let content = r#"```
+        let content = r"```
 <!-- in code -->
    ```
 <!-- after -->
-"#;
+";
 
         assert_eq!(comment_sources(&mut parser(), content)?, ["<!-- after -->"]);
         Ok(())
@@ -898,12 +898,12 @@ Inline code `<!-- in code -->` is not a comment.
     #[test]
     fn frontmatter_parse_comments_returns_no_comment_for_it() -> anyhow::Result<()> {
         // Frontmatter is YAML, where `<!--` starts no comment.
-        let content = r#"---
+        let content = r"---
 title: <!-- in frontmatter -->
 ---
 
 <!-- after -->
-"#;
+";
 
         assert_eq!(comment_sources(&mut parser(), content)?, ["<!-- after -->"]);
         Ok(())

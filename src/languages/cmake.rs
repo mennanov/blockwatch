@@ -39,12 +39,12 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_comments_correctly() -> anyhow::Result<()> {
+    fn parses_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
             .parse(
-                r#"
+                r"
 # This is a line comment
 add_library(foo foo.c) # inline comment
 
@@ -55,7 +55,7 @@ spanning multiple lines
 #[=[ Bracketed
 comment ]=]
 ## A section heading repeats the marker.
-"#,
+",
             )
             .collect();
 
@@ -90,7 +90,5 @@ comment ]=]
                 },
             ]
         );
-
-        Ok(())
     }
 }

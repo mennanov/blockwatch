@@ -218,7 +218,7 @@ fn virtual_blocks(
             let is_entry_modified = is_entry_modified(text, &lines, &symbols, index, line_changes)?;
             entry_blocks(
                 block_entry.into_inner(),
-                entry,
+                &entry,
                 is_entry_modified,
                 file_system,
             )
@@ -237,8 +237,10 @@ fn virtual_blocks(
 /// # Errors
 /// Returns an error that shows the line of the second block's entry and of the first one.
 // A `Regex` keeps a cache that it changes as it runs, so the lint calls the key mutable. But a
-// `TargetPattern` is hashed and compared by its text, which never changes.
-#[allow(clippy::mutable_key_type)]
+#[expect(
+    clippy::mutable_key_type,
+    reason = "`TargetPattern` is hashed and compared by its text, which never changes"
+)]
 fn reject_duplicate_blocks(blocks: &[VirtualBlock]) -> anyhow::Result<()> {
     // A symbol, a pattern or a whole file has at most one block, as all its rules fit in one.
     // Allowing more blocks later breaks no config, while forbidding them later would.
@@ -294,7 +296,7 @@ fn is_entry_modified(
 ///   without `check-lua`.
 fn entry_blocks(
     block_entry: BlockEntry,
-    entry: ConfigEntry,
+    entry: &ConfigEntry,
     is_entry_modified: bool,
     file_system: &impl FileSystem,
 ) -> anyhow::Result<Vec<VirtualBlock>> {
@@ -427,10 +429,9 @@ impl TargetFile {
     /// Returns an error if the glob is not valid, or if the repository can't be walked.
     fn files(self, file_system: &impl FileSystem) -> anyhow::Result<Vec<RepoPath>> {
         match self {
-            Self::Existing(file) => Ok(vec![file]),
+            // The error about a missing file shows the path from the config.
+            Self::Existing(file) | Self::Missing(file) => Ok(vec![file]),
             Self::Glob(glob) => PathsGlob::new(glob.as_str())?.matching_files(file_system),
-            // The error about the missing file shows the path from the config.
-            Self::Missing(file) => Ok(vec![file]),
         }
     }
 }
@@ -765,7 +766,10 @@ patterns = ['^driver: postgres$', '^url:']
     }
 
     #[test]
-    #[allow(clippy::single_range_in_vec_init)]
+    #[expect(
+        clippy::single_range_in_vec_init,
+        reason = "a `Vec` of one range is the expected value here"
+    )]
     fn diff_touching_an_entry_marks_only_its_block_modified() -> anyhow::Result<()> {
         let text = r"ignore = ['vendor/**']
 
@@ -823,7 +827,10 @@ target = 'a.json#/b'
     }
 
     #[test]
-    #[allow(clippy::single_range_in_vec_init)]
+    #[expect(
+        clippy::single_range_in_vec_init,
+        reason = "a `Vec` of one range is the expected value here"
+    )]
     fn diff_touching_a_glob_entry_marks_every_block_it_declares_modified() -> anyhow::Result<()> {
         let text = r"[[block]]
 target = 'plugins/*/package.json#/version'
@@ -849,7 +856,10 @@ target = 'plugins/*/package.json#/version'
     }
 
     #[test]
-    #[allow(clippy::single_range_in_vec_init)]
+    #[expect(
+        clippy::single_range_in_vec_init,
+        reason = "a `Vec` of one range is the expected value here"
+    )]
     fn diff_touching_target_if_subtable_marks_its_blocks_modified() -> anyhow::Result<()> {
         let text = r"[[block]]
 target = '*.yml#/x'
@@ -1424,13 +1434,13 @@ severity = 'warning'
             &FakeFileSystem::new(HashMap::new()),
             &DiffChanges::default(),
         )?;
-        assert!(config.settings.ignore.is_empty());
-        assert!(config.settings.extensions.is_empty());
-        assert!(config.settings.enable.is_empty());
-        assert!(config.settings.disable.is_empty());
-        assert!(config.settings.only_blocks.is_empty());
-        assert!(config.settings.skip_blocks.is_empty());
-        assert!(config.blocks.is_empty());
+        assert_eq!(config.settings.ignore, Vec::<String>::new());
+        assert_eq!(config.settings.extensions, HashMap::new());
+        assert_eq!(config.settings.enable, Vec::<String>::new());
+        assert_eq!(config.settings.disable, Vec::<String>::new());
+        assert_eq!(config.settings.only_blocks, Vec::<String>::new());
+        assert_eq!(config.settings.skip_blocks, Vec::<String>::new());
+        assert_eq!(config.blocks, []);
         Ok(())
     }
 

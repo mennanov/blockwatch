@@ -12,7 +12,7 @@ mod common;
 const UNSORTED_PYTHON: &str = "# <block keep-sorted>\nb\na\n# </block>\n";
 
 /// A diff that changes `src/x.py`, written against [`UNSORTED_PYTHON`].
-const DIFF_CHANGING_SRC_X: &str = r#"
+const DIFF_CHANGING_SRC_X: &str = r"
 diff --git a/src/x.py b/src/x.py
 index 0000000..1111111 100644
 --- a/src/x.py
@@ -23,7 +23,7 @@ index 0000000..1111111 100644
 +b
  a
  # </block>
-"#;
+";
 
 /// Creates a repository in a temporary directory. Returns the directory, which deletes the
 /// repository when dropped, and the path of the repository root.

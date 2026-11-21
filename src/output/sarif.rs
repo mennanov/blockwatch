@@ -239,10 +239,9 @@ impl<'a> SarifResult<'a> {
             level: sarif_level(diagnostic.severity()),
             message: Message::new(diagnostic.message()),
             locations: [Location::new(file, diagnostic)],
-            partial_fingerprints: diagnostic
-                .address()
-                .map(|address| BTreeMap::from([(ADDRESS_FINGERPRINT_KEY, address.to_string())]))
-                .unwrap_or_default(),
+            partial_fingerprints: diagnostic.address().map_or_default(|address| {
+                BTreeMap::from([(ADDRESS_FINGERPRINT_KEY, address.to_string())])
+            }),
             suppressions: diagnostic
                 .is_suppressed()
                 .then_some([Suppression { kind: "external" }]),
@@ -531,10 +530,7 @@ mod tests {
                 Severity::Warning => {
                     assert_eq!(sarif_level(severity), "warning");
                 }
-                Severity::Info => {
-                    assert_eq!(sarif_level(severity), "note");
-                }
-                Severity::Hint => {
+                Severity::Info | Severity::Hint => {
                     assert_eq!(sarif_level(severity), "note");
                 }
             }
@@ -587,7 +583,8 @@ mod tests {
 
         // Every result points at its own rule, whatever order the validators reported in.
         for result in log["runs"][0]["results"].as_array().expect("results") {
-            let index = result["ruleIndex"].as_u64().expect("a rule index") as usize;
+            let index = usize::try_from(result["ruleIndex"].as_u64().expect("a rule index"))
+                .expect("a rule index that fits in usize");
             assert_eq!(rules[index]["id"], result["ruleId"]);
         }
     }

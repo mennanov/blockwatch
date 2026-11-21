@@ -66,7 +66,7 @@ impl CodeLanguage for Hcl {
 /// text of the file. Adds each body and object in `body` to `walk`, with its own parents.
 fn push_members<'tree>(
     body: Node<'tree>,
-    parents: Vec<Node<'tree>>,
+    parents: &[Node<'tree>],
     source: &str,
     walk: &mut NestedWalk<'tree>,
 ) {
@@ -87,7 +87,7 @@ fn push_members<'tree>(
                     .map(code_symbols::without_parentheses),
             ),
             "block" => {
-                push_block(member, &parents, source, walk);
+                push_block(member, parents, source, walk);
                 continue;
             }
             // Comments, the braces of an object, and the text the parser skipped define no name.
@@ -100,7 +100,7 @@ fn push_members<'tree>(
             .filter(|value| value.kind() == "collection_value")
             .and_then(|value| child(value, "object"));
         let range = range(member, &members[index + 1..], body);
-        walk.add_definition_with_body(&parents, name, range, value, object);
+        walk.add_definition_with_body(parents, name, range, value, object);
     }
 }
 
@@ -618,7 +618,7 @@ empty = ""
     #[test]
     fn heredoc_parse_symbols_returns_its_text() -> anyhow::Result<()> {
         // A `·` stands for a space, so that no editor strips the spaces at the end of a line.
-        let source = r#"plain = <<EOT
+        let source = r"plain = <<EOT
   a
     b
 EOT
@@ -633,7 +633,7 @@ empty = <<EOT
 EOT
 flush_empty = <<-EOT
   EOT
-"#
+"
         .replace('·', " ");
 
         assert_eq!(
@@ -717,10 +717,10 @@ ok = "fine"
 
     #[test]
     fn parentheses_around_value_parse_symbols_removes_them() -> anyhow::Result<()> {
-        let source = r#"a = ((var.x))
+        let source = r"a = ((var.x))
 b = (1) + (2)
 c = ( /* three */ 3 )
-"#;
+";
 
         assert_eq!(
             values(&hcl(source)?, source),
@@ -833,11 +833,11 @@ variable "after" {
     fn syntax_error_parse_symbols_makes_names_with_dashes_and_colons_in_it_unreadable()
     -> anyhow::Result<()> {
         // In HCL, `a-b` is one name, and `-c` is a minus and a name.
-        let source = r#"a-b = 1
+        let source = r"a-b = 1
 c = 2
 d::e = 3
 ) a-b -c d::e
-"#;
+";
 
         let symbols = hcl(source)?;
 
@@ -860,7 +860,7 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_comments_correctly() -> anyhow::Result<()> {
+    fn parses_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
@@ -924,7 +924,5 @@ spanning multiple lines
                 },
             ]
         );
-
-        Ok(())
     }
 }

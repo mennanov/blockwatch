@@ -29,12 +29,12 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_comments_correctly() -> anyhow::Result<()> {
+    fn parses_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(
-                r#"
+                r"
 SELECT * FROM users
 -- This is a single line comment
 WHERE id = 1;  -- This is an inline comment
@@ -49,7 +49,7 @@ that spans multiple lines
 
 SELECT COUNT(*) FROM orders; /* Inline block comment */
 --- A separator line repeats the marker.
-"#,
+",
             )
             .collect();
 
@@ -99,7 +99,5 @@ SELECT COUNT(*) FROM orders; /* Inline block comment */
                 },
             ]
         );
-
-        Ok(())
     }
 }

@@ -21,7 +21,7 @@ pub(crate) enum RunMode {
 
 impl RunMode {
     /// The name the mode goes by in the report, on both the summary line and in the JSON.
-    fn as_str(&self) -> &'static str {
+    fn as_str(self) -> &'static str {
         match self {
             Self::All => "all",
             Self::AllWithDiff => "all+diff",

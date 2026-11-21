@@ -230,7 +230,7 @@ mod tests {
     use crate::position::Position;
 
     #[test]
-    fn invalid_mdx_is_an_error() -> anyhow::Result<()> {
+    fn invalid_mdx_is_an_error() {
         // MDX 2 and later have no HTML comments.
         let error = parser()
             .parse_comments("<!-- comment -->\nText\n")
@@ -243,8 +243,6 @@ mod tests {
              start a name, such as a letter, `$`, or `_` (note: to create a comment in MDX, use \
              `{/* text */}`) (markdown-rs:unexpected-character)"
         );
-
-        Ok(())
     }
 
     #[test]
@@ -455,7 +453,7 @@ Warm.
     }
 
     #[test]
-    fn invalid_mdx_parse_symbols_returns_error() -> anyhow::Result<()> {
+    fn invalid_mdx_parse_symbols_returns_error() {
         // MDX 2 and later have no HTML comments.
         let error = parser()
             .parse_symbols("# Colors\n\n<!-- a comment -->\n")
@@ -465,7 +463,6 @@ Warm.
             error.to_string().contains("Unexpected character `!`"),
             "unexpected error: {error}"
         );
-        Ok(())
     }
     // </block>
 }

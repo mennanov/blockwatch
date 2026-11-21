@@ -945,13 +945,12 @@ pass
     }
 
     #[test]
-    fn reference_to_a_missing_target_file_fails_the_run() -> anyhow::Result<()> {
+    fn reference_to_a_missing_target_file_fails_the_run() {
         let context = validation_context(
             "source.py",
             "# <block name=\"s\" affects=\"gone.py:t\">\nvalue = 1\n# </block>",
         );
         assert!(validator(&[]).validate(context).is_err());
-        Ok(())
     }
 
     /// Create a [`validators::ValidationContext`] with `files` and the diff from `changed_files`.
@@ -973,8 +972,7 @@ pass
             let contents = files
                 .iter()
                 .find(|(path, _)| path == changed_file)
-                .map(|(_, contents)| *contents)
-                .unwrap_or_default();
+                .map_or_default(|(_, contents)| *contents);
             line_changes.insert(
                 RepoPath::from_reference(changed_file)?,
                 contents

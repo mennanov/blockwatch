@@ -20,7 +20,7 @@ const VCS_METADATA_DIRECTORY_NAMES: [&str; 4] = [".git", ".hg", ".jj", ".svn"];
 
 /// Every read the program performs, behind a trait.
 ///
-/// `Send + Sync` so an `Arc<Fs>` can be shared into validator threads (std::thread and Tokio).
+/// `Send + Sync` so an `Arc<Fs>` can be shared into validator threads (`std::thread` and Tokio).
 pub(crate) trait FileSystem: Send + Sync {
     /// Reads the entire contents of a file as bytes.
     fn read(&self, path: &Path) -> anyhow::Result<Vec<u8>>;
@@ -180,7 +180,7 @@ impl FileSystem for FileSystemImpl {
                 let relative_path = entry
                     .path()
                     .strip_prefix(&filter_root_path)
-                    .unwrap_or(entry.path());
+                    .unwrap_or_else(|_| entry.path());
                 let is_wanted = directory.as_ref().is_none_or(|directory| {
                     let is_directory = entry
                         .file_type()

@@ -745,7 +745,7 @@ fn diff_touching_the_second_place_a_table_is_written_succeeds() {
     // `[package.metadata.docs]` is written apart from `[package]`, but is part of it.
     let diff_content = format!(
         "{TABLE_SOURCE_DIFF}{}",
-        r#"diff --git a/tests/testdata/affects/table_target.toml b/tests/testdata/affects/table_target.toml
+        r"diff --git a/tests/testdata/affects/table_target.toml b/tests/testdata/affects/table_target.toml
 index abc123..def456 100644
 --- a/tests/testdata/affects/table_target.toml
 +++ b/tests/testdata/affects/table_target.toml
@@ -753,7 +753,7 @@ index abc123..def456 100644
  [package.metadata.docs]
 -all-features = false
 +all-features = true
-"#
+"
     );
 
     let mut cmd = cargo_bin_cmd!();
@@ -836,13 +836,13 @@ index abc123..def456 100644
 fn diff_deleting_the_last_line_of_a_nested_mapping_succeeds() {
     let diff_content = format!(
         "{NESTED_MAPPING_SOURCE_DIFF}{}",
-        r#"diff --git a/tests/testdata/affects/nested_mapping_target.yaml b/tests/testdata/affects/nested_mapping_target.yaml
+        r"diff --git a/tests/testdata/affects/nested_mapping_target.yaml b/tests/testdata/affects/nested_mapping_target.yaml
 index abc123..def456 100644
 --- a/tests/testdata/affects/nested_mapping_target.yaml
 +++ b/tests/testdata/affects/nested_mapping_target.yaml
 @@ -4 +3,0 @@
 -  pullPolicy: Always
-"#
+"
     );
 
     let mut cmd = cargo_bin_cmd!();
@@ -858,14 +858,14 @@ index abc123..def456 100644
 fn diff_touching_the_key_after_a_nested_mapping_fails() {
     let diff_content = format!(
         "{NESTED_MAPPING_SOURCE_DIFF}{}",
-        r#"diff --git a/tests/testdata/affects/nested_mapping_target.yaml b/tests/testdata/affects/nested_mapping_target.yaml
+        r"diff --git a/tests/testdata/affects/nested_mapping_target.yaml b/tests/testdata/affects/nested_mapping_target.yaml
 index abc123..def456 100644
 --- a/tests/testdata/affects/nested_mapping_target.yaml
 +++ b/tests/testdata/affects/nested_mapping_target.yaml
 @@ -4 +4 @@
 -replicas: 2
 +replicas: 3
-"#
+"
     );
 
     let mut cmd = cargo_bin_cmd!();

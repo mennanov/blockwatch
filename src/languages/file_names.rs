@@ -25,7 +25,12 @@ impl Language {
 /// A name is left out when Linguist gives it to several languages, such as `.inc`. Such a name
 /// doesn't tell which parser to use.
 pub(super) const NAMES: &[(&str, Language)] = {
-    use Language::*;
+    use Language::{
+        Bash, C, CMake, CSharp, Cpp, Css, Dart, Dockerfile, Elixir, Go, GoModule, GraphQl, Groovy,
+        Hcl, Html, Java, JavaScript, Json, Kotlin, Lean, Lua, Makefile, Markdown, Mdx, Nix, OCaml,
+        Php, Proto, Python, Ruby, Rust, Scala, Sql, Starlark, Swift, Toml, Tsx, TypeScript, Xml,
+        Yaml, Zsh,
+    };
     &[
         /* <block name="language-names"
         affects="src/languages/file_names.rs:language-name-rows"

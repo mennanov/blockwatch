@@ -453,11 +453,11 @@ FINE=ok
     -> anyhow::Result<()> {
         // The parser skips everything from `$((` up to the body of `helper`. A function's name can
         // hold `-`, `.` and `:`, so the whole word counts as a name.
-        let source = r#"BEFORE=1
+        let source = r"BEFORE=1
 echo $(( 1 + )) ns::helper my-tool.run
 helper() { :; }
 AFTER=2
-"#;
+";
 
         assert_eq!(
             symbols(&bash(source)?, source),
@@ -483,7 +483,7 @@ mod tests {
     use crate::position::Position;
 
     #[test]
-    fn parses_comments_correctly() -> anyhow::Result<()> {
+    fn parses_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
@@ -548,12 +548,10 @@ VALUE=42  # Comment after code
                 },
             ]
         );
-
-        Ok(())
     }
 
     #[test]
-    fn comment_at_the_start_that_is_not_a_shebang_parse_returns_it() -> anyhow::Result<()> {
+    fn comment_at_the_start_that_is_not_a_shebang_parse_returns_it() {
         let mut comments_parser = comments_parser();
 
         // Only a `#!` at the first byte of the file is a shebang.
@@ -568,6 +566,5 @@ VALUE=42  # Comment after code
 
             assert_eq!(texts, [expected], "{source:?}");
         }
-        Ok(())
     }
 }

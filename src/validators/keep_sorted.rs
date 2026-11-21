@@ -417,10 +417,10 @@ mod validate_tests {
         let validator = KeepSortedValidator;
         let context = validation_context(
             "example.py",
-            r#"# <block keep-sorted>
+            r"# <block keep-sorted>
         B
         A
-        # </block>"#,
+        # </block>",
         );
         let violations = validator.validate(context)?.violations;
         assert_eq!(violations.len(), 1);
@@ -802,7 +802,7 @@ mod validate_tests {
     }
 
     #[test]
-    fn numeric_format_with_a_non_numeric_value_returns_an_error() -> anyhow::Result<()> {
+    fn numeric_format_with_a_non_numeric_value_returns_an_error() {
         let validator = KeepSortedValidator;
         let context = validation_context(
             "example.py",
@@ -819,7 +819,6 @@ mod validate_tests {
             err.contains("is not a valid number"),
             "unexpected error: {err}"
         );
-        Ok(())
     }
 
     #[test]
@@ -928,7 +927,7 @@ mod validate_tests {
     }
 
     #[test]
-    fn numeric_format_with_a_misplaced_digit_separator_returns_an_error() -> anyhow::Result<()> {
+    fn numeric_format_with_a_misplaced_digit_separator_returns_an_error() {
         let validator = KeepSortedValidator;
         let context = validation_context(
             "example.py",
@@ -944,11 +943,10 @@ mod validate_tests {
             err.contains("is not a valid number"),
             "unexpected error: {err}"
         );
-        Ok(())
     }
 
     #[test]
-    fn numeric_format_with_an_infinite_value_returns_an_error() -> anyhow::Result<()> {
+    fn numeric_format_with_an_infinite_value_returns_an_error() {
         let validator = KeepSortedValidator;
         // Infinity and NaN are float-specific spellings, not numbers a source file can hold.
         let context = validation_context(
@@ -965,7 +963,6 @@ mod validate_tests {
             err.contains("is not a valid number"),
             "unexpected error: {err}"
         );
-        Ok(())
     }
 
     #[test]

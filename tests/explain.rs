@@ -189,11 +189,11 @@ fn with_diff_is_recorded_and_marks_the_block_as_changed() -> anyhow::Result<()> 
     Ok(())
 }
 
-// The next tests read their own config file, so they can't use `common::cargo_bin_cmd!`, which
-// replaces that file with an empty one.
-
 #[test]
-#[allow(clippy::disallowed_macros)]
+#[expect(
+    clippy::disallowed_macros,
+    reason = "reads its own config file, so it can't use `common::cargo_bin_cmd!`"
+)]
 fn validator_that_the_config_disables_is_listed_as_disabled_and_not_run() -> anyhow::Result<()> {
     let temp = tempfile::tempdir()?;
     // `line-count` is off too, but the block doesn't ask for it, so it isn't listed.
@@ -217,7 +217,10 @@ fn validator_that_the_config_disables_is_listed_as_disabled_and_not_run() -> any
 }
 
 #[test]
-#[allow(clippy::disallowed_macros)]
+#[expect(
+    clippy::disallowed_macros,
+    reason = "reads its own config file, so it can't use `common::cargo_bin_cmd!`"
+)]
 fn validator_turned_on_by_any_of_its_attributes_is_listed_as_disabled() -> anyhow::Result<()> {
     // `line-pattern-forbidden` turns `line-pattern` on, though it isn't the validator's own name.
     let source = r#"# <block name="no-todo" line-pattern-forbidden="TODO">
@@ -241,7 +244,10 @@ apple
 }
 
 #[test]
-#[allow(clippy::disallowed_macros)]
+#[expect(
+    clippy::disallowed_macros,
+    reason = "reads its own config file, so it can't use `common::cargo_bin_cmd!`"
+)]
 fn block_that_the_config_skips_is_still_checked() -> anyhow::Result<()> {
     let temp = tempfile::tempdir()?;
     let root = repo_with_config(temp.path(), FIXTURE_TEXT, "skip-blocks = ['a.py:colors']\n")?;
@@ -257,7 +263,10 @@ fn block_that_the_config_skips_is_still_checked() -> anyhow::Result<()> {
 }
 
 #[test]
-#[allow(clippy::disallowed_macros)]
+#[expect(
+    clippy::disallowed_macros,
+    reason = "reads its own config file, so it can't use `common::cargo_bin_cmd!`"
+)]
 fn explain_fails_when_a_block_has_an_invalid_attribute_value() -> anyhow::Result<()> {
     let source = "# <block name=\"b\" keep-sorted=\"sideways\">\na\n# </block>\n";
     let temp = tempfile::tempdir()?;

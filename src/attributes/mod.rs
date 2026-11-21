@@ -101,6 +101,8 @@ impl AttributeName {
 same-as-format="identifier" same-as-pattern='^\s*(?P<value>[a-z_]+):'> */
 /// The attributes of a block. Only `affects` and `same-as` can hold a list.
 #[derive(Debug, Clone, Default)]
+// On one line, so that the pattern of this block does not read `clippy` as a field.
+#[expect(clippy::option_option, reason = "empty `keep-unique` is `Some(None)`")]
 pub(crate) struct Attributes {
     // <block keep-sorted keep-sorted-pattern="^\s*(?P<value>[a-z_]+):">
     affects: Option<Vec<TargetReference>>,
@@ -179,6 +181,10 @@ impl Attributes {
 
         let mut attributes = Self::default();
         for (raw_name, entry) in entries {
+            #[expect(
+                clippy::map_err_ignore,
+                reason = "strum's error only says that no attribute name matched"
+            )]
             let name: AttributeName = raw_name
                 .parse()
                 .map_err(|_| anyhow!("unrecognized attribute `{raw_name}`"))?;
@@ -312,6 +318,10 @@ impl Attributes {
     }
 
     /// The `keep-unique` attribute when set (`Some(None)` when empty), or `None` when omitted.
+    #[expect(
+        clippy::option_option,
+        reason = "an empty `keep-unique` differs from no `keep-unique`"
+    )]
     pub(crate) fn keep_unique(&self) -> Option<Option<&Regex>> {
         self.keep_unique.as_ref().map(Option::as_ref)
     }
@@ -641,11 +651,11 @@ mod attribute_names_tests {
 
 #[cfg(test)]
 mod attributes_tests {
-    use super::{AttributeEntry, Attributes, parse_regex};
+    use super::{AttributeEntry, Attributes, SortFormat, SortOrder, parse_regex};
 
     #[test]
     fn unrecognized_name_from_tag_returns_error() {
-        let error = Attributes::from_tag([("keep-sortd".into(), "".into())])
+        let error = Attributes::from_tag([("keep-sortd".into(), String::new())])
             .unwrap_err()
             .to_string();
 
@@ -732,7 +742,7 @@ mod attributes_tests {
     fn invalid_same_as_list_entry_from_entries_returns_error() {
         let error = Attributes::from_entries([(
             "same-as".into(),
-            AttributeEntry::List(vec!["ok.md".into(), "".into()]),
+            AttributeEntry::List(vec!["ok.md".into(), String::new()]),
         )])
         .unwrap_err();
 
@@ -766,7 +776,7 @@ mod attributes_tests {
             "line-pattern-forbidden",
             "same-as-pattern",
         ] {
-            let error = Attributes::from_tag([(name.into(), "".into())]).unwrap_err();
+            let error = Attributes::from_tag([(name.into(), String::new())]).unwrap_err();
             assert!(
                 format!("{error:#}").starts_with(&format!("invalid `{name}`:")),
                 "{name}: {error:#}"
@@ -792,12 +802,12 @@ mod attributes_tests {
         let attrs = Attributes::from_tag([
             ("keep-sorted".into(), "  ".into()),
             ("keep-sorted-format".into(), "  ".into()),
-            ("keep-unique".into(), "".into()),
+            ("keep-unique".into(), String::new()),
         ])
         .unwrap();
 
-        assert_eq!(attrs.keep_sorted(), Some(Default::default()));
-        assert_eq!(attrs.keep_sorted_format(), Some(Default::default()));
+        assert_eq!(attrs.keep_sorted(), Some(SortOrder::default()));
+        assert_eq!(attrs.keep_sorted_format(), Some(SortFormat::default()));
         assert!(matches!(attrs.keep_unique(), Some(None)));
     }
 
@@ -810,9 +820,9 @@ mod attributes_tests {
             ),
             ("check-lua".into(), "check.lua".into()),
             ("check-lua-timeout".into(), " 30 ".into()),
-            ("keep-sorted".into(), "".into()),
+            ("keep-sorted".into(), String::new()),
             ("keep-sorted-format".into(), " NUMERIC ".into()),
-            ("keep-unique".into(), "".into()),
+            ("keep-unique".into(), String::new()),
             ("line-count".into(), "<= 50".into()),
             ("same-as-format".into(), " b : flat , a : numeric ".into()),
             ("same-as-mode".into(), " SET ".into()),
@@ -844,7 +854,7 @@ mod attributes_tests {
     #[test]
     fn attributes_with_the_same_values_are_equal() -> anyhow::Result<()> {
         let written = Attributes::from_tag([
-            ("keep-sorted".into(), "".into()),
+            ("keep-sorted".into(), String::new()),
             ("severity".into(), "InFo".into()),
         ])?;
         let normalized = Attributes::from_tag([

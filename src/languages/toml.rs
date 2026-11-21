@@ -129,7 +129,7 @@ impl<'s> Walk<'s> {
     /// Adds a symbol for every key in `table`, and returns where its contents are written.
     fn add_key_symbols(&mut self, table: &Table) -> anyhow::Result<Placement> {
         let mut placement = Placement::default();
-        for (name, item) in table.iter() {
+        for (name, item) in table {
             self.path.push(name.to_string());
             match item {
                 Item::None => {}
@@ -239,7 +239,7 @@ impl<'s> Walk<'s> {
                     let range = start..require_span(value.span())?.end;
                     vec![range]
                 };
-                self.symbols[at].def_byte_ranges = ranges.clone();
+                self.symbols[at].def_byte_ranges.clone_from(&ranges);
                 Ok(ranges)
             }
         }
@@ -266,7 +266,7 @@ impl<'s> Walk<'s> {
     /// written.
     fn add_inline_key_symbols(&mut self, table: &InlineTable) -> anyhow::Result<Vec<Range<usize>>> {
         let mut ranges = Vec::new();
-        for (name, member) in table.iter() {
+        for (name, member) in table {
             self.path.push(name.to_string());
             let start = require_span(table.key(name).and_then(Key::span))?.start;
             ranges.extend(self.add_value_symbol(start, member)?);
@@ -304,7 +304,7 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn source_with_comments_parse_returns_every_comment() -> anyhow::Result<()> {
+    fn source_with_comments_parse_returns_every_comment() {
         let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
@@ -362,8 +362,6 @@ dob = 1979-05-27T07:32:00-08:00 # Date of birth with comment
                 },
             ]
         );
-
-        Ok(())
     }
 
     /// A symbol as `(path, value, the text of each of its ranges)`.
@@ -395,7 +393,7 @@ dob = 1979-05-27T07:32:00-08:00 # Date of birth with comment
                 (
                     path.to_string(),
                     value.map(str::to_string),
-                    texts.iter().map(|text| text.to_string()).collect(),
+                    texts.iter().map(std::string::ToString::to_string).collect(),
                 )
             })
             .collect()
@@ -669,13 +667,12 @@ integer = 1_000
     }
 
     #[test]
-    fn duplicate_key_parse_symbols_returns_error_with_its_position() -> anyhow::Result<()> {
+    fn duplicate_key_parse_symbols_returns_error_with_its_position() {
         let err = parser().parse_symbols("v = 1\nv = 2\n").unwrap_err();
 
         assert_eq!(
             err.to_string(),
             "file is not valid TOML at line 2, column 1: duplicate key"
         );
-        Ok(())
     }
 }

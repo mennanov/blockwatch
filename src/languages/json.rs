@@ -46,6 +46,7 @@ impl SymbolsParser for JsonSymbolsParser {
 }
 
 /// A member of an object or an array, whose symbol the walk still has to add.
+#[derive(Clone, Copy)]
 enum Member<'tree> {
     /// A pair of an object, such as `"a": 1`.
     Pair(Node<'tree>),
@@ -325,15 +326,17 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::single_range_in_vec_init)]
+    #[expect(
+        clippy::single_range_in_vec_init,
+        reason = "a `Vec` of one range is the expected value here"
+    )]
     fn multibyte_source_parse_symbols_returns_byte_ranges_and_character_columns()
     -> anyhow::Result<()> {
+        type PathAndRanges = (String, Vec<Range<usize>>, Vec<Range<Position>>);
         // A key covers its whole pair, and an item only itself.
         let source = r#"{
   "é": [1, 22]
 }"#;
-
-        type PathAndRanges = (String, Vec<Range<usize>>, Vec<Range<Position>>);
         let ranges: Vec<PathAndRanges> = parser()
             .parse_symbols(source)?
             .symbols

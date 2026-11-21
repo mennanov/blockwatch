@@ -438,7 +438,7 @@ impl<'tree> NestedWalk<'tree> {
 /// own parents. It gets `root` first, with no parents.
 pub(crate) fn nested_definitions<'tree>(
     root: Node<'tree>,
-    mut push_members: impl FnMut(Node<'tree>, Vec<Node<'tree>>, &mut NestedWalk<'tree>),
+    mut push_members: impl FnMut(Node<'tree>, &[Node<'tree>], &mut NestedWalk<'tree>),
 ) -> Vec<Definition<'tree>> {
     // The walk keeps its own stack, as deeply nested types could overflow the call stack.
     let mut walk = NestedWalk {
@@ -446,7 +446,7 @@ pub(crate) fn nested_definitions<'tree>(
         bodies: vec![(root, Vec::new())],
     };
     while let Some((body, parents)) = walk.bodies.pop() {
-        push_members(body, parents, &mut walk);
+        push_members(body, &parents, &mut walk);
     }
     // The walk reads all of a body before the bodies in it.
     walk.definitions
@@ -559,6 +559,10 @@ pub(crate) fn decode_bytes(
             _ => bytes.extend_from_slice(text.as_bytes()),
         }
     }
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "the cause gives an index into the decoded bytes, which doesn't point into the source"
+    )]
     String::from_utf8(bytes).map_err(|_| anyhow!("its bytes are not UTF-8 text"))
 }
 
@@ -944,11 +948,11 @@ def function():
     -> anyhow::Result<()> {
         // The parser skips `= (1` and `B`, then reads `X = 2`. So `X` would read the value of
         // `B`, and `B` would not be found.
-        let source = r#"A = 1
+        let source = r"A = 1
 X = (1
 B = 2
 C = 3
-"#;
+";
 
         let symbols = symbols_of(source)?;
 
@@ -970,10 +974,10 @@ C = 3
     #[test]
     fn missing_token_in_a_definition_symbols_makes_its_name_unreadable() -> anyhow::Result<()> {
         // The parser assumes a `)` right after the `(`, and skips nothing.
-        let source = r#"def f(:
+        let source = r"def f(:
     pass
 Y = 2
-"#;
+";
 
         let symbols = symbols_of(source)?;
 
@@ -993,9 +997,9 @@ Y = 2
     fn several_errors_near_a_name_symbols_reports_the_first_in_its_definition() -> anyhow::Result<()>
     {
         // The parser skips the `N` on line 1, and each `for` on line 2.
-        let source = r#"print(M N)
+        let source = r"print(M N)
 N = [1, for, 2, for]
-"#;
+";
 
         let symbols = symbols_of(source)?;
 
@@ -1009,9 +1013,9 @@ N = [1, for, 2, for]
     #[test]
     fn skipped_words_symbols_makes_only_whole_words_unreadable() -> anyhow::Result<()> {
         // The parser skips `AB A_1 Aé A1 1A`. A word that starts with a digit can't be a name.
-        let source = r#"A = 1
+        let source = r"A = 1
 print(AB A_1 Aé A1 1A x)
-"#;
+";
 
         let symbols = symbols_of(source)?;
 
@@ -1020,7 +1024,7 @@ print(AB A_1 Aé A1 1A x)
             vec![symbol("/A", "A = 1", Some("1"))]
         );
         let mut names: Vec<&str> = symbols.skipped.keys().map(String::as_str).collect();
-        names.sort();
+        names.sort_unstable();
         assert_eq!(names, vec!["A1", "AB", "A_1", "Aé"]);
         assert_eq!(symbols.unreadable, unreadable(&[])?);
         Ok(())
@@ -1050,11 +1054,11 @@ B = "plain"
 
     #[test]
     fn nested_definitions_symbols_returns_each_path_under_its_parents() -> anyhow::Result<()> {
-        let source = r#"class Outer:
+        let source = r"class Outer:
     class Inner:
         X = 1
     Y = 2
-"#;
+";
 
         let symbols = symbols_of(source)?;
 
@@ -1075,12 +1079,12 @@ B = "plain"
     -> anyhow::Result<()> {
         // The parser skips the `for`. `A` holds it too, but not `Y` next to it, nor the `X` of
         // `B`.
-        let source = r#"class A:
+        let source = r"class A:
     X = [1, for]
     Y = 2
 class B:
     X = 3
-"#;
+";
 
         let symbols = symbols_of(source)?;
 

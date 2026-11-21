@@ -108,7 +108,7 @@ fn spec_definitions<'tree>(
     // The field also holds the commas between the names.
     let names: Vec<Node> = spec
         .children_by_field_name("name", &mut cursor)
-        .filter(|name| name.is_named())
+        .filter(tree_sitter::Node::is_named)
         .collect();
     let values: Vec<Node> = match spec.child_by_field_name("value") {
         Some(list) => {
@@ -156,6 +156,10 @@ fn function_definition<'tree>(function: Node<'tree>, source: &str) -> Option<Def
 ///
 /// # Errors
 /// Returns an error if `escape` is not one Go has, or stands for no character.
+#[expect(
+    clippy::map_err_ignore,
+    reason = "a digit that doesn't parse is an escape that Go doesn't have, which the error says"
+)]
 fn push_escape(escape: &str, bytes: &mut Vec<u8>) -> anyhow::Result<()> {
     let not_an_escape = || anyhow!("`{escape}` is not an escape in a Go string");
     let body = escape.strip_prefix('\\').ok_or_else(not_an_escape)?;
@@ -342,7 +346,7 @@ var Fine = "ok"
     fn syntax_errors_parse_symbols_makes_the_names_near_them_unreadable() -> anyhow::Result<()> {
         // The parser skips the `+` in `F`, and the `B =` after `X =`. So `X` would read the value
         // of `B`.
-        let source = r#"package p
+        let source = r"package p
 
 const A = 1
 
@@ -353,7 +357,7 @@ const (
 	X =
 	B = 2
 )
-"#;
+";
 
         assert_eq!(
             symbols(&go(source)?, source),
@@ -381,7 +385,7 @@ const (
     fn span_that_swallows_definitions_parse_symbols_makes_their_names_unreadable()
     -> anyhow::Result<()> {
         // The unclosed `{` makes the parser skip everything after it, `Y` and `B` included.
-        let source = r#"package p
+        let source = r"package p
 
 const A = 1
 
@@ -389,7 +393,7 @@ var X = []int{1, 2
 const Y = 2
 
 const B = 3
-"#;
+";
 
         assert_eq!(
             symbols(&go(source)?, source),
@@ -411,7 +415,7 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_go_comments_correctly() -> anyhow::Result<()> {
+    fn parses_go_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
@@ -480,17 +484,15 @@ func main() {
                 },
             ]
         );
-
-        Ok(())
     }
 
     #[test]
-    fn parses_go_mod_comments_correctly() -> anyhow::Result<()> {
+    fn parses_go_mod_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(
-                r#"
+                r"
 module example.com/my/module
 
 go 1.21
@@ -506,7 +508,7 @@ comment
 */
 // Another comment
 exclude github.com/bad/dependency v0.0.0
-"#,
+",
             )
             .collect();
 
@@ -535,17 +537,15 @@ exclude github.com/bad/dependency v0.0.0
                 },
             ]
         );
-
-        Ok(())
     }
 
     #[test]
-    fn parses_go_work_comments_correctly() -> anyhow::Result<()> {
+    fn parses_go_work_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(
-                r#"
+                r"
 go 1.21
 
 // This is a comment in go.work
@@ -560,7 +560,7 @@ workspace comment
 */
 // Another comment
 use ./module3
-"#,
+",
             )
             .collect();
 
@@ -589,17 +589,15 @@ use ./module3
                 },
             ]
         );
-
-        Ok(())
     }
 
     #[test]
-    fn parses_go_sum_comments_correctly() -> anyhow::Result<()> {
+    fn parses_go_sum_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
             .parse(
-                r#"
+                r"
 // This is a comment in go.sum
 github.com/example/pkg v1.0.0 h1:abc123
 github.com/example/pkg v1.0.0/go.mod h1:def456 // Hash comment
@@ -610,7 +608,7 @@ in go.sum
 */
 // Final comment
 github.com/another/pkg v2.0.0 h1:xyz789
-"#,
+",
             )
             .collect();
 
@@ -639,7 +637,5 @@ github.com/another/pkg v2.0.0 h1:xyz789
                 },
             ]
         );
-
-        Ok(())
     }
 }

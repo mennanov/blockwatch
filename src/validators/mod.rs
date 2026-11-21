@@ -61,7 +61,7 @@ pub(crate) mod test_utils {
     use crate::repo_path::RepoPath;
     use crate::scan::{Scan, ScanMode};
     use crate::validators::{ValidationContext, ValidationReport};
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
     use std::sync::Arc;
 
     /// Creates a [`ValidationContext`] for the given `file_name` with `contents` with all lines
@@ -178,7 +178,7 @@ pub(crate) mod test_utils {
         contexts: Vec<Arc<ValidationContext>>,
     ) -> Arc<ValidationContext> {
         let parsers = LanguageParsers::new();
-        let mut merged_modified_blocks = HashMap::new();
+        let mut merged_modified_blocks = BTreeMap::new();
         let mut merged_line_changes = HashMap::new();
         for context in contexts {
             for (file_path, file_blocks) in &context.blocks {

@@ -202,13 +202,14 @@ mod tests {
             }
             // A parser without symbols refuses every source with the same error, so an empty
             // source is enough to tell. A parser with symbols may accept it or report it as broken.
-            let has_symbols = match parsers
+            let result = parsers
                 .parser(language)
                 .lock()
                 .expect("a thread panicked while it held the parser")
                 .parse_symbols("")
-            {
-                Ok(_) => true,
+                .map(|_| ());
+            let has_symbols = match result {
+                Ok(()) => true,
                 Err(err) => err.to_string() != "symbols are not supported for this language",
             };
             if has_symbols {
@@ -282,7 +283,7 @@ mod tests {
 
 #[cfg(test)]
 mod supported_languages_tests {
-    use std::collections::HashMap;
+
     use std::path::Path;
 
     use super::LanguageParsers;
@@ -291,7 +292,7 @@ mod supported_languages_tests {
     #[test]
     fn all_language_extensions_are_supported() -> anyhow::Result<()> {
         let parsers = LanguageParsers::new();
-        let files = HashMap::from([
+        let files = [
             (
                 "BUILD".to_string(),
                 "# <block>\ncc_library(name = \"foo\")\n# </block>".to_string(),
@@ -654,7 +655,7 @@ mod supported_languages_tests {
             ),
             (
                 "rs.rs".to_string(),
-                r#"/* <block> */fn a() {}/* </block> */"#.to_string(),
+                r"/* <block> */fn a() {}/* </block> */".to_string(),
             ),
             (
                 "sbt.sbt".to_string(),
@@ -780,18 +781,18 @@ mod supported_languages_tests {
                 "CITATION.cff".to_string(),
                 "# <block>\nversion: 1.0.0\n# </block>".to_string(),
             ),
-        ]);
+        ];
         for (file_name, contents) in &files {
             let parser = parsers
                 .parser_for(Path::new(file_name))
                 .unwrap_or_else(|| panic!("{file_name} should have a language"));
-            let mut parser = parser
+            let has_comments = parser
                 .lock()
-                .expect("a thread panicked while it held the parser");
-            assert!(
-                parser.parse_comments(contents)?.next().is_some(),
-                "{file_name} should have comments",
-            );
+                .expect("a thread panicked while it held the parser")
+                .parse_comments(contents)?
+                .next()
+                .is_some();
+            assert!(has_comments, "{file_name} should have comments");
         }
         Ok(())
     }

@@ -185,7 +185,10 @@ pub(crate) enum LineChangeKind {
 }
 
 #[cfg(test)]
-#[allow(clippy::single_range_in_vec_init)]
+#[expect(
+    clippy::single_range_in_vec_init,
+    reason = "a `Vec` of one range is the expected value here"
+)]
 mod tests {
     use super::test_utils::{added, deleted};
     use super::*;
@@ -263,7 +266,10 @@ pub(crate) mod test_utils {
     }
 
     /// A modified line with `length` chars modified.
-    #[allow(clippy::single_range_in_vec_init)]
+    #[expect(
+        clippy::single_range_in_vec_init,
+        reason = "a `Vec` of one range is the expected value here"
+    )]
     pub(crate) fn modified(line: usize, length: usize) -> LineChange {
         LineChange {
             line,

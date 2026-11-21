@@ -1,7 +1,10 @@
 //! Shared helpers for integration tests.
 
-// Each test file compiles this module on its own, and no file uses every helper.
-#![allow(dead_code)]
+// An `expect` would fail in the test files that do use every helper.
+#![allow(
+    dead_code,
+    reason = "each test file compiles this module on its own, and most use only some helpers"
+)]
 
 /// The path of an empty config file. With `--config`, it makes a run use the flags alone.
 ///
@@ -12,8 +15,10 @@ pub(super) const EMPTY_CONFIG: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/tests/common/empty.toml");
 
 /// Returns a command that runs the `blockwatch` binary with `--config` set to [`EMPTY_CONFIG`].
-// This is where the empty config gets added, so it has to start from the command without it.
-#[allow(clippy::disallowed_macros)]
+#[expect(
+    clippy::disallowed_macros,
+    reason = "this is where the empty config gets added, so it has to start from the command without it"
+)]
 pub(super) fn command() -> assert_cmd::Command {
     let mut command = assert_cmd::cargo_bin_cmd!();
     command.args(["--config", EMPTY_CONFIG]);
@@ -48,10 +53,12 @@ pub fn run_with_tty_stdin(args: &[&str], current_dir: Option<&str>) -> std::proc
     // master end is kept open by the parent until the child exits.
     let mut master: libc::c_int = -1;
     let mut slave: libc::c_int = -1;
+    // SAFETY: `master` and `slave` are valid places for `openpty` to write the two fds, and the
+    // null pointers ask for no name and the default terminal settings and size.
     let rc = unsafe {
         libc::openpty(
-            &mut master,
-            &mut slave,
+            &raw mut master,
+            &raw mut slave,
             std::ptr::null_mut(),
             std::ptr::null_mut::<libc::termios>(),
             std::ptr::null_mut::<libc::winsize>(),
@@ -59,9 +66,9 @@ pub fn run_with_tty_stdin(args: &[&str], current_dir: Option<&str>) -> std::proc
     };
     assert_eq!(rc, 0, "openpty failed: {}", std::io::Error::last_os_error());
 
-    // SAFETY: `master` and `slave` were just returned by `openpty` and are owned here.
-    // We wrap them in `OwnedFd` immediately to manage their lifespans safely.
+    // SAFETY: `master` was just returned by `openpty`, and nothing else owns it.
     let _master_fd = unsafe { OwnedFd::from_raw_fd(master) };
+    // SAFETY: as for `master`.
     let slave_fd = unsafe { OwnedFd::from_raw_fd(slave) };
 
     // Transfer ownership of the slave fd to the child's stdin.
@@ -89,6 +96,7 @@ pub fn run_with_tty_stdin(args: &[&str], current_dir: Option<&str>) -> std::proc
 }
 
 /// The output of the `blockwatch` process that [`run_with_closed_output`] closes.
+#[derive(Clone, Copy)]
 pub enum ClosedOutput {
     Stdout,
     Stderr,

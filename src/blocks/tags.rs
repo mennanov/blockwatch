@@ -80,7 +80,7 @@ impl<'source> WinnowBlockTagParser<'source> {
     }
 }
 
-impl<'source> Iterator for WinnowBlockTagParser<'source> {
+impl Iterator for WinnowBlockTagParser<'_> {
     type Item = Result<BlockTag, MalformedTag>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -149,7 +149,7 @@ fn find_tag_start(input: &str) -> Option<usize> {
 /// `a b         -> 1, no backtick closes the span on this line
 /// ```
 fn code_span_len(input: &str) -> usize {
-    debug_assert!(input.starts_with('`'));
+    debug_assert!(input.starts_with('`'), "a code span starts with a backtick");
     // A span ends on its own line, so a stray backtick can't hide a tag on a later line.
     #[expect(clippy::string_slice, reason = "`find` returns the index of a `\\n`")]
     let line = &input[..input.find('\n').unwrap_or(input.len())];

@@ -183,7 +183,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn language_without_symbols_parse_symbols_returns_error() -> anyhow::Result<()> {
+    fn language_without_symbols_parse_symbols_returns_error() {
         let mut parser = LanguageParserImpl::new(python_style_comments_parser(
             &tree_sitter_ruby::LANGUAGE.into(),
             "comment",
@@ -197,6 +197,5 @@ mod tests {
                 .contains("symbols are not supported for this language"),
             "unexpected error message: {err}"
         );
-        Ok(())
     }
 }

@@ -364,13 +364,13 @@ const FINE: &str = "ok";
 
     #[test]
     fn syntax_errors_parse_symbols_makes_the_names_near_them_unreadable() -> anyhow::Result<()> {
-        let source = r#"const PORTS: u8 = 8;
+        let source = r"const PORTS: u8 = 8;
 fn helper( {
     1
 }
 const BROKEN: u8 = = 1;
 const AFTER: u8 = 3;
-"#;
+";
 
         assert_eq!(
             symbols(&rust(source)?, source),
@@ -395,12 +395,12 @@ const AFTER: u8 = 3;
     -> anyhow::Result<()> {
         // The unclosed `[` makes the parser read the lines after it as part of the array,
         // `AFTER` included.
-        let source = r#"const PORTS: u8 = 8;
+        let source = r"const PORTS: u8 = 8;
 const CONFIG: [u8; 1] = [
     1,
 
 const AFTER: u8 = 3;
-"#;
+";
 
         assert_eq!(
             symbols(&rust(source)?, source),
@@ -422,7 +422,7 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_comments_correctly() -> anyhow::Result<()> {
+    fn parses_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
@@ -507,7 +507,5 @@ mod tests {
                 },
             ]
         );
-
-        Ok(())
     }
 }

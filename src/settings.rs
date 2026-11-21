@@ -95,10 +95,7 @@ impl Settings {
     ///
     /// Returns an error if either source has an invalid value. The error says which source it
     /// came from.
-    pub(crate) fn resolve(
-        flags: RawSettings,
-        config_file: RawSettings,
-    ) -> anyhow::Result<Settings> {
+    pub(crate) fn resolve(flags: &RawSettings, config_file: &RawSettings) -> anyhow::Result<Self> {
         let flags = flags.parse().context("invalid command-line flags")?;
         let config_file = config_file.parse().context("invalid config file")?;
 
@@ -128,7 +125,7 @@ impl Settings {
             .chain(flags.extensions)
             .collect();
 
-        Ok(Settings {
+        Ok(Self {
             ignored_globs: ignored_globs
                 .build()
                 .context("failed to build ignore glob set")?,
@@ -203,17 +200,13 @@ mod tests {
     use super::*;
     use crate::blocks::test_utils::block_addresses;
 
-    fn resolve(flags: RawSettings, config_file: RawSettings) -> anyhow::Result<Settings> {
-        Settings::resolve(flags, config_file)
-    }
-
-    fn check_error(settings: RawSettings) -> String {
+    fn check_error(settings: &RawSettings) -> String {
         let error = settings.parse().expect_err("the settings must be rejected");
         format!("{error:#}")
     }
 
     fn to_string_vec(names: &[&str]) -> Vec<String> {
-        names.iter().map(|name| name.to_string()).collect()
+        names.iter().map(std::string::ToString::to_string).collect()
     }
 
     #[test]
@@ -226,7 +219,7 @@ mod tests {
             ignore: to_string_vec(&["generated/**"]),
             ..RawSettings::default()
         };
-        let settings = resolve(flags, config_file)?;
+        let settings = Settings::resolve(&flags, &config_file)?;
         assert!(settings.ignored_globs.is_match("generated/a.rs"));
         assert!(settings.ignored_globs.is_match("vendor/b.rs"));
         assert!(!settings.ignored_globs.is_match("src/c.rs"));
@@ -239,7 +232,7 @@ mod tests {
             ignore: to_string_vec(&["{,sub/}a.rs"]),
             ..RawSettings::default()
         };
-        let settings = resolve(RawSettings::default(), config_file)?;
+        let settings = Settings::resolve(&RawSettings::default(), &config_file)?;
         assert!(settings.ignored_globs.is_match("a.rs"));
         assert!(settings.ignored_globs.is_match("sub/a.rs"));
         assert!(!settings.ignored_globs.is_match("other/a.rs"));
@@ -257,7 +250,7 @@ mod tests {
             ..RawSettings::default()
         };
         assert_eq!(
-            resolve(flags, config_file)?.extensions,
+            Settings::resolve(&flags, &config_file)?.extensions,
             HashMap::from([
                 (OsString::from("cxx"), Language::Cpp),
                 (OsString::from("pyw"), Language::Python),
@@ -277,7 +270,7 @@ mod tests {
             ..RawSettings::default()
         };
         assert_eq!(
-            resolve(flags, config_file)?.extensions,
+            Settings::resolve(&flags, &config_file)?.extensions,
             HashMap::from([(OsString::from("hpp"), Language::Cpp)])
         );
         Ok(())
@@ -289,7 +282,7 @@ mod tests {
             enable: to_string_vec(&["keep-sorted"]),
             ..RawSettings::default()
         };
-        let settings = resolve(RawSettings::default(), config_file)?;
+        let settings = Settings::resolve(&RawSettings::default(), &config_file)?;
         assert_eq!(
             settings.validator_selection,
             ValidatorSelection::Only(HashSet::from([Validator::KeepSorted]))
@@ -303,7 +296,7 @@ mod tests {
             disable: to_string_vec(&["check-ai"]),
             ..RawSettings::default()
         };
-        let settings = resolve(RawSettings::default(), config_file)?;
+        let settings = Settings::resolve(&RawSettings::default(), &config_file)?;
         assert_eq!(
             settings.validator_selection,
             ValidatorSelection::Skip(HashSet::from([Validator::CheckAi]))
@@ -321,7 +314,7 @@ mod tests {
             enable: to_string_vec(&["keep-sorted"]),
             ..RawSettings::default()
         };
-        let settings = resolve(flags, config_file)?;
+        let settings = Settings::resolve(&flags, &config_file)?;
         assert_eq!(
             settings.validator_selection,
             ValidatorSelection::Skip(HashSet::from([Validator::CheckAi]))
@@ -339,7 +332,7 @@ mod tests {
             disable: to_string_vec(&["check-ai"]),
             ..RawSettings::default()
         };
-        let settings = resolve(flags, config_file)?;
+        let settings = Settings::resolve(&flags, &config_file)?;
         assert_eq!(
             settings.validator_selection,
             ValidatorSelection::Only(HashSet::from([Validator::KeepSorted]))
@@ -353,7 +346,7 @@ mod tests {
             only_blocks: to_string_vec(&["a.py:fruits"]),
             ..RawSettings::default()
         };
-        let settings = resolve(RawSettings::default(), config_file)?;
+        let settings = Settings::resolve(&RawSettings::default(), &config_file)?;
         assert_eq!(
             settings.block_selection,
             BlockSelection::Only(block_addresses(&["a.py:fruits"]))
@@ -367,7 +360,7 @@ mod tests {
             skip_blocks: to_string_vec(&["a.py:fruits"]),
             ..RawSettings::default()
         };
-        let settings = resolve(RawSettings::default(), config_file)?;
+        let settings = Settings::resolve(&RawSettings::default(), &config_file)?;
         assert_eq!(
             settings.block_selection,
             BlockSelection::Skip(block_addresses(&["a.py:fruits"]))
@@ -386,7 +379,7 @@ mod tests {
             skip_blocks: to_string_vec(&["a.py:fruits"]),
             ..RawSettings::default()
         };
-        let settings = resolve(flags, config_file)?;
+        let settings = Settings::resolve(&flags, &config_file)?;
         assert_eq!(
             settings.block_selection,
             BlockSelection::Only(block_addresses(&["a.py:fruits"]))
@@ -404,7 +397,7 @@ mod tests {
             only_blocks: to_string_vec(&["a.py:fruits"]),
             ..RawSettings::default()
         };
-        let settings = resolve(flags, config_file)?;
+        let settings = Settings::resolve(&flags, &config_file)?;
         assert_eq!(
             settings.block_selection,
             BlockSelection::Skip(block_addresses(&["a.py:vegetables"]))
@@ -420,7 +413,8 @@ mod tests {
         };
         let error = format!(
             "{:#}",
-            resolve(flags, RawSettings::default()).expect_err("the flags must be rejected")
+            Settings::resolve(&flags, &RawSettings::default())
+                .expect_err("the flags must be rejected")
         );
         assert!(error.contains("invalid command-line flags"), "{error}");
         assert!(error.contains("cxx=cobol"), "{error}");
@@ -438,7 +432,7 @@ mod tests {
         };
         let error = format!(
             "{:#}",
-            resolve(flags, config_file).expect_err("the config file must be rejected")
+            Settings::resolve(&flags, &config_file).expect_err("the config file must be rejected")
         );
         assert!(error.contains("invalid config file"), "{error}");
         assert!(error.contains("keep-tidy"), "{error}");
@@ -446,7 +440,7 @@ mod tests {
 
     #[test]
     fn ignore_glob_that_does_not_compile_is_rejected() {
-        let error = check_error(RawSettings {
+        let error = check_error(&RawSettings {
             ignore: to_string_vec(&["docs/**", "a/[b"]),
             ..RawSettings::default()
         });
@@ -455,7 +449,7 @@ mod tests {
 
     #[test]
     fn extension_mapped_to_unsupported_language_is_rejected() {
-        let error = check_error(RawSettings {
+        let error = check_error(&RawSettings {
             extensions: HashMap::from([
                 ("cxx".to_string(), "cpp".to_string()),
                 ("hpp".to_string(), "cobol".to_string()),
@@ -467,7 +461,7 @@ mod tests {
 
     #[test]
     fn unknown_validator_is_rejected() {
-        let error = check_error(RawSettings {
+        let error = check_error(&RawSettings {
             disable: to_string_vec(&["keep-sorted", "keep-tidy"]),
             ..RawSettings::default()
         });
@@ -476,7 +470,7 @@ mod tests {
 
     #[test]
     fn enable_and_disable_together_are_rejected() {
-        let error = check_error(RawSettings {
+        let error = check_error(&RawSettings {
             enable: to_string_vec(&["keep-sorted"]),
             disable: to_string_vec(&["check-ai"]),
             ..RawSettings::default()
@@ -486,7 +480,7 @@ mod tests {
 
     #[test]
     fn block_address_without_a_block_name_is_rejected() {
-        let error = check_error(RawSettings {
+        let error = check_error(&RawSettings {
             skip_blocks: to_string_vec(&["a.py:fruits", "a.py"]),
             ..RawSettings::default()
         });
@@ -495,7 +489,7 @@ mod tests {
 
     #[test]
     fn only_blocks_and_skip_blocks_together_are_rejected() {
-        let error = check_error(RawSettings {
+        let error = check_error(&RawSettings {
             only_blocks: to_string_vec(&["a.py:fruits"]),
             skip_blocks: to_string_vec(&["a.py:vegetables"]),
             ..RawSettings::default()

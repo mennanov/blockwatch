@@ -955,9 +955,9 @@ const char *Fine = "ok";
     fn comment_inside_a_macro_parse_symbols_makes_its_name_unreadable() -> anyhow::Result<()> {
         // The grammar ends the macro at the comment, and reads `+ 2` as code. So the macro would
         // read `1`.
-        let source = r#"#define INSIDE 1 /* c */ + 2
+        let source = r"#define INSIDE 1 /* c */ + 2
 #define AFTER 3
-"#;
+";
 
         assert_eq!(
             symbols(&c(source)?, source),
@@ -986,7 +986,7 @@ const char *Fine = "ok";
     fn line_end_that_the_grammar_misreads_parse_symbols_ends_the_macro_there() -> anyhow::Result<()>
     {
         // The grammar would read the line end after the `/` as part of the macro.
-        let source = r#"#define URL 1 // https://example.com/
+        let source = r"#define URL 1 // https://example.com/
 #define ROOT /
 #define NEXT 2
 #define SPLIT 3 + \
@@ -995,7 +995,7 @@ const char *Fine = "ok";
 #define LAST 6
 int ratio = 8 /
   2;
-"#;
+";
 
         assert_eq!(
             symbols(&c(source)?, source),
@@ -1076,12 +1076,12 @@ int after = 3;
     fn span_that_swallows_definitions_parse_symbols_makes_their_names_unreadable()
     -> anyhow::Result<()> {
         // The unclosed `{` makes the parser skip everything after it, `y` and `b` included.
-        let source = r#"int a = 1;
+        let source = r"int a = 1;
 struct S { int m;
 int y = 2;
 
 int b = 3;
-"#;
+";
 
         assert_eq!(
             symbols(&c(source)?, source),
@@ -1100,12 +1100,12 @@ int b = 3;
     fn unclosed_function_parse_symbols_finds_no_definition_inside_it() -> anyhow::Result<()> {
         // The parser assumes a `}` at the end of the file, so `y` and `b` are local variables of
         // `f`, and no skipped span holds their names.
-        let source = r#"int a = 1;
+        let source = r"int a = 1;
 int f(void) {
 int y = 2;
 
 int b = 3;
-"#;
+";
 
         let symbols = c(source)?;
 
@@ -1127,7 +1127,7 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_c_comments_correctly() -> anyhow::Result<()> {
+    fn parses_c_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
@@ -1240,7 +1240,5 @@ int c; ///<
                 },
             ]
         );
-
-        Ok(())
     }
 }

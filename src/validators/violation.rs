@@ -135,6 +135,10 @@ pub(crate) struct SimpleDiagnostic<'a> {
 }
 
 /// Keeps a `false` `suppressed` field out of the serialized diagnostic.
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's `skip_serializing_if` passes the field by reference"
+)]
 fn is_false(value: &bool) -> bool {
     !*value
 }

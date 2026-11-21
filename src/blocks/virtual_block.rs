@@ -382,7 +382,10 @@ impl VirtualBlock {
 }
 
 #[cfg(test)]
-#[allow(clippy::single_range_in_vec_init)]
+#[expect(
+    clippy::single_range_in_vec_init,
+    reason = "a `Vec` of one range is the expected value here"
+)]
 mod tests {
     use super::test_utils::{virtual_block, virtual_block_with_target_if};
     use super::*;

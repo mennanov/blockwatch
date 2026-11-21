@@ -255,36 +255,36 @@ fn hex_value(digits: &str, lengths: RangeInclusive<usize>) -> Option<u32> {
 /// Adds the definitions in `body`, the root of a file or the body of a type, to `walk`. `parents`
 /// are the names of the type that `body` belongs to. Adds the body of each type in `body` to
 /// `walk`, with its own parents.
-fn push_members<'tree>(body: Node<'tree>, parents: Vec<Node<'tree>>, walk: &mut NestedWalk<'tree>) {
+fn push_members<'tree>(body: Node<'tree>, parents: &[Node<'tree>], walk: &mut NestedWalk<'tree>) {
     let mut cursor = body.walk();
     for member in body.named_children(&mut cursor) {
         let range = member.byte_range();
         match member.kind() {
-            "top_level_variable_declaration" => push_declaration(member, range, &parents, walk),
-            "member_declaration" => push_member(member, &parents, walk),
+            "top_level_variable_declaration" => push_declaration(member, range, parents, walk),
+            "member_declaration" => push_member(member, parents, walk),
             "function_declaration" | "getter_declaration" | "setter_declaration" => {
                 let signature = member.child_by_field_name("signature");
                 let body = member.child_by_field_name("body");
                 if let Some(signature) = signature {
-                    push_signature(signature, body, range, &parents, walk);
+                    push_signature(signature, body, range, parents, walk);
                 }
             }
             "enum_entry" => {
                 if let Some(name) = member.child_by_field_name("name") {
-                    walk.add_definition(&parents, name, range, None);
+                    walk.add_definition(parents, name, range, None);
                 }
             }
             // The grammar gives the name of a type alias no field name.
             "type_alias" => {
                 if let Some(name) = child(member, "type_identifier") {
-                    walk.add_definition(&parents, name, range, None);
+                    walk.add_definition(parents, name, range, None);
                 }
             }
             "class_declaration"
             | "mixin_declaration"
             | "enum_declaration"
-            | "extension_declaration" => push_type(member, &parents, walk),
-            "extension_type_declaration" => push_extension_type(member, &parents, walk),
+            | "extension_declaration" => push_type(member, parents, walk),
+            "extension_type_declaration" => push_extension_type(member, parents, walk),
             // An external declaration has no body for a block to follow, and code never refers
             // to a library or a directive by name.
             _ => {}
@@ -409,7 +409,7 @@ fn constructor_name(signature: Node<'_>) -> Option<Node<'_>> {
     let mut cursor = signature.walk();
     signature
         .children_by_field_name("name", &mut cursor)
-        .filter(|name| name.is_named())
+        .filter(tree_sitter::Node::is_named)
         .nth(1)
 }
 
@@ -477,7 +477,7 @@ fn push_representation_field<'tree>(
     let start = representation
         .named_children(&mut cursor)
         .find(|part| !part.is_extra())
-        .map_or(field.start_byte(), |part| part.start_byte());
+        .map_or_else(|| field.start_byte(), |part| part.start_byte());
     walk.add_definition(parents, field, start..field.end_byte(), None);
 }
 
@@ -506,7 +506,7 @@ mod symbols_tests {
 
     #[test]
     fn file_with_every_shape_parse_symbols_returns_every_symbol_in_order() -> anyhow::Result<()> {
-        let source = r#"library billing;
+        let source = r"library billing;
 
 import 'dart:math';
 
@@ -560,7 +560,7 @@ extension StringX on String { bool get isBlank => trim().isEmpty; }
 extension type Id(int value) {
   int get doubled => value * 2;
 }
-"#;
+";
         let invoice = text_of(source, "@immutable\nclass", "\n}")?;
 
         // <block affects="docs/symbols.md:dart-paths">
@@ -654,7 +654,7 @@ extension type Id(int value) {
     #[test]
     fn getter_and_setter_with_one_name_parse_symbols_returns_both() -> anyhow::Result<()> {
         // Both have the path `/Box/size`, so a reference to it is ambiguous.
-        let source = r#"int get count => _count;
+        let source = r"int get count => _count;
 set count(int value) => _count = value;
 
 class Box {
@@ -663,7 +663,7 @@ class Box {
     _size = value;
   }
 }
-"#;
+";
         let set_size = text_of(source, "set size", "\n  }")?;
 
         assert_eq!(
@@ -682,7 +682,7 @@ class Box {
     #[test]
     fn constructors_parse_symbols_returns_only_the_named_ones() -> anyhow::Result<()> {
         // `Point.new` is the unnamed constructor, written with its tear-off name.
-        let source = r#"class Point {
+        let source = r"class Point {
   final int x;
   Point(this.x);
   Point.origin() : this(0);
@@ -702,7 +702,7 @@ class Single {
   factory Single() => Single._();
   Single._();
 }
-"#;
+";
 
         let paths: Vec<String> = symbols(&dart(source)?, source)
             .into_iter()
@@ -732,11 +732,11 @@ class Single {
     fn named_constructor_and_field_with_one_name_parse_symbols_returns_both() -> anyhow::Result<()>
     {
         // Both have the path `/Button/disabled`, so a reference to it is ambiguous.
-        let source = r#"class Button {
+        let source = r"class Button {
   final bool disabled;
   const Button.disabled() : disabled = true;
 }
-"#;
+";
 
         assert_eq!(
             symbols(&dart(source)?, source)[1..],
@@ -756,7 +756,7 @@ class Single {
     fn named_and_unnamed_extensions_parse_symbols_returns_only_the_named_members()
     -> anyhow::Result<()> {
         // Both extensions extend `String`, so their members don't go under it.
-        let source = r#"extension StringX on String {
+        let source = r"extension StringX on String {
   static const empty = '';
   bool get isBlank => trim().isEmpty;
   String twice() => this + this;
@@ -767,7 +767,7 @@ extension on String {
 }
 
 extension NumX on num { int get rounded => round(); }
-"#;
+";
 
         let paths: Vec<String> = symbols(&dart(source)?, source)
             .into_iter()
@@ -791,14 +791,14 @@ extension NumX on num { int get rounded => round(); }
     fn extension_types_parse_symbols_returns_the_representation_and_the_members()
     -> anyhow::Result<()> {
         // `Meters.from` declares a named constructor, as `Point.from(...)` in a class does.
-        let source = r#"extension type const UserId(@protected int raw) implements int {
+        let source = r"extension type const UserId(@protected int raw) implements int {
   static const zero = UserId(0);
   UserId.parse(String text) : raw = int.parse(text);
   bool get isValid => raw > 0;
 }
 
 extension type Meters.from(/* in meters */ double value) {}
-"#;
+";
 
         assert_eq!(
             symbols(&dart(source)?, source),
@@ -838,7 +838,7 @@ extension type Meters.from(/* in meters */ double value) {}
 
     #[test]
     fn enum_with_members_parse_symbols_returns_its_values_and_members() -> anyhow::Result<()> {
-        let source = r#"enum Planet implements Comparable<Planet> {
+        let source = r"enum Planet implements Comparable<Planet> {
   mercury(mass: 3.3),
   @Deprecated('x')
   pluto(mass: 0.01);
@@ -851,7 +851,7 @@ extension type Meters.from(/* in meters */ double value) {}
   bool get isHeavy => mass > 1;
   int compareTo(Planet other) => 0;
 }
-"#;
+";
 
         assert_eq!(
             symbols(&dart(source)?, source)[1..],
@@ -882,7 +882,7 @@ extension type Meters.from(/* in meters */ double value) {}
 
     #[test]
     fn external_declarations_parse_symbols_returns_none_of_them() -> anyhow::Result<()> {
-        let source = r#"external int nativeAdd(int a, int b);
+        let source = r"external int nativeAdd(int a, int b);
 external int counter;
 external String get platform;
 external set platform(String value);
@@ -897,7 +897,7 @@ class Interop {
   external void run();
   void kept() {}
 }
-"#;
+";
 
         let paths: Vec<String> = symbols(&dart(source)?, source)
             .into_iter()
@@ -909,14 +909,14 @@ class Interop {
 
     #[test]
     fn operators_parse_symbols_returns_none_of_them() -> anyhow::Result<()> {
-        let source = r#"class Vector {
+        let source = r"class Vector {
   bool operator ==(Object other) => true;
   Vector operator -() => this;
   int operator [](int index) => 0;
   void operator []=(int index, int value) {}
   int length() => 0;
 }
-"#;
+";
 
         let paths: Vec<String> = symbols(&dart(source)?, source)
             .into_iter()
@@ -1036,14 +1036,14 @@ const escaped = '''a\\\r\nb''';
 
     #[test]
     fn escape_that_is_not_text_parse_symbols_makes_the_name_unreadable() -> anyhow::Result<()> {
-        let source = r#"class Broken {
+        let source = r"class Broken {
   static const tooLong = '\u{1234567}';
   static const tooHigh = '\u{110000}';
   static const half = '\uD800';
   static const bracedHalf = 'a' '\u{DC00}';
   static const fine = 'ok';
 }
-"#;
+";
 
         assert_eq!(
             values(&dart(source)?, source)[1..],
@@ -1080,7 +1080,7 @@ const escaped = '''a\\\r\nb''';
     fn syntax_error_parse_symbols_makes_the_definitions_that_hold_it_unreadable()
     -> anyhow::Result<()> {
         // The parser skips `call(1 2)`, and the `+` of `z`.
-        let source = r#"class A {
+        let source = r"class A {
   static const x = 1;
   void broken() { call(1 2); }
   static const y = 2;
@@ -1092,7 +1092,7 @@ class B {
 }
 
 const after = 5;
-"#;
+";
 
         assert_eq!(
             symbols(&dart(source)?, source),
@@ -1126,10 +1126,10 @@ const after = 5;
     fn name_with_a_dollar_in_a_skipped_span_parse_symbols_makes_it_unreadable() -> anyhow::Result<()>
     {
         // Dart allows `$` in a name. The parser skips `call(_$count 2)`.
-        let source = r#"void broken() { call(_$count 2); }
+        let source = r"void broken() { call(_$count 2); }
 
 const _$count = 1;
-"#;
+";
 
         assert_eq!(
             unresolved(&dart(source)?, source, "/_$count")?,
@@ -1145,12 +1145,12 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_comments_correctly() -> anyhow::Result<()> {
+    fn parses_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
             .parse(
-                r#"
+                r"
 // This is a line comment
 /// Doc comment
 int add(int a, int b) {
@@ -1163,7 +1163,7 @@ spanning multiple lines
 /** Documentation block */
 //! Rust and Doxygen read this marker as a doc comment.
 //// A banner line repeats the marker.
-"#,
+",
             )
             .collect();
 
@@ -1209,7 +1209,5 @@ spanning multiple lines
                 },
             ]
         );
-
-        Ok(())
     }
 }

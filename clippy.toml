@@ -9,3 +9,7 @@ disallowed-methods = [
     { path = "globset::Glob::new", reason = "use paths_glob::glob_builder, which keeps an empty alternative" },
     { path = "globset::GlobBuilder::new", reason = "use paths_glob::glob_builder, which keeps an empty alternative" },
 ]
+# `unwrap_used` is for the code that ships. A test that unwraps a bad value fails, which is what it should do.
+allow-unwrap-in-tests = true
+# `doc_markdown` would want backticks around these. The `".."` keeps clippy's own list.
+doc-valid-idents = ["CMake", "CommonMark", "MakeMaker", "OpenAI", ".."]

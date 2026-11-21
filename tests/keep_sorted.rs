@@ -228,7 +228,7 @@ index 1111111..2222222 100644
 
 #[test]
 fn with_empty_keep_sorted_value_defaults_to_asc() {
-    let diff_content = r#"
+    let diff_content = r"
 diff --git a/tests/testdata/keep_sorted/orderings.py b/tests/testdata/keep_sorted/orderings.py
 index 1111111..2222222 100644
 --- a/tests/testdata/keep_sorted/orderings.py
@@ -239,7 +239,7 @@ index 1111111..2222222 100644
      'a',
 +    'c',
      # </block>
- ]"#;
+ ]";
 
     let mut cmd = cargo_bin_cmd!();
     cmd.args(["--diff", "--only-changed"]);

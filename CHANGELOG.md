@@ -35,6 +35,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   entry was used and the first was ignored.
 - With `--only-changed` and several files that fail to parse, the error now always shows the file with the lowest
   path. Before, the file shown could change from run to run.
+- An invalid number in `line-count` now says why it is invalid, as in `invalid number: number too large to fit in
+  target type`. Before, the error said only `invalid number`.
 
 ## [0.19.2] - 2026-11-14
 

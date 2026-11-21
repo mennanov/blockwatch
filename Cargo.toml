@@ -101,6 +101,81 @@ libc = "0.2"
 predicates = "3.1"
 tempfile = "3.27.0"
 
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+# A match on an enum must list every variant (AGENTS.md). These two turn such a match into `if let` or let-else.
+single_match_else = "allow"
+manual_let_else = "allow"
+# Comes from dependencies, which pull in two versions of some crates.
+multiple_crate_versions = "allow"
+# The symbol tests put every shape in one fixture on purpose, so they are long.
+too_many_lines = "allow"
+# Flags pairs such as `block` and `blocks`. Renaming them would make the names worse.
+similar_names = "allow"
+# Flags fields such as `open_blocks` in `Blocks`. Each name says what the field holds. Without the struct's name, it
+# would say less.
+struct_field_names = "allow"
+# A module with child modules keeps its own code in `mod.rs`, inside its folder, so each such module looks the same.
+self_named_module_files = "warn"
+# A `_` arm gives a variant added later whatever that arm does, without anyone deciding it. So each `_` on an enum
+# needs an `expect` that says why no new variant could need another arm.
+wildcard_enum_match_arm = "warn"
+# Restriction lints, one by one. The whole group doesn't fit.
+# AGENTS.md asks for a reason on each `expect`.
+allow_attributes_without_reason = "warn"
+# `#[expect]` fails once its lint stops firing. `#[allow]` goes stale without a word.
+allow_attributes = "warn"
+# stdout carries the JSON and SARIF output. A stray `println!` breaks it.
+print_stdout = "warn"
+print_stderr = "warn"
+# Leftovers from debugging.
+dbg_macro = "warn"
+todo = "warn"
+# `process::exit` skips destructors and buffered writes.
+exit = "warn"
+# Test names follow `state_action_expected_result`, with no `test_` prefix.
+redundant_test_prefix = "warn"
+# Tests must run the code that ships.
+cfg_not_test = "warn"
+# Each panic must say why it can't happen. `allow-unwrap-in-tests` in `clippy.toml` lets tests unwrap.
+unwrap_used = "warn"
+# Hash order changes between runs. Output must not.
+iter_over_hash_type = "warn"
+# `|_|` drops the cause of the error.
+map_err_ignore = "warn"
+# An `unsafe` block says why it is sound.
+undocumented_unsafe_blocks = "warn"
+# An ignored `Result` must be on purpose.
+let_underscore_must_use = "warn"
+# `.ok()` hides that a `Result` is thrown away.
+unused_result_ok = "warn"
+# A failed assert says what broke.
+missing_assert_message = "warn"
+# One way to join strings.
+string_add = "warn"
+# Keeps `pub(super)` and never `pub(in super)`.
+pub_without_shorthand = "warn"
+# Nursery lints, one by one. The group has wrong hits, and lints that go against AGENTS.md.
+# `peekable` with no `peek` is dead code.
+unused_peekable = "warn"
+# Threads share the parsers behind a `Mutex`. Holding a lock longer than needed makes them wait.
+significant_drop_in_scrutinee = "warn"
+significant_drop_tightening = "warn"
+# Pushing an absolute path onto a `PathBuf` replaces the whole path.
+path_buf_push_overwrite = "warn"
+# These catch dead code, or code that asks for more than it needs.
+collection_is_never_read = "warn"
+needless_pass_by_ref_mut = "warn"
+derive_partial_eq_without_eq = "warn"
+trait_duplication_in_bounds = "warn"
+# `unwrap_or(f())` runs `f` even when the value is there.
+or_fun_call = "warn"
+# AGENTS.md asks for short sentences.
+too_long_first_doc_paragraph = "warn"
+# One name for the type inside its own `impl`.
+use_self = "warn"
+
 [profile.dist]
 inherits = "release"
 lto = "thin"

@@ -14,12 +14,6 @@
 // Slicing a `str` panics when an index falls inside a multi-byte character, such as `é`. So each
 // slice outside tests needs an `expect` that says why its indexes are on character boundaries.
 #![cfg_attr(not(test), warn(clippy::string_slice))]
-// A module with child modules keeps its own code in `mod.rs`, inside its folder, so each such
-// module looks the same.
-#![warn(clippy::self_named_module_files)]
-// A `_` arm gives a variant added later whatever that arm does, without anyone deciding it. So
-// each `_` on an enum needs an `expect` that says why no new variant could need another arm.
-#![warn(clippy::wildcard_enum_match_arm)]
 
 mod attributes;
 mod blocks;
@@ -46,6 +40,10 @@ pub use cli::run;
 ///
 /// # Panics
 /// Panics if the tree-sitter crate can't load the Rust grammar, which is a build bug.
+///
+/// # Errors
+///
+/// Returns an error if a block tag in `source` is malformed.
 ///
 /// # Examples
 ///

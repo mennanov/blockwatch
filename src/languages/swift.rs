@@ -200,23 +200,23 @@ fn push_unicode<'text>(
 /// Adds the definitions of the members of `body`, the root of a file or the body of a type or
 /// extension, to `walk`. `parents` are the names of the types that `body` belongs to. Adds the
 /// body of each type and extension in `body` to `walk`, with its own parents.
-fn push_members<'tree>(body: Node<'tree>, parents: Vec<Node<'tree>>, walk: &mut NestedWalk<'tree>) {
+fn push_members<'tree>(body: Node<'tree>, parents: &[Node<'tree>], walk: &mut NestedWalk<'tree>) {
     let mut cursor = body.walk();
     for member in body.named_children(&mut cursor) {
         let name = match member.kind() {
             // The grammar calls a struct, an enum, an actor and an extension a class too.
             "class_declaration" | "protocol_declaration" => {
-                push_type(member, &parents, walk);
+                push_type(member, parents, walk);
                 continue;
             }
             "property_declaration" => {
-                push_parts(member, &parents, walk, |pattern| {
+                push_parts(member, parents, walk, |pattern| {
                     pattern.child_by_field_name("bound_identifier")
                 });
                 continue;
             }
             "enum_entry" => {
-                push_parts(member, &parents, walk, Some);
+                push_parts(member, parents, walk, Some);
                 continue;
             }
             "protocol_property_declaration" => member
@@ -236,7 +236,7 @@ fn push_members<'tree>(body: Node<'tree>, parents: Vec<Node<'tree>>, walk: &mut 
             _ => continue,
         };
         if let Some(name) = name {
-            walk.add_definition(&parents, name, member.byte_range(), None);
+            walk.add_definition(parents, name, member.byte_range(), None);
         }
     }
 }
@@ -522,7 +522,7 @@ actor Counter {
     #[test]
     fn extensions_parse_symbols_returns_their_members_under_the_type() -> anyhow::Result<()> {
         // `String` is not defined in the file, and `[Int]` is a type without a name.
-        let source = r#"struct Config {
+        let source = r"struct Config {
     let a = 1
 }
 
@@ -549,7 +549,7 @@ extension Array<Int> {
 extension [Int] {
     var first: Int { 0 }
 }
-"#;
+";
 
         assert_eq!(
             symbols(&swift(source)?, source),
@@ -603,7 +603,7 @@ extension Named {
 
     #[test]
     fn copies_in_if_branches_parse_symbols_returns_each_copy() -> anyhow::Result<()> {
-        let source = r#"#if os(iOS)
+        let source = r"#if os(iOS)
 let platform = 1
 #else
 let platform = 2
@@ -614,7 +614,7 @@ struct Config {
     static let level = 3
     #endif
 }
-"#;
+";
 
         assert_eq!(
             values(&swift(source)?, source),
@@ -631,7 +631,7 @@ struct Config {
     #[test]
     fn computed_property_with_one_statement_parse_symbols_returns_a_value_only_for_an_expression()
     -> anyhow::Result<()> {
-        let source = r#"var chosen: Int { if ok { 1 } else { 2 } }
+        let source = r"var chosen: Int { if ok { 1 } else { 2 } }
 var token: String? { do { return try read() } catch { return nil } }
 var guarded: Void { guard ok else { return } }
 var looped: Void { for _ in 0..<3 { step() } }
@@ -642,7 +642,7 @@ var local: Void { let y = 1 }
 var localFunction: Void { func f() {} }
 var localType: Void { struct S {} }
 var localAlias: Void { typealias T = Int }
-"#;
+";
 
         assert_eq!(
             values(&swift(source)?, source),
@@ -669,12 +669,12 @@ var localAlias: Void { typealias T = Int }
     -> anyhow::Result<()> {
         // The grammar parses parentheses as a tuple. A tuple with a label or two values is a
         // tuple.
-        let source = r#"let one = ((1))
+        let source = r"let one = ((1))
 let commented = (1 /* one */)
 let labeled = (a: 1)
 let pair = (1, 2)
 let sum = (1) + (2)
-"#;
+";
 
         assert_eq!(
             values(&swift(source)?, source),
@@ -691,12 +691,12 @@ let sum = (1) + (2)
 
     #[test]
     fn names_in_backticks_parse_symbols_returns_them_without_the_backticks() -> anyhow::Result<()> {
-        let source = r#"enum `Type` {
+        let source = r"enum `Type` {
     case `default`
 
     static let `is` = 1
 }
-"#;
+";
 
         assert_eq!(
             symbols(&swift(source)?, source),
@@ -813,7 +813,7 @@ let joined = "a" + "b"
     fn string_that_swift_rejects_parse_symbols_makes_the_name_unreadable() -> anyhow::Result<()> {
         // The grammar itself rejects an unknown escape in a string that is not raw, so only a raw
         // string shows one here.
-        let source = r###"let rawUnknown = #"\#q"#
+        let source = r##"let rawUnknown = #"\#q"#
 let rawNoBrace = #"\#u41"#
 let rawUnclosed = #"\#u{41"#
 let rawEmpty = #"\#u{}"#
@@ -824,7 +824,7 @@ let interpolated = "\u{D800} \(x)"
 let fine = "ok"
 let rawUnclosedString = #"a\#"#
 let rawSign = #"\#u{+41}"#
-"###;
+"##;
 
         assert_eq!(
             values(&swift(source)?, source),
@@ -1034,14 +1034,14 @@ let rawSign = #"\#u{+41}"#
     -> anyhow::Result<()> {
         // The grammar can't parse the empty tuple as an argument, `(())`, and assumes a token is
         // missing.
-        let source = r#"struct A {
+        let source = r"struct A {
     let x = 1
     func send() { call(()) }
     let y = 2
 }
 
 let after = 5
-"#;
+";
 
         assert_eq!(
             symbols(&swift(source)?, source),
@@ -1066,13 +1066,13 @@ let after = 5
     fn span_that_swallows_a_definition_parse_symbols_makes_its_name_unreadable()
     -> anyhow::Result<()> {
         // The unclosed `(` makes the parser skip `let w`.
-        let source = r#"struct B {
+        let source = r"struct B {
     let z = (3
     let w = 4
 }
 
 let after = 5
-"#;
+";
 
         assert_eq!(
             symbols(&swift(source)?, source),
@@ -1096,7 +1096,7 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_swift_comments_correctly() -> anyhow::Result<()> {
+    fn parses_swift_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
@@ -1169,7 +1169,5 @@ mod tests {
                 },
             ]
         );
-
-        Ok(())
     }
 }

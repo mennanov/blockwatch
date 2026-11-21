@@ -11,12 +11,12 @@ use strum::IntoEnumIterator;
 /// Runs all sync validators concurrently each in a separate thread and returns violations grouped
 /// by file paths.
 fn run_sync_validators(
-    context: Arc<ValidationContext>,
+    context: &Arc<ValidationContext>,
     validators: SyncValidators,
 ) -> anyhow::Result<ValidationLog> {
     let mut handles = Vec::new();
     for (name, validator) in validators {
-        let context = Arc::clone(&context);
+        let context = Arc::clone(context);
         handles.push(std::thread::spawn(move || {
             (name, validator.validate(context))
         }));
@@ -75,12 +75,12 @@ pub(crate) fn run(
     async_validators: AsyncValidators,
 ) -> anyhow::Result<ValidationLog> {
     let mut log = if async_validators.is_empty() {
-        run_sync_validators(context, sync_validators)?
+        run_sync_validators(&context, sync_validators)?
     } else {
         // Run sync and async validators concurrently.
         let sync_context = Arc::clone(&context);
         let sync_violations_handle =
-            std::thread::spawn(move || run_sync_validators(sync_context, sync_validators));
+            std::thread::spawn(move || run_sync_validators(&sync_context, sync_validators));
         let async_violations_handle =
             std::thread::spawn(move || run_async_validators(context, async_validators));
         let sync_result = sync_violations_handle
@@ -159,9 +159,9 @@ impl ValidatorSelection {
     /// Whether the run uses `validator`.
     pub(crate) fn includes(&self, validator: Validator) -> bool {
         match self {
-            ValidatorSelection::All => true,
-            ValidatorSelection::Only(validators) => validators.contains(&validator),
-            ValidatorSelection::Skip(validators) => !validators.contains(&validator),
+            Self::All => true,
+            Self::Only(validators) => validators.contains(&validator),
+            Self::Skip(validators) => !validators.contains(&validator),
         }
     }
 }
@@ -331,6 +331,10 @@ mod tests {
     }
 
     /// Creates the fakes above in place of `keep-sorted` and `check-ai`.
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "it stands in for the real factory, which can fail"
+    )]
     fn create_fakes<Fs: FileSystem>(
         validator: Validator,
         _file_system: &Arc<Fs>,
@@ -384,7 +388,7 @@ mod tests {
             .iter()
             .map(|v| v.code.as_str())
             .collect::<Vec<_>>();
-        file1_violations.sort();
+        file1_violations.sort_unstable();
         assert_eq!(file1_violations, vec!["check-ai", "keep-sorted"]);
         assert_eq!(
             violations[&RepoPath::from_reference("example2.py")?].len(),
@@ -394,7 +398,7 @@ mod tests {
             .iter()
             .map(|v| v.code.as_str())
             .collect::<Vec<_>>();
-        file2_violations.sort();
+        file2_violations.sort_unstable();
         assert_eq!(file2_violations, vec!["check-ai", "keep-sorted"]);
         Ok(())
     }
@@ -487,7 +491,7 @@ mod tests {
 
     /// Runs the fake validators that `selection` picks on one block that turns on both
     /// `keep-sorted` and `check-ai`. Returns the code of each violation.
-    fn violation_codes(selection: ValidatorSelection) -> anyhow::Result<Vec<Validator>> {
+    fn violation_codes(selection: &ValidatorSelection) -> anyhow::Result<Vec<Validator>> {
         let context = validation_context(
             "example1.py",
             r#"# <block keep-sorted="asc" check-ai="condition B">
@@ -496,7 +500,7 @@ mod tests {
         let (sync_validators, async_validators) = detect_validators(
             &context,
             create_fakes,
-            &selection,
+            selection,
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
         let violations = validators::run(context, sync_validators, async_validators)?.violations;
@@ -511,7 +515,7 @@ mod tests {
     fn detect_and_run_with_disabled_async_validators_returns_violations_for_sync_validators_only()
     -> anyhow::Result<()> {
         let selection = ValidatorSelection::Skip(HashSet::from([Validator::CheckAi]));
-        assert_eq!(violation_codes(selection)?, [Validator::KeepSorted]);
+        assert_eq!(violation_codes(&selection)?, [Validator::KeepSorted]);
         Ok(())
     }
 
@@ -519,7 +523,7 @@ mod tests {
     fn detect_and_run_with_enabled_async_validators_returns_violations_for_async_validators_only()
     -> anyhow::Result<()> {
         let selection = ValidatorSelection::Only(HashSet::from([Validator::CheckAi]));
-        assert_eq!(violation_codes(selection)?, [Validator::CheckAi]);
+        assert_eq!(violation_codes(&selection)?, [Validator::CheckAi]);
         Ok(())
     }
 
@@ -527,7 +531,7 @@ mod tests {
     fn detect_and_run_with_disabled_sync_validators_returns_violations_for_async_validators_only()
     -> anyhow::Result<()> {
         let selection = ValidatorSelection::Skip(HashSet::from([Validator::KeepSorted]));
-        assert_eq!(violation_codes(selection)?, [Validator::CheckAi]);
+        assert_eq!(violation_codes(&selection)?, [Validator::CheckAi]);
         Ok(())
     }
 
@@ -535,7 +539,7 @@ mod tests {
     fn detect_and_run_with_enabled_sync_validators_returns_violations_for_sync_validators_only()
     -> anyhow::Result<()> {
         let selection = ValidatorSelection::Only(HashSet::from([Validator::KeepSorted]));
-        assert_eq!(violation_codes(selection)?, [Validator::KeepSorted]);
+        assert_eq!(violation_codes(&selection)?, [Validator::KeepSorted]);
         Ok(())
     }
 

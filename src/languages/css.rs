@@ -347,7 +347,7 @@ impl<'i> DeclarationParser<'i> for Walk<'_> {
     }
 }
 
-impl<'i> RuleBodyItemParser<'i, (), ()> for Walk<'_> {
+impl RuleBodyItemParser<'_, (), ()> for Walk<'_> {
     fn parse_declarations(&self) -> bool {
         true
     }
@@ -410,10 +410,10 @@ mod tests {
     use crate::position::Position;
 
     #[test]
-    fn parses_css_comments_correctly() -> anyhow::Result<()> {
+    fn parses_css_comments_correctly() {
         let blocks: Vec<Comment> = CssCommentsParser
             .parse(
-                r#"
+                r"
             body {
                 color: black;
             }
@@ -430,7 +430,7 @@ mod tests {
             /* Another multi-line
                CSS comment with
                different formatting */
-            "#,
+            ",
             )
             .collect();
 
@@ -456,21 +456,19 @@ mod tests {
                 },
             ]
         );
-
-        Ok(())
     }
 
     /// Each comment in `source`, as written.
-    fn comments_in(source: &str) -> anyhow::Result<Vec<String>> {
-        Ok(CssCommentsParser
+    fn comments_in(source: &str) -> Vec<String> {
+        CssCommentsParser
             .parse(source)
             .map(|comment| source[comment.source_range].to_string())
-            .collect())
+            .collect()
     }
 
     #[test]
-    fn comments_in_nested_blocks_parse_returns_each_in_order() -> anyhow::Result<()> {
-        let source = r#"
+    fn comments_in_nested_blocks_parse_returns_each_in_order() {
+        let source = r"
             @media (min-width: /* a */ 1px) {
                 .item[data-color /* b */] {
                     width: calc(1px /* c */ + 2px);
@@ -478,42 +476,39 @@ mod tests {
                 /* d */
             }
             /* e */
-        "#;
+        ";
 
         assert_eq!(
-            comments_in(source)?,
+            comments_in(source),
             ["/* a */", "/* b */", "/* c */", "/* d */", "/* e */"]
         );
-        Ok(())
     }
 
     #[test]
-    fn comment_in_an_unquoted_url_parse_returns_no_comment() -> anyhow::Result<()> {
+    fn comment_in_an_unquoted_url_parse_returns_no_comment() {
         // Browsers read `/*` in an unquoted `url(...)` as part of the URL. Any other function,
         // even one whose name starts with `url`, holds a comment.
-        let source = r#"
+        let source = r"
             .a { background: url(/* a */); }
             .b { background: URL(/* b */); }
             .c { background: urls(/* c */); }
-        "#;
+        ";
 
-        assert_eq!(comments_in(source)?, ["/* c */"]);
-        Ok(())
+        assert_eq!(comments_in(source), ["/* c */"]);
     }
 
     #[test]
-    fn comment_markers_in_a_string_parse_returns_no_comment() -> anyhow::Result<()> {
+    fn comment_markers_in_a_string_parse_returns_no_comment() {
         let source = r#"
             .a { content: "/* a */"; quotes: '/* b */'; background: url("/* c */"); }
             /* d */
         "#;
 
-        assert_eq!(comments_in(source)?, ["/* d */"]);
-        Ok(())
+        assert_eq!(comments_in(source), ["/* d */"]);
     }
 
     #[test]
-    fn unclosed_comment_at_the_end_parse_returns_it_to_the_end_of_the_file() -> anyhow::Result<()> {
+    fn unclosed_comment_at_the_end_parse_returns_it_to_the_end_of_the_file() {
         let source = ".a { color: red; }\n/* open";
         let comments: Vec<Comment> = CssCommentsParser.parse(source).collect();
 
@@ -523,17 +518,15 @@ mod tests {
             .collect();
         assert_eq!(texts, ["   open"]);
         assert_eq!(comments[0].source_range.end, source.len());
-        Ok(())
     }
 
     #[test]
-    fn deeply_nested_blocks_parse_returns_the_comment_inside() -> anyhow::Result<()> {
+    fn deeply_nested_blocks_parse_returns_the_comment_inside() {
         // Deeper than the 75 nested blocks that cssparser's `parse_nested_block` reads.
         let depth = 100;
         let source = format!("{}/* deep */{}", ".a{".repeat(depth), "}".repeat(depth));
 
-        assert_eq!(comments_in(&source)?, ["/* deep */"]);
-        Ok(())
+        assert_eq!(comments_in(&source), ["/* deep */"]);
     }
 }
 
@@ -553,7 +546,12 @@ mod symbols_tests {
 
     /// The path with these `segments`, written without escapes.
     fn path(segments: &[&str]) -> SymbolPath {
-        SymbolPath::from_segments(segments.iter().map(|s| s.to_string()).collect())
+        SymbolPath::from_segments(
+            segments
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
+        )
     }
 
     #[test]

@@ -62,7 +62,7 @@ impl ViolationAddress {
         };
         Ok(Self {
             file,
-            block_name: segments.get(1).map(|name| name.to_string()),
+            block_name: segments.get(1).map(std::string::ToString::to_string),
             validator,
             text_hash,
         })
@@ -75,14 +75,23 @@ impl ViolationAddress {
     /// and so on down to the single violation a four-segment address mentions.
     pub(crate) fn matches(&self, violation_address: &Self) -> bool {
         /// An absent segment matches any value; a present one has to be equal.
-        fn covers<T: PartialEq>(suppressed: &Option<T>, reported: &Option<T>) -> bool {
+        fn covers<T: PartialEq>(suppressed: Option<&T>, reported: Option<&T>) -> bool {
             suppressed.is_none() || suppressed == reported
         }
 
         self.file == violation_address.file
-            && covers(&self.block_name, &violation_address.block_name)
-            && covers(&self.validator, &violation_address.validator)
-            && covers(&self.text_hash, &violation_address.text_hash)
+            && covers(
+                self.block_name.as_ref(),
+                violation_address.block_name.as_ref(),
+            )
+            && covers(
+                self.validator.as_ref(),
+                violation_address.validator.as_ref(),
+            )
+            && covers(
+                self.text_hash.as_ref(),
+                violation_address.text_hash.as_ref(),
+            )
     }
 
     /// Whether this address covers every violation in `file`, including the ones on unnamed blocks
@@ -120,11 +129,12 @@ impl Serialize for ViolationAddress {
 fn text_hash(text: &str) -> String {
     let mut hasher = fnv::FnvHasher::default();
     hasher.write(text.as_bytes());
-    format!(
-        "{:0width$x}",
-        hasher.finish() as u32,
-        width = TEXT_HASH_HEX_LEN
-    )
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the hash is cut to its low 32 bits on purpose, to keep it short"
+    )]
+    let hash = hasher.finish() as u32;
+    format!("{hash:0TEXT_HASH_HEX_LEN$x}")
 }
 
 /// The hash segment of `address`, rejected unless it is shaped like one this program emits.

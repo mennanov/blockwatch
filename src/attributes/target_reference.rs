@@ -75,7 +75,7 @@ impl TargetReference {
             return parse_block_reference(file_part, name_part, reference);
         }
         // Normalized so `./target.json` and `target.json` resolve to the same file.
-        Ok(TargetReference::File(RepoPath::from_reference(reference)?))
+        Ok(Self::File(RepoPath::from_reference(reference)?))
     }
 
     /// The target this reference points at, written in `referencing_file`. A reference without a

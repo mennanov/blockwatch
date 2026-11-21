@@ -224,7 +224,8 @@ impl ResolveError<'_> {
         match self {
             ResolveError::NotFound { hints } if hints.is_empty() => "symbol not found".to_string(),
             ResolveError::NotFound { hints } => {
-                let hints: Vec<String> = hints.iter().map(|hint| hint.to_string()).collect();
+                let hints: Vec<String> =
+                    hints.iter().map(std::string::ToString::to_string).collect();
                 format!("symbol not found; did you mean: {}", hints.join(", "))
             }
             ResolveError::AmbiguousSymbol { candidates } => {
@@ -501,7 +502,10 @@ pub(crate) trait SymbolsParser: Send + Sync {
 }
 
 #[cfg(test)]
-#[allow(clippy::single_range_in_vec_init)]
+#[expect(
+    clippy::single_range_in_vec_init,
+    reason = "a `Vec` of one range is the expected value here"
+)]
 mod resolve_tests {
     use super::*;
 

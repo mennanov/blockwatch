@@ -29,9 +29,10 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::{env, fs};
 
-/// Runs the program with the command-line flags of the process: validates the blocks, lists them
-/// with the `list` subcommand, checks one block with the `explain` subcommand, or prints the agent
-/// skill with the `skill` subcommand.
+/// Runs the program with the command-line flags of the process.
+///
+/// With no subcommand, it validates the blocks. `list` lists them, `explain` checks one block, and
+/// `skill` prints the agent skill.
 ///
 /// Returns the exit code of the process:
 /// - `0` when no violation fails the run.
@@ -49,9 +50,12 @@ pub fn run() -> ExitCode {
         None => run_validators(&args),
     });
     result.unwrap_or_else(|error| {
-        // `{error:?}` adds the causes, as Rust does for an error returned from `main`. The result
-        // is ignored because there is nowhere left to report a closed stderr, and `eprintln!`
-        // would panic on it instead.
+        // `{error:?}` adds the causes, as Rust does for an error returned from `main`.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "there is nowhere left to report a closed stderr, and `eprintln!` would panic \
+                      on it instead"
+        )]
         let _ = writeln!(std::io::stderr(), "Error: {error:?}");
         // Not 1, so a script can tell a broken rule from a run that could not check the code.
         // clap already uses 2 for a flag it can't parse.
@@ -276,7 +280,7 @@ fn read_config(
     line_changes: &DiffChanges,
 ) -> anyhow::Result<(Settings, Vec<VirtualBlock>)> {
     let config = config::read(args.config.as_deref(), file_system, line_changes)?;
-    let settings = Settings::resolve(args.raw_settings(), config.settings)?;
+    let settings = Settings::resolve(&args.raw_settings(), &config.settings)?;
     Ok((settings, config.blocks))
 }
 
@@ -315,7 +319,7 @@ fn build_context(
         // The scan read only the files in the diff. An argument that selects none of them still
         // passes when it selects a file that the diff doesn't touch.
         scan::ScanMode::OnlyChanged => {
-            path_arguments.ensure_each_matches(scanned_files.chain(scan.checkable_files()))?
+            path_arguments.ensure_each_matches(scanned_files.chain(scan.checkable_files()))?;
         }
     }
     Ok((
@@ -379,7 +383,7 @@ fn repository_root_path(current_path: &Path) -> anyhow::Result<PathBuf> {
         same-as-pattern='"(?P<value>\.[a-z]+)"'> */
         .find(|path| path.join(".git").exists() || path.join(".hg").exists())
         // </block>
-        .map(|path| path.to_path_buf())
+        .map(std::path::Path::to_path_buf)
         .ok_or_else(|| anyhow::anyhow!("could not find the repository root directory"))
 }
 

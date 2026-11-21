@@ -7,7 +7,7 @@ mod common;
 
 #[test]
 fn with_all_lines_unique_succeeds() {
-    let diff_content = r#"
+    let diff_content = r"
 diff --git a/tests/testdata/keep_unique/basic_and_pattern.py b/tests/testdata/keep_unique/basic_and_pattern.py
 index d69398d..c5cbb7f 100644
 --- a/tests/testdata/keep_unique/basic_and_pattern.py
@@ -19,7 +19,7 @@ index d69398d..c5cbb7f 100644
 -    'orange',
 +    'cherry',
      # </block>
- ]"#;
+ ]";
 
     let mut cmd = cargo_bin_cmd!();
     cmd.args(["--diff", "--only-changed"]);

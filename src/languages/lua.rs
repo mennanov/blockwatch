@@ -45,12 +45,12 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_comments_correctly() -> anyhow::Result<()> {
+    fn parses_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
             .parse(
-                r#"
+                r"
 -- This is a line comment
 local x = 42 -- inline comment
 
@@ -62,7 +62,7 @@ spanning multiple lines
 comment ]=]
 print(x)
 --- LuaLS reads this marker as a doc comment, as in ---@param.
-"#,
+",
             )
             .collect();
 
@@ -98,7 +98,5 @@ print(x)
                 },
             ]
         );
-
-        Ok(())
     }
 }

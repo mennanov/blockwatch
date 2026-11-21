@@ -18,7 +18,7 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_comments_correctly() -> anyhow::Result<()> {
+    fn parses_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let comments: Vec<Comment> = comments_parser
@@ -63,7 +63,5 @@ mod tests {
                 },
             ]
         );
-
-        Ok(())
     }
 }

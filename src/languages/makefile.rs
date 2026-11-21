@@ -84,6 +84,10 @@ impl SymbolsParser for MakefileSymbolsParser {
 /// makefile-lossless skips a part of it. Makefile-lossless also reports errors on lines that make
 /// reads, or never reads, such as a tab line in a branch make skips. Those don't stop the run.
 #[expect(
+    clippy::match_same_arms,
+    reason = "`TooDeeplyNested` stops the run for its own reason, which its comment explains."
+)]
+#[expect(
     clippy::wildcard_enum_match_arm,
     reason = "The enum is non-exhaustive, and a kind added later can't be one of the seven that stop \
               the run."

@@ -44,30 +44,30 @@ impl Validator {
     /// A one-line description of the validator.
     pub(crate) fn description(self) -> &'static str {
         match self {
-            Validator::Affects => "Requires co-dependent blocks to be updated together.",
-            Validator::CheckAi => "Checks a block with AI.",
-            Validator::CheckLua => "Checks a block with a custom Lua script.",
-            Validator::KeepSorted => "Requires the lines of a block to stay in order.",
-            Validator::KeepUnique => "Requires the lines of a block to stay free of duplicates.",
-            Validator::LineCount => "Constrains how many lines a block has.",
-            Validator::LinePattern => {
+            Self::Affects => "Requires co-dependent blocks to be updated together.",
+            Self::CheckAi => "Checks a block with AI.",
+            Self::CheckLua => "Checks a block with a custom Lua script.",
+            Self::KeepSorted => "Requires the lines of a block to stay in order.",
+            Self::KeepUnique => "Requires the lines of a block to stay free of duplicates.",
+            Self::LineCount => "Constrains how many lines a block has.",
+            Self::LinePattern => {
                 "Checks every line of a block against a required or a forbidden pattern."
             }
-            Validator::SameAs => "Requires two places to keep holding the same value.",
+            Self::SameAs => "Requires two places to keep holding the same value.",
         }
     }
 
     /// Whether this validator only ever fires when a diff is supplied.
     pub(crate) fn needs_diff(self) -> bool {
         match self {
-            Validator::Affects => true,
-            Validator::CheckAi
-            | Validator::CheckLua
-            | Validator::KeepSorted
-            | Validator::KeepUnique
-            | Validator::LineCount
-            | Validator::LinePattern
-            | Validator::SameAs => false,
+            Self::Affects => true,
+            Self::CheckAi
+            | Self::CheckLua
+            | Self::KeepSorted
+            | Self::KeepUnique
+            | Self::LineCount
+            | Self::LinePattern
+            | Self::SameAs => false,
         }
     }
 
@@ -75,17 +75,17 @@ impl Validator {
     /// `line-pattern-forbidden` for `line-pattern`. The validator's own name comes first.
     pub(crate) fn attributes(self) -> &'static [AttributeName] {
         match self {
-            Validator::Affects => &[AttributeName::Affects],
-            Validator::CheckAi => &[AttributeName::CheckAi],
-            Validator::CheckLua => &[AttributeName::CheckLua],
-            Validator::KeepSorted => &[AttributeName::KeepSorted],
-            Validator::KeepUnique => &[AttributeName::KeepUnique],
-            Validator::LineCount => &[AttributeName::LineCount],
-            Validator::LinePattern => &[
+            Self::Affects => &[AttributeName::Affects],
+            Self::CheckAi => &[AttributeName::CheckAi],
+            Self::CheckLua => &[AttributeName::CheckLua],
+            Self::KeepSorted => &[AttributeName::KeepSorted],
+            Self::KeepUnique => &[AttributeName::KeepUnique],
+            Self::LineCount => &[AttributeName::LineCount],
+            Self::LinePattern => &[
                 AttributeName::LinePattern,
                 AttributeName::LinePatternForbidden,
             ],
-            Validator::SameAs => &[AttributeName::SameAs, AttributeName::SameAsPaths],
+            Self::SameAs => &[AttributeName::SameAs, AttributeName::SameAsPaths],
         }
     }
 
@@ -103,8 +103,8 @@ impl Validator {
     /// Looks up the validator called `value`. Returns an error if there is no validator with that
     /// name.
     pub(crate) fn parse(value: &str) -> anyhow::Result<Self> {
-        value.parse::<Validator>().with_context(|| {
-            let validators: Vec<&str> = Validator::iter().map(|v| v.as_str()).collect();
+        value.parse::<Self>().with_context(|| {
+            let validators: Vec<&str> = Self::iter().map(Self::as_str).collect();
             format!(
                 "unknown validator: {value}. Available validators: {}",
                 validators.join(", ")

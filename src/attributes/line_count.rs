@@ -51,24 +51,24 @@ enum Op {
 }
 
 impl Op {
-    fn as_str(&self) -> &'static str {
+    fn as_str(self) -> &'static str {
         match self {
-            Op::Lt => "<",
-            Op::Le => "<=",
-            Op::Eq => "==",
-            Op::Ge => ">=",
-            Op::Gt => ">",
+            Self::Lt => "<",
+            Self::Le => "<=",
+            Self::Eq => "==",
+            Self::Ge => ">=",
+            Self::Gt => ">",
         }
     }
 
     /// Returns whether `actual` satisfies the rule this operator forms with `expected`.
     fn accepts(self, actual: usize, expected: usize) -> bool {
         match self {
-            Op::Lt => actual < expected,
-            Op::Le => actual <= expected,
-            Op::Eq => actual == expected,
-            Op::Ge => actual >= expected,
-            Op::Gt => actual > expected,
+            Self::Lt => actual < expected,
+            Self::Le => actual <= expected,
+            Self::Eq => actual == expected,
+            Self::Ge => actual >= expected,
+            Self::Gt => actual > expected,
         }
     }
 }
@@ -92,7 +92,9 @@ fn parse_constraint(s: &str) -> anyhow::Result<(Op, usize)> {
     if num_str.is_empty() {
         return Err(anyhow!("missing number"));
     }
-    let expected: usize = num_str.parse().map_err(|_| anyhow!("invalid number"))?;
+    let expected: usize = num_str
+        .parse()
+        .map_err(|error| anyhow!("invalid number: {error}"))?;
     Ok((op, expected))
 }
 
@@ -106,6 +108,16 @@ mod tests {
         assert!(Constraint::parse("").is_err());
         assert!(Constraint::parse("> -1").is_err());
         assert!(Constraint::parse("<== 50").is_err());
+    }
+
+    #[test]
+    fn number_too_large_parse_constraint_returns_error_with_its_cause() {
+        let error = Constraint::parse("< 99999999999999999999999").unwrap_err();
+        assert_eq!(
+            format!("{error:#}"),
+            "expected a comparator like <N, <=N, ==N, >=N, >N; got \"< 99999999999999999999999\" \
+             (error: invalid number: number too large to fit in target type)"
+        );
     }
 
     #[test]

@@ -175,21 +175,21 @@ mod validate_tests {
     use crate::repo_path::RepoPath;
     use crate::validators::test_utils::validation_context;
     use crate::validators::test_utils::{checked_lines, violation_count};
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     #[test]
     fn block_with_a_duplicate_line_returns_a_violation_on_the_repeat() -> anyhow::Result<()> {
         let validator = KeepUniqueValidator;
         let context = validation_context(
             "example.py",
-            r#"# <block keep-unique>
+            r"# <block keep-unique>
 A
 BB
 C
 BB
 C
 BB
-# </block>"#,
+# </block>",
         );
 
         let violations = validator.validate(context)?.violations;
@@ -239,11 +239,11 @@ BB
         let validator = KeepUniqueValidator;
         let context = validation_context(
             "example.py",
-            r#"# <block keep-unique>
+            r"# <block keep-unique>
 A
 B
 C
-# </block>"#,
+# </block>",
         );
 
         let violations = validator.validate(context)?.violations;
@@ -462,7 +462,7 @@ ID:2
         let validator = KeepUniqueValidator;
         let context = validation_context(
             "example.py",
-            r#"# <block keep-unique>
+            r"# <block keep-unique>
 A
 B
  
@@ -470,7 +470,7 @@ B
   
   
 C
-# </block>"#,
+# </block>",
         );
 
         let violations = validator.validate(context)?.violations;
@@ -484,8 +484,8 @@ C
         let validator = KeepUniqueValidator;
         let context = validation_context(
             "example.py",
-            r#"# <block keep-unique>
-# </block>"#,
+            r"# <block keep-unique>
+# </block>",
         );
 
         let violations = validator.validate(context)?.violations;
@@ -498,7 +498,7 @@ C
     fn context_without_any_blocks_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepUniqueValidator;
         let context = Arc::new(validators::ValidationContext::new(
-            HashMap::new(),
+            BTreeMap::new(),
             LanguageParsers::new(),
             DiffChanges::default(),
             Vec::new(),

@@ -74,8 +74,7 @@ impl CodeLanguage for Python {
                 // The start holds the prefix and the opening quotes, such as `rb"`.
                 let start = node
                     .child(0)
-                    .map(|start| node_text(&start, source))
-                    .unwrap_or_default();
+                    .map_or_default(|start| node_text(&start, source));
                 let parts: Vec<Node> = node.named_children(&mut cursor).collect();
                 if start.contains(['b', 'B'])
                     || parts.iter().any(|part| part.kind() == "interpolation")
@@ -598,12 +597,12 @@ UPPER_RAW = R"\u12"
 
     #[test]
     fn syntax_errors_parse_symbols_makes_the_names_near_them_unreadable() -> anyhow::Result<()> {
-        let source = r#"PORTS = 8
+        let source = r"PORTS = 8
 def helper(:
     return 1
 BROKEN = = 1
 AFTER = 3
-"#;
+";
 
         assert_eq!(
             symbols(&python(source)?, source),
@@ -654,7 +653,7 @@ mod tests {
     use crate::{languages::Comment, position::Position};
 
     #[test]
-    fn parses_comments_correctly() -> anyhow::Result<()> {
+    fn parses_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
@@ -722,7 +721,5 @@ value = 42  # Comment after code
                 },
             ]
         );
-
-        Ok(())
     }
 }

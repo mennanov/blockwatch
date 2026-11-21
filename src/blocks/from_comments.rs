@@ -184,7 +184,7 @@ impl<'source, I: Iterator<Item = Comment>> Tags<'source, I> {
                 Some(Err(malformed)) => {
                     match self.take_adjacent_comment(&comment) {
                         Some(next) => {
-                            comment = join_comments(comment, next, self.contents);
+                            comment = join_comments(comment, &next, self.contents);
                             // Joining only adds text after the open tag, so the tags before it
                             // stay as they were parsed.
                             tags_parser_cursor = malformed.position;
@@ -215,7 +215,7 @@ impl<'source, I: Iterator<Item = Comment>> Tags<'source, I> {
 }
 
 /// Joins `comment` and `next`, a later comment of `contents`, into one comment that spans both.
-fn join_comments(comment: Comment, next: Comment, contents: &str) -> Comment {
+fn join_comments(comment: Comment, next: &Comment, contents: &str) -> Comment {
     // The text between the comments is copied from the source, so an offset into the joined text
     // maps onto the source as it does for a single comment.
     #[expect(
@@ -223,10 +223,13 @@ fn join_comments(comment: Comment, next: Comment, contents: &str) -> Comment {
         reason = "parsers give comment ranges of whole characters"
     )]
     let between = &contents[comment.source_range.end..next.source_range.start];
+    let mut comment_text = comment.comment_text;
+    comment_text.push_str(between);
+    comment_text.push_str(&next.comment_text);
     Comment {
         position_range: comment.position_range.start..next.position_range.end,
         source_range: comment.source_range.start..next.source_range.end,
-        comment_text: comment.comment_text + between + &next.comment_text,
+        comment_text,
     }
 }
 
@@ -338,12 +341,12 @@ impl BlockEnd {
     ///
     /// Returns an error if the start tag has an attribute that is not valid.
     fn into_block(self, block_start: BlockStart) -> anyhow::Result<Block> {
-        let content_range = if !Rc::ptr_eq(&self.comment, &block_start.comment) {
-            block_start.comment.source_range.end..self.comment.source_range.start
-        } else {
+        let content_range = if Rc::ptr_eq(&self.comment, &block_start.comment) {
             // Block that starts and ends in the same comment can't have any
             // content.
             0..0
+        } else {
+            block_start.comment.source_range.end..self.comment.source_range.start
         };
         let content_start_position = block_start.comment.position_range.end;
         let content_end_position = self.comment.position_range.start;
@@ -383,7 +386,7 @@ mod tests {
             }
         "#;
         let blocks = parse_all(&mut parser, contents)?;
-        assert!(blocks.is_empty());
+        assert_eq!(blocks, []);
         Ok(())
     }
 
@@ -655,7 +658,7 @@ println!("hello2");
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 2);
         assert!(blocks[0].content.text(contents).contains("\r\n"));
-        assert!(blocks[1].content.text(contents).contains("\n"));
+        assert!(blocks[1].content.text(contents).contains('\n'));
         Ok(())
     }
 
@@ -872,6 +875,7 @@ println!("hello2");
         // MDX 2 and later have no HTML comments.
         let results: Vec<anyhow::Result<Block>> =
             parse_blocks(&mut **parser, "<!-- comment -->\n").collect();
+        drop(parser);
 
         assert_eq!(results.len(), 1);
         assert!(results[0].as_ref().is_err_and(|error| {
@@ -882,7 +886,7 @@ println!("hello2");
     }
 
     #[test]
-    fn unclosed_block_returns_error() -> anyhow::Result<()> {
+    fn unclosed_block_returns_error() {
         let mut parser = create_parser();
         let contents = r#"
         // <block name="foo">
@@ -895,11 +899,10 @@ println!("hello2");
             error_message,
             "block at line 2, column 12 is not closed. If this is not meant as a tag, put it in backticks"
         );
-        Ok(())
     }
 
     #[test]
-    fn unclosed_block_on_a_later_comment_line_reports_that_line_and_column() -> anyhow::Result<()> {
+    fn unclosed_block_on_a_later_comment_line_reports_that_line_and_column() {
         let mut parser = create_parser();
         let contents = "/*\n * checks the <block> rules\n */\nfn foo() {}\n";
         let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
@@ -907,11 +910,10 @@ println!("hello2");
             error_message,
             "block at line 2, column 15 is not closed. If this is not meant as a tag, put it in backticks"
         );
-        Ok(())
     }
 
     #[test]
-    fn unclosed_block_with_a_closed_nested_one_returns_error() -> anyhow::Result<()> {
+    fn unclosed_block_with_a_closed_nested_one_returns_error() {
         let mut parser = create_parser();
         let contents = r#"
         // <block name="foo">
@@ -929,11 +931,10 @@ println!("hello2");
             error_message,
             "block at line 2, column 12 is not closed. If this is not meant as a tag, put it in backticks"
         );
-        Ok(())
     }
 
     #[test]
-    fn unmatched_end_tag_returns_error() -> anyhow::Result<()> {
+    fn unmatched_end_tag_returns_error() {
         let mut parser = create_parser();
         let contents = r#"
         fn say_hello_world() {
@@ -946,11 +947,10 @@ println!("hello2");
             result.unwrap_err().to_string(),
             "unexpected closed block at line 5, column 12. If this is not meant as a tag, put it in backticks"
         );
-        Ok(())
     }
 
     #[test]
-    fn malformed_block_tag_returns_error() -> anyhow::Result<()> {
+    fn malformed_block_tag_returns_error() {
         let mut parser = create_parser();
         let contents = r#"
         // <block name="foo" affects="file:block" invalid-attr=">
@@ -958,11 +958,10 @@ println!("hello2");
         // </block>
         "#;
         assert!(parse_all(&mut parser, contents).is_err());
-        Ok(())
     }
 
     #[test]
-    fn unclosed_start_tag_with_nothing_else_in_the_file_returns_error() -> anyhow::Result<()> {
+    fn unclosed_start_tag_with_nothing_else_in_the_file_returns_error() {
         let mut parser = create_parser();
         // No other tag anywhere in the file, so nothing else can trip an error: the missing `>`
         // has to be caught on its own.
@@ -972,11 +971,10 @@ println!("hello2");
             error_message,
             "malformed block tag at line 1, column 4. If this is not meant as a tag, put it in backticks"
         );
-        Ok(())
     }
 
     #[test]
-    fn unclosed_end_tag_with_nothing_else_in_the_file_returns_error() -> anyhow::Result<()> {
+    fn unclosed_end_tag_with_nothing_else_in_the_file_returns_error() {
         let mut parser = create_parser();
         let contents = "// </block\nfn foo() {}\n";
         let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
@@ -984,11 +982,10 @@ println!("hello2");
             error_message,
             "malformed block tag at line 1, column 4. If this is not meant as a tag, put it in backticks"
         );
-        Ok(())
     }
 
     #[test]
-    fn malformed_tag_on_a_later_line_reports_that_line_and_column() -> anyhow::Result<()> {
+    fn malformed_tag_on_a_later_line_reports_that_line_and_column() {
         let mut parser = create_parser();
         let contents = "fn foo() {}\n    // <block name=\"foo\" keep-sorted\n";
         let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
@@ -996,11 +993,10 @@ println!("hello2");
             error_message,
             "malformed block tag at line 2, column 8. If this is not meant as a tag, put it in backticks"
         );
-        Ok(())
     }
 
     #[test]
-    fn start_tag_continued_after_code_returns_error() -> anyhow::Result<()> {
+    fn start_tag_continued_after_code_returns_error() {
         let mut parser = create_parser();
         // `A` reads as a valueless attribute, so the tag would close if the code between the two
         // comments were read as part of it.
@@ -1010,7 +1006,6 @@ println!("hello2");
             error_message,
             "malformed block tag at line 2, column 8. If this is not meant as a tag, put it in backticks"
         );
-        Ok(())
     }
 
     #[test]
@@ -1021,7 +1016,7 @@ println!("hello2");
         // ordinary text, not an attempted tag.
         let contents = "// see <blockquote> for details\nfn foo() {}\n";
         let blocks = parse_all(&mut parser, contents)?;
-        assert!(blocks.is_empty());
+        assert_eq!(blocks, []);
         Ok(())
     }
 
@@ -1032,7 +1027,7 @@ println!("hello2");
         // comma there instead.
         let contents = "// only <block, filesystem> is tested\nfn foo() {}\n";
         let blocks = parse_all(&mut parser, contents)?;
-        assert!(blocks.is_empty());
+        assert_eq!(blocks, []);
         Ok(())
     }
 
@@ -1042,12 +1037,12 @@ println!("hello2");
         let mut parser = create_parser();
         let contents = "// a block ends at </block, as in HTML\nfn foo() {}\n";
         let blocks = parse_all(&mut parser, contents)?;
-        assert!(blocks.is_empty());
+        assert_eq!(blocks, []);
         Ok(())
     }
 
     #[test]
-    fn non_breaking_space_after_the_block_prefix_returns_error() -> anyhow::Result<()> {
+    fn non_breaking_space_after_the_block_prefix_returns_error() {
         let mut parser = create_parser();
         // An editor can type a non-breaking space by accident. The tag must then fail the run,
         // rather than be skipped as prose.
@@ -1057,7 +1052,6 @@ println!("hello2");
             error_message,
             "malformed block tag at line 1, column 4. If this is not meant as a tag, put it in backticks"
         );
-        Ok(())
     }
 
     #[test]
@@ -1089,7 +1083,7 @@ println!("hello2");
         let mut parser = create_parser();
         let contents = "// ``a ` <block> `` and `b `` <block> `\nfn foo() {}\n";
         let blocks = parse_all(&mut parser, contents)?;
-        assert!(blocks.is_empty());
+        assert_eq!(blocks, []);
         Ok(())
     }
 
@@ -1194,10 +1188,10 @@ println!("hello2");
     #[test]
     fn unquoted_attribute_values_return_correct_values() -> anyhow::Result<()> {
         let mut parser = create_parser();
-        let contents = r#"
+        let contents = r"
         // <block name=red check-ai=sweet>
         // </block>
-        "#;
+        ";
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks[0].name(), Some("red"));
         assert_eq!(blocks[0].attributes.check_ai(), Some("sweet"));
@@ -1252,7 +1246,7 @@ println!("hello2");
     }
 
     #[test]
-    fn quoted_attribute_value_ending_in_one_backslash_returns_error() -> anyhow::Result<()> {
+    fn quoted_attribute_value_ending_in_one_backslash_returns_error() {
         let mut parser = create_parser();
         // The backslash escapes the quote after it, so the value has no closing quote.
         let contents = "// <block name=\"foo\\\">\nfn foo() {}\n// </block>\n";
@@ -1261,16 +1255,15 @@ println!("hello2");
             error_message,
             "malformed block tag at line 1, column 4. If this is not meant as a tag, put it in backticks"
         );
-        Ok(())
     }
 
     #[test]
     fn valueless_attributes_return_empty_strings() -> anyhow::Result<()> {
         let mut parser = create_parser();
-        let contents = r#"
+        let contents = r"
         // <block keep-sorted keep-unique>
         // </block>
-        "#;
+        ";
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks[0].attributes.keep_sorted(), Some(SortOrder::Asc));
         assert!(matches!(blocks[0].attributes.keep_unique(), Some(None)));
@@ -1417,7 +1410,7 @@ println!("hello2");
     #[test]
     fn comment_with_xml_like_symbols_returns_the_block() -> anyhow::Result<()> {
         let mut parser = create_parser();
-        let contents = r#"
+        let contents = r"
         /*
         Some logical expressions: a && b, a & b, a ^ b, a || b, a | b, a ^ !b
         Arithmetic expressions: a < b, a << b, d > f
@@ -1425,7 +1418,7 @@ println!("hello2");
         */
         fn unicode() {}
         // </block>
-        "#;
+        ";
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 1);
         Ok(())
@@ -1449,11 +1442,11 @@ println!("hello2");
     #[test]
     fn comment_with_unrelated_tags_returns_the_block() -> anyhow::Result<()> {
         let mut parser = create_parser();
-        let contents = r#"
+        let contents = r"
         // <p>Paragraph</p><block><b>bold</b>
         fn unicode() {}
         // </block><body>hello</body>
-        "#;
+        ";
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 1);
         Ok(())
@@ -1462,11 +1455,11 @@ println!("hello2");
     #[test]
     fn comment_with_unclosed_unrelated_tags_returns_the_block() -> anyhow::Result<()> {
         let mut parser = create_parser();
-        let contents = r#"
+        let contents = r"
         // <p>this tag has no ending tag <block></b> this tag has no starting tag
         fn unicode() {}
         // </block>
-        "#;
+        ";
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 1);
         Ok(())
@@ -1475,11 +1468,11 @@ println!("hello2");
     #[test]
     fn comment_with_an_invalid_tag_before_a_block_returns_the_block() -> anyhow::Result<()> {
         let mut parser = create_parser();
-        let contents = r#"
+        let contents = r"
         // <invalid tag
         // <block>
         fn unicode() {}
-        // </block>"#;
+        // </block>";
         let blocks = parse_all(&mut parser, contents)?;
         assert_eq!(blocks.len(), 1);
         Ok(())

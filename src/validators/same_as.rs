@@ -94,14 +94,13 @@ struct Comparison<'a> {
 impl<'a> Comparison<'a> {
     fn new(block: &'a Block, file_content: &str) -> Self {
         let pattern = block.attributes.same_as_pattern();
-        let mode = block
-            .attributes
-            .same_as_mode()
-            .unwrap_or(if pattern.is_some() {
+        let mode = block.attributes.same_as_mode().unwrap_or_else(|| {
+            if pattern.is_some() {
                 Mode::Set
             } else {
                 Mode::Sequence
-            });
+            }
+        });
         let formats = block
             .attributes
             .same_as_format()
@@ -574,7 +573,7 @@ fn canonicalize(records: Vec<Record>, formats: &Formats) -> Result<Vec<Record>, 
 /// so that different spellings of the same value (`"10"`, `"10.0"`, `"1_0"`) compare equal; a value
 /// that is not a number yields `Err` with a human-readable reason, which the caller surfaces as a
 /// violation rather than aborting the run. Under [`Format::Identifier`] the value becomes its
-/// snake_case form (`"HTTPServer"` becomes `"http_server"`) and never fails. Under [`Format::Flat`]
+/// `snake_case` form (`"HTTPServer"` becomes `"http_server"`) and never fails. Under [`Format::Flat`]
 /// the value keeps only its lower-cased letters and digits (`"Sign-In"` becomes `"signin"`) and
 /// never fails. Under [`Format::Verbatim`] the value is returned unchanged.
 ///
@@ -2176,14 +2175,13 @@ red: 1
     }
 
     #[test]
-    fn whole_file_target_that_is_missing_returns_an_error() -> anyhow::Result<()> {
+    fn whole_file_target_that_is_missing_returns_an_error() {
         let context = validation_context(
             "version.rs",
             "// <block same-as=\"gone.json\">\n1.2.3\n// </block>",
         );
 
         assert!(validator(&[]).validate(context).is_err());
-        Ok(())
     }
 
     /// The target file of the symbol reference tests.

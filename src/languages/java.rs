@@ -157,7 +157,7 @@ fn unicode_unit(characters: &mut Peekable<Chars>) -> anyhow::Result<u16> {
 /// Adds the definitions of the members of `body`, the root of a file or the body of a type, to
 /// `walk`. `parents` are the names of the types that `body` belongs to. Adds the body of each type
 /// in `body` to `walk`, with its own parents.
-fn push_members<'tree>(body: Node<'tree>, parents: Vec<Node<'tree>>, walk: &mut NestedWalk<'tree>) {
+fn push_members<'tree>(body: Node<'tree>, parents: &[Node<'tree>], walk: &mut NestedWalk<'tree>) {
     let mut cursor = body.walk();
     for member in body.named_children(&mut cursor) {
         let name = member.child_by_field_name("name");
@@ -165,10 +165,10 @@ fn push_members<'tree>(body: Node<'tree>, parents: Vec<Node<'tree>>, walk: &mut 
             // A compact source file declares its fields as local variables, and an interface its
             // constants as constants.
             "field_declaration" | "local_variable_declaration" | "constant_declaration" => {
-                push_fields(member, &parents, walk);
+                push_fields(member, parents, walk);
             }
             // The members of an enum that come after its constants.
-            "enum_body_declarations" => walk.add_body(member, parents.clone()),
+            "enum_body_declarations" => walk.add_body(member, parents.to_vec()),
             "class_declaration"
             | "interface_declaration"
             | "enum_declaration"
@@ -176,20 +176,20 @@ fn push_members<'tree>(body: Node<'tree>, parents: Vec<Node<'tree>>, walk: &mut 
             | "annotation_type_declaration" => {
                 if let Some(name) = name {
                     let body = member.child_by_field_name("body");
-                    walk.add_definition_with_body(&parents, name, member.byte_range(), None, body);
+                    walk.add_definition_with_body(parents, name, member.byte_range(), None, body);
                 }
             }
             // The body of an enum constant is a class without a name, so its members are not
             // members of the enum.
             "method_declaration" | "enum_constant" => {
                 if let Some(name) = name {
-                    walk.add_definition(&parents, name, member.byte_range(), None);
+                    walk.add_definition(parents, name, member.byte_range(), None);
                 }
             }
             "annotation_type_element_declaration" => {
                 if let Some(name) = name {
                     let default = member.child_by_field_name("value");
-                    walk.add_definition(&parents, name, member.byte_range(), default);
+                    walk.add_definition(parents, name, member.byte_range(), default);
                 }
             }
             // Code never refers to a constructor or an initializer block by name.
@@ -249,7 +249,7 @@ mod symbols_tests {
 
     #[test]
     fn file_with_every_shape_parse_symbols_returns_every_symbol_in_order() -> anyhow::Result<()> {
-        let source = r#"package com.example;
+        let source = r"package com.example;
 
 import java.util.List;
 
@@ -340,7 +340,7 @@ enum Level { LOW }
 record Pair<A, B>(A first, B second) {}
 
 @interface Marker {}
-"#;
+";
         let config = text_of(source, "@Deprecated", "\n}")?;
 
         // <block affects="docs/symbols.md:java-paths">
@@ -454,7 +454,7 @@ record Pair<A, B>(A first, B second) {}
     #[test]
     fn compact_source_file_parse_symbols_returns_its_top_level_members() -> anyhow::Result<()> {
         // A file with methods and fields at its top level declares a class without a name.
-        let source = r#"static final int LIMIT = 3;
+        let source = r"static final int LIMIT = 3;
 int count;
 
 void main() {
@@ -462,7 +462,7 @@ void main() {
 }
 
 class Helper {}
-"#;
+";
 
         assert_eq!(
             symbols(&java(source)?, source),
@@ -655,7 +655,7 @@ class Helper {}
     fn syntax_errors_parse_symbols_makes_the_definitions_that_hold_them_unreadable()
     -> anyhow::Result<()> {
         // The parser assumes a `)` after `broken(`, and skips the second `=` of `Z`.
-        let source = r#"class A {
+        let source = r"class A {
     static final int X = 1;
     void broken( {
         return;
@@ -667,7 +667,7 @@ class B {
     int Z = = 3;
     int W = 4;
 }
-"#;
+";
 
         assert_eq!(
             symbols(&java(source)?, source),
@@ -701,7 +701,7 @@ class B {
     -> anyhow::Result<()> {
         // The unclosed `Config(` makes the parser skip up to the `;` after it, `Y` included. The
         // skipped text could also hold a second class `Config`.
-        let source = r#"class A {
+        let source = r"class A {
     static final int X = 1;
     Config(
     static final int Y = 2;
@@ -709,7 +709,7 @@ class B {
 }
 
 class Config { int W = 4; }
-"#;
+";
 
         assert_eq!(
             symbols(&java(source)?, source),
@@ -758,7 +758,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_comments_correctly() -> anyhow::Result<()> {
+    fn parses_comments_correctly() {
         let mut comments_parser = comments_parser();
 
         let blocks: Vec<Comment> = comments_parser
@@ -854,7 +854,5 @@ mod tests {
                 },
             ]
         );
-
-        Ok(())
     }
 }

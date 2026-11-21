@@ -36,9 +36,9 @@ impl SortFormat {
             Self::Lexicographic => Ok(a.cmp(b)),
             Self::Numeric => {
                 let a_num =
-                    parse_number(a).ok_or_else(|| anyhow!("\"{}\" is not a valid number", a))?;
+                    parse_number(a).ok_or_else(|| anyhow!("\"{a}\" is not a valid number"))?;
                 let b_num =
-                    parse_number(b).ok_or_else(|| anyhow!("\"{}\" is not a valid number", b))?;
+                    parse_number(b).ok_or_else(|| anyhow!("\"{b}\" is not a valid number"))?;
                 Ok(a_num.cmp(&b_num))
             }
         }

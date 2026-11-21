@@ -9,7 +9,7 @@ use crate::validators::{
 };
 use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
-use mlua::{HookTriggers, Lua, StdLib, VmState};
+use mlua::{HookTriggers, Lua, LuaOptions, StdLib, VmState};
 use serde::Serialize;
 use std::ffi::OsStr;
 use std::path::Path;
@@ -73,10 +73,12 @@ impl LuaMode {
         match self {
             Self::Sandboxed => Lua::new_with(
                 StdLib::COROUTINE | StdLib::TABLE | StdLib::STRING | StdLib::UTF8 | StdLib::MATH,
-                Default::default(),
+                LuaOptions::default(),
             )
             .expect("failed to start Lua"),
             Self::Safe => Lua::new(),
+            // SAFETY: the user asked for every library by setting the mode to `unsafe`. Lua code
+            // can then load C modules, which Rust can't check.
             Self::Unsafe => unsafe { Lua::unsafe_new() },
         }
     }
@@ -231,7 +233,7 @@ async fn run_lua_script<Fs: FileSystem>(
 
     // Run the Lua script in a blocking thread for CPU-heavy scripts that never yield control back.
     // I/O-heavy scripts won't invoke the hook, in this case the Tokio's timeout will fire.
-    let worker = spawn_blocking(move || run_lua_script_sync(inputs, mode));
+    let worker = spawn_blocking(move || run_lua_script_sync(&inputs, mode));
     match tokio::time::timeout(timeout + CHECK_LUA_TIMEOUT_BACKSTOP_GRACE, worker).await {
         Ok(worker_result) => worker_result.context("the check-lua worker thread panicked")?,
         Err(_elapsed) => Err(anyhow!(timeout_error_message(timeout))),
@@ -314,7 +316,7 @@ impl LuaScriptInputs {
 ///
 /// It runs synchronously so its whole Lua lifetime stays on one thread, which lets
 /// [`run_lua_script`] host it on a blocking thread and bound it with a wall-clock timeout.
-fn run_lua_script_sync(inputs: LuaScriptInputs, mode: LuaMode) -> anyhow::Result<Option<String>> {
+fn run_lua_script_sync(inputs: &LuaScriptInputs, mode: LuaMode) -> anyhow::Result<Option<String>> {
     let lua = mode.new_lua();
     // Install the hook that stops the script from inside the VM once `timeout` elapses.
     // Needed for the CPU-heavy Lua scripts that never yield control back to the runtime.
@@ -698,11 +700,11 @@ some content
 
         let report = validator(&[(
             "check.lua",
-            r#"
+            r"
 function validate(ctx, content)
     return nil
 end
-"#,
+",
         )])
         .validate(context)
         .await?;
@@ -1330,11 +1332,11 @@ some content
         let report = validator(&[
             (
                 "ok.lua",
-                r#"
+                r"
 function validate(ctx, content)
     return nil
 end
-"#,
+",
             ),
             (
                 "fail.lua",
@@ -1368,11 +1370,11 @@ some content
 
         let err = validator(&[(
             "loop.lua",
-            r#"
+            r"
 function validate(ctx, content)
     while true do end
 end
-"#,
+",
         )])
         .validate(context)
         .await
@@ -1397,11 +1399,11 @@ some content
 
         let report = validator(&[(
             "check.lua",
-            r#"
+            r"
 function validate(ctx, content)
     return nil
 end
-"#,
+",
         )])
         .validate(context)
         .await?;
@@ -1489,11 +1491,11 @@ some content
 
         let report = validator(&[(
             "check.lua",
-            r#"#!/usr/bin/env lua
+            r"#!/usr/bin/env lua
 function validate(ctx, content)
     return nil
 end
-"#,
+",
         )])
         .validate(context)
         .await?;
@@ -1559,11 +1561,11 @@ some content
         // would shift every line the script reports by one.
         let err = validator(&[(
             "check.lua",
-            r#"#!/usr/bin/env lua
+            r"#!/usr/bin/env lua
 function validate(ctx, content)
     this is not lua
 end
-"#,
+",
         )])
         .validate(context)
         .await
@@ -1588,11 +1590,11 @@ some content
 
         let err = validator(&[(
             "scripts/check.lua",
-            r#"function validate(ctx, content)
+            r"function validate(ctx, content)
     local items = nil
     return items.first
 end
-"#,
+",
         )])
         .validate(context)
         .await

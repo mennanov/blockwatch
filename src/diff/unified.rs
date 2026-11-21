@@ -81,7 +81,9 @@ fn line_changes(patched_file: &PatchedFile) -> anyhow::Result<LineChanges> {
         for line in hunk.lines() {
             if line.is_added() {
                 added.push(line);
-                last_target_line = line.target_line_no.unwrap();
+                last_target_line = line
+                    .target_line_no
+                    .expect("an added or context line is in the target file");
             } else if line.is_removed() {
                 removed.push(line);
             } else if line.is_context() {
@@ -91,7 +93,9 @@ fn line_changes(patched_file: &PatchedFile) -> anyhow::Result<LineChanges> {
                     last_target_line + 1,
                     &mut line_changes,
                 )?;
-                last_target_line = line.target_line_no.unwrap();
+                last_target_line = line
+                    .target_line_no
+                    .expect("an added or context line is in the target file");
             }
             // Other line types (the "\ No newline at end of file" marker) can appear between the
             // removed and added runs of a group and must not affect grouping.
@@ -171,7 +175,9 @@ fn flush_group(
             push_line_change(
                 line_changes,
                 LineChange {
-                    line: added_line.target_line_no.unwrap(),
+                    line: added_line
+                        .target_line_no
+                        .expect("an added line is in the target file"),
                     kind,
                 },
             )?;
@@ -295,10 +301,8 @@ fn line_diff(old: &str, new: &str) -> Vec<Range<usize>> {
             }
             DiffOp::Insert {
                 new_index, new_len, ..
-            } => {
-                push_or_merge_range(&mut result, *new_index..(new_index + new_len));
             }
-            DiffOp::Replace {
+            | DiffOp::Replace {
                 new_index, new_len, ..
             } => {
                 push_or_merge_range(&mut result, *new_index..(new_index + new_len));
@@ -336,7 +340,7 @@ mod modified_line_ranges_tests {
     fn equal_lines_returns_empty_ranges() {
         let ranges = line_diff("box", "box");
 
-        assert!(ranges.is_empty());
+        assert_eq!(ranges, [] as [std::ops::Range<usize>; 0]);
     }
 
     #[test]
@@ -481,7 +485,10 @@ index 1234567..0000000\n\
 }
 
 #[cfg(test)]
-#[allow(clippy::single_range_in_vec_init)]
+#[expect(
+    clippy::single_range_in_vec_init,
+    reason = "a `Vec` of one range is the expected value here"
+)]
 mod tests {
     use super::*;
     use crate::diff::test_utils::{added, deleted};
@@ -509,7 +516,7 @@ mod tests {
                 path.components()
                     .next()
                     .and_then(|c| c.as_os_str().to_str()),
-                Some("a") | Some("b")
+                Some("a" | "b")
             )
         }
 
@@ -651,7 +658,7 @@ index e69de29..215ed53 100644
     #[test]
     fn single_new_line_diff_returns_single_line_change() -> anyhow::Result<()> {
         let line_changes = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..b4b0c67 100644
 --- a/a.txt
 +++ b/a.txt
@@ -660,7 +667,7 @@ index f384549..b4b0c67 100644
  two
  three
 +three and a half
- four"#,
+ four",
         )?;
         assert_eq!(line_changes.for_file(&key("a.txt")).0, vec![added(4)]);
         Ok(())
@@ -669,7 +676,7 @@ index f384549..b4b0c67 100644
     #[test]
     fn single_first_new_line_diff_returns_single_line_change() -> anyhow::Result<()> {
         let ranges = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..fa220f8 100644
 --- a/a.txt
 +++ b/a.txt
@@ -677,7 +684,7 @@ index f384549..fa220f8 100644
 +zero
  one
  two
- three"#,
+ three",
         )?;
         assert_eq!(ranges.for_file(&key("a.txt")).0, vec![added(1)]);
         Ok(())
@@ -686,7 +693,7 @@ index f384549..fa220f8 100644
     #[test]
     fn multiple_contiguous_new_lines_diff_returns_multiple_line_changes() -> anyhow::Result<()> {
         let line_changes = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..3a7bc2a 100644
 --- a/a.txt
 +++ b/a.txt
@@ -696,7 +703,7 @@ index f384549..3a7bc2a 100644
  three
 +three and a half
 +almost four
- four"#,
+ four",
         )?;
         assert_eq!(
             line_changes.for_file(&key("a.txt")).0,
@@ -709,7 +716,7 @@ index f384549..3a7bc2a 100644
     fn multiple_first_contiguous_new_lines_diff_returns_multiple_line_changes() -> anyhow::Result<()>
     {
         let line_changes = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..3ccae75 100644
 --- a/a.txt
 +++ b/a.txt
@@ -718,7 +725,7 @@ index f384549..3ccae75 100644
 +zero
  one
  two
- three"#,
+ three",
         )?;
         assert_eq!(
             line_changes.for_file(&key("a.txt")).0,
@@ -731,7 +738,7 @@ index f384549..3ccae75 100644
     fn multiple_non_contiguous_new_lines_diff_returns_multiple_line_changes() -> anyhow::Result<()>
     {
         let line_changes = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..e797e7c 100644
 --- a/a.txt
 +++ b/a.txt
@@ -741,7 +748,7 @@ index f384549..e797e7c 100644
 +two and a half
  three
 +three and a half
- four"#,
+ four",
         )?;
         assert_eq!(
             line_changes.for_file(&key("a.txt")).0,
@@ -754,7 +761,7 @@ index f384549..e797e7c 100644
     fn multiple_contiguous_new_line_groups_diff_returns_multiple_line_changes() -> anyhow::Result<()>
     {
         let line_changes = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..ab47fb2 100644
 --- a/a.txt
 +++ b/a.txt
@@ -766,7 +773,7 @@ index f384549..ab47fb2 100644
  three
 +three and a half
 +almost four
- four"#,
+ four",
         )?;
         assert_eq!(
             line_changes.for_file(&key("a.txt")).0,
@@ -778,7 +785,7 @@ index f384549..ab47fb2 100644
     #[test]
     fn modified_line_returns_single_line_change_with_ranges() -> anyhow::Result<()> {
         let line_changes = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..e4c2829 100644
 --- a/a.txt
 +++ b/a.txt
@@ -787,7 +794,7 @@ index f384549..e4c2829 100644
  two
 -there was three
 +there is thora
- four"#,
+ four",
         )?;
         assert_eq!(
             line_changes.for_file(&key("a.txt")).0,
@@ -804,7 +811,7 @@ index f384549..e4c2829 100644
     fn multiple_non_consecutive_modified_line_returns_separate_line_changes_with_ranges()
     -> anyhow::Result<()> {
         let line_changes = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..46c7533 100644
 --- a/a.txt
 +++ b/a.txt
@@ -817,7 +824,7 @@ index f384549..46c7533 100644
  four
 -five brown foxes
 +five own boxes
- "#,
+ ",
         )?;
         assert_eq!(
             line_changes.for_file(&key("a.txt")).0,
@@ -846,7 +853,7 @@ index f384549..46c7533 100644
     fn multiple_consecutive_modified_lines_returns_single_line_changes_with_ranges()
     -> anyhow::Result<()> {
         let line_changes = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..676cbb7 100644
 --- a/a.txt
 +++ b/a.txt
@@ -856,7 +863,7 @@ index f384549..676cbb7 100644
 -three
 +modified two
 +modified three
- four"#,
+ four",
         )?;
         assert_eq!(
             line_changes.for_file(&key("a.txt")).0,
@@ -877,7 +884,7 @@ index f384549..676cbb7 100644
     #[test]
     fn all_lines_replaced_returns_single_line_changes_with_ranges() -> anyhow::Result<()> {
         let line_changes = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..676cbb7 100644
 --- a/a.txt
 +++ b/a.txt
@@ -887,7 +894,7 @@ index f384549..676cbb7 100644
 -three
 -four
 +modified one
-+modified two"#,
++modified two",
         )?;
         assert_eq!(
             line_changes.for_file(&key("a.txt")).0,
@@ -908,7 +915,7 @@ index f384549..676cbb7 100644
     #[test]
     fn single_deleted_line_returns_single_line_change() -> anyhow::Result<()> {
         let line_changes = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..87a123c 100644
 --- a/a.txt
 +++ b/a.txt
@@ -916,7 +923,7 @@ index f384549..87a123c 100644
  one
  two
 -three
- four"#,
+ four",
         )?;
         assert_eq!(line_changes.for_file(&key("a.txt")).0, vec![deleted(3)]);
         Ok(())
@@ -925,7 +932,7 @@ index f384549..87a123c 100644
     #[test]
     fn single_first_deleted_line_returns_single_line_change() -> anyhow::Result<()> {
         let line_changes = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..58ac960 100644
 --- a/a.txt
 +++ b/a.txt
@@ -933,7 +940,7 @@ index f384549..58ac960 100644
 -one
  two
  three
- four"#,
+ four",
         )?;
         assert_eq!(line_changes.for_file(&key("a.txt")).0, vec![deleted(1)]);
         Ok(())
@@ -942,7 +949,7 @@ index f384549..58ac960 100644
     #[test]
     fn single_last_deleted_line_returns_single_line_change() -> anyhow::Result<()> {
         let line_changes = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..4cb29ea 100644
 --- a/a.txt
 +++ b/a.txt
@@ -950,7 +957,7 @@ index f384549..4cb29ea 100644
  one
  two
  three
--four"#,
+-four",
         )?;
         assert_eq!(line_changes.for_file(&key("a.txt")).0, vec![deleted(4)]);
         Ok(())
@@ -960,7 +967,7 @@ index f384549..4cb29ea 100644
     fn multiple_non_consecutive_deleted_lines_returns_separate_line_changes() -> anyhow::Result<()>
     {
         let line_changes = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..8c05df4 100644
 --- a/a.txt
 +++ b/a.txt
@@ -968,7 +975,7 @@ index f384549..8c05df4 100644
 -one
  two
 -three
- four"#,
+ four",
         )?;
         assert_eq!(
             line_changes.for_file(&key("a.txt")).0,
@@ -980,7 +987,7 @@ index f384549..8c05df4 100644
     #[test]
     fn multiple_consecutive_deleted_lines_returns_single_line_change() -> anyhow::Result<()> {
         let line_changes = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..a9c7698 100644
 --- a/a.txt
 +++ b/a.txt
@@ -988,7 +995,7 @@ index f384549..a9c7698 100644
  one
 -two
 -three
- four"#,
+ four",
         )?;
         // Consecutive deleted lines are treated as a single one-line range because they no longer
         // exist in the target file.
@@ -999,7 +1006,7 @@ index f384549..a9c7698 100644
     #[test]
     fn all_lines_deleted_treated_as_deleted_file() -> anyhow::Result<()> {
         let line_changes = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..e69de29 100644
 --- a/a.txt
 +++ b/a.txt
@@ -1007,7 +1014,7 @@ index f384549..e69de29 100644
 -one
 -two
 -three
--four"#,
+-four",
         )?;
         assert!(line_changes.0.is_empty());
         Ok(())
@@ -1016,7 +1023,7 @@ index f384549..e69de29 100644
     #[test]
     fn mixed_changes_returns_correct_line_changes() -> anyhow::Result<()> {
         let line_changes = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..58a279e 100644
 --- a/a.txt
 +++ b/a.txt
@@ -1028,7 +1035,7 @@ index f384549..58a279e 100644
 -four
 +modified three
 +modified four
-+added five"#,
++added five",
         )?;
         assert_eq!(
             line_changes.for_file(&key("a.txt")).0,
@@ -1153,7 +1160,7 @@ index abc123..def456 100644
     #[test]
     fn out_of_order_hunks_returns_error() {
         let err = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..b4b0c67 100644
 --- a/a.txt
 +++ b/a.txt
@@ -1163,7 +1170,7 @@ index f384549..b4b0c67 100644
 @@ -1 +1 @@
 -one
 +ONE
-"#,
+",
         )
         .unwrap_err();
         assert!(
@@ -1209,7 +1216,7 @@ index f384549..b4b0c67 100644
     #[test]
     fn deletion_after_earlier_insertions_uses_target_line_number() -> anyhow::Result<()> {
         let line_changes = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..b4b0c67 100644
 --- a/a.txt
 +++ b/a.txt
@@ -1221,7 +1228,7 @@ index f384549..b4b0c67 100644
 +pad five
 @@ -3,1 +7,0 @@
 -deleted content
-"#,
+",
         )?;
         let changes = &line_changes.for_file(&key("a.txt")).0;
         // Source line 3 sits at target position 8 after the five inserted lines: the deletion gap
@@ -1236,7 +1243,7 @@ index f384549..b4b0c67 100644
     fn modified_last_line_without_trailing_newline_returns_single_line_change_with_ranges()
     -> anyhow::Result<()> {
         let line_changes = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 index f384549..b4b0c67 100644
 --- a/a.txt
 +++ b/a.txt
@@ -1244,7 +1251,7 @@ index f384549..b4b0c67 100644
 -#  </block>
 \ No newline at end of file
 +# </block>
-\ No newline at end of file"#,
+\ No newline at end of file",
         )?;
         let changes = &line_changes.for_file(&key("a.txt")).0;
         assert_eq!(changes.len(), 1, "unexpected changes: {changes:?}");
@@ -1277,7 +1284,7 @@ index 0000000..710d1d9
     #[test]
     fn deleted_file_diff_is_ignored() -> anyhow::Result<()> {
         let line_changes = changes(
-            r#"diff --git a/a.txt b/a.txt
+            r"diff --git a/a.txt b/a.txt
 deleted file mode 100644
 index f384549..0000000
 --- a/a.txt
@@ -1286,7 +1293,7 @@ index f384549..0000000
 -one
 -two
 -three
--four"#,
+-four",
         )?;
         assert!(line_changes.0.is_empty());
         Ok(())
@@ -1322,14 +1329,14 @@ new file mode 120000
     #[test]
     fn diff_with_parent_dir_traversal_target_path_returns_error() {
         let err = changes(
-            r#"diff --git a/../../../etc/passwd b/../../../etc/passwd
+            r"diff --git a/../../../etc/passwd b/../../../etc/passwd
 new file mode 100644
 index 0000000..710d1d9
 --- /dev/null
 +++ b/../../../etc/passwd
 @@ -0,0 +1,1 @@
 +pwned
-"#,
+",
         )
         .unwrap_err();
         assert!(
@@ -1343,14 +1350,14 @@ index 0000000..710d1d9
         // Git never writes an absolute target, so this is rejected for carrying no path prefix
         // before the traversal check is ever reached. Either way it must not resolve.
         let err = changes(
-            r#"diff --git a/etc/passwd b/etc/passwd
+            r"diff --git a/etc/passwd b/etc/passwd
 new file mode 100644
 index 0000000..710d1d9
 --- /dev/null
 +++ /etc/passwd
 @@ -0,0 +1,1 @@
 +pwned
-"#,
+",
         )
         .unwrap_err();
         assert!(

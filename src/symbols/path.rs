@@ -128,8 +128,8 @@ impl fmt::Display for SymbolPath {
 impl fmt::Display for Segment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Segment::Key(key) => write!(f, "{}", encode(key)),
-            Segment::Filter { key, value } => write!(f, "~[{}={}]", encode(key), encode(value)),
+            Self::Key(key) => write!(f, "{}", encode(key)),
+            Self::Filter { key, value } => write!(f, "~[{}={}]", encode(key), encode(value)),
         }
     }
 }

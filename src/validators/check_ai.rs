@@ -295,17 +295,19 @@ struct OpenAiClient {
 }
 
 impl OpenAiClient {
-    /// Creates a new OpenAI client from environment variables (BLOCKWATCH_AI_*),
+    /// Creates a new OpenAI client from environment variables (`BLOCKWATCH_AI_*`),
     /// falling back to `async-openai` crate defaults when not provided.
     fn from_env() -> Self {
-        let model = std::env::var(API_MODEL_ENV_VAR_NAME).unwrap_or(DEFAULT_MODEL_NAME.into());
-        let api_base = std::env::var(API_URL_ENV_VAR_NAME).unwrap_or(OPENAI_API_BASE.into());
-        let api_key = std::env::var(API_KEY_ENV_VAR_NAME).unwrap_or("".into());
+        let model =
+            std::env::var(API_MODEL_ENV_VAR_NAME).unwrap_or_else(|_| DEFAULT_MODEL_NAME.into());
+        let api_base =
+            std::env::var(API_URL_ENV_VAR_NAME).unwrap_or_else(|_| OPENAI_API_BASE.into());
+        let api_key = std::env::var(API_KEY_ENV_VAR_NAME).unwrap_or_default();
         let config = OpenAIConfig::new()
             .with_api_base(api_base)
             .with_api_key(api_key);
         let client = Client::with_config(config);
-        Self { model, client }
+        Self { client, model }
     }
 }
 
@@ -395,7 +397,7 @@ mod tests {
 
     #[async_trait]
     impl AiClient for FakeClient {
-        fn model(&self) -> &str {
+        fn model(&self) -> &'static str {
             "fake-model"
         }
 

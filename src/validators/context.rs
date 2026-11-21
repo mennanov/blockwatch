@@ -8,7 +8,7 @@ use crate::languages::LanguageParsers;
 use crate::repo_path::RepoPath;
 use crate::scan::{self, ScanMode};
 use anyhow::bail;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Everything the validators are given to work with, shared read-only across all of them.
 ///
@@ -17,7 +17,7 @@ use std::collections::HashMap;
 /// other than the one it started from.
 pub(crate) struct ValidationContext {
     /// Blocks with their corresponding source file contents grouped by filename.
-    pub(super) blocks: HashMap<RepoPath, FileBlocks>,
+    pub(super) blocks: BTreeMap<RepoPath, FileBlocks>,
     /// Language parsers per file type, used by validators to parse referenced source files.
     pub(super) parsers: LanguageParsers,
     /// Every line change from the diff (if any).
@@ -52,7 +52,7 @@ pub(crate) enum BlockSelection {
 impl ValidationContext {
     /// Creates a new validation context with modified blocks grouped by filename.
     pub(crate) fn new(
-        blocks: HashMap<RepoPath, FileBlocks>,
+        blocks: BTreeMap<RepoPath, FileBlocks>,
         parsers: LanguageParsers,
         line_changes: DiffChanges,
         virtual_blocks: Vec<VirtualBlock>,
@@ -72,7 +72,7 @@ impl ValidationContext {
     }
 
     /// The blocks the run validates, with the text of their files, by file.
-    pub(crate) fn blocks(&self) -> &HashMap<RepoPath, FileBlocks> {
+    pub(crate) fn blocks(&self) -> &BTreeMap<RepoPath, FileBlocks> {
         &self.blocks
     }
 
@@ -171,6 +171,7 @@ mod tests {
     use crate::validators::test_utils::{
         merge_validation_contexts, validation_context, with_virtual_blocks,
     };
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     /// The files of the block selection tests, as paths and contents. `a.py` has two named blocks
@@ -280,7 +281,7 @@ mod tests {
 
         context.apply_block_selection(&selection, &file_system)?;
 
-        assert!(kept_blocks(&context).is_empty());
+        assert_eq!(kept_blocks(&context), [] as [std::string::String; 0]);
         Ok(())
     }
 
@@ -304,7 +305,7 @@ mod tests {
 
         context.apply_block_selection(&selection, &file_system)?;
 
-        assert!(kept_blocks(&context).is_empty());
+        assert_eq!(kept_blocks(&context), [] as [std::string::String; 0]);
         Ok(())
     }
 }
