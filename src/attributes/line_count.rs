@@ -111,6 +111,16 @@ mod tests {
     }
 
     #[test]
+    fn number_without_comparator_parse_constraint_returns_error_with_the_comparators() {
+        let error = Constraint::parse("50").unwrap_err();
+        assert_eq!(
+            format!("{error:#}"),
+            "expected a comparator like <N, <=N, ==N, >=N, >N; got \"50\" (error: missing \
+             comparator)"
+        );
+    }
+
+    #[test]
     fn number_too_large_parse_constraint_returns_error_with_its_cause() {
         let error = Constraint::parse("< 99999999999999999999999").unwrap_err();
         assert_eq!(

@@ -464,49 +464,6 @@ red
     }
 
     #[test]
-    fn block_with_an_invalid_regex_returns_an_error() {
-        let err = crate::validators::test_utils::try_validation_context(
-            "example.py",
-            r#"# <block line-pattern="[A-Z+">
-        # </block>"#,
-        )
-        .unwrap_err();
-
-        assert!(
-            format!("{err:#}").contains("invalid `line-pattern`"),
-            "unexpected error: {err:#}"
-        );
-    }
-
-    #[test]
-    fn block_with_an_invalid_forbidden_regex_returns_an_error() {
-        let err = crate::validators::test_utils::try_validation_context(
-            "example.py",
-            r#"# <block line-pattern-forbidden="[a-z+">
-# </block>"#,
-        )
-        .unwrap_err();
-
-        assert!(
-            format!("{err:#}").contains("invalid `line-pattern-forbidden`"),
-            "unexpected error: {err:#}"
-        );
-    }
-
-    #[test]
-    fn block_with_a_line_break_in_the_pattern_returns_an_error() {
-        let err = crate::validators::test_utils::try_validation_context(
-            "example.py",
-            "# <block line-pattern=\"^[a-z]+\n# $\">\nabc\n# </block>",
-        )
-        .unwrap_err();
-        assert!(
-            format!("{err:#}").contains("line break"),
-            "unexpected error: {err:#}"
-        );
-    }
-
-    #[test]
     fn block_without_a_line_pattern_attribute_returns_no_violations() -> anyhow::Result<()> {
         let validator = LinePatternValidator;
         let context = validation_context("example.py", "#<block>\n#</block>");

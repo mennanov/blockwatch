@@ -626,22 +626,6 @@ I like apples
         Ok(())
     }
 
-    #[test]
-    fn block_with_an_empty_check_ai_condition_returns_an_error() {
-        for attr in [r#"check-ai=" ""#, r#"check-ai="""#, "check-ai"] {
-            let err = crate::validators::test_utils::try_validation_context(
-                "example.py",
-                &format!("# <block {attr}>\ntext\n# </block>"),
-            )
-            .unwrap_err();
-            let err_chain = format!("{err:#}");
-            assert!(
-                err_chain.contains("invalid `check-ai`"),
-                "{attr}: {err_chain}"
-            );
-        }
-    }
-
     #[tokio::test]
     async fn blocks_with_and_without_check_ai_records_a_check_for_the_examined_ones_only()
     -> anyhow::Result<()> {

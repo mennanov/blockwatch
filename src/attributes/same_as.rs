@@ -215,3 +215,83 @@ impl TargetPaths {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Formats, Mode, TargetPaths};
+    use regex::Regex;
+
+    #[test]
+    fn unknown_format_parse_returns_error_with_the_known_ones() {
+        let error = Formats::parse("number").unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "\"number\" (expected numeric, identifier or flat)"
+        );
+    }
+
+    #[test]
+    fn unknown_format_for_a_group_parse_returns_error_with_the_known_ones() {
+        let error = Formats::parse("value:numbr").unwrap_err();
+
+        assert!(
+            format!("{error:#}").ends_with("\"numbr\" (expected numeric, identifier or flat)"),
+            "{error:#}"
+        );
+    }
+
+    #[test]
+    fn one_format_mixed_with_formats_for_groups_parse_returns_error() {
+        let error = Formats::parse("identifier,value:numeric").unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "\"identifier,value:numeric\" (expected one format, or group:format entries such as \
+             value:numeric)"
+        );
+    }
+
+    #[test]
+    fn empty_or_repeated_group_parse_returns_error() {
+        for value in [
+            ":numeric",
+            " : numeric",
+            "value:numeric,",
+            "value:numeric, value:flat",
+            "value:numeric, value : flat",
+        ] {
+            assert!(Formats::parse(value).is_err(), "{value}");
+        }
+    }
+
+    #[test]
+    fn unknown_mode_parse_returns_error_with_the_known_ones() {
+        let error = Mode::parse("sorted").unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "\"sorted\" (expected set, sequence, single or subset)"
+        );
+    }
+
+    #[test]
+    fn invalid_glob_parse_returns_error() {
+        assert!(TargetPaths::parse("services/[a").is_err());
+    }
+
+    #[test]
+    fn format_for_a_group_the_pattern_lacks_validate_groups_returns_error() -> anyhow::Result<()> {
+        let pattern = Regex::new(r"(?P<name>\w+) = (?P<value>\d+)")?;
+
+        let error = Formats::parse("vaule:numeric")?
+            .validate_groups(Some(&pattern))
+            .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "same-as-format refers to group \"vaule\", which same-as-pattern doesn't have"
+        );
+        Ok(())
+    }
+}

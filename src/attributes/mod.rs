@@ -651,7 +651,11 @@ mod attribute_names_tests {
 
 #[cfg(test)]
 mod attributes_tests {
-    use super::{AttributeEntry, Attributes, SortFormat, SortOrder, parse_regex};
+    use super::test_utils::text_attributes;
+    use super::{
+        AttributeEntry, AttributeName, AttributeValue, Attributes, Severity, SortFormat, SortOrder,
+        parse_regex,
+    };
 
     #[test]
     fn unrecognized_name_from_tag_returns_error() {
@@ -784,6 +788,85 @@ mod attributes_tests {
         }
         // A single space regex is valid for matching literal spaces.
         assert!(parse_regex(" ").is_ok());
+    }
+
+    #[test]
+    fn pattern_with_a_line_break_from_tag_returns_error() {
+        for name in [
+            "check-ai-pattern",
+            "check-lua-pattern",
+            "keep-sorted-pattern",
+            "keep-unique",
+            "line-count-pattern",
+            "line-pattern",
+            "line-pattern-forbidden",
+            "same-as-pattern",
+        ] {
+            let error = Attributes::from_tag([(name.into(), "a\nb".into())]).unwrap_err();
+            assert_eq!(
+                format!("{error:#}"),
+                format!(
+                    "invalid `{name}`: the pattern has a line break. Put the pattern on one line"
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_regex_in_a_pattern_from_tag_returns_error() {
+        for name in [
+            "check-ai-pattern",
+            "check-lua-pattern",
+            "keep-sorted-pattern",
+            "keep-unique",
+            "line-count-pattern",
+            "line-pattern",
+            "line-pattern-forbidden",
+            "same-as-pattern",
+        ] {
+            let error = Attributes::from_tag([(name.into(), "(unclosed".into())]).unwrap_err();
+            assert!(
+                format!("{error:#}").starts_with(&format!("invalid `{name}`: regex parse error")),
+                "{name}: {error:#}"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_keep_sorted_keyword_from_tag_returns_error_with_the_known_ones() {
+        for (name, value, expected) in [
+            (
+                "keep-sorted",
+                "invalid",
+                "\"invalid\" (expected asc or desc)",
+            ),
+            (
+                "keep-sorted-format",
+                "alphabetical",
+                "\"alphabetical\" (expected lexicographic or numeric)",
+            ),
+        ] {
+            let error = Attributes::from_tag([(name.into(), value.into())]).unwrap_err();
+            assert_eq!(
+                format!("{error:#}"),
+                format!("invalid `{name}`: {expected}")
+            );
+        }
+    }
+
+    #[test]
+    fn check_lua_timeout_that_is_not_a_positive_whole_number_from_tag_returns_error() {
+        for value in ["soon", "0"] {
+            let error =
+                Attributes::from_tag([("check-lua-timeout".into(), value.into())]).unwrap_err();
+            assert_eq!(
+                format!("{error:#}"),
+                format!(
+                    "invalid `check-lua-timeout`: must be a whole number of seconds >= 1, got \
+                     {value:?}"
+                )
+            );
+        }
     }
 
     #[test]
@@ -960,6 +1043,24 @@ mod attributes_tests {
         assert_eq!(
             error.to_string(),
             "same-as-format refers to group \"foo\", which same-as-pattern doesn't have"
+        );
+    }
+
+    #[test]
+    fn block_without_severity_attribute_returns_error_severity() {
+        assert_eq!(Attributes::default().severity(), Severity::Error);
+    }
+
+    #[test]
+    fn mixed_case_severity_values_returns_it_in_lowercase() {
+        let attributes = text_attributes(&[("severity", "InFo")]);
+
+        assert_eq!(
+            attributes.values().collect::<Vec<_>>(),
+            vec![(
+                AttributeName::Severity,
+                AttributeValue::Text("info".to_string())
+            )]
         );
     }
 }

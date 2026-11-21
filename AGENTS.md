@@ -42,7 +42,8 @@ cargo run -- list '<path or glob>' # print the blocks parsed from matching files
 - Never add a dependency loop, between the modules in `src/` or between the files of one module. If `a` uses `b`, then
   `b` must not use `a`, directly or through other files. Tests count too: a test may use only what its file's code may
   use. A `mod.rs` doesn't use an item it only re-exports. To break a loop, move the item that both sides need into its
-  own file.
+  own file. A test stays next to the code it tests, though. If a test can't avoid the loop by calling its own file's
+  code directly, leave the loop. A test far from its code is worse.
 - Give each item the narrowest visibility that compiles: private, then `pub(super)`, then `pub(crate)`. blockwatch is
   a program, not a library.
 - Rename or move Rust symbols with a tool that understands Rust, such as rust-analyzer. Never use `sed`, `perl` or a

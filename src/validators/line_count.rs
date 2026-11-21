@@ -454,55 +454,6 @@ red
     }
 
     #[test]
-    fn pattern_with_invalid_regex_returns_an_error() {
-        let err = crate::validators::test_utils::try_validation_context(
-            "example.py",
-            r#"# <block line-count="==1" line-count-pattern="(unclosed">
-red
-# </block>"#,
-        )
-        .unwrap_err();
-
-        assert!(
-            format!("{err:#}").contains("invalid `line-count-pattern`"),
-            "{err:#}"
-        );
-    }
-
-    #[test]
-    fn pattern_with_a_line_break_returns_an_error() {
-        let err = crate::validators::test_utils::try_validation_context(
-            "example.py",
-            "# <block line-count=\"==1\" line-count-pattern=\"^red\n# $\">\nred\n# </block>",
-        )
-        .unwrap_err();
-
-        assert!(
-            format!("{err:#}").contains("the pattern has a line break"),
-            "{err:#}"
-        );
-    }
-
-    #[test]
-    fn block_with_an_invalid_line_count_returns_an_error() {
-        let error = crate::validators::test_utils::try_validation_context(
-            "example.py",
-            "# <block line-count=\"50\">\na\n# </block>",
-        )
-        .unwrap_err();
-        let error_chain = format!("{error:#}");
-
-        assert!(
-            error_chain.contains("invalid `line-count`"),
-            "{error_chain}"
-        );
-        assert!(
-            error_chain.contains("expected a comparator like <N, <=N, ==N, >=N, >N"),
-            "{error_chain}"
-        );
-    }
-
-    #[test]
     fn validate_with_blocks_without_line_count_records_a_check_for_the_examined_ones_only()
     -> anyhow::Result<()> {
         let context = validation_context(

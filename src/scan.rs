@@ -1413,52 +1413,6 @@ mod parse_blocks_tests {
     }
 
     #[test]
-    fn unknown_attribute_in_block_fails_with_error() {
-        let file_system = FakeFileSystem::new(HashMap::from([(
-            "a.py".to_string(),
-            "# <block name=\"x\" unknown-attr=\"value\">\n1\n# </block>".to_string(),
-        )]));
-        let parsers = LanguageParsers::new();
-        let file_blocks = parse_file(
-            &file_system,
-            Path::new("a.py"),
-            &LineChanges::default(),
-            ScanMode::All,
-            &parsers,
-            &[],
-        );
-
-        assert!(file_blocks.is_err());
-        assert_eq!(
-            file_blocks.unwrap_err().source().unwrap().to_string(),
-            "block x at line 1 contains unrecognized attribute `unknown-attr`"
-        );
-    }
-
-    #[test]
-    fn unknown_severity_value_in_block_fails_with_error() {
-        let file_system = FakeFileSystem::new(HashMap::from([(
-            "a.py".to_string(),
-            "# <block severity=\"invalid-severity\">\n1\n# </block>".to_string(),
-        )]));
-        let parsers = LanguageParsers::new();
-        let file_blocks = parse_file(
-            &file_system,
-            Path::new("a.py"),
-            &LineChanges::default(),
-            ScanMode::All,
-            &parsers,
-            &[],
-        );
-
-        assert!(file_blocks.is_err());
-        assert_eq!(
-            file_blocks.unwrap_err().source().unwrap().to_string(),
-            "block (unnamed) at line 1 contains invalid `severity`: \"invalid-severity\" (expected error, warning, info or hint)"
-        );
-    }
-
-    #[test]
     fn duplicate_block_name_in_the_same_file_fails_with_error() {
         let file_system = FakeFileSystem::new(HashMap::from([(
             "a.py".to_string(),

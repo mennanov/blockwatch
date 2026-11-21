@@ -1376,19 +1376,6 @@ ids = 1, 2
     }
 
     #[test]
-    fn pattern_with_a_line_break_returns_an_error() {
-        let err = crate::validators::test_utils::try_validation_context(
-            "config.py",
-            "# <block same-as=\":b\" same-as-pattern=\"port\n# (?P<value>\\d+)\">\nport 80\n# </block>\n# <block name=\"b\">\n80\n# </block>",
-        )
-        .unwrap_err();
-        assert!(
-            format!("{err:#}").contains("line break"),
-            "unexpected error: {err:#}"
-        );
-    }
-
-    #[test]
     fn set_mode_with_repeated_values_lists_each_once_in_first_seen_order() -> anyhow::Result<()> {
         let context = validation_context(
             "a.rs",
@@ -1821,24 +1808,6 @@ cafe
     }
 
     #[test]
-    fn unknown_same_as_format_value_returns_an_error() {
-        // Unlike bad content, an unrecognized `same-as-format` value is an authoring error and
-        // aborts the run, mirroring how an unknown `same-as-mode` is handled.
-        let error = crate::validators::test_utils::try_validation_context(
-            "a.rs",
-            "// <block same-as=\":b\" same-as-format=\"number\">\n1\n// </block>\n// <block name=\"b\">\n1\n// </block>",
-        )
-        .unwrap_err();
-
-        assert!(
-            format!("{error:#}").contains(
-                "invalid `same-as-format`: \"number\" (expected numeric, identifier or flat)"
-            ),
-            "unexpected error: {error:#}"
-        );
-    }
-
-    #[test]
     fn same_as_format_trims_single_and_group_entries() -> anyhow::Result<()> {
         let single = validation_context(
             "a.py",
@@ -1864,36 +1833,6 @@ red_ball: 1
         );
         assert!(validator(&[]).validate(grouped)?.violations.is_empty());
         Ok(())
-    }
-
-    #[test]
-    fn same_as_format_with_empty_or_duplicate_group_returns_an_error() {
-        for value in [
-            ":numeric",
-            " : numeric",
-            "value:numeric,",
-            "value:numeric, value:flat",
-            "value:numeric, value : flat",
-        ] {
-            let error = crate::validators::test_utils::try_validation_context(
-                "a.py",
-                &format!(
-                    r#"# <block same-as=":b" same-as-format="{value}" same-as-pattern="(?P<value>\d+)">
-1
-# </block>
-# <block name="b">
-1
-# </block>
-"#
-                ),
-            )
-            .unwrap_err();
-
-            assert!(
-                format!("{error:#}").contains("invalid `same-as-format`"),
-                "{value}: {error:#}"
-            );
-        }
     }
 
     #[test]
@@ -1980,92 +1919,6 @@ red-color: 1.0
         );
         assert!(validator(&[]).validate(context)?.violations.is_empty());
         Ok(())
-    }
-
-    #[test]
-    fn format_for_a_group_the_pattern_does_not_have_returns_an_error() {
-        // A typo in a group name would otherwise compare that group as written, with no sign that
-        // its format is lost.
-        let error = crate::validators::test_utils::try_validation_context(
-            "a.py",
-            r#"# <block same-as=":b" same-as-format="vaule:numeric" same-as-pattern="(?P<name>\w+) = (?P<value>\d+)">
-red = 1
-# </block>
-# <block name="b" same-as-pattern="(?P<name>\w+): (?P<value>\d+)">
-red: 1
-# </block>
-"#,
-        )
-        .unwrap_err();
-
-        assert!(
-            format!("{error:#}").ends_with(
-                r#"same-as-format refers to group "vaule", which same-as-pattern doesn't have"#
-            ),
-            "unexpected error: {error:#}"
-        );
-    }
-
-    #[test]
-    fn unknown_format_for_a_group_returns_an_error() {
-        let error = crate::validators::test_utils::try_validation_context(
-            "a.py",
-            r#"# <block same-as=":b" same-as-format="value:numbr">
-1
-# </block>
-# <block name="b">
-1
-# </block>
-"#,
-        )
-        .unwrap_err();
-
-        let err_chain = format!("{error:#}");
-        assert!(
-            err_chain.contains("invalid `same-as-format`")
-                && err_chain.ends_with(r#""numbr" (expected numeric, identifier or flat)"#),
-            "unexpected error: {err_chain}"
-        );
-    }
-
-    #[test]
-    fn one_format_mixed_with_formats_for_groups_returns_an_error() {
-        let error = crate::validators::test_utils::try_validation_context(
-            "a.py",
-            r#"# <block same-as=":b" same-as-format="identifier,value:numeric" same-as-pattern="(?P<name>\w+) = (?P<value>\d+)">
-red = 1
-# </block>
-# <block name="b" same-as-pattern="(?P<name>\w+): (?P<value>\d+)">
-red: 1
-# </block>
-"#,
-        )
-        .unwrap_err();
-
-        let err_chain = format!("{error:#}");
-        assert!(
-            err_chain.contains("invalid `same-as-format`")
-                && err_chain.ends_with(
-                    r#""identifier,value:numeric" (expected one format, or group:format entries such as value:numeric)"#
-                ),
-            "unexpected error: {err_chain}"
-        );
-    }
-
-    #[test]
-    fn unknown_mode_returns_an_error() {
-        let error = crate::validators::test_utils::try_validation_context(
-            "a.rs",
-            "// <block same-as=\":b\" same-as-mode=\"sorted\">\n1\n// </block>\n// <block name=\"b\">\n1\n// </block>",
-        )
-        .unwrap_err();
-
-        assert!(
-            format!("{error:#}").contains(
-                "invalid `same-as-mode`: \"sorted\" (expected set, sequence, single or subset)"
-            ),
-            "unexpected error: {error:#}"
-        );
     }
 
     #[test]
@@ -2473,22 +2326,6 @@ services/auth/
             "unexpected message: {message}"
         );
         Ok(())
-    }
-
-    #[test]
-    fn paths_target_with_an_invalid_glob_returns_an_error() {
-        let error = crate::validators::test_utils::try_validation_context(
-            "README.md",
-            r#"<!-- <block same-as-paths="services/[a" same-as-pattern=".+"> -->
-services/auth/
-<!-- </block> -->"#,
-        )
-        .unwrap_err();
-
-        assert!(
-            format!("{error:#}").contains("invalid `same-as-paths`"),
-            "unexpected error: {error:#}"
-        );
     }
 
     #[test]

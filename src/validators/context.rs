@@ -164,13 +164,11 @@ impl ValidationContext {
 
 #[cfg(test)]
 mod tests {
+    use super::test_utils::{merge_validation_contexts, validation_context, with_virtual_blocks};
     use super::*;
     use crate::blocks::test_utils::block_addresses;
     use crate::blocks::test_utils::virtual_block;
     use crate::fs::test_utils::FakeFileSystem;
-    use crate::validators::test_utils::{
-        merge_validation_contexts, validation_context, with_virtual_blocks,
-    };
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -307,5 +305,121 @@ mod tests {
 
         assert_eq!(kept_blocks(&context), [] as [std::string::String; 0]);
         Ok(())
+    }
+}
+
+/// Test helpers for building a [`ValidationContext`].
+#[cfg(test)]
+pub(crate) mod test_utils {
+    use super::ValidationContext;
+    use crate::blocks::FileBlocks;
+    use crate::blocks::VirtualBlock;
+    use crate::diff::test_utils::diff_changes;
+    use crate::diff::{LineChange, LineChangeKind};
+    use crate::fs::test_utils::{FakeFileSystem, path_filter_all};
+    use crate::languages::LanguageParsers;
+    use crate::repo_path::RepoPath;
+    use crate::scan::{Scan, ScanMode};
+    use std::collections::{BTreeMap, HashMap};
+    use std::sync::Arc;
+
+    /// Creates a [`ValidationContext`] for the given `file_name` with `contents` with all lines
+    /// modified.
+    ///
+    /// # Panics
+    /// Panics if `file_name` is not a repository path, or if `contents` doesn't parse.
+    pub(crate) fn validation_context(file_name: &str, contents: &str) -> Arc<ValidationContext> {
+        let line_changes: Vec<LineChange> = contents
+            .lines()
+            .enumerate()
+            .map(|(line, _)| LineChange {
+                line: line + 1,
+                kind: LineChangeKind::Added,
+            })
+            .collect();
+        validation_context_with_changes(file_name, contents, line_changes)
+    }
+
+    /// Creates a [`ValidationContext`] for the given `file_name` with `contents` and specified
+    /// `line_changes`, rooted at the current directory.
+    ///
+    /// # Panics
+    /// Panics if `file_name` is not a repository path, or if `contents` doesn't parse.
+    pub(crate) fn validation_context_with_changes(
+        file_name: &str,
+        contents: &str,
+        line_changes: Vec<LineChange>,
+    ) -> Arc<ValidationContext> {
+        let file_system = FakeFileSystem::new(HashMap::from([(
+            file_name.to_string(),
+            contents.to_string(),
+        )]));
+        let line_changes_by_file =
+            diff_changes([(RepoPath::from_reference(file_name).unwrap(), line_changes)]);
+        let parsers = LanguageParsers::new();
+        Arc::new(ValidationContext::new(
+            Scan::new(&file_system, &path_filter_all(), &parsers, &[])
+                .parse_blocks(&line_changes_by_file, ScanMode::OnlyChanged)
+                .unwrap()
+                .blocks,
+            parsers,
+            line_changes_by_file,
+            Vec::new(),
+        ))
+    }
+
+    /// `context` with traces requested.
+    pub(crate) fn with_traces(context: Arc<ValidationContext>) -> Arc<ValidationContext> {
+        let mut context = Arc::into_inner(context).expect("the context is not shared");
+        context.request_traces();
+        Arc::new(context)
+    }
+
+    /// `context` with `virtual_blocks` as the config file's virtual blocks.
+    pub(crate) fn with_virtual_blocks(
+        context: Arc<ValidationContext>,
+        virtual_blocks: Vec<VirtualBlock>,
+    ) -> Arc<ValidationContext> {
+        let context = Arc::into_inner(context).expect("the context is not shared");
+        Arc::new(ValidationContext::new(
+            context.blocks,
+            context.parsers,
+            context.line_changes,
+            virtual_blocks,
+        ))
+    }
+
+    /// Combines several single-file contexts into one, so a test can exercise a validator that
+    /// resolves references across files.
+    pub(crate) fn merge_validation_contexts(
+        contexts: Vec<Arc<ValidationContext>>,
+    ) -> Arc<ValidationContext> {
+        let parsers = LanguageParsers::new();
+        let mut merged_modified_blocks = BTreeMap::new();
+        let mut merged_line_changes = HashMap::new();
+        for context in contexts {
+            for (file_path, file_blocks) in &context.blocks {
+                merged_modified_blocks
+                    .entry(file_path.clone())
+                    .or_insert_with(|| FileBlocks {
+                        file_content: file_blocks.file_content.clone(),
+                        blocks_with_context: vec![],
+                    })
+                    .blocks_with_context
+                    .extend(file_blocks.blocks_with_context.clone());
+            }
+            for file_path in context.line_changes.files() {
+                merged_line_changes.insert(
+                    file_path.clone(),
+                    context.line_changes.for_file(file_path).clone(),
+                );
+            }
+        }
+        Arc::new(ValidationContext::new(
+            merged_modified_blocks,
+            parsers,
+            merged_line_changes.into_iter().collect(),
+            Vec::new(),
+        ))
     }
 }

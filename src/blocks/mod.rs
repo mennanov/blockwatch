@@ -446,6 +446,44 @@ mod block_address_tests {
 }
 
 #[cfg(test)]
+mod from_tags_tests {
+    use super::{Block, Content};
+    use crate::position::Position;
+
+    /// The error of a block whose start tag on line 3 holds `attributes`.
+    fn from_tags_error(attributes: &[(&str, &str)]) -> String {
+        let start = Position::new(3, 1);
+        let error = Block::from_tags(
+            attributes
+                .iter()
+                .map(|(name, value)| ((*name).to_string(), (*value).to_string()))
+                .collect(),
+            start..start,
+            Content::source(0..0, start..start),
+        )
+        .unwrap_err();
+        format!("{error:#}")
+    }
+
+    #[test]
+    fn named_block_with_an_unknown_attribute_from_tags_returns_error_with_its_name_and_line() {
+        assert_eq!(
+            from_tags_error(&[("name", "x"), ("unknown-attr", "value")]),
+            "block x at line 3 contains unrecognized attribute `unknown-attr`"
+        );
+    }
+
+    #[test]
+    fn unnamed_block_with_an_invalid_value_from_tags_returns_error_with_its_line() {
+        assert_eq!(
+            from_tags_error(&[("severity", "invalid")]),
+            "block (unnamed) at line 3 contains invalid `severity`: \"invalid\" (expected error, \
+             warning, info or hint)"
+        );
+    }
+}
+
+#[cfg(test)]
 mod block_with_context_tests {
     use super::*;
     use crate::diff::test_utils::{added, deleted, modified, modified_range};

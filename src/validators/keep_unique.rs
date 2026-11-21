@@ -397,20 +397,6 @@ ID:1 C
     }
 
     #[test]
-    fn pattern_with_a_line_break_returns_an_error() {
-        let err = crate::validators::test_utils::try_validation_context(
-            "example.py",
-            "# <block keep-unique=\"id = (?P<value>\\w+)\n# ok\">\nid = a ok\nid = a ok\n# </block>",
-        )
-        .unwrap_err();
-
-        assert!(
-            format!("{err:#}").contains("line break"),
-            "unexpected error: {err:#}"
-        );
-    }
-
-    #[test]
     fn block_with_lines_not_matching_the_pattern_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepUniqueValidator;
         let context = validation_context(

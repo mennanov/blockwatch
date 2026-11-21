@@ -926,36 +926,6 @@ end
         Ok(())
     }
 
-    #[test]
-    fn invalid_check_lua_pattern_returns_an_error() {
-        let err = crate::validators::test_utils::try_validation_context(
-            "example.py",
-            r#"# <block check-lua="check.lua" check-lua-pattern="[invalid">
-some content
-# </block>"#,
-        )
-        .unwrap_err();
-        let err_chain = format!("{err:#}");
-        assert!(
-            err_chain.contains("invalid `check-lua-pattern`"),
-            "unexpected error: {err_chain}"
-        );
-    }
-
-    #[test]
-    fn check_lua_pattern_with_a_line_break_returns_an_error() {
-        let err = crate::validators::test_utils::try_validation_context(
-            "example.py",
-            "# <block check-lua=\"check.lua\" check-lua-pattern=\"port\n# (?P<value>\\d+)\">\nport 80\n# </block>",
-        )
-        .unwrap_err();
-        let err_chain = format!("{err:#}");
-        assert!(
-            err_chain.contains("line break"),
-            "unexpected error: {err_chain}"
-        );
-    }
-
     #[tokio::test]
     async fn lua_context_exposes_the_block_fields() -> anyhow::Result<()> {
         let context = validation_context(
@@ -1409,39 +1379,6 @@ end
     }
 
     #[test]
-    fn non_numeric_check_lua_timeout_returns_an_error() {
-        let err = crate::validators::test_utils::try_validation_context(
-            "example.py",
-            r#"# <block check-lua="check.lua" check-lua-timeout="soon">
-some content
-# </block>"#,
-        )
-        .unwrap_err();
-        let err_chain = format!("{err:#}");
-        assert!(
-            err_chain.contains("invalid `check-lua-timeout`: must be a whole number of seconds"),
-            "unexpected error: {err_chain}"
-        );
-    }
-
-    #[test]
-    fn zero_check_lua_timeout_returns_an_error() {
-        let err = crate::validators::test_utils::try_validation_context(
-            "example.py",
-            r#"# <block check-lua="check.lua" check-lua-timeout="0">
-some content
-# </block>"#,
-        )
-        .unwrap_err();
-        let err_chain = format!("{err:#}");
-        // Zero is rejected as a value error, not silently treated as an instant deadline.
-        assert!(
-            err_chain.contains("invalid `check-lua-timeout`: must be a whole number of seconds"),
-            "unexpected error: {err_chain}"
-        );
-    }
-
-    #[test]
     fn valid_lua_mode_parses_to_its_mode() -> anyhow::Result<()> {
         for mode in [LuaMode::Sandboxed, LuaMode::Safe, LuaMode::Unsafe] {
             // A new mode doesn't compile until it gets an arm here, and so a place in the list.
@@ -1619,22 +1556,6 @@ text
             "unexpected error: {err_chain}"
         );
         Ok(())
-    }
-
-    #[test]
-    fn empty_script_path_returns_an_error() {
-        for attr in [r#"check-lua=" ""#, r#"check-lua="""#, "check-lua"] {
-            let err = crate::validators::test_utils::try_validation_context(
-                "example.py",
-                &format!("# <block {attr}>\ntext\n# </block>"),
-            )
-            .unwrap_err();
-            let err_chain = format!("{err:#}");
-            assert!(
-                err_chain.contains("invalid `check-lua`"),
-                "{attr}: {err_chain}"
-            );
-        }
     }
 }
 

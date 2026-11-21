@@ -431,21 +431,6 @@ mod validate_tests {
     }
 
     #[test]
-    fn invalid_keep_sorted_value_returns_an_error() {
-        let error = crate::validators::test_utils::try_validation_context(
-            "example.py",
-            r#"# <block keep-sorted="invalid">
-        # </block>"#,
-        )
-        .unwrap_err();
-        assert!(
-            format!("{error:#}")
-                .contains("invalid `keep-sorted`: \"invalid\" (expected asc or desc)"),
-            "{error:#}"
-        );
-    }
-
-    #[test]
     fn order_and_format_in_capitals_are_read_like_lowercase() -> anyhow::Result<()> {
         let context = validation_context(
             "example.py",
@@ -589,37 +574,6 @@ mod validate_tests {
             ViolationRange::new(Position::new(4, 9), Position::new(4, 12))
         );
         Ok(())
-    }
-
-    #[test]
-    fn invalid_keep_sorted_pattern_returns_an_error() {
-        let err = crate::validators::test_utils::try_validation_context(
-            "example.py",
-            r#"# <block keep-sorted="asc" keep-sorted-pattern="(unclosed">
-        item1 = 1
-        item2 = 2
-        # </block>"#,
-        )
-        .unwrap_err();
-
-        assert!(
-            format!("{err:#}").contains("invalid `keep-sorted-pattern`"),
-            "unexpected error: {err:#}"
-        );
-    }
-
-    #[test]
-    fn pattern_with_a_line_break_returns_an_error() {
-        let err = crate::validators::test_utils::try_validation_context(
-            "example.py",
-            "# <block keep-sorted=\"asc\" keep-sorted-pattern=\"id = (?P<value>\\w+)\n# ok\">\nid = b ok\nid = a ok\n# </block>",
-        )
-        .unwrap_err();
-
-        assert!(
-            format!("{err:#}").contains("line break"),
-            "unexpected error: {err:#}"
-        );
     }
 
     #[test]
@@ -958,24 +912,6 @@ mod validate_tests {
         assert!(
             err.contains("is not a valid number"),
             "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn unknown_keep_sorted_format_value_returns_an_error() {
-        let error = crate::validators::test_utils::try_validation_context(
-            "example.py",
-            r#"# <block keep-sorted="asc" keep-sorted-format="alphabetical">
-        a
-        b
-        # </block>"#,
-        )
-        .unwrap_err();
-        assert!(
-            format!("{error:#}").contains(
-                "invalid `keep-sorted-format`: \"alphabetical\" (expected lexicographic or numeric)"
-            ),
-            "{error:#}"
         );
     }
 

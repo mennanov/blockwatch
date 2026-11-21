@@ -551,41 +551,13 @@ mod file_system_impl_tests {
 /// Test helpers for filesystems and path filters.
 #[cfg(test)]
 pub(crate) mod test_utils {
-    use crate::fs::{Entry, FileSystem, PathFilter};
+    pub(crate) use super::path_filter::test_utils::{
+        path_filter_all, path_filter_ignoring, path_filter_only,
+    };
+    use crate::fs::{Entry, FileSystem};
     use crate::repo_path::RepoPath;
-    use globset::GlobSet;
     use std::collections::HashMap;
     use std::path::{Component, Path};
-
-    /// Selects every path.
-    pub(crate) fn path_filter_all() -> PathFilter {
-        path_filter_only("**")
-    }
-
-    /// Selects only the paths matching `glob`.
-    pub(crate) fn path_filter_only(glob: &str) -> PathFilter {
-        PathFilter::new(glob_set([glob]), GlobSet::empty())
-    }
-
-    /// Selects every path except those matching `ignored_globs`.
-    pub(crate) fn path_filter_ignoring(
-        ignored_globs: impl IntoIterator<Item = impl AsRef<str>>,
-    ) -> PathFilter {
-        PathFilter::new(glob_set(["**"]), glob_set(ignored_globs))
-    }
-
-    /// Compiles `globs` for the test filter builders.
-    fn glob_set(globs: impl IntoIterator<Item = impl AsRef<str>>) -> GlobSet {
-        let mut builder = GlobSet::builder();
-        for glob in globs {
-            builder.add(
-                crate::fs::glob_builder(glob.as_ref())
-                    .build()
-                    .expect("malformed test glob"),
-            );
-        }
-        builder.build().expect("failed to build test glob set")
-    }
 
     /// An in-memory stand-in for [`FileSystem`], so unit tests can describe a source tree as a map
     /// of strings instead of creating temporary directories.

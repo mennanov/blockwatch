@@ -36,49 +36,33 @@ impl Severity {
 
 #[cfg(test)]
 mod tests {
-    use crate::attributes::test_utils::text_attributes;
-    use crate::attributes::{AttributeName, AttributeValue, Attributes, Severity};
+    use super::Severity;
 
     #[test]
-    fn block_with_valid_severity_attribute_returns_correct_severity() {
-        let attributes = text_attributes(&[("severity", "warning")]);
-
-        assert_eq!(attributes.severity(), Severity::Warning);
+    fn known_severity_parse_returns_it() -> anyhow::Result<()> {
+        assert_eq!(Severity::parse("warning")?, Severity::Warning);
+        Ok(())
     }
 
     #[test]
-    fn block_with_mixed_case_severity_attribute_returns_correct_severity() {
-        let attributes = text_attributes(&[("severity", "InFo")]);
+    fn unknown_severity_parse_returns_error_with_the_known_ones() {
+        let error = Severity::parse("warn").unwrap_err();
 
-        assert_eq!(attributes.severity(), Severity::Info);
         assert_eq!(
-            attributes.values().collect::<Vec<_>>(),
-            vec![(
-                AttributeName::Severity,
-                AttributeValue::Text("info".to_string())
-            )]
+            error.to_string(),
+            "\"warn\" (expected error, warning, info or hint)"
         );
     }
 
     #[test]
-    fn block_without_severity_attribute_returns_error_severity() {
-        assert_eq!(Attributes::default().severity(), Severity::Error);
+    fn mixed_case_severity_parse_returns_it() -> anyhow::Result<()> {
+        assert_eq!(Severity::parse("InFo")?, Severity::Info);
+        Ok(())
     }
 
     #[test]
-    fn block_with_trimmed_severity_attribute_returns_correct_severity() {
-        let attributes = text_attributes(&[("severity", " warning ")]);
-
-        assert_eq!(attributes.severity(), Severity::Warning);
-    }
-
-    #[test]
-    fn block_with_invalid_severity_attribute_returns_error() {
-        let error = Attributes::from_tag([("severity".into(), "warn".into())]).unwrap_err();
-
-        assert_eq!(
-            format!("{error:#}"),
-            "invalid `severity`: \"warn\" (expected error, warning, info or hint)"
-        );
+    fn severity_with_surrounding_spaces_parse_returns_it() -> anyhow::Result<()> {
+        assert_eq!(Severity::parse(" warning ")?, Severity::Warning);
+        Ok(())
     }
 }

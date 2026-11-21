@@ -31,3 +31,41 @@ impl PathFilter {
         self.ignored_glob_set.is_match(path)
     }
 }
+
+/// Test helpers for building path filters.
+#[cfg(test)]
+pub(crate) mod test_utils {
+    use super::PathFilter;
+    use crate::fs::glob::glob_builder;
+    use globset::GlobSet;
+
+    /// Selects every path.
+    pub(crate) fn path_filter_all() -> PathFilter {
+        path_filter_only("**")
+    }
+
+    /// Selects only the paths matching `glob`.
+    pub(crate) fn path_filter_only(glob: &str) -> PathFilter {
+        PathFilter::new(glob_set([glob]), GlobSet::empty())
+    }
+
+    /// Selects every path except those matching `ignored_globs`.
+    pub(crate) fn path_filter_ignoring(
+        ignored_globs: impl IntoIterator<Item = impl AsRef<str>>,
+    ) -> PathFilter {
+        PathFilter::new(glob_set(["**"]), glob_set(ignored_globs))
+    }
+
+    /// Compiles `globs` for the test filter builders.
+    fn glob_set(globs: impl IntoIterator<Item = impl AsRef<str>>) -> GlobSet {
+        let mut builder = GlobSet::builder();
+        for glob in globs {
+            builder.add(
+                glob_builder(glob.as_ref())
+                    .build()
+                    .expect("malformed test glob"),
+            );
+        }
+        builder.build().expect("failed to build test glob set")
+    }
+}
