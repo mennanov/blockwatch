@@ -43,7 +43,7 @@ impl ValidationReport {
     /// # Errors
     /// Returns an error if `trace` can't be written as JSON, such as a map whose keys are not
     /// strings.
-    pub(crate) fn add_trace(
+    pub(super) fn add_trace(
         &mut self,
         file: &RepoPath,
         block: &Block,

@@ -236,7 +236,7 @@ fn virtual_blocks(
 ///
 /// # Errors
 /// Returns an error that shows the line of the second block's entry and of the first one.
-// A `Regex` keeps a cache that it changes as it runs, so the lint calls the key mutable. But a
+// A `Regex` keeps a cache that it changes as it runs, so the lint calls the key mutable.
 #[expect(
     clippy::mutable_key_type,
     reason = "`TargetPattern` is hashed and compared by its text, which never changes"
