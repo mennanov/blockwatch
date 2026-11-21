@@ -5,11 +5,31 @@ import '../styles/theme.css';
 import { Code } from 'astro:components';
 import logo from '../assets/logo.svg?raw';
 import Icon from '../components/Icon.astro';
-import { githubIcon, installIcon, languageIcon } from '../lib/icons';
+import { githubIcon, installIcon, languageIcon, lookIcon, setUpIcon } from '../lib/icons';
 import { agentPrompt, installs, languages, license, pluginInstall, validators, version } from '../lib/repo';
 import { umamiScript } from '../lib/analytics.mjs';
 
 const title = 'blockwatch: keep code, docs and configs in sync';
+// The agent reads the README's install commands itself, so this prompt doesn't repeat them and can't fall behind them.
+const installTabs = [
+	{
+		label: 'AI agent',
+		command:
+			`Install the blockwatch CLI. Pick the install command from ${new URL('/docs/#installation', Astro.site)} that fits this machine, and prefer a package manager that is already installed. Then run \`blockwatch --version\` to check that it works.`,
+		prompt: true,
+	},
+	...installs.map((install) => ({ ...install, prompt: false })),
+];
+const agentPrompts = [
+	{
+		label: 'Look first, change nothing',
+		prompt:
+			"Run `blockwatch skill` and read it. Don't edit any file yet. List the places in this repo where two or more files must stay in sync. Say which of them already disagree, and which blockwatch validator would guard each one.",
+		event: 'copy-agent-prompt-look',
+		icon: lookIcon,
+	},
+	{ label: 'Set it up', prompt: agentPrompt, event: 'copy-agent-prompt', icon: setUpIcon },
+];
 const description = `Write a rule in a comment next to the code. When a change breaks it, your pre-commit hook or CI fails. ${languages.length} languages, free and open source.`;
 
 // One short example per validator, shown on its card. The names must be the ones in the README's validator table; a
@@ -79,6 +99,11 @@ PORT = 8080
 
 const faq = [
 	{
+		q: 'I don\'t know what "drift" means. Do I need to?',
+		short: 'No',
+		a: "No. Drift is when two places that should match stop matching: the port in your code and the port in your Dockerfile, or a function and the README that describes it. You don't have to find these yourself. The agent finds them and adds the blocks.",
+	},
+	{
 		q: 'Does it need Git?',
 		short: 'No',
 		a: 'No. A plain <code>blockwatch</code> run checks every block in the folder. Rules such as <code class="tk-k">affects</code> need to know what changed, so they read a unified diff from stdin. Git, Mercurial and Jujutsu all print one.',
@@ -96,12 +121,17 @@ const faq = [
 	{
 		q: 'Do I have to write the blocks myself?',
 		short: 'No',
-		a: 'No. blockwatch ships a skill for coding agents. Paste one prompt, and the agent finds the places that must stay in sync and adds the blocks. You review them like any other change.',
+		a: 'No. blockwatch ships a skill for coding agents. Paste one prompt, and the agent finds the places that must stay in sync and adds the blocks. You review them like any other change. You can also write them by hand: a block is two comments.',
+	},
+	{
+		q: 'Does it replace code review, or my review agent?',
+		short: 'No',
+		a: 'No. It takes over the checks a machine can do: do these files still agree, is this list sorted, did the docs change with the code. Reviewers still make the judgment calls.',
 	},
 	{
 		q: 'Is it free?',
 		short: 'Yes',
-		a: 'Yes. blockwatch is open source under the MIT license.',
+		a: 'Yes. blockwatch is open source under the MIT license. There is no paid plan and no account.',
 	},
 ];
 ---
@@ -147,8 +177,8 @@ const faq = [
 				<h1>Catch drift before it ships</h1>
 				<p class="lead">
 					Some values have to change together: a port in three configs, a version in the docs, a constant and the
-					test that checks it. Write those rules in comments. When a change breaks one, your pre-commit hook or CI
-					fails.
+					test that checks it. Write a rule in a comment next to them. When a change breaks it, your pre-commit hook
+					or CI fails.
 				</p>
 				<div class="actions">
 					<a class="button primary" href="#install" data-umami-event="install-click">Install</a>
@@ -223,11 +253,11 @@ same-as <span class="tk-k">=</span> <span class="tk-s">'app/settings.py#/PORT'</
 			<section id="install" class="wrap">
 				<h2><span class="hash">#</span> Quick start</h2>
 				<ol class="steps">
-					<li>
+					<li data-tab-group>
 						<h3>Install blockwatch</h3>
 						<div class="tabs" role="tablist">
 							{
-								installs.map((install, i) => (
+								installTabs.map((install, i) => (
 									<button role="tab" aria-selected={i === 0 ? 'true' : 'false'} data-tab={i}>
 										<Icon icon={installIcon(install.label)} />
 										{install.label}
@@ -235,12 +265,20 @@ same-as <span class="tk-k">=</span> <span class="tk-s">'app/settings.py#/PORT'</
 								))
 							}
 						</div>
-						<div class="install-panels">
+						<div class="panels">
 						{
-							installs.map((install, i) => (
-								<div class="copy-box" data-panel={i} hidden={i !== 0}>
-									<Code code={install.command} lang="shell" theme="css-variables" />
-									<button class="copy" data-copy={install.command} data-umami-event={`copy-install-${install.label.toLowerCase()}`}>
+							installTabs.map((install, i) => (
+								<div class:list={['copy-box', { 'prompt-box': install.prompt }]} data-panel={i} hidden={i !== 0}>
+									{install.prompt ? (
+										<code>{install.command}</code>
+									) : (
+										<Code code={install.command} lang="shell" theme="css-variables" />
+									)}
+									<button
+										class="copy"
+										data-copy={install.command}
+										data-umami-event={`copy-install-${install.label.toLowerCase().replace(' ', '-')}`}
+									>
 										Copy
 									</button>
 								</div>
@@ -248,16 +286,34 @@ same-as <span class="tk-k">=</span> <span class="tk-s">'app/settings.py#/PORT'</
 						}
 						</div>
 					</li>
-					<li>
+					<li data-tab-group>
 						<h3>Let your coding agent add the blocks</h3>
 						<p>Paste this prompt into Claude Code, Codex, Cursor or any other agent:</p>
-						<div class="copy-box prompt-box">
-							<code>{agentPrompt}</code>
-							<button class="copy" data-copy={agentPrompt} data-umami-event="copy-agent-prompt">Copy</button>
+						<div class="tabs" role="tablist">
+							{
+								agentPrompts.map((item, i) => (
+									<button role="tab" aria-selected={i === 0 ? 'true' : 'false'} data-tab={i}>
+										<Icon icon={item.icon} />
+										{item.label}
+									</button>
+								))
+							}
 						</div>
-						<p class="muted">
-							Review the blocks it adds and commit them. Want future agent runs to know the rules too?
-							<a href="/docs/agents/">Install the skill</a>
+						<div class="panels">
+							{
+								agentPrompts.map((item, i) => (
+									<div class="copy-box prompt-box" data-panel={i} hidden={i !== 0}>
+										<code>{item.prompt}</code>
+										<button class="copy" data-copy={item.prompt} data-umami-event={item.event}>
+											Copy
+										</button>
+									</div>
+								))
+							}
+						</div>
+						<p class="muted" data-panel={agentPrompts.findIndex((item) => item.label === 'Set it up')} hidden>
+							Review the blocks it adds and commit them. Want future agent runs to know the rules too? <a
+								href="/docs/agents/">Install the skill</a>
 						</p>
 					</li>
 					<li>
@@ -276,14 +332,9 @@ same-as <span class="tk-k">=</span> <span class="tk-s">'app/settings.py#/PORT'</
 							</figure>
 							<figure class="file">
 								<figcaption>GitHub Actions</figcaption>
-								<Code code="- uses: mennanov/blockwatch-action@v1" lang="yaml" theme="css-variables" />
+								<Code code="- uses: mennanov/blockwatch-action@v1 # pin an exact release" lang="yaml" theme="css-variables" />
 							</figure>
 						</div>
-						<p class="muted">
-							<a href="/docs/ci/#pinning-the-action">Pin the action to a commit</a>, because
-							<code>v1</code> moves to each new release.
-							<a href="/docs/ci/">Plain Git hooks, other CI and SARIF output</a>
-						</p>
 					</li>
 				</ol>
 			</section>
@@ -293,21 +344,26 @@ same-as <span class="tk-k">=</span> <span class="tk-s">'app/settings.py#/PORT'</
 				<div class="split">
 					<ul class="facts">
 						<li>A <strong>block</strong> is a pair of tags in comments, around the lines a rule covers.</li>
-						<li>The <strong>start tag</strong> holds the rules, such as <code class="tk-k">same-as</code> or <code class="tk-k">keep-sorted</code>.</li>
+						<li>
+							The <strong>start tag</strong> holds the rules, such as <code class="tk-k">same-as</code> or <code
+								class="tk-k">keep-sorted</code>.
+							<pre class="tag-example"><code><span class="tk-c">#</span> &lt;<span class="tk-k">block</span> <span class="tk-k">same-as</span>=<span class="tk-s">"app/settings.py#/PORT"</span>&gt;</code></pre>
+						</li>
 						<li>
 							A rule can point at another block, a whole file, or a <a href="/docs/symbols/">symbol</a>: a constant in
 							code, a key in JSON or YAML, a Markdown section.
 						</li>
 						<li>
 							A file that can't hold a comment, such as <code class="tk-s">package.json</code>, gets its blocks
-							from <code class="tk-s">blockwatch.toml</code>.
+							from <code class="tk-s" data-toml-ref>blockwatch.toml</code>.
 						</li>
 						<li>
 							<code>blockwatch</code> checks the whole repository. <code><span class="tk-f">git</span> <span class="tk-s">diff --patch</span> <span class="tk-k">|</span> <span class="tk-f">blockwatch</span> <span class="tk-s">--diff</span></code> also
 							checks the rules that need a change.
 						</li>
 					</ul>
-					<figure class="file">
+					<svg class="toml-link" aria-hidden="true"><path /></svg>
+					<figure class="file" data-toml-example>
 						<figcaption>blockwatch.toml</figcaption>
 						<Code
 							code={`# deploy.json can't hold a comment,
@@ -433,11 +489,13 @@ same-as = 'app/settings.py#/PORT'`}
 
 		<script>
 			for (const tab of document.querySelectorAll<HTMLButtonElement>('[data-tab]')) {
+				// Each step has its own tabs, so a click must not switch the panels of another step.
+				const group = tab.closest('[data-tab-group]')!;
 				tab.addEventListener('click', () => {
-					for (const other of document.querySelectorAll('[data-tab]')) {
+					for (const other of group.querySelectorAll('[data-tab]')) {
 						other.setAttribute('aria-selected', String(other === tab));
 					}
-					for (const panel of document.querySelectorAll<HTMLElement>('[data-panel]')) {
+					for (const panel of group.querySelectorAll<HTMLElement>('[data-panel]')) {
 						panel.hidden = panel.dataset.panel !== tab.dataset.tab;
 					}
 				});
@@ -450,6 +508,48 @@ same-as = 'app/settings.py#/PORT'`}
 				});
 			}
 			setupDemo();
+			linkTomlExample();
+
+			/**
+			 * Draws a line from the file name `blockwatch.toml` in the How it works list to the example file next to it.
+			 * When the columns stack on a phone, the example sits right under the list, so there is no line.
+			 */
+			function linkTomlExample() {
+				const ref = document.querySelector<HTMLElement>('[data-toml-ref]')!;
+				const example = document.querySelector<HTMLElement>('[data-toml-example]')!;
+				const svg = document.querySelector<SVGSVGElement>('.toml-link')!;
+				const path = svg.querySelector('path')!;
+				const box = svg.parentElement!;
+				const draw = () => {
+					const outer = box.getBoundingClientRect();
+					// The last box of the name, in case it wraps onto two lines.
+					const rects = ref.getClientRects();
+					const from = rects[rects.length - 1];
+					const to = example.getBoundingClientRect();
+					if (to.left < from.right) {
+						path.removeAttribute('d');
+						return;
+					}
+					// Past the full stop that follows the name, with a gap after it.
+					const x1 = from.right - outer.left + 16;
+					const y1 = from.top + from.height / 2 - outer.top;
+					const top = to.top - outer.top;
+					const bottom = to.bottom - outer.top;
+					// The line runs right along the name's own line, which is empty after it, so it crosses no text. Beside
+					// the example it goes straight in. Above or below it, it turns into the example's nearest edge.
+					const r = 12;
+					if (y1 > bottom + 2 * r || y1 < top - 2 * r) {
+						const x2 = to.left - outer.left + 32;
+						const y2 = y1 > bottom ? bottom + 6 : top - 6;
+						const turn = y1 > bottom ? -r : r;
+						path.setAttribute('d', `M${x1},${y1} H${x2 - r} Q${x2},${y1} ${x2},${y1 + turn} V${y2}`);
+					} else {
+						path.setAttribute('d', `M${x1},${y1} H${to.left - outer.left - 6}`);
+					}
+				};
+				new ResizeObserver(draw).observe(box);
+				document.fonts.ready.then(draw);
+			}
 
 			/**
 			 * Plays the hero example one step at a time, in a loop, once it scrolls into view. A click on a tab plays that
@@ -1291,11 +1391,14 @@ same-as = 'app/settings.py#/PORT'`}
 		color: var(--accent);
 		font-family: var(--sl-font-mono);
 	}
+	/* The tabs sit on the top border of the box under them. The picked tab overlaps that border by 1px and paints over
+	   it, so the tab and the box read as one shape. */
 	.tabs {
+		position: relative;
+		z-index: 1;
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.25rem;
-		margin-bottom: 0.5rem;
+		margin-bottom: -1px;
 	}
 	.tabs button {
 		display: inline-flex;
@@ -1303,17 +1406,35 @@ same-as = 'app/settings.py#/PORT'`}
 		gap: 0.4rem;
 		font: inherit;
 		font-size: 0.85rem;
-		padding: 0.25rem 0.75rem;
-		border-radius: 999px;
-		border: 1px solid transparent;
+		padding: 0.4rem 0.9rem;
+		/* A faint outline on every tab shows the bar's shape. The picked tab gets the full --line color. */
+		border: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
 		background: none;
 		color: var(--muted);
 		cursor: pointer;
 	}
+	/* Neighbors share one border instead of drawing two side by side. */
+	.tabs button + button {
+		margin-left: -1px;
+	}
+	.tabs button:first-child {
+		border-top-left-radius: 0.5rem;
+	}
+	.tabs button:last-child {
+		border-top-right-radius: 0.5rem;
+	}
+	.tabs button:hover {
+		color: var(--text);
+	}
 	.tabs button[aria-selected='true'] {
+		position: relative;
 		border-color: var(--line);
+		border-bottom-color: var(--panel);
 		color: var(--text);
 		background: var(--panel);
+	}
+	.tabs + .panels > .copy-box {
+		border-top-left-radius: 0;
 	}
 	.copy-box {
 		display: flex;
@@ -1328,17 +1449,17 @@ same-as = 'app/settings.py#/PORT'`}
 	.copy-box[hidden] {
 		display: none;
 	}
-	/* All install commands share one cell and the hidden ones stay laid out, so the box is as tall as the tallest one.
-	   A long command has a scroll bar, and without this the box would change height when its tab is picked. */
-	.install-panels {
+	/* All panels of a step share one cell and the hidden ones stay laid out, so the box is as tall as the tallest one.
+	   Without this the box would change height when a tab is picked, and the page below it would jump. */
+	.panels {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr);
 	}
-	.install-panels > .copy-box {
+	.panels > .copy-box {
 		grid-area: 1 / 1;
 		align-items: center;
 	}
-	.install-panels > .copy-box[hidden] {
+	.panels > .copy-box[hidden] {
 		display: flex;
 		visibility: hidden;
 	}
@@ -1373,8 +1494,30 @@ same-as = 'app/settings.py#/PORT'`}
 		gap: 1rem;
 		align-items: start;
 	}
+	/* Each column starts as wide as its longest line, and the two share what is left. With equal columns, the GitHub
+	   Actions line was a few pixels too long for its half and got a scroll bar, while the other half had room to spare. */
+	.two {
+		grid-template-columns: repeat(2, minmax(0, auto));
+	}
 	.split {
+		position: relative;
 		gap: 2.5rem;
+	}
+	.toml-link {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		overflow: visible;
+		pointer-events: none;
+	}
+	.toml-link path {
+		fill: none;
+		stroke: var(--accent);
+		stroke-width: 1.5;
+		stroke-linecap: round;
+		stroke-dasharray: 4 4;
+		opacity: 0.7;
 	}
 	.facts {
 		margin: 0;
@@ -1384,6 +1527,15 @@ same-as = 'app/settings.py#/PORT'`}
 	}
 	.facts li::marker {
 		color: var(--accent);
+	}
+	.tag-example {
+		margin: 0.5rem 0 0;
+		padding: 0.5rem 0.75rem;
+		border: 1px solid var(--line);
+		border-radius: 0.5rem;
+		background: var(--panel);
+		font-size: 0.85rem;
+		overflow-x: auto;
 	}
 
 	.grid {

@@ -1,4 +1,4 @@
-// The icons on the landing page: one for each language and each way to install, and the GitHub logo.
+// The icons on the landing page: one for each language, each way to install and each agent prompt, and the GitHub logo.
 
 import {
 	siApachegroovy,
@@ -165,7 +165,7 @@ export function languageIcon(language: string): Icon {
 	return icon;
 }
 
-// Keys are the tab names of the install commands in src/lib/repo.ts.
+// Keys are the tab names of the install commands in src/lib/repo.ts, plus the AI agent tab on the landing page.
 const installIcons: Record<string, Icon> = {
 	Homebrew: fill(siHomebrew),
 	Shell: terminal,
@@ -177,6 +177,11 @@ const installIcons: Record<string, Icon> = {
 	},
 	Python: fill(siPython),
 	Cargo: fill(siRust),
+	// Sparkles, the usual sign for AI.
+	'AI agent': {
+		path: 'M10 3l1.6 4.4L16 9l-4.4 1.6L10 15l-1.6-4.4L4 9l4.4-1.6ZM18 14l.8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8Z',
+		style: 'stroke',
+	},
 };
 
 /** Returns the icon of an install tab. Throws if it has none. */
@@ -190,3 +195,15 @@ export function installIcon(label: string): Icon {
 
 /** The GitHub logo, in the color of the text around it. */
 export const githubIcon: Icon = { path: siGithub.path, style: 'fill' };
+
+/** An eye, for the agent prompt that only reads the repository. */
+export const lookIcon: Icon = {
+	path: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Zm10 3a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
+	style: 'stroke',
+};
+
+/** A wrench, for the agent prompt that adds blocks. */
+export const setUpIcon: Icon = {
+	path: 'M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9Z',
+	style: 'stroke',
+};
