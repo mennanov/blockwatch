@@ -41,6 +41,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   target type`. Before, the error said only `invalid number`.
 - With `--diff`, a source path in a `---` line that is quoted badly, such as `"a/x\9.py"`, is now an error. Before, it
   was read as `/dev/null`, so the file could resolve to the wrong path.
+- When a filter in a symbol path matches no item, `did you mean` now lists only paths that exist. Before, it also listed
+  items that lack the rest of the path, such as `steps/~[uses=actions~1checkout@v7]/with/toolchain`.
 
 ## [0.19.2] - 2026-11-14
 

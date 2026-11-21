@@ -148,7 +148,7 @@ impl Symbols {
     /// alike by edit distance, and those that end in the same segment. When `path` has a filter,
     /// they are only paths under the child that the last filter matched, and they keep every
     /// filter as written. When a filter matches no child, the hints are `path` with the filter's
-    /// value swapped for a value that exactly one child holds.
+    /// value swapped for each value of a child that makes the path resolve.
     ///
     /// # Errors
     /// Returns [`ResolveError::Unreadable`] when `path` is an unreadable path, or one of its
@@ -316,7 +316,7 @@ fn resolve_filters<'a>(
                 // child matches, so a filter that matches doesn't keep every key it looked at.
                 let keys = child_keys(&scope, parent, key);
                 return Err(ResolveError::NotFound {
-                    hints: filter_hints(path, index, key, keys),
+                    hints: filter_hints(symbols, path, index, key, keys),
                 });
             }
             1 => {
@@ -427,38 +427,31 @@ fn path_hints(symbols: &[&Symbol], path: &SymbolPath, resolved: &SymbolPath) -> 
 }
 
 /// The paths to suggest when the filter at `index` in `path`, on `key`, matches none of `keys`:
-/// `path` with the filter's value swapped for each value that exactly one of `keys` holds. The
-/// most alike come first.
+/// `path` with the filter's value swapped for each value of `keys` that makes the path resolve in
+/// `symbols`. The most alike come first.
 fn filter_hints<'s>(
+    symbols: &Symbols,
     path: &SymbolPath,
     index: usize,
     key: &str,
     keys: impl Iterator<Item = &'s Symbol>,
 ) -> Vec<SymbolPath> {
-    let values: Vec<&str> = keys
+    // The hints start from `path`, so the filters before `index` stay as the reference wrote them.
+    // A value that several children hold makes the filter ambiguous, so its path doesn't resolve.
+    let alternatives: Vec<SymbolPath> = keys
         // A key that holds a list or a map has no value to put in a filter.
         .filter_map(|symbol| symbol.value.as_ref())
-        .map(|held| held.text.as_str())
-        .collect();
-    let mut counts: HashMap<&str, usize> = HashMap::new();
-    for value in &values {
-        *counts.entry(value).or_default() += 1;
-    }
-    // A value that several children hold would make the hint match several children too. The
-    // hints start from `path`, so the filters before `index` stay as the reference wrote them.
-    let alternatives: Vec<SymbolPath> = values
-        .iter()
-        .filter(|value| counts[*value] == 1)
-        .map(|value| {
+        .map(|held| {
             let filter = Segment::Filter {
                 key: key.to_string(),
-                value: value.to_string(),
+                value: held.text.clone(),
             };
             path.clone().with_segment(index, filter)
         })
+        .filter(|alternative| symbols.resolve(alternative).is_ok())
         .collect();
-    // Each alternative points at a real child and differs from `path` only in the filter's value,
-    // so a similarity cutoff would only drop real choices.
+    // Each alternative resolves and differs from `path` only in the filter's value, so a
+    // similarity cutoff would only drop real choices.
     hints(&alternatives, path, 0.0)
 }
 
@@ -801,11 +794,50 @@ mod resolve_tests {
     }
 
     #[test]
+    fn filter_matching_no_child_leaves_children_without_the_rest_of_the_path_out_of_hints() {
+        // `blues` is the most alike value, but its item has no `content`.
+        let symbols = Symbols::from(vec![
+            scalar("/items/0/name", 0, "blues"),
+            scalar("/items/1/name", 1, "red"),
+            symbol("/items/1/content", 2),
+        ]);
+
+        assert_eq!(
+            symbols.resolve(&path("/items/~[name=blue]/content")),
+            Err(ResolveError::NotFound {
+                hints: vec![path("/items/~[name=red]/content")]
+            })
+        );
+    }
+
+    #[test]
+    fn filter_matching_no_child_leaves_children_where_a_later_filter_fails_out_of_hints() {
+        // Only the `first` group has an item named `blue`.
+        let symbols = Symbols::from(vec![
+            scalar("/groups/0/name", 0, "first"),
+            scalar("/groups/0/items/0/name", 1, "blue"),
+            symbol("/groups/0/items/0/content", 2),
+            scalar("/groups/1/name", 3, "second"),
+            scalar("/groups/1/items/0/name", 4, "red"),
+            symbol("/groups/1/items/0/content", 5),
+        ]);
+
+        assert_eq!(
+            symbols.resolve(&path("/groups/~[name=secnd]/items/~[name=blue]/content")),
+            Err(ResolveError::NotFound {
+                hints: vec![path("/groups/~[name=first]/items/~[name=blue]/content")]
+            })
+        );
+    }
+
+    #[test]
     fn filter_at_the_end_matching_no_child_returns_hints_below_the_similarity_floor() {
         // `/~[name=crimson]` is 56% alike to `/~[name=blue]`, below the 60% that other hints need.
         let symbols = Symbols::from(vec![
-            scalar("/0/name", 0, "red"),
-            scalar("/1/name", 1, "crimson"),
+            element("/0", 0..2),
+            scalar("/0/name", 1, "red"),
+            element("/1", 2..4),
+            scalar("/1/name", 3, "crimson"),
         ]);
 
         assert_eq!(
@@ -896,6 +928,7 @@ mod resolve_tests {
         let symbols = Symbols::from(vec![
             scalar("/groups/0/name", 0, "first"),
             scalar("/groups/0/items/0/name", 1, "blue"),
+            symbol("/groups/0/items/0/content", 2),
         ]);
 
         assert_eq!(
@@ -912,6 +945,7 @@ mod resolve_tests {
         let symbols = Symbols::from(vec![
             symbol("/items/0/name", 0),
             scalar("/items/1/name", 1, "red"),
+            symbol("/items/1/content", 2),
         ]);
 
         assert_eq!(
