@@ -51,3 +51,22 @@ jobs:
           files: coverage.lcov
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
+
+  # rustc and clippy check std functions against `rust-version` in Cargo.toml, but not language features. Only a build
+  # on that Rust shows that it still works.
+  oldest-rust:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the oldest supported Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: '1.98'
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2.9.3
+      - name: Build on the oldest supported Rust
+        run: cargo check --all-targets --locked

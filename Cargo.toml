@@ -2,6 +2,7 @@
 name = "blockwatch"
 version = "0.19.2"
 edition = "2024"
+rust-version = "1.98"
 repository = "https://github.com/mennanov/blockwatch"
 description = "Language agnostic linter that keeps your code and documentation in sync and valid"
 homepage = "https://blockwatch.sh"

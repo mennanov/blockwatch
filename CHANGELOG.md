@@ -28,6 +28,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - An empty `keep-sorted-pattern` is now an error. Before, `keep-sorted-pattern=""` meant no pattern.
 - Spaces around the value of `keep-sorted`, `keep-sorted-format`, `same-as-format`, `same-as-mode`, `same-as-paths` and
   `severity` are now ignored. Before, `keep-sorted=" desc "` was an error.
+- Building blockwatch from source, as with `cargo install blockwatch`, now needs Rust 1.98 or newer. On an older Rust,
+  `cargo` now stops at the start and says which version is needed.
 
 ### Fixed
 
