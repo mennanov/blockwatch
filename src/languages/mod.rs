@@ -179,6 +179,26 @@ impl<C: CommentsParser> LanguageParser for LanguageParserImpl<C> {
 }
 
 #[cfg(test)]
+pub(crate) mod test_utils {
+    use super::LanguageParser;
+
+    /// The source text of each comment that `parser` finds in `contents`, in the order of the
+    /// comments in `contents`.
+    ///
+    /// # Errors
+    /// Returns the error of [`LanguageParser::parse_comments`].
+    pub(crate) fn comment_sources<'a>(
+        parser: &mut impl LanguageParser,
+        contents: &'a str,
+    ) -> anyhow::Result<Vec<&'a str>> {
+        Ok(parser
+            .parse_comments(contents)?
+            .map(|comment| &contents[comment.source_range])
+            .collect())
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

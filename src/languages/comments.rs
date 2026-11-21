@@ -1,6 +1,6 @@
 //! Finds the comments in a file, and the comment styles that several languages share.
 
-use super::{node_text, tree_sitter_parser};
+use super::syntax_tree::{node_text, tree_sitter_parser};
 use crate::position::{Position, character_column_at};
 use std::ops::Range;
 use tree_sitter::{Node, Parser, Tree, TreeCursor};
@@ -496,24 +496,4 @@ pub(super) fn blank_decorative_stars(content: &str) -> String {
         result.push_str(after_stars);
     }
     result
-}
-
-#[cfg(test)]
-pub(crate) mod test_utils {
-    use crate::languages::LanguageParser;
-
-    /// The source text of each comment that `parser` finds in `contents`, in the order of the
-    /// comments in `contents`.
-    ///
-    /// # Errors
-    /// Returns the error of [`LanguageParser::parse_comments`].
-    pub(crate) fn comment_sources<'a>(
-        parser: &mut impl LanguageParser,
-        contents: &'a str,
-    ) -> anyhow::Result<Vec<&'a str>> {
-        Ok(parser
-            .parse_comments(contents)?
-            .map(|comment| &contents[comment.source_range])
-            .collect())
-    }
 }

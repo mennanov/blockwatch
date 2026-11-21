@@ -18,7 +18,7 @@ fn comments_parser() -> impl CommentsParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::languages::comments::test_utils::comment_sources;
+    use crate::languages::test_utils::comment_sources;
     use crate::{languages::Comment, position::Position};
 
     #[test]

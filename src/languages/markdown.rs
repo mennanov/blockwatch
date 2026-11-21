@@ -368,7 +368,7 @@ fn title_start(definition: &[u8]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::languages::comments::test_utils::comment_sources;
+    use crate::languages::test_utils::comment_sources;
     use crate::position::{Position, test_utils};
 
     /// The symbols `source` derives, as `(path, value)` pairs in the order they were derived.
