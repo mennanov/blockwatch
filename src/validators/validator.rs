@@ -117,6 +117,7 @@ impl Validator {
 mod tests {
     use super::Validator;
     use crate::attributes::{AttributeName, Attributes};
+    use std::collections::BTreeSet;
     use strum::IntoEnumIterator;
 
     #[test]
@@ -215,5 +216,20 @@ mod tests {
                 "{validator}"
             );
         }
+    }
+
+    #[test]
+    fn each_validator_description_returns_its_own_one_line_sentence() {
+        // The description is the SARIF rule's short description, which SARIF asks to be one
+        // sentence that reads on one line.
+        let descriptions: Vec<&str> = Validator::iter().map(Validator::description).collect();
+        for description in &descriptions {
+            assert!(
+                !description.contains('\n') && description.ends_with('.'),
+                "{description:?}"
+            );
+        }
+        let distinct: BTreeSet<&str> = descriptions.iter().copied().collect();
+        assert_eq!(distinct.len(), descriptions.len(), "{descriptions:?}");
     }
 }
