@@ -7,7 +7,7 @@ use crate::validators::{
     AsyncValidator, PatternContent, TargetFiles, TypedValidator, ValidationContext,
     ValidationReport, Validator, ValidatorTrace, Violation, block_content_for_pattern,
 };
-use anyhow::{Context, anyhow};
+use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
 use mlua::{HookTriggers, Lua, StdLib, VmState};
 use serde::Serialize;
@@ -400,14 +400,20 @@ fn run_lua_script_sync(inputs: LuaScriptInputs, mode: LuaMode) -> anyhow::Result
         .call((ctx_table, content))
         .with_context(|| format!("failed to call validate() in {}", inputs.script_path))?;
 
-    match result {
-        mlua::Value::Nil => Ok(None),
-        mlua::Value::String(s) => Ok(Some(s.to_str()?.to_string())),
-        other => Err(anyhow!(
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "Only nil and a string are valid results, so any other kind of value, including one \
+                  added later, is an error."
+    )]
+    let message = match result {
+        mlua::Value::Nil => None,
+        mlua::Value::String(s) => Some(s.to_str()?.to_string()),
+        other => bail!(
             "validate() must return nil or a string, got: {:?}",
             other.type_name()
-        )),
-    }
+        ),
+    };
+    Ok(message)
 }
 
 /// The message both timeout layers report, so a script stopped inside the VM by the hook and one

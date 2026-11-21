@@ -109,8 +109,10 @@ impl Formats {
     /// # Errors
     /// Returns an error when a group name in `same-as-format` is absent from `pattern`.
     pub(super) fn validate_groups(&self, pattern: Option<&Regex>) -> anyhow::Result<()> {
-        let FormatsKind::ByGroup(groups_map) = &self.0 else {
-            return Ok(());
+        let groups_map = match &self.0 {
+            // One format for every group refers to no group by name.
+            FormatsKind::All(_) => return Ok(()),
+            FormatsKind::ByGroup(groups_map) => groups_map,
         };
         let groups = pattern_groups(pattern);
         for group in groups_map.keys() {

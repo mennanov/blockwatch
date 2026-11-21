@@ -17,6 +17,9 @@
 // A module with child modules keeps its own code in `mod.rs`, inside its folder, so each such
 // module looks the same.
 #![warn(clippy::self_named_module_files)]
+// A `_` arm gives a variant added later whatever that arm does, without anyone deciding it. So
+// each `_` on an enum needs an `expect` that says why no new variant could need another arm.
+#![warn(clippy::wildcard_enum_match_arm)]
 
 mod attributes;
 mod blocks;

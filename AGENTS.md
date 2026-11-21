@@ -33,10 +33,12 @@ cargo run -- list '<path or glob>' # print the blocks parsed from matching files
   the cause and, where possible, the fix. Never fall back to a default, and never skip a bad input with only a
   warning. Users don't notice warnings, so a silent fallback gives a wrong result that looks right. Output may be empty
   or zero when that is the true result.
-- Handle an enum with an exhaustive `match`, never with `let ... else` or an `if` plus one catch-all branch. Then the
-  compiler makes you decide what each new variant does. `Option` and `Result` can't get new variants, so
-  `let ... else` on them is fine. A `match` on another crate's enum may end with `_` when it picks out a few variants
-  that no new variant could be. Say why in a comment next to the `_`.
+- Handle an enum with an exhaustive `match`, never with `let ... else`, `if let` or `matches!`. Then the compiler
+  makes you decide what each new variant does. Clippy's `wildcard_enum_match_arm` fails a `_` arm, but it doesn't
+  see these three. `Option` and `Result` can't get new variants, so they are fine.
+- A `match` on another crate's enum may end with `_` when no new variant could need another arm. Say why in an
+  `#[expect(clippy::wildcard_enum_match_arm, reason = "...")]` on the function or statement that holds the `match`.
+  Clippy ignores one on the arm.
 - Never add a dependency loop, between the modules in `src/` or between the files of one module. If `a` uses `b`, then
   `b` must not use `a`, directly or through other files. Tests count too: a test may use only what its file's code may
   use. A `mod.rs` doesn't use an item it only re-exports. To break a loop, move the item that both sides need into its

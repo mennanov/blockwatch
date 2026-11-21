@@ -38,7 +38,9 @@ impl RepoPath {
                         .to_str()
                         .ok_or_else(|| anyhow!("path \"{}\" is not valid UTF-8", path.display()))?,
                 ),
-                _ => bail!("path \"{}\" escapes the repository root", path.display()),
+                Component::Prefix(_) | Component::RootDir | Component::ParentDir => {
+                    bail!("path \"{}\" escapes the repository root", path.display())
+                }
             }
         }
         if segments.is_empty() {

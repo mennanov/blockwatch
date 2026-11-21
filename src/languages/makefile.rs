@@ -83,6 +83,11 @@ impl SymbolsParser for MakefileSymbolsParser {
 /// Whether a parse error of `kind` stops the run: make stops reading the file there, or
 /// makefile-lossless skips a part of it. Makefile-lossless also reports errors on lines that make
 /// reads, or never reads, such as a tab line in a branch make skips. Those don't stop the run.
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "The enum is non-exhaustive, and a kind added later can't be one of the seven that stop \
+              the run."
+)]
 fn stops_run(kind: ParseErrorKind) -> bool {
     match kind {
         ParseErrorKind::MissingEndef
@@ -95,7 +100,6 @@ fn stops_run(kind: ParseErrorKind) -> bool {
         // reads, so a name set inside would be missing without a word. A `$(...)` nested that
         // deep loses nothing, but it gives the same kind, so it stops the run too.
         ParseErrorKind::TooDeeplyNested => true,
-        // The enum is non-exhaustive, and a kind added later can't be one of the seven above.
         _ => false,
     }
 }

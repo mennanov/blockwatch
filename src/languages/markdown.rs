@@ -204,11 +204,14 @@ impl<'s> Sections<'s> {
 
 /// The level of `node` if it is a heading, from 1 for `#` to 6 for `######`. `None` for any other
 /// node.
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "Both kinds of Markdown heading, `#` and underlined, are `Node::Heading`, so a new kind \
+              of node would not be a heading either."
+)]
 fn heading_depth(node: &Node) -> Option<u8> {
     match node {
         Node::Heading(heading) => Some(heading.depth),
-        // Both kinds of Markdown heading, `#` and underlined, are `Node::Heading`, so a new kind
-        // of node would not be a heading either.
         _ => None,
     }
 }
@@ -242,6 +245,12 @@ impl MdCommentsParser {
         let lines = LineIndex::new(source);
         let mut comments = Vec::new();
         for node in nodes_in_order(&root) {
+            #[expect(
+                clippy::wildcard_enum_match_arm,
+                reason = "Raw HTML that Markdown keeps as HTML is always `Node::Html`, and every link \
+                          reference definition is `Node::Definition`. A `<!--` in the alt text of an \
+                          image or in the title of a link is part of an attribute, not a comment."
+            )]
             match node {
                 Node::Html(_) => {
                     comments.extend(self.html_comments(
@@ -253,9 +262,6 @@ impl MdCommentsParser {
                 Node::Definition(definition) => {
                     comments.extend(link_reference_comment(definition, source, &lines));
                 }
-                // Raw HTML that Markdown keeps as HTML is always `Node::Html`, and every link
-                // reference definition is `Node::Definition`. A `<!--` in the alt text of an image
-                // or in the title of a link is part of an attribute, not a comment.
                 _ => {}
             }
         }
