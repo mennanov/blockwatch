@@ -360,12 +360,13 @@ impl BlockEnd {
 
 #[cfg(test)]
 mod tests {
+    use super::Blocks;
     use crate::attributes::test_utils::text_attributes;
     use crate::attributes::{Attributes, SortOrder};
     use crate::blocks::{Block, Content, Declaration, parse_blocks};
     use crate::languages;
-    use crate::languages::{Language, LanguageParser, LanguageParsers};
-    use crate::position::{Position, test_utils};
+    use crate::languages::{Comment, Language, LanguageParser, LanguageParsers};
+    use crate::position::{LineIndex, Position, test_utils};
 
     fn create_parser() -> impl LanguageParser {
         // Reuse existing real blocks parser.
@@ -375,6 +376,53 @@ mod tests {
     /// Drains the parser into a `Vec`, failing on the first parse error.
     fn parse_all(parser: &mut impl LanguageParser, contents: &str) -> anyhow::Result<Vec<Block>> {
         parse_blocks(parser, contents).collect()
+    }
+
+    /// The blocks in `contents` when its comments are `comment_sources`, which appear in
+    /// `contents` in this order. A comment's text is all of its source, with no comment marker,
+    /// so no language is involved.
+    ///
+    /// Returns the attributes, the start tag text and the content text of each block, or the
+    /// first error.
+    fn blocks_in_comments(
+        contents: &str,
+        comment_sources: &[&str],
+    ) -> anyhow::Result<Vec<(Attributes, String, String)>> {
+        let line_index = LineIndex::new(contents);
+        let mut comments = Vec::new();
+        let mut search_start = 0;
+        for source in comment_sources {
+            let (start, _) = contents
+                .match_indices(source)
+                .find(|(start, _)| *start >= search_start)
+                .expect("each comment source is in contents, after the one before it");
+            let source_range = start..start + source.len();
+            search_start = source_range.end;
+            comments.push(Comment {
+                position_range: line_index.range(&source_range),
+                source_range,
+                comment_text: (*source).to_string(),
+            });
+        }
+        let offset_at = |position: Position| {
+            (0..=contents.len())
+                .find(|&offset| {
+                    contents.is_char_boundary(offset) && line_index.position(offset) == position
+                })
+                .expect("a block position is in contents")
+        };
+        Blocks::new(comments.into_iter(), contents)
+            .map(|block| {
+                let block = block?;
+                let tag = block.start_tag_position_range;
+                let tag_text = contents.get(offset_at(tag.start)..offset_at(tag.end));
+                Ok((
+                    block.attributes,
+                    tag_text.expect("a tag is whole characters").to_string(),
+                    block.content.text(contents).to_string(),
+                ))
+            })
+            .collect()
     }
 
     #[test]
@@ -683,60 +731,92 @@ println!("hello2");
     }
 
     #[test]
-    fn start_tag_continued_over_line_comments_returns_correct_block() -> anyhow::Result<()> {
-        let mut parser = create_parser();
-        let contents =
-            "// <block name=\"foo\"\n// keep-sorted\n// keep-unique>\nlet a = 1;\n// </block>";
-        let blocks = parse_all(&mut parser, contents)?;
+    fn start_tag_split_over_comments_on_separate_lines_returns_one_block() -> anyhow::Result<()> {
+        let contents = "<block name=\"foo\"\nkeep-sorted\nkeep-unique>\nb\na\n</block>\n";
+        let blocks = blocks_in_comments(
+            contents,
+            &[
+                "<block name=\"foo\"",
+                "keep-sorted",
+                "keep-unique>",
+                "</block>",
+            ],
+        )?;
         assert_eq!(
             blocks,
-            [Block {
-                attributes: text_attributes(&[
-                    ("name", "foo"),
-                    ("keep-sorted", ""),
-                    ("keep-unique", ""),
-                ]),
-                start_tag_position_range: Position::new(1, 4)..Position::new(3, 16),
-                content: Content::source(
-                    test_utils::substr_range(contents, "\nlet a = 1;\n"),
-                    Position::new(3, 16)..Position::new(5, 1),
-                ),
-                declaration: Declaration::Tags,
-            }],
+            [(
+                text_attributes(&[("name", "foo"), ("keep-sorted", ""), ("keep-unique", "")]),
+                "<block name=\"foo\"\nkeep-sorted\nkeep-unique>".to_string(),
+                "\nb\na\n".to_string(),
+            )],
         );
         Ok(())
     }
 
     #[test]
-    fn start_tag_continued_after_an_end_tag_on_the_same_line_returns_correct_blocks()
-    -> anyhow::Result<()> {
-        let mut parser = create_parser();
-        let contents = "// <block name=\"a\">\nlet x = 1;\n// </block> <block name=\"b\"\n// keep-sorted>\nlet y = 2;\n// </block>";
-        let blocks = parse_all(&mut parser, contents)?;
+    fn start_tag_split_over_comments_with_nothing_between_returns_one_block() -> anyhow::Result<()>
+    {
+        // Some comments end with their line break, such as a Markdown link reference definition.
+        // Then the next comment starts right where the last one ends.
+        let contents = "<block name=\"foo\"\nkeep-sorted>\nb\na\n</block>\n";
+        let blocks = blocks_in_comments(
+            contents,
+            &["<block name=\"foo\"\n", "keep-sorted>\n", "</block>\n"],
+        )?;
+        assert_eq!(
+            blocks,
+            [(
+                text_attributes(&[("name", "foo"), ("keep-sorted", "")]),
+                "<block name=\"foo\"\nkeep-sorted>".to_string(),
+                "b\na\n".to_string(),
+            )],
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn start_tag_split_after_an_end_tag_in_one_comment_returns_both_blocks() -> anyhow::Result<()> {
+        let contents =
+            "<block name=\"a\">\nx\n</block> <block name=\"b\"\nkeep-sorted>\ny\n</block>\n";
+        let blocks = blocks_in_comments(
+            contents,
+            &[
+                "<block name=\"a\">",
+                "</block> <block name=\"b\"",
+                "keep-sorted>",
+                "</block>",
+            ],
+        )?;
         assert_eq!(
             blocks,
             [
-                Block {
-                    attributes: text_attributes(&[("name", "a")]),
-                    start_tag_position_range: Position::new(1, 4)..Position::new(1, 20),
-                    content: Content::source(
-                        test_utils::substr_range(contents, "\nlet x = 1;\n"),
-                        Position::new(1, 20)..Position::new(3, 1),
-                    ),
-                    declaration: Declaration::Tags,
-                },
-                Block {
-                    attributes: text_attributes(&[("name", "b"), ("keep-sorted", "")]),
-                    start_tag_position_range: Position::new(3, 13)..Position::new(4, 16),
-                    content: Content::source(
-                        test_utils::substr_range(contents, "\nlet y = 2;\n"),
-                        Position::new(4, 16)..Position::new(6, 1),
-                    ),
-                    declaration: Declaration::Tags,
-                },
+                (
+                    text_attributes(&[("name", "a")]),
+                    "<block name=\"a\">".to_string(),
+                    "\nx\n".to_string(),
+                ),
+                (
+                    text_attributes(&[("name", "b"), ("keep-sorted", "")]),
+                    "<block name=\"b\"\nkeep-sorted>".to_string(),
+                    "\ny\n".to_string(),
+                ),
             ],
         );
         Ok(())
+    }
+
+    #[test]
+    fn start_tag_split_over_comments_with_code_between_returns_error() {
+        // `code` reads as an attribute with no value. So the tag would close if the code between
+        // the comments were read as part of it.
+        let contents = "<block name=\"foo\"\ncode keep-sorted>\n";
+        let error = blocks_in_comments(contents, &["<block name=\"foo\"", "keep-sorted>"])
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "malformed block tag at line 1, column 1. If this is not meant as a tag, put it in backticks"
+        );
     }
 
     #[test]
@@ -988,19 +1068,6 @@ println!("hello2");
     fn malformed_tag_on_a_later_line_reports_that_line_and_column() {
         let mut parser = create_parser();
         let contents = "fn foo() {}\n    // <block name=\"foo\" keep-sorted\n";
-        let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
-        assert_eq!(
-            error_message,
-            "malformed block tag at line 2, column 8. If this is not meant as a tag, put it in backticks"
-        );
-    }
-
-    #[test]
-    fn start_tag_continued_after_code_returns_error() {
-        let mut parser = create_parser();
-        // `A` reads as a valueless attribute, so the tag would close if the code between the two
-        // comments were read as part of it.
-        let contents = "enum E {\n    // <block name=\"foo\"\n    A // keep-sorted>\n}\n";
         let error_message = parse_all(&mut parser, contents).unwrap_err().to_string();
         assert_eq!(
             error_message,
