@@ -31,13 +31,6 @@ pub(crate) struct ValidationContext {
     pub(super) traces_requested: bool,
 }
 
-#[cfg(test)]
-impl std::fmt::Debug for ValidationContext {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ValidationContext").finish_non_exhaustive()
-    }
-}
-
 /// Which blocks a run checks. Each address is `FILE:BLOCK_NAME`.
 #[derive(Debug, PartialEq)]
 pub(crate) enum BlockSelection {
