@@ -77,38 +77,44 @@ impl<'a> RunReport<'a> {
         context: &'a ValidationContext,
         log: &ValidationLog,
     ) -> Self {
-        let mut checks = 0;
         let mut validators: BTreeMap<&'static str, usize> = BTreeMap::new();
-        for blocks_in_file in log.checked_blocks.values() {
-            for validators_of_block in blocks_in_file.values() {
-                checks += validators_of_block.len();
-                for validator in validators_of_block {
-                    *validators.entry(validator.as_str()).or_default() += 1;
-                }
-            }
+        for validator in log
+            .checked_blocks
+            .values()
+            .flat_map(BTreeMap::values)
+            .flatten()
+        {
+            *validators.entry(validator.as_str()).or_default() += 1;
         }
 
-        let mut files = BTreeMap::new();
-        let mut blocks = 0;
-        let mut blocks_unchecked = 0;
-        for (file_path, file_blocks) in context.blocks() {
-            let checked_in_file = log.checked_blocks.get(file_path);
-            let mut listings = Vec::with_capacity(file_blocks.blocks_with_context.len());
-            for block_with_context in &file_blocks.blocks_with_context {
-                blocks += 1;
-                let mut listing = BlockListing::from(block_with_context);
-                let key = block_with_context.block.key();
-                listing.checks = Some(match checked_in_file.and_then(|blocks| blocks.get(&key)) {
-                    Some(block_validators) => block_validators.clone(),
-                    None => {
-                        blocks_unchecked += 1;
-                        BTreeSet::new()
-                    }
-                });
-                listings.push(listing);
-            }
-            files.insert(file_path, listings);
-        }
+        let files: BTreeMap<_, Vec<BlockListing>> = context
+            .blocks()
+            .iter()
+            .map(|(file_path, file_blocks)| {
+                let checked_in_file = log.checked_blocks.get(file_path);
+                let listings = file_blocks
+                    .blocks_with_context
+                    .iter()
+                    .map(|block_with_context| {
+                        let key = block_with_context.block.key();
+                        let mut listing = BlockListing::from(block_with_context);
+                        listing.checks = Some(
+                            checked_in_file
+                                .and_then(|blocks| blocks.get(&key))
+                                .cloned()
+                                .unwrap_or_default(),
+                        );
+                        listing
+                    });
+                (file_path, listings.collect())
+            })
+            .collect();
+        let listings = || files.values().flatten();
+        // A checked block always has the validator that checked it, so an empty set means that
+        // nothing checked the block.
+        let blocks_unchecked = listings()
+            .filter(|listing| listing.checks.as_ref().is_some_and(BTreeSet::is_empty))
+            .count();
 
         Self {
             summary: ReportSummary {
@@ -116,10 +122,10 @@ impl<'a> RunReport<'a> {
                 files_scanned: stats.files_scanned,
                 files_with_blocks: context.blocks().len(),
                 files_skipped: stats.files_skipped,
-                blocks,
+                blocks: listings().count(),
                 blocks_unchecked,
                 blocks_needing_diff,
-                checks,
+                checks: validators.values().sum(),
                 violations: log.violations.values().map(Vec::len).sum(),
                 validators,
             },
