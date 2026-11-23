@@ -332,6 +332,20 @@ fn run_lua_script_sync(inputs: &LuaScriptInputs, mode: LuaMode) -> anyhow::Resul
         .get("validate")
         .context("Lua script must define a global 'validate' function")?;
 
+    let ctx = ctx_table(&lua, inputs)?;
+    let content = content_value(&lua, &inputs.content)?;
+    let result: mlua::Value = validate_fn
+        .call((ctx, content))
+        .with_context(|| format!("failed to call validate() in {}", inputs.script_path))?;
+    returned_message(result)
+}
+
+/// Builds the `ctx` table that `validate()` gets in `lua`, from `inputs`.
+///
+/// # Errors
+/// Returns an error when Lua can't create a table or set a field, such as when it runs out of
+/// memory.
+fn ctx_table(lua: &Lua, inputs: &LuaScriptInputs) -> anyhow::Result<mlua::Table> {
     let ctx_table = lua.create_table().context("failed to create ctx table")?;
     ctx_table
         .set("file", inputs.file.as_str())
@@ -355,37 +369,56 @@ fn run_lua_script_sync(inputs: &LuaScriptInputs, mode: LuaMode) -> anyhow::Resul
         .set("attrs", attrs_table)
         .context("failed to set ctx.attrs")?;
 
-    // When the block carries an `affects` attribute, expose the affected targets as
-    // `ctx.affects = [{ file, name, content }, …]` so scripts can inspect them in sandboxed mode.
+    // The targets come with their content, so a sandboxed script, which can't read files, can
+    // still check them.
     if let Some(affected_targets) = &inputs.affects {
-        let affects_table = lua
-            .create_table()
-            .context("failed to create affects table")?;
-        for (i, affected) in affected_targets.iter().enumerate() {
-            let entry = lua
-                .create_table()
-                .context("failed to create affects entry table")?;
-            entry
-                .set("file", affected.file.as_str())
-                .context("failed to set ctx.affects[].file")?;
-            if let Some(name) = &affected.name {
-                entry
-                    .set("name", name.as_str())
-                    .context("failed to set ctx.affects[].name")?;
-            }
-            entry
-                .set("content", affected.content.as_str())
-                .context("failed to set ctx.affects[].content")?;
-            affects_table
-                .set(i + 1, entry)
-                .context("failed to set ctx.affects entry")?;
-        }
         ctx_table
-            .set("affects", affects_table)
+            .set("affects", affects_table(lua, affected_targets)?)
             .context("failed to set ctx.affects")?;
     }
+    Ok(ctx_table)
+}
 
-    let content: mlua::Value = match &inputs.content {
+/// Builds `ctx.affects` in `lua`: an array of `{ file, name, content }` tables, one for each of
+/// `affected_targets`, in the same order. `name` is missing for a whole file.
+///
+/// # Errors
+/// Returns an error when Lua can't create a table or set a field, such as when it runs out of
+/// memory.
+fn affects_table(lua: &Lua, affected_targets: &[LuaAffected]) -> anyhow::Result<mlua::Table> {
+    let affects_table = lua
+        .create_table()
+        .context("failed to create affects table")?;
+    for (i, affected) in affected_targets.iter().enumerate() {
+        let entry = lua
+            .create_table()
+            .context("failed to create affects entry table")?;
+        entry
+            .set("file", affected.file.as_str())
+            .context("failed to set ctx.affects[].file")?;
+        if let Some(name) = &affected.name {
+            entry
+                .set("name", name.as_str())
+                .context("failed to set ctx.affects[].name")?;
+        }
+        entry
+            .set("content", affected.content.as_str())
+            .context("failed to set ctx.affects[].content")?;
+        affects_table
+            .set(i + 1, entry)
+            .context("failed to set ctx.affects entry")?;
+    }
+    Ok(affects_table)
+}
+
+/// Builds the `content` argument of `validate()` in `lua`: a string for [`LuaContent::Text`], or
+/// an array of strings for [`LuaContent::Matches`].
+///
+/// # Errors
+/// Returns an error when Lua can't create the string or the array, such as when it runs out of
+/// memory.
+fn content_value(lua: &Lua, content: &LuaContent) -> anyhow::Result<mlua::Value> {
+    Ok(match content {
         LuaContent::Text(text) => mlua::Value::String(
             lua.create_string(text.as_str())
                 .context("failed to build the content string")?,
@@ -394,26 +427,28 @@ fn run_lua_script_sync(inputs: &LuaScriptInputs, mode: LuaMode) -> anyhow::Resul
             lua.create_sequence_from(matches.iter().map(String::as_str))
                 .context("failed to build the content array")?,
         ),
-    };
+    })
+}
 
-    let result: mlua::Value = validate_fn
-        .call((ctx_table, content))
-        .with_context(|| format!("failed to call validate() in {}", inputs.script_path))?;
-
-    #[expect(
-        clippy::wildcard_enum_match_arm,
-        reason = "Only nil and a string are valid results, so any other kind of value, including one \
-                  added later, is an error."
-    )]
-    let message = match result {
+/// The message in `result`, the value `validate()` returned. Returns `None` for `nil`.
+///
+/// # Errors
+/// Returns an error when `result` is neither `nil` nor a string, or is a string that isn't
+/// valid UTF-8.
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "Only nil and a string are valid results, so any other kind of value, including one \
+              added later, is an error."
+)]
+fn returned_message(result: mlua::Value) -> anyhow::Result<Option<String>> {
+    Ok(match result {
         mlua::Value::Nil => None,
         mlua::Value::String(s) => Some(s.to_str()?.to_string()),
         other => bail!(
             "validate() must return nil or a string, got: {:?}",
             other.type_name()
         ),
-    };
-    Ok(message)
+    })
 }
 
 /// The message both timeout layers report, so a script stopped inside the VM by the hook and one
