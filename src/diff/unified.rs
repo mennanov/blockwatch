@@ -142,52 +142,69 @@ fn flush_group(
     deletion_anchor_line: usize,
     line_changes: &mut Vec<LineChange>,
 ) -> anyhow::Result<()> {
-    if added.is_empty() {
-        // A purely deleted group is represented by a single line change at the target-file line
-        // now occupying the deleted region, since the deleted lines no longer exist there.
-        if !removed.is_empty() {
-            push_line_change(
-                line_changes,
-                LineChange {
-                    line: deletion_anchor_line,
-                    kind: LineChangeKind::Deleted,
-                },
-            )?;
-        }
-    } else {
-        let matched_removed_idxes = align_added_to_removed(removed, added);
-        for (i, added_line) in added.iter().enumerate() {
-            let kind = match &matched_removed_idxes {
-                // The group removed nothing, so the line is an insertion: it brings a line break
-                // that was not there before, on top of the characters it holds.
-                None => LineChangeKind::Added,
-                // The group rewrote the lines it removed into these, so it added no line break.
-                // A line the pairing found no counterpart for is still part of that rewrite, and
-                // every character it holds differs - but nothing past them does.
-                Some(idxes) => LineChangeKind::Modified(match idxes[i] {
-                    Some(j) => line_diff(&removed[j].value, &added_line.value),
-                    None => {
-                        let whole_line = 0..added_line.value.chars().count();
-                        vec![whole_line]
-                    }
-                }),
-            };
-            push_line_change(
-                line_changes,
-                LineChange {
-                    line: added_line
-                        .target_line_no
-                        .expect("an added line is in the target file"),
-                    kind,
-                },
-            )?;
-        }
-        // Removed lines with no counterpart are dropped: their region is already covered by the
-        // added lines of the same group.
+    for line_change in group_changes(removed, added, deletion_anchor_line) {
+        push_line_change(line_changes, line_change)?;
     }
     removed.clear();
     added.clear();
     Ok(())
+}
+
+/// The [`LineChange`]s of the change group made of `removed` and `added`, in target-file order.
+/// Gives one [`LineChangeKind::Deleted`] at `deletion_anchor_line` when the group only removed
+/// lines, one change for each added line otherwise, and none for an empty group.
+fn group_changes(
+    removed: &[&Line],
+    added: &[&Line],
+    deletion_anchor_line: usize,
+) -> Vec<LineChange> {
+    if added.is_empty() {
+        // A purely deleted group is represented by a single line change at the target-file line
+        // now occupying the deleted region, since the deleted lines no longer exist there.
+        if removed.is_empty() {
+            return Vec::new();
+        }
+        return vec![LineChange {
+            line: deletion_anchor_line,
+            kind: LineChangeKind::Deleted,
+        }];
+    }
+    let matched_removed_idxes = align_added_to_removed(removed, added);
+    // Removed lines with no counterpart are dropped: their region is already covered by the
+    // added lines of the same group.
+    added
+        .iter()
+        .enumerate()
+        .map(|(i, added_line)| LineChange {
+            line: added_line
+                .target_line_no
+                .expect("an added line is in the target file"),
+            kind: match &matched_removed_idxes {
+                // The group removed nothing, so the line is an insertion: it brings a line break
+                // that was not there before, on top of the characters it holds.
+                None => LineChangeKind::Added,
+                // The group rewrote the lines it removed into these, so it added no line break.
+                Some(idxes) => LineChangeKind::Modified(changed_ranges(
+                    idxes[i].map(|j| removed[j]),
+                    added_line,
+                )),
+            },
+        })
+        .collect()
+}
+
+/// The character ranges of `added_line` that differ from `counterpart`, the removed line it is
+/// paired with, in order. The whole line when it has no counterpart.
+fn changed_ranges(counterpart: Option<&Line>, added_line: &Line) -> Vec<Range<usize>> {
+    match counterpart {
+        Some(removed_line) => line_diff(&removed_line.value, &added_line.value),
+        // A line the pairing found no counterpart for is still part of the group's rewrite, and
+        // every character it holds differs - but nothing past them does.
+        None => {
+            let whole_line = 0..added_line.value.chars().count();
+            vec![whole_line]
+        }
+    }
 }
 
 /// Maximum `removed.len() * added.len()` of a change group for similarity-based pairing; larger
