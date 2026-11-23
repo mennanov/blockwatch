@@ -189,9 +189,9 @@ pub(crate) fn diff_gated_block_count(
 
 /// Instantiates exactly the validators the blocks in `context` call for.
 ///
-/// A validator is created at most once, no matter how many blocks use it, and scanning stops as
-/// soon as every candidate has been detected. Returning sync and async validators separately lets
-/// the caller skip starting a Tokio runtime when no async validator is present.
+/// A validator is created at most once, no matter how many blocks use it. Validators come in the
+/// order `Validator` lists them. Returning sync and async validators separately lets the caller
+/// skip starting a Tokio runtime when no async validator is present.
 ///
 /// Only the validators that `selection` includes are considered.
 ///
@@ -203,32 +203,23 @@ pub(crate) fn detect_validators<Fs: FileSystem + 'static>(
     selection: &ValidatorSelection,
     file_system: &Arc<Fs>,
 ) -> anyhow::Result<(SyncValidators, AsyncValidators)> {
-    let mut undetected: Vec<Validator> = Validator::iter()
-        .filter(|validator| selection.includes(*validator))
-        .collect();
+    let used = Validator::iter().filter(|validator| {
+        selection.includes(*validator)
+            && context
+                .blocks
+                .values()
+                .flat_map(|file_blocks| &file_blocks.blocks_with_context)
+                .any(|block| validator.is_turned_on_by(&block.block.attributes))
+    });
     let mut sync_validators = Vec::new();
     let mut async_validators = Vec::new();
-    'outer: for file_blocks in context.blocks.values() {
-        for block in &file_blocks.blocks_with_context {
-            let mut still_undetected = Vec::new();
-            for validator in undetected {
-                if !validator.is_turned_on_by(&block.block.attributes) {
-                    still_undetected.push(validator);
-                    continue;
-                }
-                match create(validator, file_system)? {
-                    TypedValidator::Sync(sync_validator) => {
-                        sync_validators.push((validator, sync_validator));
-                    }
-                    TypedValidator::Async(async_validator) => {
-                        async_validators.push((validator, async_validator));
-                    }
-                }
+    for validator in used {
+        match create(validator, file_system)? {
+            TypedValidator::Sync(sync_validator) => {
+                sync_validators.push((validator, sync_validator));
             }
-            undetected = still_undetected;
-            if undetected.is_empty() {
-                // All validators have been detected.
-                break 'outer;
+            TypedValidator::Async(async_validator) => {
+                async_validators.push((validator, async_validator));
             }
         }
     }
@@ -545,8 +536,8 @@ mod tests {
 
     #[test]
     fn run_sorts_violations_by_position_then_validator_then_message() -> anyhow::Result<()> {
-        // A validator's violations are merged in the order of the block where it was first found, so
-        // the first block puts `keep-sorted` first.
+        // Violations are merged in the order `Validator` lists the validators, so `keep-sorted`
+        // at line 14 comes before `keep-unique` at line 10.
         let contents = r#"# <block keep-sorted>
 a
 b
