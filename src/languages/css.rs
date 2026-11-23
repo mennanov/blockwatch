@@ -304,10 +304,7 @@ impl<'i> DeclarationParser<'i> for Walk<'_> {
                     | Token::SquareBracketBlock
                     | Token::CurlyBracketBlock
             ) {
-                input.parse_nested_block(|block| {
-                    while block.next().is_ok() {}
-                    Ok::<(), ParseError<()>>(())
-                })?;
+                input.parse_nested_block(skip_block)?;
             }
             tokens.push((token_start..input.position(), token));
         }
@@ -345,6 +342,16 @@ impl<'i> DeclarationParser<'i> for Walk<'_> {
         });
         Ok(())
     }
+}
+
+/// Reads every token of `block`, a block such as the arguments of a function. Never fails.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "`Parser::parse_nested_block` takes a function that returns a `Result`"
+)]
+fn skip_block(block: &mut Parser) -> Result<(), ParseError<()>> {
+    while block.next().is_ok() {}
+    Ok(())
 }
 
 impl RuleBodyItemParser<'_, (), ()> for Walk<'_> {

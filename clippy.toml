@@ -13,3 +13,6 @@ disallowed-methods = [
 allow-unwrap-in-tests = true
 # `doc_markdown` would want backticks around these. The `".."` keeps clippy's own list.
 doc-valid-idents = ["CMake", "CommonMark", "MakeMaker", "OpenAI", ".."]
+# Deep nesting makes a reader track every enclosing loop, `match` and closure at once. A deeper block moves
+# into its own function.
+excessive-nesting-threshold = 5

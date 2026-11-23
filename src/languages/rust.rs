@@ -64,36 +64,45 @@ impl CodeLanguage for Rust {
             "string_literal" | "raw_string_literal"
                 if !node_text(node, source).starts_with(['b', 'c']) =>
             {
-                let mut text = String::new();
-                // After a backslash at the end of a line, Rust skips the white space that starts
-                // the next lines.
-                let mut joined = false;
-                let mut cursor = node.walk();
-                // A raw string has no escapes, only its content.
-                for part in node.named_children(&mut cursor) {
-                    let written = node_text(&part, source);
-                    match part.kind() {
-                        "escape_sequence" if matches!(written, "\\\n" | "\\\r") => joined = true,
-                        "escape_sequence" => {
-                            joined = false;
-                            text.push(escaped_character(written)?);
-                        }
-                        _ => {
-                            let written = if joined {
-                                written.trim_start_matches([' ', '\t', '\n', '\r'])
-                            } else {
-                                written
-                            };
-                            // Rust reads a CRLF line end in a file as a line feed.
-                            text.push_str(&written.replace("\r\n", "\n"));
-                        }
-                    }
-                }
-                Ok(Some(text))
+                string_content(node, source).map(Some)
             }
             _ => Ok(None),
         }
     }
+}
+
+/// The text that `literal`, a string or raw string literal, stands for, with its escapes
+/// decoded.
+///
+/// # Errors
+/// Returns an error if an escape stands for no character.
+fn string_content(literal: &Node, source: &str) -> anyhow::Result<String> {
+    let mut text = String::new();
+    // After a backslash at the end of a line, Rust skips the white space that starts the next
+    // lines.
+    let mut joined = false;
+    let mut cursor = literal.walk();
+    // A raw string has no escapes, only its content.
+    for part in literal.named_children(&mut cursor) {
+        let written = node_text(&part, source);
+        match part.kind() {
+            "escape_sequence" if matches!(written, "\\\n" | "\\\r") => joined = true,
+            "escape_sequence" => {
+                joined = false;
+                text.push(escaped_character(written)?);
+            }
+            _ => {
+                let written = if joined {
+                    written.trim_start_matches([' ', '\t', '\n', '\r'])
+                } else {
+                    written
+                };
+                // Rust reads a CRLF line end in a file as a line feed.
+                text.push_str(&written.replace("\r\n", "\n"));
+            }
+        }
+    }
+    Ok(text)
 }
 
 /// The character that `escape`, such as `\n` or `\u{e9}`, stands for.
