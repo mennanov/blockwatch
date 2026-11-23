@@ -310,8 +310,8 @@ fn resolve_filters<'a>(
                     .is_some_and(|held| held.text == *value)
             })
             .collect();
-        match matches.len() {
-            0 => {
+        match matches.as_slice() {
+            [] => {
                 // The second call to `child_keys` walks `scope` again. It happens only when no
                 // child matches, so a filter that matches doesn't keep every key it looked at.
                 let keys = child_keys(&scope, parent, key);
@@ -319,23 +319,9 @@ fn resolve_filters<'a>(
                     hints: filter_hints(symbols, path, index, key, keys),
                 });
             }
-            1 => {
-                let key = matches[0];
+            [key] => {
                 resolved = resolved.with_segment(index, key.path.segments()[index].clone());
-                let child = &resolved.segments()[..=index];
-                let siblings: Vec<&Symbol> = scope
-                    .iter()
-                    .copied()
-                    .filter(|symbol| symbol.path.segments() == child)
-                    .collect();
-                // A child alone at its path keeps every symbol under that path, even one written
-                // outside it, such as a member that a Swift extension adds to a type.
-                if siblings.len() > 1 {
-                    // A key written outside every child, such as in a Swift extension, picks none
-                    // of them, so the path stays ambiguous.
-                    let picked = siblings.iter().find(|sibling| is_inside(key, sibling));
-                    scope.retain(|symbol| picked.is_none_or(|picked| is_inside(symbol, picked)));
-                }
+                narrow_to_child(&mut scope, &resolved.segments()[..=index], key);
             }
             _ => {
                 return Err(ResolveError::AmbiguousFilter {
@@ -350,6 +336,25 @@ fn resolve_filters<'a>(
         return Err(ResolveError::Unreadable { reason });
     }
     Ok((resolved, scope))
+}
+
+/// Keeps in `scope` only the symbols inside the child that holds `key`, when several symbols in
+/// `scope` have the path `child`, such as two `ingress` blocks in HCL. Keeps all of `scope` when
+/// only one symbol has that path, or when none of them holds `key`.
+fn narrow_to_child(scope: &mut Vec<&Symbol>, child: &[Segment], key: &Symbol) {
+    let siblings: Vec<&Symbol> = scope
+        .iter()
+        .copied()
+        .filter(|symbol| symbol.path.segments() == child)
+        .collect();
+    // A child alone at its path keeps every symbol under that path, even one written outside it,
+    // such as a member that a Swift extension adds to a type.
+    if siblings.len() > 1 {
+        // A key written outside every child, such as in a Swift extension, picks none of them, so
+        // the path stays ambiguous.
+        let picked = siblings.iter().find(|sibling| is_inside(key, sibling));
+        scope.retain(|symbol| picked.is_none_or(|picked| is_inside(symbol, picked)));
+    }
 }
 
 /// Whether `symbol` is written inside `item`: whether it starts where `item` is written.
