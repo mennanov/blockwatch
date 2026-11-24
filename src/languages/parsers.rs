@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::Path;
 use std::sync::Mutex;
+use strum::IntoEnumIterator;
 
 /// A parser for one language, shared between files and threads.
 ///
@@ -20,47 +21,9 @@ pub(crate) type SharedLanguageParser = Mutex<Box<dyn LanguageParser>>;
 /// The language parsers of a run, one for each [`Language`], and how a file name selects one.
 pub(crate) struct LanguageParsers {
     resolver: LanguageResolver,
-    bash: SharedLanguageParser,
-    c: SharedLanguageParser,
-    cmake: SharedLanguageParser,
-    c_sharp: SharedLanguageParser,
-    cpp: SharedLanguageParser,
-    css: SharedLanguageParser,
-    dart: SharedLanguageParser,
-    dockerfile: SharedLanguageParser,
-    elixir: SharedLanguageParser,
-    go: SharedLanguageParser,
-    go_module: SharedLanguageParser,
-    graphql: SharedLanguageParser,
-    groovy: SharedLanguageParser,
-    hcl: SharedLanguageParser,
-    html: SharedLanguageParser,
-    java: SharedLanguageParser,
-    javascript: SharedLanguageParser,
-    json: SharedLanguageParser,
-    kotlin: SharedLanguageParser,
-    lean: SharedLanguageParser,
-    lua: SharedLanguageParser,
-    makefile: SharedLanguageParser,
-    markdown: SharedLanguageParser,
-    mdx: SharedLanguageParser,
-    nix: SharedLanguageParser,
-    ocaml: SharedLanguageParser,
-    php: SharedLanguageParser,
-    proto: SharedLanguageParser,
-    python: SharedLanguageParser,
-    ruby: SharedLanguageParser,
-    rust: SharedLanguageParser,
-    scala: SharedLanguageParser,
-    sql: SharedLanguageParser,
-    starlark: SharedLanguageParser,
-    swift: SharedLanguageParser,
-    toml: SharedLanguageParser,
-    tsx: SharedLanguageParser,
-    typescript: SharedLanguageParser,
-    xml: SharedLanguageParser,
-    yaml: SharedLanguageParser,
-    zsh: SharedLanguageParser,
+    /// The parser of each [`Language`], in the order the enum lists them. So the value of a
+    /// language cast to `usize` is the index of its parser.
+    parsers: Vec<SharedLanguageParser>,
 }
 
 impl LanguageParsers {
@@ -70,53 +33,11 @@ impl LanguageParsers {
     /// Panics if the tree-sitter crate doesn't support a grammar's ABI version, or if the PHP
     /// grammar lacks the nodes its comments query reads. Either is a build bug.
     pub(crate) fn new() -> Self {
-        fn parser<P: LanguageParser + 'static>(p: P) -> SharedLanguageParser {
-            Mutex::new(Box::new(p))
-        }
-
         Self {
             resolver: LanguageResolver::new(HashMap::new()),
-            bash: parser(bash::parser()),
-            c: parser(c::parser()),
-            cmake: parser(cmake::parser()),
-            c_sharp: parser(c_sharp::parser()),
-            cpp: parser(cpp::parser()),
-            css: parser(css::parser()),
-            dart: parser(dart::parser()),
-            dockerfile: parser(dockerfile::parser()),
-            elixir: parser(elixir::parser()),
-            go: parser(go::parser()),
-            go_module: parser(go::module_files_parser()),
-            graphql: parser(graphql::parser()),
-            groovy: parser(groovy::parser()),
-            hcl: parser(hcl::parser()),
-            html: parser(html::parser()),
-            java: parser(java::parser()),
-            javascript: parser(javascript::parser()),
-            json: parser(json::parser()),
-            kotlin: parser(kotlin::parser()),
-            lean: parser(lean::parser()),
-            lua: parser(lua::parser()),
-            makefile: parser(makefile::parser()),
-            markdown: parser(markdown::parser()),
-            mdx: parser(mdx::parser()),
-            nix: parser(nix::parser()),
-            ocaml: parser(ocaml::parser()),
-            php: parser(php::parser()),
-            proto: parser(proto::parser()),
-            python: parser(python::parser()),
-            ruby: parser(ruby::parser()),
-            rust: parser(rust::parser()),
-            scala: parser(scala::parser()),
-            sql: parser(sql::parser()),
-            starlark: parser(starlark::parser()),
-            swift: parser(swift::parser()),
-            toml: parser(toml::parser()),
-            tsx: parser(tsx::parser()),
-            typescript: parser(typescript::parser()),
-            xml: parser(xml::parser()),
-            yaml: parser(yaml::parser()),
-            zsh: parser(bash::zsh_parser()),
+            parsers: Language::iter()
+                .map(|language| Mutex::new(new_parser(language)))
+                .collect(),
         }
     }
 
@@ -140,49 +61,57 @@ impl LanguageParsers {
 
     /// The parser for `language`.
     pub(crate) fn parser(&self, language: Language) -> &SharedLanguageParser {
-        match language {
-            Language::Bash => &self.bash,
-            Language::C => &self.c,
-            Language::CMake => &self.cmake,
-            Language::CSharp => &self.c_sharp,
-            Language::Cpp => &self.cpp,
-            Language::Css => &self.css,
-            Language::Dart => &self.dart,
-            Language::Dockerfile => &self.dockerfile,
-            Language::Elixir => &self.elixir,
-            Language::Go => &self.go,
-            Language::GoModule => &self.go_module,
-            Language::GraphQl => &self.graphql,
-            Language::Groovy => &self.groovy,
-            Language::Hcl => &self.hcl,
-            Language::Html => &self.html,
-            Language::Java => &self.java,
-            Language::JavaScript => &self.javascript,
-            Language::Json => &self.json,
-            Language::Kotlin => &self.kotlin,
-            Language::Lean => &self.lean,
-            Language::Lua => &self.lua,
-            Language::Makefile => &self.makefile,
-            Language::Markdown => &self.markdown,
-            Language::Mdx => &self.mdx,
-            Language::Nix => &self.nix,
-            Language::OCaml => &self.ocaml,
-            Language::Php => &self.php,
-            Language::Proto => &self.proto,
-            Language::Python => &self.python,
-            Language::Ruby => &self.ruby,
-            Language::Rust => &self.rust,
-            Language::Scala => &self.scala,
-            Language::Sql => &self.sql,
-            Language::Starlark => &self.starlark,
-            Language::Swift => &self.swift,
-            Language::Toml => &self.toml,
-            Language::Tsx => &self.tsx,
-            Language::TypeScript => &self.typescript,
-            Language::Xml => &self.xml,
-            Language::Yaml => &self.yaml,
-            Language::Zsh => &self.zsh,
-        }
+        &self.parsers[language as usize]
+    }
+}
+
+/// Builds the parser of `language`.
+///
+/// # Panics
+/// Panics in the cases that [`LanguageParsers::new`] lists.
+fn new_parser(language: Language) -> Box<dyn LanguageParser> {
+    match language {
+        Language::Bash => Box::new(bash::parser()),
+        Language::C => Box::new(c::parser()),
+        Language::CMake => Box::new(cmake::parser()),
+        Language::CSharp => Box::new(c_sharp::parser()),
+        Language::Cpp => Box::new(cpp::parser()),
+        Language::Css => Box::new(css::parser()),
+        Language::Dart => Box::new(dart::parser()),
+        Language::Dockerfile => Box::new(dockerfile::parser()),
+        Language::Elixir => Box::new(elixir::parser()),
+        Language::Go => Box::new(go::parser()),
+        Language::GoModule => Box::new(go::module_files_parser()),
+        Language::GraphQl => Box::new(graphql::parser()),
+        Language::Groovy => Box::new(groovy::parser()),
+        Language::Hcl => Box::new(hcl::parser()),
+        Language::Html => Box::new(html::parser()),
+        Language::Java => Box::new(java::parser()),
+        Language::JavaScript => Box::new(javascript::parser()),
+        Language::Json => Box::new(json::parser()),
+        Language::Kotlin => Box::new(kotlin::parser()),
+        Language::Lean => Box::new(lean::parser()),
+        Language::Lua => Box::new(lua::parser()),
+        Language::Makefile => Box::new(makefile::parser()),
+        Language::Markdown => Box::new(markdown::parser()),
+        Language::Mdx => Box::new(mdx::parser()),
+        Language::Nix => Box::new(nix::parser()),
+        Language::OCaml => Box::new(ocaml::parser()),
+        Language::Php => Box::new(php::parser()),
+        Language::Proto => Box::new(proto::parser()),
+        Language::Python => Box::new(python::parser()),
+        Language::Ruby => Box::new(ruby::parser()),
+        Language::Rust => Box::new(rust::parser()),
+        Language::Scala => Box::new(scala::parser()),
+        Language::Sql => Box::new(sql::parser()),
+        Language::Starlark => Box::new(starlark::parser()),
+        Language::Swift => Box::new(swift::parser()),
+        Language::Toml => Box::new(toml::parser()),
+        Language::Tsx => Box::new(tsx::parser()),
+        Language::TypeScript => Box::new(typescript::parser()),
+        Language::Xml => Box::new(xml::parser()),
+        Language::Yaml => Box::new(yaml::parser()),
+        Language::Zsh => Box::new(bash::zsh_parser()),
     }
 }
 

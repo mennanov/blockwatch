@@ -58,6 +58,7 @@ use comments::{
     c_style_multiline_comment_processor, comment_visitor, ecmascript_comments_parser,
     python_style_comments_parser, xml_style_comments_parser,
 };
+use strum_macros::EnumIter;
 use syntax_tree::{ensure_no_syntax_error, members, node_text, tree_sitter_parser, walk_tree};
 
 /// A language that blockwatch parses, one variant per parser.
@@ -65,7 +66,7 @@ use syntax_tree::{ensure_no_syntax_error, members, node_text, tree_sitter_parser
 /// Two names that need different parsers are two variants, even when people call them one
 /// language: `Bash` and `Zsh`, `TypeScript` and `Tsx`, `Go` and `GoModule`.
 // <block name="languages" affects="src/languages/parsers.rs:supported-extensions, README.md:supported-grammar">
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter)]
 pub(crate) enum Language {
     Bash,
     C,
