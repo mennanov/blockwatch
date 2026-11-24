@@ -1,5 +1,5 @@
 //! `SymbolPath`: a parsed and validated symbol path. It follows RFC 6901 and adds filters, such as
-//! `~[name=blue]`.
+//! `~[name=blue]` and `~[metadata/name=api]`.
 
 use anyhow::{Context, bail};
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
@@ -26,8 +26,12 @@ pub(crate) struct SymbolPath {
 pub(crate) enum Segment {
     /// A key, or a position in a list, such as `0`.
     Key(String),
-    /// A filter, written `~[key=value]`. It stands for the one child whose `key` holds `value`.
-    Filter { key: String, value: String },
+    /// A filter, written `~[key=value]` or `~[a/b=value]`. It stands for the one child whose
+    /// `key_path` holds `value`.
+    Filter {
+        key_path: Vec<String>,
+        value: String,
+    },
 }
 
 impl SymbolPath {
@@ -59,8 +63,8 @@ impl SymbolPath {
 
         // A rooted path always has a leading `/`, so the segment slice starts after index 1.
         #[expect(clippy::string_slice, reason = "`decoded` starts with `/`")]
-        let segments: Vec<Segment> = decoded[1..]
-            .split('/')
+        let segments: Vec<Segment> = split_segments(&decoded[1..])
+            .into_iter()
             .map(parse_segment)
             .collect::<anyhow::Result<Vec<Segment>>>()?;
 
@@ -129,7 +133,10 @@ impl fmt::Display for Segment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Key(key) => write!(f, "{}", encode(key)),
-            Self::Filter { key, value } => write!(f, "~[{}={}]", encode(key), encode(value)),
+            Self::Filter { key_path, value } => {
+                let key_path: Vec<String> = key_path.iter().map(|part| encode(part)).collect();
+                write!(f, "~[{}={}]", key_path.join("/"), encode(value))
+            }
         }
     }
 }
@@ -164,8 +171,49 @@ fn encode(text: &str) -> String {
     encoded
 }
 
+/// Splits `path` (a decoded symbol path without its leading `/`) into raw segments separated by
+/// `/`, keeping `/` inside a filter's key path (`~[a/b=value]`) as part of that filter segment.
+fn split_segments(path: &str) -> Vec<&str> {
+    let mut segments = Vec::new();
+    let mut rest = path;
+    loop {
+        let end = segment_end(rest);
+        #[expect(
+            clippy::string_slice,
+            reason = "`segment_end` returns a `/` byte index or `rest.len()`"
+        )]
+        segments.push(&rest[..end]);
+        match rest.get(end + 1..) {
+            Some(next) => rest = next,
+            None => return segments,
+        }
+    }
+}
+
+/// The byte index of the `/` that ends the first segment of `rest`, or `rest.len()` if none.
+///
+/// Inside a filter (`~[...`), `/` separates nested key segments before the first `=`, so the
+/// segment ends at the first `/` after `=`. A raw `/` in a value or a missing `]` stops there and
+/// fails in [`parse_segment`].
+fn segment_end(rest: &str) -> usize {
+    if rest.starts_with("~[") {
+        let Some(eq) = rest.find('=') else {
+            return rest.len();
+        };
+        #[expect(
+            clippy::string_slice,
+            reason = "`eq` is the byte index of the ASCII `=`"
+        )]
+        rest[eq + 1..]
+            .find('/')
+            .map_or(rest.len(), |offset| eq + 1 + offset)
+    } else {
+        rest.find('/').unwrap_or(rest.len())
+    }
+}
+
 /// Parses one segment of a symbol path, after percent-decoding: a filter such as
-/// `~[name=blue]`, or else a key.
+/// `~[name=blue]` or `~[metadata/name=api]`, or else a key.
 ///
 /// # Errors
 /// Returns an error if the segment starts with `~[` but is not a whole filter, or if it has an
@@ -174,10 +222,14 @@ fn parse_segment(segment: &str) -> anyhow::Result<Segment> {
     // RFC 6901 gives `~` a meaning only before `0` and `1`. So an escaped key never starts with
     // `~[`, and a filter can't be mistaken for a key.
     match segment.strip_prefix("~[") {
-        // The key ends at the first `=` and the value at the last `]`, so a value can hold both.
+        // The key path ends at the first `=` and the value at the last `]`, so a value can hold
+        // both. `/` inside the key path separates nested key segments.
         Some(filter) => match filter.strip_suffix(']').and_then(|f| f.split_once('=')) {
-            Some((key, value)) => Ok(Segment::Filter {
-                key: unescape_rfc6901(key)?,
+            Some((key_path, value)) => Ok(Segment::Filter {
+                key_path: key_path
+                    .split('/')
+                    .map(unescape_rfc6901)
+                    .collect::<anyhow::Result<Vec<String>>>()?,
                 value: unescape_rfc6901(value)?,
             }),
             None => bail!("invalid filter \"{segment}\" in symbol path; write it as ~[key=value]"),
@@ -242,9 +294,9 @@ mod tests {
         keys.iter().map(|k| key(k)).collect()
     }
 
-    fn filter(key: &str, value: &str) -> Segment {
+    fn filter(key_path: &[&str], value: &str) -> Segment {
         Segment::Filter {
-            key: key.to_string(),
+            key_path: key_path.iter().map(|part| (*part).to_string()).collect(),
             value: value.to_string(),
         }
     }
@@ -384,18 +436,86 @@ mod tests {
         let test_cases = [
             (
                 "/items/~[name=blue]/content",
-                vec![key("items"), filter("name", "blue"), key("content")],
+                vec![key("items"), filter(&["name"], "blue"), key("content")],
             ),
             // The value starts after the first `=` and ends at the last `]`.
-            ("/~[k=a=b]c]", vec![filter("k", "a=b]c")]),
-            ("/~[=]", vec![filter("", "")]),
-            ("/~[a~1b=c~0d%2C]", vec![filter("a/b", "c~d,")]),
+            ("/~[k=a=b]c]", vec![filter(&["k"], "a=b]c")]),
+            ("/~[=]", vec![filter(&[""], "")]),
+            ("/~[a~1b=c~0d%2C]", vec![filter(&["a/b"], "c~d,")]),
         ];
         for (raw, segments) in test_cases {
             let path = SymbolPath::parse(raw)?;
             assert_eq!(path.segments(), segments, "unexpected segments for {raw}");
             assert_eq!(path.to_string(), raw);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn nested_filter_key_parses_into_segments_and_displays_as_written() -> anyhow::Result<()> {
+        // `/` inside a filter key separates nested key segments while `~1` stays a literal `/`
+        // in both keys and values.
+        let test_cases = [
+            (
+                "/items/~[metadata/name=api]/spec/replicas",
+                vec![
+                    key("items"),
+                    filter(&["metadata", "name"], "api"),
+                    key("spec"),
+                    key("replicas"),
+                ],
+            ),
+            (
+                "/~[spec/containers/0/name=web]",
+                vec![filter(&["spec", "containers", "0", "name"], "web")],
+            ),
+            (
+                "/items/~[metadata/labels/app.kubernetes.io~1name=api]/kind",
+                vec![
+                    key("items"),
+                    filter(&["metadata", "labels", "app.kubernetes.io/name"], "api"),
+                    key("kind"),
+                ],
+            ),
+            (
+                "/items/~[apiVersion=argoproj.io~1v1alpha1]/metadata/name",
+                vec![
+                    key("items"),
+                    filter(&["apiVersion"], "argoproj.io/v1alpha1"),
+                    key("metadata"),
+                    key("name"),
+                ],
+            ),
+            (
+                "/items/~[[python]/indent=4]/x",
+                vec![key("items"), filter(&["[python]", "indent"], "4"), key("x")],
+            ),
+            (
+                "/items/~[a/b=1]/~[c/d=2]/val",
+                vec![
+                    key("items"),
+                    filter(&["a", "b"], "1"),
+                    filter(&["c", "d"], "2"),
+                    key("val"),
+                ],
+            ),
+            (
+                "/~[k=a=b]c]/next",
+                vec![filter(&["k"], "a=b]c"), key("next")],
+            ),
+            ("/~[a/b=1]/", vec![filter(&["a", "b"], "1"), key("")]),
+            ("/~[a//b=1]", vec![filter(&["a", "", "b"], "1")]),
+        ];
+        for (raw, segments) in test_cases {
+            let path = SymbolPath::parse(raw)?;
+            assert_eq!(path.segments(), segments, "unexpected segments for {raw}");
+            assert_eq!(path.to_string(), raw);
+        }
+        // `%2F` decodes before splitting, so it separates nested filter key segments too.
+        assert_eq!(
+            SymbolPath::parse("/items/~[metadata%2Fname=api]/kind")?,
+            SymbolPath::parse("/items/~[metadata/name=api]/kind")?,
+        );
         Ok(())
     }
 
@@ -410,10 +530,34 @@ mod tests {
 
     #[test]
     fn incomplete_filter_parse_fails() {
-        for raw in ["/~[name=blue", "/~[name]"] {
+        // Unclosed brackets, missing `=`, raw `/` in a value, and trailing text after `]` fail.
+        for raw in [
+            "/~[name=blue",
+            "/~[name]",
+            "/~[]",
+            "/~[metadata/name=api",
+            "/~[metadata/name=api/spec",
+            "/~[metadata/name]/spec",
+            "/~[metadata/name",
+            "/items/~[apiVersion=argoproj.io/v1alpha1]/kind",
+            "/~[a=1/b=2]",
+            "/~[a/b=1]x/next",
+        ] {
             let err = SymbolPath::parse(raw).unwrap_err();
             assert!(
                 err.to_string().contains("invalid filter"),
+                "unexpected error message for {raw}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn nested_filter_inside_filter_key_fails_as_invalid_escape() {
+        // A nested `~[...]` inside a filter key is rejected as an invalid RFC 6901 escape.
+        for raw in ["/~[a/~[b=1]/c=2]", "/~[a/~2=1]"] {
+            let err = SymbolPath::parse(raw).unwrap_err();
+            assert!(
+                err.to_string().contains("invalid RFC 6901 escape"),
                 "unexpected error message for {raw}: {err}"
             );
         }

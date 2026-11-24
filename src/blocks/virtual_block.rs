@@ -872,6 +872,33 @@ MODELS = [
     }
 
     #[test]
+    fn target_if_with_a_nested_filter_key_resolve_checks_each_matched_item() -> anyhow::Result<()> {
+        // A nested filter key in `target-if` looks for the rest of the path under each item whose
+        // nested key matches, and ignores items with another value.
+        let path = "#/items/~[metadata/name=a]/enabled";
+        let one_item_enabled = "\
+items:
+  - metadata:
+      name: a
+  - metadata:
+      name: a
+    enabled: true
+";
+        let other_item_enabled = "\
+items:
+  - metadata:
+      name: a
+  - metadata:
+      name: b
+    enabled: true
+";
+
+        assert!(gets_block("a.yml", one_item_enabled, &[path], &[])?);
+        assert!(!gets_block("a.yml", other_item_enabled, &[path], &[])?);
+        Ok(())
+    }
+
+    #[test]
     fn target_if_with_unreadable_symbol_resolve_returns_error() -> anyhow::Result<()> {
         let symbols = Symbols::with_unreadable(
             Vec::new(),

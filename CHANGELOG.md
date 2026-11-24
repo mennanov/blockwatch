@@ -12,6 +12,12 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+- Symbol path filters now accept nested keys separated by `/`, such as `#/items/~[metadata/name=api]/spec/replicas` and
+  `#/items/~[spec/containers/0/name=web]/kind`. Escape a literal `/` inside a key segment or a filter value as `~1`.
+  Repeated matching keys inside one item now count that item once instead of failing as ambiguous.
+
 ## [0.20.0] - 2026-11-21
 
 ### Changed

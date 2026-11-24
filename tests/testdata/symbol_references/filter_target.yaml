@@ -1,5 +1,9 @@
 items:
   - name: red
+    metadata:
+      name: web
     size: 1
   - name: blue
+    metadata:
+      name: api
     size: 2

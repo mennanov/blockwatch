@@ -156,8 +156,8 @@ A symbol points to one value or definition inside a file (`file#/path`, or `#/pa
 
 - **RFC 6901 paths:** `/` separates keys; 0-based indices for arrays (`#/files/0`). Escape `/` as `~1`, `~` as `~0`,
   `,` as `%2C`, `%` as `%25` (for example, `#/dependencies/@types~1node`).
-- **Value filters:** `~[key=value]` picks the unique item where `key` equals `value` (`#/services/~[name=web]/port`, or
-  XML `#/Project/ItemGroup/~[@Include=Serilog]/@Version`). Zero or multiple matches fail.
+- **Value filters:** `~[key=value]` picks the unique item where `key` equals `value`; `/` matches nested keys
+  (`#/items/~[metadata/name=api]/spec`, XML `#/Project/ItemGroup/~[@Include=Serilog]/@Version`). Zero or many fail.
 - **How formats map:**
   - **JSON / TOML / YAML:** keys, tables, and list items; strings read without quotes, containers as raw file text.
   - **Markdown / MDX:** heading path from `#` down (`README.md#/My project/Install`); `same-as` reads the body without

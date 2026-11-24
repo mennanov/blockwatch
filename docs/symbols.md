@@ -107,7 +107,10 @@ services:
   too: `2 items match ~[name=web], at 2:5, 6:5`.
 - **The value compares as a symbol reads it:** a string without its quotes, any other value as written. So
   `~[port=8080]` matches `port: 8080` and `port: "8080"`.
-- **Only a key right under the item counts.** A `name` deeper inside the item does not make it match.
+- **A filter key can be nested with `/`.** `~[metadata/name=api]` picks the item whose `metadata/name` holds `api`,
+  and `~[spec/containers/0/name=web]` matches through a list index. A filter without `/` still checks only a key right
+  under the item, so a `name` deeper inside does not match `~[name=api]`.
+- **Repeated matching keys inside one item count that item once.**
 - **A filter picks a map entry too.** In `{"a": {"name": "x"}}`, `#/~[name=x]` is `#/a`.
 - **A path can hold several filters**, such as `#/groups/~[name=api]/services/~[name=web]/port`. A filter can come
   first, in a file that is a list: `#/~[name=web]`.
@@ -115,10 +118,11 @@ services:
   example, two `ingress` blocks in an HCL resource share a path.
   `#/resource/aws_security_group/web/~[from_port=443]/to_port` is the `to_port` of the block whose `from_port` is
   `443`.
-- **A filter that reaches an unreadable path stops the run**, as that path does. An item blockwatch can't read, such
-  as one with a syntax error, also stops a filter that compares its key, because that item could match too.
+- **A filter that reaches an unreadable path stops the run**, as that path does. An unreadable path at or above a
+  child's filter key, such as one with a syntax error, also stops the filter because that item could match too.
 - **The value starts after the first `=` and ends at the last `]`,** so it can hold both. The key can't hold `=`.
-  Inside a filter, escape the key and the value like any key: `/` as `~1`, `,` as `%2C`, and so on.
+  Inside a filter, escape each key segment and the value like any key: `/` as `~1` (in both key segments and values,
+  such as `~[apiVersion=argoproj.io~1v1alpha1]`), `,` as `%2C`, and so on.
 
 Keys that look like filters still work. `[python]`, as in VS Code settings, needs no escape. A key that starts with
 `~[` is written `~0[`, as RFC 6901 already requires.
