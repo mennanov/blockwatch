@@ -126,4 +126,4 @@ same-as-pattern = '^\|\s*`(?P<value>[a-z-]+)`'
 # CI builds blockwatch on the oldest Rust that Cargo.toml allows, so both must be the same version.
 [[block]]
 target = 'Cargo.toml#/package/rust-version'
-same-as = '.github/workflows/rust.yml#/jobs/oldest-rust/steps/~[name=Install the oldest supported Rust]/with/toolchain'
+same-as = '.github/workflows/rust.yml#/jobs/oldest-rust/env/RUSTUP_TOOLCHAIN'

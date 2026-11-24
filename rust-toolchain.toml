@@ -1,0 +1,8 @@
+# The Rust that builds, lints and tests this repository, on every machine and in CI. A new Rust
+# release often adds clippy lints or changes them, and clippy runs with `-D warnings`. So with an
+# unpinned Rust, a change can fail because of code it didn't touch. Move to a new version on
+# purpose, in a commit that also fixes what its lints find.
+[toolchain]
+channel = "1.100.0"
+profile = "minimal"
+components = ["clippy", "llvm-tools-preview", "rustfmt"]
