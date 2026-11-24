@@ -116,19 +116,25 @@ impl<Fs: FileSystem + 'static> AsyncValidator for CheckLuaValidator<Fs> {
                     continue;
                 }
 
-                // The block is checked from here on, whatever the script returns, so add it
-                // before the borrowed path is shadowed by the owned copy the task takes.
+                // The block is checked from here on, whatever the script returns.
                 report.add_checked_block(file_path, &block_with_context.block);
 
-                let context = Arc::clone(&context);
-                let file_path = file_path.clone();
-                let file_system = Arc::clone(&self.file_system);
-                let mode = self.mode;
-                tasks.spawn(async move {
-                    let (violations, trace) =
-                        check_block(file_system.as_ref(), mode, &context, &file_path, block_idx)
-                            .await?;
-                    anyhow::Ok((file_path, block_idx, violations, trace))
+                tasks.spawn({
+                    let context = Arc::clone(&context);
+                    let file_path = file_path.clone();
+                    let file_system = Arc::clone(&self.file_system);
+                    let mode = self.mode;
+                    async move {
+                        let (violations, trace) = check_block(
+                            file_system.as_ref(),
+                            mode,
+                            &context,
+                            &file_path,
+                            block_idx,
+                        )
+                        .await?;
+                        anyhow::Ok((file_path, block_idx, violations, trace))
+                    }
                 });
             }
         }

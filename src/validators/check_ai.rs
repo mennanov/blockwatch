@@ -58,17 +58,18 @@ impl<C: AiClient + 'static> AsyncValidator for CheckAiValidator<C> {
                     continue;
                 }
 
-                // The block is checked from here on, whatever the API answers, so add it
-                // before the borrowed path is shadowed by the owned copy the task takes.
+                // The block is checked from here on, whatever the API answers.
                 report.add_checked_block(file_path, &block_with_context.block);
 
-                let client = Arc::clone(&self.client);
-                let context = Arc::clone(&context);
-                let file_path = file_path.clone();
-                tasks.spawn(async move {
-                    let (violations, trace) =
-                        check_block(client.as_ref(), &context, &file_path, block_idx).await?;
-                    anyhow::Ok((file_path, block_idx, violations, trace))
+                tasks.spawn({
+                    let client = Arc::clone(&self.client);
+                    let context = Arc::clone(&context);
+                    let file_path = file_path.clone();
+                    async move {
+                        let (violations, trace) =
+                            check_block(client.as_ref(), &context, &file_path, block_idx).await?;
+                        anyhow::Ok((file_path, block_idx, violations, trace))
+                    }
                 });
             }
         }
