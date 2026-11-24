@@ -8,6 +8,7 @@ use crate::position::{LineIndex, Position};
 use path::Segment;
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::fmt;
 use std::ops::Range;
 
 /// An addressable element of a source file, such as a JSON key, an array item or a Markdown
@@ -158,31 +159,56 @@ impl Symbols {
     /// when several symbols match `path`, and [`ResolveError::AmbiguousFilter`] when a filter
     /// matches several children.
     pub(crate) fn resolve(&self, path: &SymbolPath) -> Result<&Symbol, ResolveError<'_>> {
-        // A problem in the path's own definition is closer than a skipped word, so it is reported
-        // first.
-        let unreadable = self.unreadable.get(path).or_else(|| {
-            path.segments().iter().find_map(|segment| match segment {
-                Segment::Key(name) => self.skipped.get(name),
-                // A filter stands for a list item or a map entry, not for a name the file defines.
-                Segment::Filter { .. } => None,
-            })
-        });
-        if let Some(reason) = unreadable {
-            return Err(ResolveError::Unreadable { reason });
+        if let Some(unreadable) = self.unreadable_reason(path) {
+            return Err(ResolveError::Unreadable(unreadable));
         }
         let (resolved, scope) = resolve_filters(self, path)?;
-        let candidates: Vec<&Symbol> = scope
-            .iter()
-            .copied()
+        let candidates: Vec<&Symbol> = in_scope(self, scope)
             .filter(|symbol| symbol.path == resolved)
             .collect();
         match candidates.len() {
             0 => Err(ResolveError::NotFound {
-                hints: path_hints(&scope, path, &resolved),
+                hints: path_hints(self, scope, path, &resolved),
             }),
             1 => Ok(candidates[0]),
             _ => Err(ResolveError::AmbiguousSymbol { candidates }),
         }
+    }
+
+    /// Finds every symbol at `path`, in document order.
+    ///
+    /// A filter in `path` that matches several children looks for the rest of the path under each
+    /// of them. Returns an empty list when no symbol matches `path`.
+    ///
+    /// # Errors
+    /// Returns [`Unreadable`] when `path` is unreadable, a segment of `path` is a word the parser
+    /// skipped, a filter compares an unreadable key, or a matched child leads to an unreadable
+    /// path.
+    pub(crate) fn resolve_all(&self, path: &SymbolPath) -> Result<Vec<&Symbol>, Unreadable<'_>> {
+        if let Some(unreadable) = self.unreadable_reason(path) {
+            return Err(unreadable);
+        }
+        let mut found = Vec::new();
+        resolve_all_from(self, path, None, &mut found)?;
+        Ok(found)
+    }
+
+    /// Why `path` itself cannot be read reliably, if it is unreadable or one of its key segments
+    /// is a word the parser skipped.
+    fn unreadable_reason(&self, path: &SymbolPath) -> Option<Unreadable<'_>> {
+        // A problem in the path's own definition is closer than a skipped word, so it is reported
+        // first.
+        self.unreadable
+            .get(path)
+            .or_else(|| {
+                path.segments().iter().find_map(|segment| match segment {
+                    Segment::Key(name) => self.skipped.get(name),
+                    // A filter stands for a list item or a map entry, not for a name the file
+                    // defines.
+                    Segment::Filter { .. } => None,
+                })
+            })
+            .map(|reason| Unreadable { reason })
     }
 }
 
@@ -194,6 +220,18 @@ pub(crate) struct ScalarValue {
     pub(crate) text: String,
     /// The byte range of the source where the value is written, quotes included.
     pub(crate) byte_range: Range<usize>,
+}
+
+/// A symbol path whose definition or value blockwatch can't read reliably.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Unreadable<'a> {
+    reason: &'a str,
+}
+
+impl fmt::Display for Unreadable<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.reason)
+    }
 }
 
 /// Why a symbol path did not resolve to exactly one symbol.
@@ -210,8 +248,7 @@ pub(crate) enum ResolveError<'a> {
         keys: Vec<&'a Symbol>,
     },
     /// The path starts with a name whose definition or value blockwatch can't read reliably.
-    /// `reason` says why.
-    Unreadable { reason: &'a str },
+    Unreadable(Unreadable<'a>),
 }
 
 impl ResolveError<'_> {
@@ -241,7 +278,7 @@ impl ResolveError<'_> {
                     positions(keys, source)
                 )
             }
-            ResolveError::Unreadable { reason } => reason.to_string(),
+            ResolveError::Unreadable(unreadable) => unreadable.to_string(),
         }
     }
 }
@@ -269,11 +306,11 @@ const MAX_HINTS: usize = 3;
 const MIN_HINT_SIMILARITY: f64 = 0.6;
 
 /// Returns `path` with each filter swapped for the child it matches among `symbols`, such as
-/// `/items/1` for `/items/~[name=blue]`, and the symbols that the rest of the path can resolve
-/// to, in document order. A path without filters comes back unchanged, with every symbol.
+/// `/items/1` for `/items/~[name=blue]`, and the item that the rest of the path must sit inside,
+/// if any. A path without filters comes back unchanged with `None`.
 ///
 /// When several children share the path of the one a filter matches, such as two `ingress` blocks
-/// in HCL, the symbols are only those inside the child that holds the matched key, if one does.
+/// in HCL, the returned item is the child that holds the matched key, if one does.
 ///
 /// # Errors
 /// Returns [`ResolveError::NotFound`] when a filter matches no child, and
@@ -282,46 +319,33 @@ const MIN_HINT_SIMILARITY: f64 = 0.6;
 fn resolve_filters<'a>(
     symbols: &'a Symbols,
     path: &SymbolPath,
-) -> Result<(SymbolPath, Vec<&'a Symbol>), ResolveError<'a>> {
+) -> Result<(SymbolPath, Option<&'a Symbol>), ResolveError<'a>> {
     // Filters are swapped one at a time, from the left. So a filter looks only under the children
     // that the filters before it matched.
     let mut resolved = path.clone();
-    let mut scope: Vec<&Symbol> = symbols.symbols.iter().collect();
+    let mut scope: Option<&Symbol> = None;
     for (index, segment) in path.segments().iter().enumerate() {
         let (key, value) = match segment {
             Segment::Key(_) => continue,
             Segment::Filter { key, value } => (key, value),
         };
         let parent = &resolved.segments()[..index];
-        // An unreadable path has no symbol, so the child it belongs to can't be told apart. Its
-        // key could hold the filter's value too.
-        let unreadable_key = symbols
-            .unreadable
-            .iter()
-            .find(|(unreadable, _)| is_child_key(unreadable, parent, key));
-        if let Some((_, reason)) = unreadable_key {
-            return Err(ResolveError::Unreadable { reason });
+        if let Some(unreadable) = unreadable_child_key(symbols, parent, key) {
+            return Err(ResolveError::Unreadable(unreadable));
         }
-        let matches: Vec<&Symbol> = child_keys(&scope, parent, key)
-            .filter(|symbol| {
-                symbol
-                    .value
-                    .as_ref()
-                    .is_some_and(|held| held.text == *value)
-            })
-            .collect();
+        let matches = matching_child_keys(symbols, scope, parent, key, value);
         match matches.as_slice() {
             [] => {
                 // The second call to `child_keys` walks `scope` again. It happens only when no
                 // child matches, so a filter that matches doesn't keep every key it looked at.
-                let keys = child_keys(&scope, parent, key);
+                let keys = child_keys(symbols, scope, parent, key);
                 return Err(ResolveError::NotFound {
                     hints: filter_hints(symbols, path, index, key, keys),
                 });
             }
             [key] => {
                 resolved = resolved.with_segment(index, key.path.segments()[index].clone());
-                narrow_to_child(&mut scope, &resolved.segments()[..=index], key);
+                scope = narrow_to_child(symbols, scope, &resolved.segments()[..=index], key);
             }
             _ => {
                 return Err(ResolveError::AmbiguousFilter {
@@ -333,28 +357,118 @@ fn resolve_filters<'a>(
     }
     // An unreadable item has no symbol, so the filter may have picked another item at its path.
     if let Some(reason) = symbols.unreadable.get(&resolved) {
-        return Err(ResolveError::Unreadable { reason });
+        return Err(ResolveError::Unreadable(Unreadable { reason }));
     }
     Ok((resolved, scope))
 }
 
-/// Keeps in `scope` only the symbols inside the child that holds `key`, when several symbols in
-/// `scope` have the path `child`, such as two `ingress` blocks in HCL. Keeps all of `scope` when
-/// only one symbol has that path, or when none of them holds `key`.
-fn narrow_to_child(scope: &mut Vec<&Symbol>, child: &[Segment], key: &Symbol) {
-    let siblings: Vec<&Symbol> = scope
+/// Appends every symbol matching `resolved` inside `scope`, in document order.
+///
+/// # Errors
+/// Returns [`Unreadable`] when a filter compares an unreadable key or leads to an unreadable path.
+fn resolve_all_from<'a>(
+    symbols: &'a Symbols,
+    resolved: &SymbolPath,
+    scope: Option<&'a Symbol>,
+    found: &mut Vec<&'a Symbol>,
+) -> Result<(), Unreadable<'a>> {
+    let next_filter = resolved
+        .segments()
         .iter()
-        .copied()
-        .filter(|symbol| symbol.path.segments() == child)
-        .collect();
+        .enumerate()
+        .find_map(|(index, segment)| match segment {
+            Segment::Key(_) => None,
+            Segment::Filter { key, value } => Some((index, key, value)),
+        });
+    let Some((index, key, value)) = next_filter else {
+        if let Some(reason) = symbols.unreadable.get(resolved) {
+            return Err(Unreadable { reason });
+        }
+        found.extend(in_scope(symbols, scope).filter(|symbol| symbol.path == *resolved));
+        return Ok(());
+    };
+    let parent = &resolved.segments()[..index];
+    if let Some(unreadable) = unreadable_child_key(symbols, parent, key) {
+        return Err(unreadable);
+    }
+    for matched_key in matching_child_keys(symbols, scope, parent, key, value) {
+        let child_path = resolved
+            .clone()
+            .with_segment(index, matched_key.path.segments()[index].clone());
+        let child_scope = narrow_to_child(
+            symbols,
+            scope,
+            &child_path.segments()[..=index],
+            matched_key,
+        );
+        resolve_all_from(symbols, &child_path, child_scope, found)?;
+    }
+    Ok(())
+}
+
+/// The symbols of `symbols` written inside `scope`, or every symbol when `scope` is `None`, in
+/// document order.
+fn in_scope<'a>(
+    symbols: &'a Symbols,
+    scope: Option<&'a Symbol>,
+) -> impl Iterator<Item = &'a Symbol> {
+    symbols
+        .symbols
+        .iter()
+        .filter(move |symbol| scope.is_none_or(|container| is_inside(symbol, container)))
+}
+
+/// Why a child of `parent` has an unreadable `key`, if any.
+fn unreadable_child_key<'a>(
+    symbols: &'a Symbols,
+    parent: &[Segment],
+    key: &str,
+) -> Option<Unreadable<'a>> {
+    // An unreadable path has no symbol, so the child it belongs to can't be told apart. Its
+    // key could hold the filter's value too.
+    symbols
+        .unreadable
+        .iter()
+        .find(|(unreadable, _)| is_child_key(unreadable, parent, key))
+        .map(|(_, reason)| Unreadable { reason })
+}
+
+/// The `key` keys of the children of `parent` inside `scope` whose scalar value is `value`, in
+/// document order.
+fn matching_child_keys<'s>(
+    symbols: &'s Symbols,
+    scope: Option<&'s Symbol>,
+    parent: &[Segment],
+    key: &str,
+    value: &str,
+) -> Vec<&'s Symbol> {
+    child_keys(symbols, scope, parent, key)
+        .filter(|symbol| symbol.value.as_ref().is_some_and(|held| held.text == value))
+        .collect()
+}
+
+/// The child that holds `key` when several symbols inside `scope` have the path `child`, such as
+/// two `ingress` blocks in HCL. Returns `scope` unchanged when at most one symbol has that path,
+/// or when none of them holds `key`.
+fn narrow_to_child<'a>(
+    symbols: &'a Symbols,
+    scope: Option<&'a Symbol>,
+    child: &[Segment],
+    key: &Symbol,
+) -> Option<&'a Symbol> {
+    let mut siblings = in_scope(symbols, scope).filter(|symbol| symbol.path.segments() == child);
     // A child alone at its path keeps every symbol under that path, even one written outside it,
     // such as a member that a Swift extension adds to a type.
-    if siblings.len() > 1 {
-        // A key written outside every child, such as in a Swift extension, picks none of them, so
-        // the path stays ambiguous.
-        let picked = siblings.iter().find(|sibling| is_inside(key, sibling));
-        scope.retain(|symbol| picked.is_none_or(|picked| is_inside(symbol, picked)));
-    }
+    let (Some(first), Some(second)) = (siblings.next(), siblings.next()) else {
+        return scope;
+    };
+    // A key written outside every child, such as in a Swift extension, picks none of them, so
+    // the path stays ambiguous.
+    [first, second]
+        .into_iter()
+        .chain(siblings)
+        .find(|sibling| is_inside(key, sibling))
+        .or(scope)
 }
 
 /// Whether `symbol` is written inside `item`: whether it starts where `item` is written.
@@ -367,18 +481,16 @@ fn is_inside(symbol: &Symbol, item: &Symbol) -> bool {
         .any(|range| range.contains(&start))
 }
 
-/// The `key` keys of the children of `parent` among `symbols`, in document order. For `parent`
+/// The `key` keys of the children of `parent` inside `scope`, in document order. For `parent`
 /// `/items` and `key` `name`, they are the symbols at `/items/0/name`, `/items/1/name` and so on.
 /// A child is a list item or a map entry.
 fn child_keys<'s>(
-    symbols: &[&'s Symbol],
+    symbols: &'s Symbols,
+    scope: Option<&'s Symbol>,
     parent: &[Segment],
     key: &str,
 ) -> impl Iterator<Item = &'s Symbol> {
-    symbols
-        .iter()
-        .copied()
-        .filter(move |symbol| is_child_key(&symbol.path, parent, key))
+    in_scope(symbols, scope).filter(move |symbol| is_child_key(&symbol.path, parent, key))
 }
 
 /// Whether `path` is the path of the `key` key of a child of `parent`, such as `/items/0/name`
@@ -400,14 +512,19 @@ fn is_child_key(path: &SymbolPath, parent: &[Segment], key: &str) -> bool {
 ///
 /// When `path` has a filter, the hints are only paths under the child that the last filter
 /// matched, written with every filter of `path`. Otherwise they come from all of `symbols`.
-fn path_hints(symbols: &[&Symbol], path: &SymbolPath, resolved: &SymbolPath) -> Vec<SymbolPath> {
+fn path_hints(
+    symbols: &Symbols,
+    scope: Option<&Symbol>,
+    path: &SymbolPath,
+    resolved: &SymbolPath,
+) -> Vec<SymbolPath> {
     let last_filter = path.segments().iter().rposition(|segment| match segment {
         Segment::Key(_) => false,
         Segment::Filter { .. } => true,
     });
     match last_filter {
         None => hints(
-            symbols.iter().map(|symbol| &symbol.path),
+            in_scope(symbols, scope).map(|symbol| &symbol.path),
             path,
             MIN_HINT_SIMILARITY,
         ),
@@ -415,8 +532,7 @@ fn path_hints(symbols: &[&Symbol], path: &SymbolPath, resolved: &SymbolPath) -> 
             // A path under another child points at an item that the filters did not pick. A
             // position in place of a filter breaks when an item is added above it.
             let matched = &resolved.segments()[..=last];
-            let candidates: Vec<SymbolPath> = symbols
-                .iter()
+            let candidates: Vec<SymbolPath> = in_scope(symbols, scope)
                 .filter(|symbol| symbol.path.segments().starts_with(matched))
                 // The keys up to the last filter are the same in both paths, so only the filters
                 // change.
@@ -641,9 +757,9 @@ mod resolve_tests {
 
         assert_eq!(
             symbols.resolve(&path("/b/c")),
-            Err(ResolveError::Unreadable {
+            Err(ResolveError::Unreadable(Unreadable {
                 reason: "syntax error near b"
-            })
+            }))
         );
     }
 
@@ -653,9 +769,9 @@ mod resolve_tests {
 
         assert_eq!(
             symbols.resolve(&path("/a/b")),
-            Err(ResolveError::Unreadable {
+            Err(ResolveError::Unreadable(Unreadable {
                 reason: "syntax error near b"
-            })
+            }))
         );
     }
 
@@ -1203,6 +1319,32 @@ mod resolve_tests {
         );
     }
 
+    #[test]
+    fn second_filter_with_key_outside_inner_siblings_keeps_the_outer_pick() {
+        // When an outer filter already narrowed to one sibling, an inner filter whose matched key
+        // sits outside two inner siblings stays inside the outer sibling instead of widening to
+        // other outer copies.
+        let inner_a = element("/Outer/Inner", 22..26);
+        let inner_b = element("/Outer/Inner", 26..30);
+        let symbols = Symbols::from(vec![
+            element("/Outer", 0..20),
+            scalar("/Outer/name", 1, "first"),
+            element("/Outer/Inner", 2..6),
+            element("/Outer", 20..40),
+            scalar("/Outer/name", 21, "second"),
+            inner_a.clone(),
+            inner_b.clone(),
+            scalar("/Outer/Inner/name", 35, "blue"),
+        ]);
+
+        assert_eq!(
+            symbols.resolve(&path("/~[name=second]/~[name=blue]")),
+            Err(ResolveError::AmbiguousSymbol {
+                candidates: vec![&inner_a, &inner_b]
+            })
+        );
+    }
+
     /// The symbols of `items`, except `unreadable`, whose path is unreadable instead, as the path
     /// of a value that blockwatch can't decode is.
     fn with_unreadable(items: &[ItemAtOnePath], unreadable: &Symbol) -> Symbols {
@@ -1224,9 +1366,9 @@ mod resolve_tests {
 
         assert_eq!(
             symbols.resolve(&path("/items/~[name=red]")),
-            Err(ResolveError::Unreadable {
+            Err(ResolveError::Unreadable(Unreadable {
                 reason: "can't decode"
-            })
+            }))
         );
     }
 
@@ -1238,9 +1380,9 @@ mod resolve_tests {
 
         assert_eq!(
             symbols.resolve(&path("/items/~[name=red]/content")),
-            Err(ResolveError::Unreadable {
+            Err(ResolveError::Unreadable(Unreadable {
                 reason: "can't decode"
-            })
+            }))
         );
     }
 
@@ -1253,9 +1395,9 @@ mod resolve_tests {
 
         assert_eq!(
             symbols.resolve(&path("/items/~[name=red]/content")),
-            Err(ResolveError::Unreadable {
+            Err(ResolveError::Unreadable(Unreadable {
                 reason: "can't decode"
-            })
+            }))
         );
     }
 
@@ -1328,6 +1470,139 @@ mod resolve_tests {
         let error = ResolveError::NotFound { hints: vec![] };
 
         assert_eq!(error.reason(""), "symbol not found");
+    }
+
+    #[test]
+    fn resolve_all_returns_every_symbol_at_a_path_or_empty_when_missing() {
+        // A path without filters returns every matching symbol in document order, and empty when
+        // none matches.
+        let first = symbol("/v", 0);
+        let second = symbol("/v", 2);
+        let symbols = Symbols::from(vec![first.clone(), symbol("/w", 1), second.clone()]);
+
+        assert_eq!(symbols.resolve_all(&path("/v")), Ok(vec![&first, &second]));
+        assert_eq!(symbols.resolve_all(&path("/missing")), Ok(vec![]));
+    }
+
+    #[test]
+    fn resolve_all_with_filter_matching_several_children_returns_symbols_under_each() {
+        // A filter that matches several items looks for the rest of the path under each one,
+        // skipping items that lack it.
+        let first_content = symbol("/items/0/content", 1);
+        let third_content = symbol("/items/2/content", 5);
+        let symbols = Symbols::from(vec![
+            scalar("/items/0/name", 0, "a"),
+            first_content.clone(),
+            scalar("/items/1/name", 2, "a"),
+            scalar("/items/2/name", 4, "a"),
+            third_content.clone(),
+            scalar("/items/3/name", 6, "b"),
+            symbol("/items/3/content", 7),
+        ]);
+
+        assert_eq!(
+            symbols.resolve_all(&path("/items/~[name=a]/content")),
+            Ok(vec![&first_content, &third_content])
+        );
+        assert_eq!(
+            symbols.resolve_all(&path("/items/~[name=c]/content")),
+            Ok(vec![])
+        );
+    }
+
+    #[test]
+    fn resolve_all_with_filter_over_items_at_one_path_stays_inside_matched_items() {
+        // When siblings share a path, `resolve_all` must look for the rest of the path only inside
+        // items that matched the filter, never in a non-matching sibling.
+        let matched_content = symbol("/items/item/content", 12);
+        let symbols = Symbols::from(vec![
+            element("/items/item", 0..10),
+            scalar("/items/item/name", 1, "a"),
+            element("/items/item", 10..20),
+            scalar("/items/item/name", 11, "a"),
+            matched_content.clone(),
+            element("/items/item", 20..30),
+            scalar("/items/item/name", 21, "b"),
+            symbol("/items/item/content", 22),
+        ]);
+
+        assert_eq!(
+            symbols.resolve_all(&path("/items/~[name=a]/content")),
+            Ok(vec![&matched_content])
+        );
+        // Neither `a` item has `extra`; only `b` does.
+        let with_extra = Symbols::from(vec![
+            element("/items/item", 0..10),
+            scalar("/items/item/name", 1, "a"),
+            element("/items/item", 10..20),
+            scalar("/items/item/name", 11, "a"),
+            element("/items/item", 20..30),
+            scalar("/items/item/name", 21, "b"),
+            symbol("/items/item/extra", 22),
+        ]);
+        assert_eq!(
+            with_extra.resolve_all(&path("/items/~[name=a]/extra")),
+            Ok(vec![])
+        );
+    }
+
+    #[test]
+    fn resolve_all_with_two_filters_collects_symbols_from_every_matched_branch() {
+        // Each filter expands every matching child before resolving the next filter.
+        let first = symbol("/groups/0/items/0/content", 2);
+        let second = symbol("/groups/1/items/1/content", 7);
+        let symbols = Symbols::from(vec![
+            scalar("/groups/0/name", 0, "g"),
+            scalar("/groups/0/items/0/name", 1, "x"),
+            first.clone(),
+            scalar("/groups/1/name", 3, "g"),
+            scalar("/groups/1/items/0/name", 4, "y"),
+            symbol("/groups/1/items/0/content", 5),
+            scalar("/groups/1/items/1/name", 6, "x"),
+            second.clone(),
+        ]);
+
+        assert_eq!(
+            symbols.resolve_all(&path("/groups/~[name=g]/items/~[name=x]/content")),
+            Ok(vec![&first, &second])
+        );
+    }
+
+    #[test]
+    fn resolve_all_returns_unreadable_reason_for_unreadable_paths_and_filter_keys() {
+        // An unreadable path, a skipped word, an unreadable filter key, or an unreadable target
+        // under a matched child each return their reason as an error.
+        let (symbols, _) = symbols_with_unreadable_names();
+        assert_eq!(
+            symbols.resolve_all(&path("/a/c")),
+            Err(Unreadable {
+                reason: "syntax error in c"
+            })
+        );
+        assert_eq!(
+            symbols.resolve_all(&path("/a/b")),
+            Err(Unreadable {
+                reason: "syntax error near b"
+            })
+        );
+
+        let (_, items) = items_at_one_path(["red", "red"]);
+        let [first, _second] = &items;
+        let unreadable_key = with_unreadable(&items, &first.name);
+        assert_eq!(
+            unreadable_key.resolve_all(&path("/items/~[name=red]/content")),
+            Err(Unreadable {
+                reason: "can't decode"
+            })
+        );
+
+        let unreadable_target = with_unreadable(&items, &first.content);
+        assert_eq!(
+            unreadable_target.resolve_all(&path("/items/~[name=red]/content")),
+            Err(Unreadable {
+                reason: "can't decode"
+            })
+        );
     }
 }
 

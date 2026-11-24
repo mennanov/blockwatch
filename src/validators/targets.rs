@@ -63,8 +63,8 @@ impl<'a, Fs: FileSystem> TargetFiles<'a, Fs> {
             Ok(symbol) => Ok(symbol),
             // The file is as broken near the name as a data file with a syntax error is, so it
             // stops the run the same way.
-            Err(ResolveError::Unreadable { reason }) => {
-                return Err(anyhow!(reason.to_string()).context(context()));
+            Err(ResolveError::Unreadable(unreadable)) => {
+                return Err(anyhow!("{unreadable}").context(context()));
             }
             Err(
                 error @ (ResolveError::NotFound { .. }

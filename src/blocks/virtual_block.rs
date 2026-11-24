@@ -6,7 +6,7 @@ use crate::diff::LineChanges;
 use crate::position::LineIndex;
 use crate::repo_path::RepoPath;
 use crate::symbols::SymbolPath;
-use crate::symbols::{ResolveError, Symbols};
+use crate::symbols::Symbols;
 use anyhow::{anyhow, bail};
 use regex::{Captures, Regex, RegexBuilder};
 use std::hash::{Hash, Hasher};
@@ -339,30 +339,12 @@ impl VirtualBlock {
         symbols: &Symbols,
         path: &SymbolPath,
     ) -> anyhow::Result<Option<Vec<Range<usize>>>> {
-        let found = match symbols.resolve(path) {
-            Ok(symbol) => vec![symbol],
-            Err(ResolveError::AmbiguousSymbol { candidates }) => candidates,
-            Err(ResolveError::AmbiguousFilter { keys, .. }) => {
-                // The filter stops the search, so the rest of the path is looked up under each
-                // item it matches. A key such as `/items/1/name` is right under its item.
-                let mut ranges = Vec::new();
-                for key in keys {
-                    let index = key.path.segments().len() - 2;
-                    let item_path = path
-                        .clone()
-                        .with_segment(index, key.path.segments()[index].clone());
-                    ranges.extend(
-                        self.target_if_symbol_ranges(symbols, &item_path)?
-                            .unwrap_or_default(),
-                    );
-                }
-                return Ok(Some(ranges).filter(|ranges| !ranges.is_empty()));
-            }
-            Err(ResolveError::NotFound { .. }) => return Ok(None),
-            Err(ResolveError::Unreadable { reason }) => {
-                return Err(self.unresolved(anyhow!("{reason}")));
-            }
-        };
+        let found = symbols
+            .resolve_all(path)
+            .map_err(|unreadable| self.unresolved(anyhow!("{unreadable}")))?;
+        if found.is_empty() {
+            return Ok(None);
+        }
         Ok(Some(
             found
                 .iter()
@@ -392,6 +374,7 @@ mod tests {
     use crate::diff::{LineChange, LineChangeKind};
     use crate::languages::LanguageParsers;
     use crate::position::Position;
+    use crate::symbols::ResolveError;
     use std::collections::HashMap;
     use std::path::Path;
 
