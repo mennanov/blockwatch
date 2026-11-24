@@ -99,7 +99,7 @@ fn run_explain(args: &flags::Args, address: &BlockAddress) -> anyhow::Result<Exi
     )?;
     context.request_traces();
     let context = Arc::new(context);
-    let log = validators::run(Arc::clone(&context), sync_validators, async_validators)?;
+    let log = validators::run(&context, sync_validators, async_validators)?;
 
     // Violations are what the run is for, so they are written first, as in `run_validators`. A
     // failure to write the explanation then can't discard them.
@@ -143,7 +143,7 @@ fn run_validators(args: &flags::Args) -> anyhow::Result<ExitCode> {
         &file_system,
     )?;
     let context = Arc::new(context);
-    let mut log = validators::run(Arc::clone(&context), sync_validators, async_validators)?;
+    let mut log = validators::run(&context, sync_validators, async_validators)?;
     apply_suppressions(&suppressed_addresses, &mut log.violations);
 
     // Violations are what the run is for; the report only describes it. Writing them first keeps a

@@ -7,7 +7,6 @@ use crate::validators::{
 };
 use serde::Serialize;
 use std::collections::HashSet;
-use std::sync::Arc;
 
 /// Enforces `keep-unique`: no two non-empty lines inside the block may be equal.
 ///
@@ -18,7 +17,7 @@ pub(super) struct KeepUniqueValidator;
 impl SyncValidator for KeepUniqueValidator {
     fn validate(
         &self,
-        context: Arc<validators::ValidationContext>,
+        context: &validators::ValidationContext,
     ) -> anyhow::Result<ValidationReport> {
         let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
@@ -188,7 +187,7 @@ BB
 # </block>",
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert_eq!(violations.len(), 1);
         let file_violations = violations
@@ -217,7 +216,7 @@ BB
             "# <block keep-unique>\ncafé\ncafé\n# </block>",
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         let file_violations = violations
             .get(&RepoPath::from_reference("example.py")?)
@@ -242,7 +241,7 @@ C
 # </block>",
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -256,7 +255,7 @@ C
             "/* <block\nkeep-unique> */\nA\nA\n/* </block> */",
         );
 
-        let violations = KeepUniqueValidator.validate(context)?.violations;
+        let violations = KeepUniqueValidator.validate(&context)?.violations;
 
         let file_violations = violations
             .get(&RepoPath::from_reference("example.rs")?)
@@ -283,7 +282,7 @@ ID:1 C
 # </block>"#,
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert_eq!(violations.len(), 1);
         let file_violations = violations
             .get(&RepoPath::from_reference("example.py")?)
@@ -307,7 +306,7 @@ ID:1 C
             "# <block keep-unique=\"^ID:(?P<value>\\d+)$\">\n  ID:1\n  ID:1\n# </block>",
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         let file_violations = violations
             .get(&RepoPath::from_reference("example.py")?)
@@ -328,7 +327,7 @@ ID:1 C
             "# <block keep-unique=\"(?P<value>.*)\">\nA\n\nB\n\n# </block>",
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -344,7 +343,7 @@ ID:1 C
             "# <block keep-unique=\"(?P<value>\\d*)\">\nabc\ndef\n# </block>",
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -363,7 +362,7 @@ red
 # </block>"#,
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -382,7 +381,7 @@ ID:1 C
 # </block>"#,
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert_eq!(violations.len(), 1);
         let file_violations = violations
             .get(&RepoPath::from_reference("example.py")?)
@@ -408,7 +407,7 @@ ID:2
 # </block>"#,
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -424,7 +423,7 @@ ID:2
             "# <block keep-unique=\"^ID: (?P<value>\\d+)$\">\n  ID: 1  \nID:2\nID: 1\n# </block>",
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert_eq!(violations.len(), 1);
         let file_violations = violations
@@ -455,7 +454,7 @@ C
 # </block>",
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -470,7 +469,7 @@ C
 # </block>",
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -479,14 +478,14 @@ C
     #[test]
     fn context_without_any_blocks_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepUniqueValidator;
-        let context = Arc::new(validators::ValidationContext::new(
+        let context = validators::ValidationContext::new(
             BTreeMap::new(),
             LanguageParsers::new(),
             DiffChanges::default(),
             Vec::new(),
-        ));
+        );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -511,7 +510,7 @@ C
 # </block>"#,
         );
 
-        let report = KeepUniqueValidator.validate(context)?;
+        let report = KeepUniqueValidator.validate(&context)?;
 
         // The block without a keep-unique attribute is not checked, so it records nothing.
         assert_eq!(checked_lines(&report), vec![1, 5]);
@@ -536,7 +535,7 @@ mod trace_tests {
             "# <block keep-unique>\nred\nblue\n\nred\n red\n# </block>\n",
         ));
 
-        let report = KeepUniqueValidator.validate(context)?;
+        let report = KeepUniqueValidator.validate(&context)?;
 
         assert_eq!(
             trace_json(&report),
@@ -563,7 +562,7 @@ ID:7 blue
 "#,
         ));
 
-        let report = KeepUniqueValidator.validate(context)?;
+        let report = KeepUniqueValidator.validate(&context)?;
 
         assert_eq!(
             trace_json(&report),
@@ -582,7 +581,7 @@ ID:7 blue
     fn context_without_traces_requested_records_no_trace() -> anyhow::Result<()> {
         let context = validation_context("a.py", "# <block keep-unique>\na\na\n# </block>\n");
 
-        let report = KeepUniqueValidator.validate(context)?;
+        let report = KeepUniqueValidator.validate(&context)?;
 
         assert_eq!(report.traces, []);
         Ok(())

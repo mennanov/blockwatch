@@ -46,9 +46,9 @@ impl<Fs: FileSystem + 'static> SameAsValidator<Fs> {
 impl<Fs: FileSystem + 'static> SyncValidator for SameAsValidator<Fs> {
     fn validate(
         &self,
-        context: Arc<validators::ValidationContext>,
+        context: &validators::ValidationContext,
     ) -> anyhow::Result<ValidationReport> {
-        let mut targets = TargetRecords::new(&context, self.file_system.as_ref());
+        let mut targets = TargetRecords::new(context, self.file_system.as_ref());
         let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
             for block_with_context in &file_blocks.blocks_with_context {
@@ -811,7 +811,7 @@ mod validate_tests {
             "config.py",
             "# <block same-as=\":b\">\nvalue = 10\n# </block>\n# <block name=\"b\">\nvalue = 20\n# </block>",
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations
             .get(&RepoPath::from_reference("config.py")?)
             .unwrap();
@@ -826,7 +826,7 @@ mod validate_tests {
             "config.py",
             "# <block same-as=\":b\">\nvalue = 10\n# </block>\n# <block name=\"b\">\nvalue = 10\n# </block>",
         );
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -840,7 +840,7 @@ mod validate_tests {
                 "[//]: # (<block name=\"doc\">)\n\nX\n\n[//]: # (</block>)",
             ),
         ]);
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -851,7 +851,7 @@ mod validate_tests {
         // The file exists but has no block named "nope"; confirming its absence requires reading the
         // full file, so the filesystem is seeded with it.
         let violations = validator(&[("config.py", source)])
-            .validate(context)?
+            .validate(&context)?
             .violations;
         let violations = violations
             .get(&RepoPath::from_reference("config.py")?)
@@ -876,7 +876,7 @@ mod validate_tests {
             "b.md",
             "[//]: # (<block name=\"doc\">)\n\nX\n\n[//]: # (</block>)",
         )]);
-        assert!(v.validate(context)?.violations.is_empty());
+        assert!(v.validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -899,7 +899,7 @@ mod validate_tests {
         );
         let v = validator(&[("package.json", r#"{"version": "1.2.3"}"#)]);
 
-        assert!(v.validate(context)?.violations.is_empty());
+        assert!(v.validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -919,7 +919,7 @@ mod validate_tests {
         );
         let v = validator(&[("package.json", r#"{"version": "1.2.3"}"#)]);
 
-        let error = v.validate(context).unwrap_err();
+        let error = v.validate(&context).unwrap_err();
 
         assert_eq!(
             format!("{error:#}"),
@@ -944,7 +944,7 @@ mod validate_tests {
             }],
         );
         let v = validator(&[("config.py", source)]);
-        assert!(v.validate(context)?.violations.is_empty());
+        assert!(v.validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -963,7 +963,7 @@ red
 # </block>
 "#,
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
@@ -992,7 +992,7 @@ blue
 # </block>
 "#,
         );
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1010,7 +1010,7 @@ blue
 # </block>
 "#,
         );
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1028,7 +1028,7 @@ blue
 # </block>
 "#,
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
@@ -1054,7 +1054,7 @@ blue, red, blue
 # </block>
 "#,
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
@@ -1081,7 +1081,7 @@ red
 # </block>
 "#,
         );
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1098,7 +1098,7 @@ red
 # </block>
 "#,
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
@@ -1123,7 +1123,7 @@ red
                 "[//]: # (<block name=\"langs\" same-as-pattern=\"[a-z]+\">)\n\nrust\ngo\n\n[//]: # (</block>)",
             ),
         ]);
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1139,7 +1139,7 @@ red
                 "[//]: # (<block name=\"langs\" same-as-pattern=\"[a-z]+\">)\n\ngo\n\n[//]: # (</block>)",
             ),
         ]);
-        assert_eq!(validator(&[]).validate(context)?.violations.len(), 1);
+        assert_eq!(validator(&[]).validate(&context)?.violations.len(), 1);
         Ok(())
     }
 
@@ -1156,7 +1156,7 @@ red
                 "[//]: # (<block name=\"langs\" same-as-pattern=\"[a-z]+\">)\n\ngo\nrust\n\n[//]: # (</block>)",
             ),
         ]);
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1176,7 +1176,7 @@ red
                 "[//]: # (<block name=\"langs\" same-as-pattern=\"[A-Z]+\">)\n\nA, B, C\nD\n\n[//]: # (</block>)",
             ),
         ]);
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1194,7 +1194,7 @@ red
                 "[//]: # (<block name=\"langs\" same-as-pattern=\"[a-z]*\">)\n\ngo\nrust\n\n[//]: # (</block>)",
             ),
         ]);
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1212,7 +1212,7 @@ red
 # </block>
 "#,
         );
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1232,7 +1232,7 @@ blue: 1
 # </block>
 "#,
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
@@ -1261,7 +1261,7 @@ blue = 2
 # </block>
 "#,
         );
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1279,7 +1279,7 @@ red: 1
 # </block>
 "#,
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
@@ -1306,7 +1306,7 @@ red: 1
 # </block>
 "#,
         );
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1323,7 +1323,7 @@ red: 1
                 "[//]: # (<block name=\"langs\" same-as-pattern=\"[0-9]+\">)\n\nrust\ngo\n\n[//]: # (</block>)",
             ),
         ]);
-        assert_eq!(validator(&[]).validate(context)?.violations.len(), 1);
+        assert_eq!(validator(&[]).validate(&context)?.violations.len(), 1);
         Ok(())
     }
 
@@ -1340,7 +1340,7 @@ id=1
 # </block>
 "#,
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
@@ -1364,7 +1364,7 @@ ids = 1, 2
 # </block>
 "#,
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
@@ -1381,7 +1381,7 @@ ids = 1, 2
             "a.rs",
             "// <block same-as=\":b\" same-as-pattern=\"(?P<value>[a-z]+)\">\ngamma\nbeta\ngamma\nbeta\n// </block>\n// <block name=\"b\" same-as-pattern=\"(?P<value>[a-z]+)\">\ndelta\nalpha\ndelta\n// </block>",
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
@@ -1406,7 +1406,7 @@ ids = 1, 2
                 "[//]: # (<block name=\"l\" same-as-pattern=\"[a-z]+\">)\n\nrust\ngo\n\n[//]: # (</block>)",
             ),
         ]);
-        assert_eq!(validator(&[]).validate(context)?.violations.len(), 1);
+        assert_eq!(validator(&[]).validate(&context)?.violations.len(), 1);
         Ok(())
     }
 
@@ -1416,7 +1416,7 @@ ids = 1, 2
             "a.rs",
             "// <block same-as=\":b\" same-as-pattern=\"(?P<value>[0-9]+)\" same-as-mode=\"single\">\n1\n2\n// </block>\n// <block name=\"b\">\n1\n// </block>",
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
         assert_eq!(file.len(), 1);
         assert_eq!(file[0].code, Validator::SameAs);
@@ -1436,7 +1436,7 @@ red: 2
 # </block>
 "#,
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
@@ -1461,7 +1461,7 @@ red: 2
                 "// <block name=\"vars\" same-as-pattern=\"(?P<value>[A-Z_]+)\">\nAPI_KEY\nAPI_URL\n// </block>",
             ),
         ]);
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1477,7 +1477,7 @@ red: 2
                 "// <block name=\"vars\" same-as-pattern=\"(?P<value>[A-Z_]+)\">\nAPI_KEY\n// </block>",
             ),
         ]);
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations
             .get(&RepoPath::from_reference("test.rs")?)
             .unwrap();
@@ -1493,7 +1493,7 @@ red: 2
             "a.rs",
             "// <block same-as=\":b\" same-as-mode=\"subset\" same-as-pattern=\"(?P<value>[a-z]+)\">\ngamma\nalpha\nbeta\ngamma\nbeta\n// </block>\n// <block name=\"b\">\nalpha\n// </block>",
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
@@ -1520,7 +1520,7 @@ red: 2
                 "// <block name=\"vars\" same-as-pattern=\"(?P<value>[A-Z_]+)\">\nAPI_KEY\n// </block>",
             ),
         ]);
-        assert_eq!(validator(&[]).validate(context)?.violations.len(), 1);
+        assert_eq!(validator(&[]).validate(&context)?.violations.len(), 1);
         Ok(())
     }
 
@@ -1537,7 +1537,7 @@ red: 2
                 "// <block name=\"port\" same-as-pattern=\"(?P<value>[0-9.]+)\">\n8080.0\n// </block>",
             ),
         ]);
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1556,7 +1556,7 @@ red: 2
 # </block>
 "#,
         );
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1568,7 +1568,7 @@ red: 2
             "a.rs",
             "// <block same-as=\":b\" same-as-pattern=\"(?P<value>\\w+)\" same-as-format=\"numeric\">\nabc\n// </block>\n// <block name=\"b\">\n1\n// </block>",
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
         assert_eq!(file.len(), 1);
         assert_eq!(file[0].code, Validator::SameAs);
@@ -1584,7 +1584,7 @@ red: 2
             "a.py",
             "# <block same-as=\":b\" same-as-pattern=\"(?P<value>\\d+)\" same-as-format=\"numeric\" same-as-mode=\"single\">\nid = 9007199254740992\n# </block>\n# <block name=\"b\" same-as-pattern=\"(?P<value>\\d+)\">\nid = 9007199254740993\n# </block>",
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
         assert_eq!(file.len(), 1);
         assert_eq!(file[0].code, Validator::SameAs);
@@ -1606,7 +1606,7 @@ red: 2
             "a.py",
             "# <block same-as=\":b\" same-as-format=\"numeric\" same-as-mode=\"single\">\n1e400\n# </block>\n# <block name=\"b\">\n1e500\n# </block>",
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
         assert_eq!(file.len(), 1);
         assert_eq!(file[0].code, Validator::SameAs);
@@ -1620,7 +1620,7 @@ red: 2
             "a.rs",
             "// <block same-as=\":b\" same-as-format=\"numeric\" same-as-mode=\"single\">\n1_000_000\n// </block>\n// <block name=\"b\">\n1000000\n// </block>",
         );
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1630,7 +1630,7 @@ red: 2
             "a.rs",
             "// <block same-as=\":b\" same-as-format=\"numeric\" same-as-mode=\"single\">\n1_000_\n// </block>\n// <block name=\"b\">\n1000\n// </block>",
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
@@ -1650,7 +1650,7 @@ red: 2
             "a.py",
             "# <block same-as=\":b\" same-as-format=\"numeric\" same-as-mode=\"single\">\ninf\n# </block>\n# <block name=\"b\">\ninf\n# </block>",
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
@@ -1678,7 +1678,7 @@ retryLimit
 // </block>
 "#,
         );
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1695,7 +1695,7 @@ http-server
 // </block>
 "#,
         );
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1713,7 +1713,7 @@ sign-in
 // </block>
 "#,
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
@@ -1740,7 +1740,7 @@ PALE_GREEN
 // </block>
 "#,
         );
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1757,7 +1757,7 @@ sign-in
 // </block>
 "#,
         );
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1773,7 +1773,7 @@ dark-red
 // </block>
 "#,
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
@@ -1796,7 +1796,7 @@ cafe
 // </block>
 "#,
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
@@ -1819,7 +1819,7 @@ cafe
 # </block>
 "#,
         );
-        assert!(validator(&[]).validate(single)?.violations.is_empty());
+        assert!(validator(&[]).validate(&single)?.violations.is_empty());
 
         let grouped = validation_context(
             "a.py",
@@ -1831,7 +1831,7 @@ red_ball: 1
 # </block>
 "#,
         );
-        assert!(validator(&[]).validate(grouped)?.violations.is_empty());
+        assert!(validator(&[]).validate(&grouped)?.violations.is_empty());
         Ok(())
     }
 
@@ -1847,7 +1847,7 @@ red: 1
 # </block>
 "#,
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
@@ -1873,7 +1873,7 @@ red: 1.0
 # </block>
 "#,
         );
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
         let file = violations.get(&RepoPath::from_reference("a.py")?).unwrap();
         assert_eq!(file.len(), 1);
         assert!(
@@ -1899,7 +1899,7 @@ red-color: 1.0
 # </block>
 "#,
         );
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1917,7 +1917,7 @@ red-color: 1.0
 # </block>
 "#,
         );
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1928,7 +1928,7 @@ red-color: 1.0
             "// <block same-as=\":b\" same-as-pattern=\"(?P<value>[0-9]+)\" same-as-mode=\"SEQUENCE\">\n1\n2\n// </block>\n// <block name=\"b\">\n2\n1\n// </block>",
         );
 
-        let violations = validator(&[]).validate(context)?.violations;
+        let violations = validator(&[]).validate(&context)?.violations;
 
         let file = violations.get(&RepoPath::from_reference("a.rs")?).unwrap();
         assert_eq!(file.len(), 1);
@@ -1942,7 +1942,7 @@ red-color: 1.0
             "// <block same-as=\":b\" same-as-mode=\" set \">\n1\n2\n// </block>\n// <block name=\"b\">\n2\n1\n// </block>",
         );
 
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1953,7 +1953,7 @@ red-color: 1.0
             "// <block same-as=\":b\" same-as-pattern=\"(?P<value>[0-9.]+)\" same-as-format=\"Numeric\">\n1\n// </block>\n// <block name=\"b\">\n1.0\n// </block>",
         );
 
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -1965,7 +1965,7 @@ red-color: 1.0
             "// <block same-as=\"VERSION\">\n1.2.3\n// </block>",
         );
 
-        let report = validator(&[("VERSION", "1.2.3\n")]).validate(context)?;
+        let report = validator(&[("VERSION", "1.2.3\n")]).validate(&context)?;
 
         assert_eq!(violation_count(&report), 0);
         Ok(())
@@ -1979,7 +1979,7 @@ red-color: 1.0
         );
 
         let violations = validator(&[("VERSION", "9.9.9\n")])
-            .validate(context)?
+            .validate(&context)?
             .violations;
 
         let file = violations
@@ -2016,7 +2016,7 @@ red-color: 1.0
             "package.json",
             "{\n  \"name\": \"example\",\n  \"version\": \"1.2.3\"\n}\n",
         )])
-        .validate(context)?;
+        .validate(&context)?;
 
         assert_eq!(violation_count(&report), 0);
         Ok(())
@@ -2029,7 +2029,7 @@ red-color: 1.0
             "// <block same-as=\"gone.json\">\n1.2.3\n// </block>",
         );
 
-        assert!(validator(&[]).validate(context).is_err());
+        assert!(validator(&[]).validate(&context).is_err());
     }
 
     /// The target file of the symbol reference tests.
@@ -2044,7 +2044,7 @@ red-color: 1.0
 # </block>"#,
         );
 
-        let report = validator(&[("package.json", PACKAGE_JSON)]).validate(context)?;
+        let report = validator(&[("package.json", PACKAGE_JSON)]).validate(&context)?;
 
         assert_eq!(violation_count(&report), 0);
         Ok(())
@@ -2060,7 +2060,7 @@ red-color: 1.0
         );
 
         let violations = validator(&[("package.json", PACKAGE_JSON)])
-            .validate(context)?
+            .validate(&context)?
             .violations;
 
         let file = violations
@@ -2093,7 +2093,7 @@ red-color: 1.0
 # </block>"#,
         );
 
-        let report = validator(&[("package.json", PACKAGE_JSON)]).validate(context)?;
+        let report = validator(&[("package.json", PACKAGE_JSON)]).validate(&context)?;
 
         assert_eq!(violation_count(&report), 0);
         Ok(())
@@ -2109,7 +2109,7 @@ red-color: 1.0
         );
 
         let violations = validator(&[("package.json", PACKAGE_JSON)])
-            .validate(context)?
+            .validate(&context)?
             .violations;
 
         let message = &violations[&RepoPath::from_reference("deps.py")?][0].message;
@@ -2131,7 +2131,7 @@ red-color: 1.0
         );
 
         let violations = validator(&[("config.json", r#"{"v": 1, "v": 2}"#)])
-            .validate(context)?
+            .validate(&context)?
             .violations;
 
         let message = &violations[&RepoPath::from_reference("deps.py")?][0].message;
@@ -2154,7 +2154,7 @@ red-color: 1.0
 }"##,
         );
 
-        let report = validator(&[]).validate(context)?;
+        let report = validator(&[]).validate(&context)?;
 
         assert_eq!(violation_count(&report), 0);
         Ok(())
@@ -2176,7 +2176,7 @@ red-color: 1.0
 <!-- </block> -->"#,
         );
 
-        let violations = validator(SERVICES).validate(context)?.violations;
+        let violations = validator(SERVICES).validate(&context)?.violations;
 
         let file = &violations[&RepoPath::from_reference("README.md")?];
         assert_eq!(file.len(), 1);
@@ -2208,7 +2208,7 @@ services/billing/
 <!-- </block> -->"#,
         );
 
-        let violations = validator(SERVICES).validate(context)?.violations;
+        let violations = validator(SERVICES).validate(&context)?.violations;
 
         let message = &violations[&RepoPath::from_reference("README.md")?][0].message;
         assert!(
@@ -2233,7 +2233,7 @@ crates/b/AGENTS.md
             ("crates/b/Cargo.toml", ""),
             ("crates/b/docs/AGENTS.md", ""),
         ])
-        .validate(context)?
+        .validate(&context)?
         .violations;
 
         let message = &violations[&RepoPath::from_reference("README.md")?][0].message;
@@ -2254,7 +2254,7 @@ docs/other.md
         );
 
         let violations = validator(&[("docs/INDEX.md", ""), ("docs/other.md", "")])
-            .validate(context)?
+            .validate(&context)?
             .violations;
 
         let message = &violations[&RepoPath::from_reference("README.md")?][0].message;
@@ -2275,7 +2275,7 @@ services/auth/
         );
 
         let violations = validator(&[("services/auth/x", ""), ("workers/mail/x", "")])
-            .validate(context)?
+            .validate(&context)?
             .violations;
 
         let message = &violations[&RepoPath::from_reference("README.md")?][0].message;
@@ -2295,7 +2295,7 @@ services/auth/
 <!-- </block> -->"#,
         );
 
-        let violations = validator(SERVICES).validate(context)?.violations;
+        let violations = validator(SERVICES).validate(&context)?.violations;
 
         let message = &violations[&RepoPath::from_reference("README.md")?][0].message;
         assert!(
@@ -2316,7 +2316,7 @@ services/auth/
 <!-- </block> -->"#,
         );
 
-        let violations = validator(SERVICES).validate(context)?.violations;
+        let violations = validator(SERVICES).validate(&context)?.violations;
 
         let message = &violations[&RepoPath::from_reference("README.md")?][0].message;
         assert!(
@@ -2340,7 +2340,7 @@ services/billing/
 <!-- </block> -->"#,
         );
 
-        let violations = validator(SERVICES).validate(context)?.violations;
+        let violations = validator(SERVICES).validate(&context)?.violations;
 
         let messages: Vec<&str> = violations[&RepoPath::from_reference("README.md")?]
             .iter()
@@ -2365,7 +2365,7 @@ alpha
 # </block>"#,
         );
 
-        let report = validator(&[]).validate(context)?;
+        let report = validator(&[]).validate(&context)?;
 
         // Only the block with the `same-as` attribute is checked. The target block is not.
         assert_eq!(checked_lines(&report), vec![1]);
@@ -2397,7 +2397,7 @@ y = "blue"
 "#,
         ));
 
-        let report = validator(&[]).validate(context)?;
+        let report = validator(&[]).validate(&context)?;
 
         assert_eq!(
             trace_json(&report),
@@ -2438,7 +2438,7 @@ blue
 "#,
         ));
 
-        let report = validator(&[]).validate(context)?;
+        let report = validator(&[]).validate(&context)?;
 
         assert_eq!(
             trace_json(&report),
@@ -2480,7 +2480,7 @@ blue
 "#,
         ));
 
-        let report = validator(&[]).validate(context)?;
+        let report = validator(&[]).validate(&context)?;
 
         let violation = &report.violations[&RepoPath::from_reference("a.py")?][0];
         let reason = &violation.data.as_ref().unwrap()["reason"];
@@ -2509,7 +2509,7 @@ dark-red
 "#,
         ));
 
-        let report = validator(&[]).validate(context)?;
+        let report = validator(&[]).validate(&context)?;
 
         let trace = trace_json(&report);
         assert_eq!(
@@ -2534,7 +2534,7 @@ blue
 "#,
         ));
 
-        let report = validator(&[("doc.md", "# Colors\n\n- red\n- blue\n")]).validate(context)?;
+        let report = validator(&[("doc.md", "# Colors\n\n- red\n- blue\n")]).validate(&context)?;
 
         assert_eq!(
             trace_json(&report)["targets"][0]["records"],
@@ -2557,7 +2557,7 @@ blue
 "#,
         ));
 
-        let report = validator(&[("colors.txt", "\nred\nblue\n")]).validate(context)?;
+        let report = validator(&[("colors.txt", "\nred\nblue\n")]).validate(&context)?;
 
         assert_eq!(
             trace_json(&report)["targets"][0]["records"],
@@ -2580,7 +2580,7 @@ blue
         ));
 
         let report = validator(&[("services/auth/a.rs", ""), ("services/billing/a.rs", "")])
-            .validate(context)?;
+            .validate(&context)?;
 
         assert_eq!(
             trace_json(&report),
@@ -2609,7 +2609,7 @@ blue
         let source = "# <block same-as=\":nope\">\nred\n# </block>\n";
         let context = with_traces(validation_context("a.py", source));
 
-        let report = validator(&[("a.py", source)]).validate(context)?;
+        let report = validator(&[("a.py", source)]).validate(&context)?;
 
         assert_eq!(
             trace_json(&report)["targets"],
@@ -2631,7 +2631,7 @@ ten
 "#,
         ));
 
-        let report = validator(&[]).validate(context)?;
+        let report = validator(&[]).validate(&context)?;
 
         let trace = trace_json(&report);
         assert_eq!(trace["records"], json!(null));
@@ -2649,7 +2649,7 @@ ten
             "# <block same-as=\":b\">\nred\n# </block>\n# <block name=\"b\">\nred\n# </block>\n",
         );
 
-        let report = validator(&[]).validate(context)?;
+        let report = validator(&[]).validate(&context)?;
 
         assert_eq!(report.traces, []);
         Ok(())

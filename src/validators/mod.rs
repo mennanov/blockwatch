@@ -41,7 +41,7 @@ pub(crate) trait AsyncValidator: Send + Sync {
 /// so the common case runs on plain threads and no Tokio runtime has to be started if no async
 /// validators are involved.
 pub(crate) trait SyncValidator: Send + Sync {
-    fn validate(&self, context: Arc<ValidationContext>) -> anyhow::Result<ValidationReport>;
+    fn validate(&self, context: &ValidationContext) -> anyhow::Result<ValidationReport>;
 }
 
 /// A sync or async validator instance.

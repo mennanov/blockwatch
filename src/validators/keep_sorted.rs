@@ -9,7 +9,6 @@ use crate::validators::{
 use anyhow::Context;
 use serde::Serialize;
 use std::cmp::Ordering;
-use std::sync::Arc;
 
 /// Enforces `keep-sorted`: the non-empty lines inside the block must be in ascending order.
 ///
@@ -25,7 +24,7 @@ struct KeepSortedViolation<'a> {
 impl SyncValidator for KeepSortedValidator {
     fn validate(
         &self,
-        context: Arc<validators::ValidationContext>,
+        context: &validators::ValidationContext,
     ) -> anyhow::Result<ValidationReport> {
         let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
@@ -185,7 +184,7 @@ mod validate_tests {
             "# <block keep-sorted=\"asc\">\nzebra\ncafé\n# </block>",
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         let file_violations = violations
             .get(&RepoPath::from_reference("example.py")?)
@@ -209,7 +208,7 @@ mod validate_tests {
             "# <block keep-sorted keep-sorted-pattern=\"café (?<value>\\w+)$\">\ncafé zebra\ncafé apple\n# </block>",
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         let file_violations = violations
             .get(&RepoPath::from_reference("example.py")?)
@@ -232,7 +231,7 @@ mod validate_tests {
             "# <block keep-sorted keep-sorted-pattern=\"^ID:(?P<value>\\d+)$\">\n  ID:2\n  ID:1\n# </block>",
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         let file_violations = violations
             .get(&RepoPath::from_reference("example.py")?)
@@ -253,7 +252,7 @@ mod validate_tests {
             "# <block keep-sorted keep-sorted-pattern=\"(?P<value>.*)\">\nA\n\nB\n\n# </block>",
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -269,7 +268,7 @@ mod validate_tests {
             "# <block keep-sorted keep-sorted-format=\"numeric\" keep-sorted-pattern=\"(?P<value>\\d*)\">\n1\n\n2\n# </block>",
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -288,7 +287,7 @@ mod validate_tests {
         # </block>"#,
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert_eq!(violations.len(), 1);
         let file_violations = violations
@@ -326,7 +325,7 @@ mod validate_tests {
         # </block>"#,
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert_eq!(violations.len(), 1);
         let file_violations = violations
@@ -359,7 +358,7 @@ mod validate_tests {
             "/* <block\nkeep-sorted=\"asc\"> */\nB\nA\n/* </block> */",
         );
 
-        let violations = KeepSortedValidator.validate(context)?.violations;
+        let violations = KeepSortedValidator.validate(&context)?.violations;
 
         let file_violations = violations
             .get(&RepoPath::from_reference("example.rs")?)
@@ -385,7 +384,7 @@ mod validate_tests {
         C
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -403,7 +402,7 @@ mod validate_tests {
         A
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -418,7 +417,7 @@ mod validate_tests {
         A
         # </block>",
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert_eq!(violations.len(), 1);
         let file_violations = violations
             .get(&RepoPath::from_reference("example.py")?)
@@ -437,7 +436,7 @@ mod validate_tests {
             "# <block keep-sorted=\"DESC\" keep-sorted-format=\"Numeric\">\n2\n10\n# </block>",
         );
 
-        let report = KeepSortedValidator.validate(context)?;
+        let report = KeepSortedValidator.validate(&context)?;
 
         assert_eq!(violation_count(&report), 1);
         Ok(())
@@ -454,7 +453,7 @@ mod validate_tests {
         A
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -470,7 +469,7 @@ mod validate_tests {
         A
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -484,7 +483,7 @@ mod validate_tests {
         Hello
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -498,7 +497,7 @@ mod validate_tests {
         Hello
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -517,7 +516,7 @@ mod validate_tests {
         C
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -534,7 +533,7 @@ mod validate_tests {
         # </block>"#,
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert_eq!(violations.len(), 1);
         let file_violations = violations
@@ -562,7 +561,7 @@ mod validate_tests {
         # </block>"#,
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert_eq!(violations.len(), 1);
         let file_violations = violations
@@ -587,7 +586,7 @@ mod validate_tests {
         10
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert_eq!(violations.len(), 1);
         let file_violations = violations
             .get(&RepoPath::from_reference("example.py")?)
@@ -618,7 +617,7 @@ mod validate_tests {
         10
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert_eq!(violations.len(), 1);
         let file_violations = violations
             .get(&RepoPath::from_reference("example.py")?)
@@ -642,7 +641,7 @@ mod validate_tests {
         20
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -658,7 +657,7 @@ mod validate_tests {
         2
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -674,7 +673,7 @@ mod validate_tests {
         A_id_3 = "id: 3"
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert_eq!(violations.len(), 1);
         let file_violations = violations
             .get(&RepoPath::from_reference("example.py")?)
@@ -698,7 +697,7 @@ mod validate_tests {
         C_id_10 = "id: 10"
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -714,7 +713,7 @@ mod validate_tests {
         10.1
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -730,7 +729,7 @@ mod validate_tests {
         3
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -746,7 +745,7 @@ mod validate_tests {
         10
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -762,7 +761,7 @@ mod validate_tests {
         10
         # </block>"#,
         );
-        let result = validator.validate(context);
+        let result = validator.validate(&context);
         assert!(result.is_err());
         let err = format!("{:#}", result.unwrap_err());
         assert!(
@@ -784,7 +783,7 @@ mod validate_tests {
         9007199254740992
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         let file_violations = violations
             .get(&RepoPath::from_reference("example.py")?)
             .unwrap();
@@ -809,7 +808,7 @@ mod validate_tests {
         1e400
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         let file_violations = violations
             .get(&RepoPath::from_reference("example.py")?)
             .unwrap();
@@ -832,7 +831,7 @@ mod validate_tests {
         1
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -848,7 +847,7 @@ mod validate_tests {
         1_000_000
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -864,7 +863,7 @@ mod validate_tests {
         1_000
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         let file_violations = violations
             .get(&RepoPath::from_reference("example.py")?)
             .unwrap();
@@ -886,7 +885,7 @@ mod validate_tests {
         1_000_
         # </block>"#,
         );
-        let result = validator.validate(context);
+        let result = validator.validate(&context);
         assert!(result.is_err());
         let err = format!("{:#}", result.unwrap_err());
         assert!(
@@ -906,7 +905,7 @@ mod validate_tests {
         inf
         # </block>"#,
         );
-        let result = validator.validate(context);
+        let result = validator.validate(&context);
         assert!(result.is_err());
         let err = format!("{:#}", result.unwrap_err());
         assert!(
@@ -924,7 +923,7 @@ mod validate_tests {
         2
         # </block>"#,
         );
-        let violations = KeepSortedValidator.validate(context)?.violations;
+        let violations = KeepSortedValidator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -937,7 +936,7 @@ mod validate_tests {
             r#"# <block keep-sorted="asc">
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -946,7 +945,7 @@ mod validate_tests {
     fn block_without_a_keep_sorted_attribute_returns_no_violations() -> anyhow::Result<()> {
         let validator = KeepSortedValidator;
         let context = validation_context("example.py", "#<block>\n#</block>");
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -969,7 +968,7 @@ mod validate_tests {
 # </block>"#,
         );
 
-        let report = KeepSortedValidator.validate(context)?;
+        let report = KeepSortedValidator.validate(&context)?;
 
         // The block without a keep-sorted attribute is not checked, so it records nothing.
         assert_eq!(checked_lines(&report), vec![1, 5]);
@@ -1002,7 +1001,7 @@ id: 3 green
 "#,
         ));
 
-        let report = KeepSortedValidator.validate(context)?;
+        let report = KeepSortedValidator.validate(&context)?;
 
         assert_eq!(
             trace_json(&report),
@@ -1026,7 +1025,7 @@ id: 3 green
             "# <block keep-sorted=\"desc\" keep-sorted-format=\"numeric\">\n10\n  9\n1\n# </block>\n",
         ));
 
-        let report = KeepSortedValidator.validate(context)?;
+        let report = KeepSortedValidator.validate(&context)?;
 
         assert_eq!(
             trace_json(&report),
@@ -1047,7 +1046,7 @@ id: 3 green
     fn context_without_traces_requested_records_no_trace() -> anyhow::Result<()> {
         let context = validation_context("a.py", "# <block keep-sorted>\nb\na\n# </block>\n");
 
-        let report = KeepSortedValidator.validate(context)?;
+        let report = KeepSortedValidator.validate(&context)?;
 
         assert_eq!(report.traces, []);
         Ok(())

@@ -5,7 +5,6 @@ use crate::validators;
 use crate::validators::{SyncValidator, ValidationReport, Validator, Violation, line_value};
 use regex::Regex;
 use serde::Serialize;
-use std::sync::Arc;
 
 /// Enforces `line-count="<N"` and friends: the number of non-empty lines in the block must satisfy
 /// the given comparison. With `line-count-pattern`, only the lines that give a value count.
@@ -24,7 +23,7 @@ struct LineCountViolation {
 impl SyncValidator for LineCountValidator {
     fn validate(
         &self,
-        context: Arc<validators::ValidationContext>,
+        context: &validators::ValidationContext,
     ) -> anyhow::Result<ValidationReport> {
         let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
@@ -188,7 +187,7 @@ mod tests {
         # </block>"#,
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert_eq!(violations.len(), 1);
         let file2_violations = violations
@@ -319,7 +318,7 @@ mod tests {
         d
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -339,7 +338,7 @@ mod tests {
         d
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -360,7 +359,7 @@ mod tests {
 # </block>"#,
         );
 
-        let violations = LineCountValidator.validate(context)?.violations;
+        let violations = LineCountValidator.validate(&context)?.violations;
 
         let violations = violations
             .get(&RepoPath::from_reference("example.py")?)
@@ -391,7 +390,7 @@ blue
 # </block>"#,
         );
 
-        let violations = LineCountValidator.validate(context)?.violations;
+        let violations = LineCountValidator.validate(&context)?.violations;
 
         let violations = violations
             .get(&RepoPath::from_reference("example.py")?)
@@ -414,7 +413,7 @@ blue
 # </block>"#,
         );
 
-        let violations = LineCountValidator.validate(context)?.violations;
+        let violations = LineCountValidator.validate(&context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -431,7 +430,7 @@ red
 # </block>"#,
         );
 
-        let violations = LineCountValidator.validate(context)?.violations;
+        let violations = LineCountValidator.validate(&context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -447,7 +446,7 @@ red
 # </block>"#,
         );
 
-        let violations = LineCountValidator.validate(context)?.violations;
+        let violations = LineCountValidator.validate(&context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -470,7 +469,7 @@ c = 3
 # </block>"#,
         );
 
-        let report = LineCountValidator.validate(context)?;
+        let report = LineCountValidator.validate(&context)?;
 
         // The block without a line-count attribute is not checked, so it records nothing.
         assert_eq!(checked_lines(&report), vec![1, 4]);
@@ -501,7 +500,7 @@ mod trace_tests {
 "#,
         ));
 
-        let report = LineCountValidator.validate(context)?;
+        let report = LineCountValidator.validate(&context)?;
 
         assert_eq!(
             trace_json(&report),
@@ -527,7 +526,7 @@ mod trace_tests {
             "# <block line-count=\"<=1\">\nred\n\n blue\n# </block>\n",
         ));
 
-        let report = LineCountValidator.validate(context)?;
+        let report = LineCountValidator.validate(&context)?;
 
         assert_eq!(
             trace_json(&report),
@@ -548,7 +547,7 @@ mod trace_tests {
     fn context_without_traces_requested_records_no_trace() -> anyhow::Result<()> {
         let context = validation_context("a.py", "# <block line-count=\"<=1\">\nred\n# </block>\n");
 
-        let report = LineCountValidator.validate(context)?;
+        let report = LineCountValidator.validate(&context)?;
 
         assert_eq!(report.traces, []);
         Ok(())

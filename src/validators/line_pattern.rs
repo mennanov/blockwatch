@@ -6,7 +6,6 @@ use crate::validators::{SyncValidator, ValidationReport, Validator, Violation, V
 use regex::Regex;
 use serde::Serialize;
 use std::ops::Range;
-use std::sync::Arc;
 
 /// Enforces `line-pattern="<regex>"`, which every non-empty line in the block must match, and
 /// `line-pattern-forbidden="<regex>"`, which no non-empty line may match.
@@ -33,7 +32,7 @@ enum LinePatternViolation<'a> {
 impl SyncValidator for LinePatternValidator {
     fn validate(
         &self,
-        context: Arc<validators::ValidationContext>,
+        context: &validators::ValidationContext,
     ) -> anyhow::Result<ValidationReport> {
         let mut report = ValidationReport::default();
         for (file_path, file_blocks) in &context.blocks {
@@ -255,7 +254,7 @@ mod validate_tests {
         # </block>"#,
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert_eq!(violations.len(), 1);
         let file_violations = violations
@@ -288,7 +287,7 @@ mod validate_tests {
             "# <block line-pattern=\"^[A-Z]+$\">\ncaféx\n# </block>",
         );
 
-        let violations = LinePatternValidator.validate(context)?.violations;
+        let violations = LinePatternValidator.validate(&context)?.violations;
 
         let file_violations = violations
             .get(&RepoPath::from_reference("example.py")?)
@@ -312,7 +311,7 @@ mod validate_tests {
         Z
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -329,7 +328,7 @@ green = "red"
 # </block>"#,
         );
 
-        let violations = LinePatternValidator.validate(context)?.violations;
+        let violations = LinePatternValidator.validate(&context)?.violations;
 
         let file_violations = violations
             .get(&RepoPath::from_reference("example.py")?)
@@ -363,7 +362,7 @@ blue = 1
 # </block>"#,
         );
 
-        let violations = LinePatternValidator.validate(context)?.violations;
+        let violations = LinePatternValidator.validate(&context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -381,7 +380,7 @@ red
 # </block>"#,
         );
 
-        let violations = LinePatternValidator.validate(context)?.violations;
+        let violations = LinePatternValidator.validate(&context)?.violations;
 
         let messages: Vec<&str> = violations
             .get(&RepoPath::from_reference("example.py")?)
@@ -407,7 +406,7 @@ red
             r#"const X: &str = /* <block line-pattern="^GOOD$"> */ "BAD" /* </block> */;"#,
         );
 
-        let violations = LinePatternValidator.validate(context)?.violations;
+        let violations = LinePatternValidator.validate(&context)?.violations;
 
         let file_violations = violations
             .get(&RepoPath::from_reference("example.rs")?)
@@ -429,7 +428,7 @@ red
             "/* <block\nline-pattern=\"^GOOD$\"> */ \"BAD\" /* </block> */",
         );
 
-        let violations = LinePatternValidator.validate(context)?.violations;
+        let violations = LinePatternValidator.validate(&context)?.violations;
 
         let file_violations = violations
             .get(&RepoPath::from_reference("example.rs")?)
@@ -457,7 +456,7 @@ red
         # </block>"#,
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -467,7 +466,7 @@ red
     fn block_without_a_line_pattern_attribute_returns_no_violations() -> anyhow::Result<()> {
         let validator = LinePatternValidator;
         let context = validation_context("example.py", "#<block>\n#</block>");
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -480,7 +479,7 @@ red
             r#"# <block line-pattern="[A-Z]+">
         # </block>"#,
         );
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
         assert!(violations.is_empty());
         Ok(())
     }
@@ -501,7 +500,7 @@ anything
 # </block>"#,
         );
 
-        let report = LinePatternValidator.validate(context)?;
+        let report = LinePatternValidator.validate(&context)?;
 
         // The block without a line-pattern attribute is not checked, so it records nothing.
         assert_eq!(checked_lines(&report), vec![1, 4]);
@@ -525,7 +524,7 @@ mod trace_tests {
             "# <block line-pattern=\"^- \">\n- red\n\nblue\n- green\n# </block>\n",
         ));
 
-        let report = LinePatternValidator.validate(context)?;
+        let report = LinePatternValidator.validate(&context)?;
 
         assert_eq!(
             trace_json(&report),
@@ -546,7 +545,7 @@ mod trace_tests {
             "# <block line-pattern=\"^- \" line-pattern-forbidden=\"TODO\">\n- TODO red\n# </block>\n",
         ));
 
-        let report = LinePatternValidator.validate(context)?;
+        let report = LinePatternValidator.validate(&context)?;
 
         assert_eq!(
             trace_json(&report),
@@ -569,7 +568,7 @@ mod trace_tests {
     fn context_without_traces_requested_records_no_trace() -> anyhow::Result<()> {
         let context = validation_context("a.py", "# <block line-pattern=\"^a$\">\nb\n# </block>\n");
 
-        let report = LinePatternValidator.validate(context)?;
+        let report = LinePatternValidator.validate(&context)?;
 
         assert_eq!(report.traces, []);
         Ok(())

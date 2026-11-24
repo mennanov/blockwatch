@@ -11,27 +11,26 @@ use strum::IntoEnumIterator;
 /// Runs all sync validators concurrently each in a separate thread and returns violations grouped
 /// by file paths.
 fn run_sync_validators(
-    context: &Arc<ValidationContext>,
+    context: &ValidationContext,
     validators: SyncValidators,
 ) -> anyhow::Result<ValidationLog> {
-    let mut handles = Vec::new();
-    for (name, validator) in validators {
-        let context = Arc::clone(context);
-        handles.push(std::thread::spawn(move || {
-            (name, validator.validate(context))
-        }));
-    }
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = validators
+            .into_iter()
+            .map(|(name, validator)| scope.spawn(move || (name, validator.validate(context))))
+            .collect();
 
-    let mut log = ValidationLog::default();
-    for handle in handles {
-        match handle.join() {
-            Ok((name, Ok(report))) => log.add_validation_report(name, report),
-            Ok((_, Err(e))) => return Err(e),
-            Err(e) => return Err(anyhow::anyhow!("failed to run validation: {e:?}")),
+        let mut log = ValidationLog::default();
+        for handle in handles {
+            match handle.join() {
+                Ok((name, Ok(report))) => log.add_validation_report(name, report),
+                Ok((_, Err(e))) => return Err(e),
+                Err(e) => return Err(anyhow::anyhow!("failed to run validation: {e:?}")),
+            }
         }
-    }
 
-    Ok(log)
+        Ok(log)
+    })
 }
 
 /// Runs all async validators concurrently via Tokio and returns violations grouped by file paths.
@@ -70,23 +69,19 @@ fn run_async_validators(
 /// The violations of each file are sorted by where they start, then by validator name, then by
 /// message.
 pub(crate) fn run(
-    context: Arc<ValidationContext>,
+    context: &Arc<ValidationContext>,
     sync_validators: SyncValidators,
     async_validators: AsyncValidators,
 ) -> anyhow::Result<ValidationLog> {
     let mut log = if async_validators.is_empty() {
-        run_sync_validators(&context, sync_validators)?
+        run_sync_validators(context, sync_validators)?
     } else {
-        // Run sync and async validators concurrently.
-        let sync_context = Arc::clone(&context);
-        let sync_violations_handle =
-            std::thread::spawn(move || run_sync_validators(&sync_context, sync_validators));
-        let async_violations_handle =
-            std::thread::spawn(move || run_async_validators(context, async_validators));
-        let sync_result = sync_violations_handle
-            .join()
-            .map_err(|e| anyhow::anyhow!("failed to join sync violations thread: {e:?}"))?;
-        let mut log = sync_result?;
+        // The async validators run on their own thread while this one runs the sync ones.
+        let async_violations_handle = std::thread::spawn({
+            let context = Arc::clone(context);
+            move || run_async_validators(context, async_validators)
+        });
+        let mut log = run_sync_validators(context, sync_validators)?;
 
         let async_result = async_violations_handle
             .join()
@@ -296,7 +291,7 @@ mod tests {
     }
 
     impl SyncValidator for FakeSyncValidator {
-        fn validate(&self, context: Arc<ValidationContext>) -> anyhow::Result<ValidationReport> {
+        fn validate(&self, context: &ValidationContext) -> anyhow::Result<ValidationReport> {
             Ok(ValidationReport {
                 violations: context
                     .blocks
@@ -368,7 +363,7 @@ mod tests {
             &ValidatorSelection::All,
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
-        let violations = validators::run(context, sync_validators, async_validators)?.violations;
+        let violations = validators::run(&context, sync_validators, async_validators)?.violations;
 
         assert_eq!(violations.len(), 2);
         assert_eq!(
@@ -415,7 +410,7 @@ mod tests {
             &ValidatorSelection::All,
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
-        let violations = validators::run(context, sync_validators, async_validators)?.violations;
+        let violations = validators::run(&context, sync_validators, async_validators)?.violations;
 
         assert_eq!(violations.len(), 2);
         assert_eq!(
@@ -458,7 +453,7 @@ mod tests {
             &ValidatorSelection::All,
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
-        let violations = validators::run(context, sync_validators, async_validators)?.violations;
+        let violations = validators::run(&context, sync_validators, async_validators)?.violations;
 
         assert_eq!(violations.len(), 2);
         assert_eq!(
@@ -494,7 +489,7 @@ mod tests {
             selection,
             &Arc::new(FakeFileSystem::new(HashMap::new())),
         )?;
-        let violations = validators::run(context, sync_validators, async_validators)?.violations;
+        let violations = validators::run(&context, sync_validators, async_validators)?.violations;
         Ok(violations
             .into_values()
             .flatten()
@@ -568,7 +563,7 @@ x
                 contents.to_string(),
             )]))),
         )?;
-        let violations = validators::run(context, sync_validators, async_validators)?.violations;
+        let violations = validators::run(&context, sync_validators, async_validators)?.violations;
 
         let order: Vec<(usize, &str, &str)> = violations[&RepoPath::from_reference("example.py")?]
             .iter()

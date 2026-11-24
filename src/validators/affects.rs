@@ -39,9 +39,9 @@ struct AffectsViolation<'a> {
 impl<Fs: FileSystem + 'static> validators::SyncValidator for AffectsValidator<Fs> {
     fn validate(
         &self,
-        context: Arc<validators::ValidationContext>,
+        context: &validators::ValidationContext,
     ) -> anyhow::Result<ValidationReport> {
-        let mut targets = TargetIndex::new(&context, self.file_system.as_ref());
+        let mut targets = TargetIndex::new(context, self.file_system.as_ref());
         let mut report = ValidationReport::default();
         // Every block carrying `affects` is examined, not only the ones the diff touched: reference
         // integrity has to catch a dangling target even when the referencing block is unchanged.
@@ -448,7 +448,7 @@ print("file3")
             ),
         ]);
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert_eq!(violations.len(), 1);
         let file1_violations = violations
@@ -498,7 +498,7 @@ print("bar")
             ),
         ]);
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -521,7 +521,7 @@ print("bar")
 
         let report =
             validator_with_symlinks(&[("AGENTS.md", AGENTS_MD)], &[("CLAUDE.md", "AGENTS.md")])
-                .validate(context)?;
+                .validate(&context)?;
 
         assert_eq!(violation_count(&report), 0);
         Ok(())
@@ -534,7 +534,7 @@ print("bar")
 
         let violations =
             validator_with_symlinks(&[("AGENTS.md", AGENTS_MD)], &[("CLAUDE.md", "AGENTS.md")])
-                .validate(context)?
+                .validate(&context)?
                 .violations;
 
         let source_violations = &violations[&RepoPath::from_reference("source.py")?];
@@ -576,7 +576,7 @@ print("bar")
             ),
         ]);
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert_eq!(violations.len(), 1);
         let file1_violations = violations
@@ -614,7 +614,7 @@ print("buzz")
             ),
         ]);
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -641,7 +641,7 @@ print("second")
             }],
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert_eq!(violations.len(), 1);
         let file1_violations = violations
@@ -705,7 +705,7 @@ pass
             ),
         ]);
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -726,7 +726,7 @@ pass
         let context = context_scoped_to_source(&file_system, line_changes)?;
 
         let violations = AffectsValidator::new(Arc::new(file_system))
-            .validate(context)?
+            .validate(&context)?
             .violations;
 
         assert_eq!(violations.len(), 1);
@@ -755,7 +755,7 @@ pass
         let context = context_scoped_to_source(&file_system, line_changes)?;
 
         let violations = AffectsValidator::new(Arc::new(file_system))
-            .validate(context)?
+            .validate(&context)?
             .violations;
 
         assert!(violations.is_empty());
@@ -801,7 +801,7 @@ value = 2
         );
 
         let violations = AffectsValidator::new(Arc::new(file_system))
-            .validate(context)?
+            .validate(&context)?
             .violations;
 
         assert!(violations.is_empty());
@@ -831,7 +831,7 @@ pass
         ];
         let context = validation_context_with_changes("file1.py", contents, line_changes);
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert!(!violations.is_empty());
         Ok(())
@@ -852,7 +852,7 @@ print("bar")
 "#,
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -869,7 +869,7 @@ print("bar")
             ),
             validation_context("target.py", "# <block name=\"t\">\nvalue = 2\n# </block>"),
         ]);
-        assert!(validator(&[]).validate(context)?.violations.is_empty());
+        assert!(validator(&[]).validate(&context)?.violations.is_empty());
         Ok(())
     }
 
@@ -884,7 +884,7 @@ pass
 "#,
         );
 
-        let violations = validator.validate(context)?.violations;
+        let violations = validator.validate(&context)?.violations;
 
         assert!(violations.is_empty());
         Ok(())
@@ -897,7 +897,7 @@ pass
         let source = "# <block name=\"s\" affects=\":nope\">\nvalue = 1\n# </block>";
         let context = validation_context("file.py", source);
         let violations = validator(&[("file.py", source)])
-            .validate(context)?
+            .validate(&context)?
             .violations;
         let file = violations
             .get(&RepoPath::from_reference("file.py")?)
@@ -924,7 +924,7 @@ pass
             }],
         );
         let violations = validator(&[("file.py", source)])
-            .validate(context)?
+            .validate(&context)?
             .violations;
         let file = violations
             .get(&RepoPath::from_reference("file.py")?)
@@ -944,7 +944,7 @@ pass
             "source.py",
             "# <block name=\"s\" affects=\"gone.py:t\">\nvalue = 1\n# </block>",
         );
-        assert!(validator(&[]).validate(context).is_err());
+        assert!(validator(&[]).validate(&context).is_err());
     }
 
     /// Create a [`validators::ValidationContext`] with `files` and the diff from `changed_files`.
@@ -1011,7 +1011,7 @@ pass
         let context = context_with_changed_files(&WHOLE_FILE_REFERENCE_FILES, &["source.py"])?;
 
         let violations = validator(&WHOLE_FILE_REFERENCE_FILES)
-            .validate(context)?
+            .validate(&context)?
             .violations;
 
         let source_violations = violations
@@ -1035,7 +1035,7 @@ pass
         let context =
             context_with_changed_files(&WHOLE_FILE_REFERENCE_FILES, &["source.py", "config.json"])?;
 
-        let report = validator(&WHOLE_FILE_REFERENCE_FILES).validate(context)?;
+        let report = validator(&WHOLE_FILE_REFERENCE_FILES).validate(&context)?;
 
         assert_eq!(violation_count(&report), 0);
         Ok(())
@@ -1054,7 +1054,7 @@ pass
         let context = context_with_changed_files(&files, &["source.py", "config.json"])?;
 
         let report = validator_with_symlinks(&files, &[("settings.json", "config.json")])
-            .validate(context)?;
+            .validate(&context)?;
 
         assert_eq!(violation_count(&report), 0);
         Ok(())
@@ -1066,7 +1066,7 @@ pass
         // An unchanged block places no obligation on what it references.
         let context = context_with_changed_files(&WHOLE_FILE_REFERENCE_FILES, &[])?;
 
-        let report = validator(&WHOLE_FILE_REFERENCE_FILES).validate(context)?;
+        let report = validator(&WHOLE_FILE_REFERENCE_FILES).validate(&context)?;
 
         assert_eq!(violation_count(&report), 0);
         Ok(())
@@ -1082,7 +1082,7 @@ pass
         )];
         let context = context_with_changed_files(&files, &[])?;
 
-        let error = validator(&files).validate(context).unwrap_err();
+        let error = validator(&files).validate(&context).unwrap_err();
 
         assert_eq!(
             error.to_string(),
@@ -1119,7 +1119,7 @@ version = "1.1"
             ),
         ]);
 
-        let report = validator(&[("package.json", PACKAGE_JSON)]).validate(context)?;
+        let report = validator(&[("package.json", PACKAGE_JSON)]).validate(&context)?;
 
         assert_eq!(violation_count(&report), 0);
         Ok(())
@@ -1149,7 +1149,7 @@ version = "1.1"
             &[("package.json", PACKAGE_JSON)],
             &[("settings.json", "package.json")],
         )
-        .validate(context)?;
+        .validate(&context)?;
 
         assert_eq!(violation_count(&report), 0);
         Ok(())
@@ -1176,7 +1176,7 @@ version = "1.1"
         ]);
 
         let violations = validator(&[("package.json", PACKAGE_JSON)])
-            .validate(context)?
+            .validate(&context)?
             .violations;
 
         let source_violations = &violations[&RepoPath::from_reference("source.py")?];
@@ -1217,7 +1217,7 @@ inngest = "4.18.2"
             ),
         ]);
 
-        let report = validator(&[("package.json", PACKAGE_JSON)]).validate(context)?;
+        let report = validator(&[("package.json", PACKAGE_JSON)]).validate(&context)?;
 
         assert_eq!(violation_count(&report), 0);
         Ok(())
@@ -1248,7 +1248,7 @@ version = "1.1"
             ),
         ]);
 
-        let report = validator(&[("package.json", target)]).validate(context)?;
+        let report = validator(&[("package.json", target)]).validate(&context)?;
 
         assert_eq!(violation_count(&report), 1);
         Ok(())
@@ -1268,7 +1268,7 @@ version = "1.0"
         ];
         let context = context_with_changed_files(&files, &[])?;
 
-        let report = validator(&files).validate(context)?;
+        let report = validator(&files).validate(&context)?;
 
         assert_eq!(violation_count(&report), 0);
         Ok(())
@@ -1288,7 +1288,7 @@ version = "1.0"
         ];
         let context = context_with_changed_files(&files, &[])?;
 
-        let violations = validator(&files).validate(context)?.violations;
+        let violations = validator(&files).validate(&context)?.violations;
 
         let source_violations = &violations[&RepoPath::from_reference("source.py")?];
         assert_eq!(source_violations.len(), 1);
@@ -1312,7 +1312,7 @@ b = 2
 # </block>"#,
         );
 
-        let report = validator(&[]).validate(context)?;
+        let report = validator(&[]).validate(&context)?;
 
         // Only the block with the `affects` attribute is checked. The target block is not.
         assert_eq!(checked_lines(&report), vec![1]);
@@ -1356,7 +1356,7 @@ red
             ],
         ));
 
-        let report = validator(&[("a.py", source)]).validate(context)?;
+        let report = validator(&[("a.py", source)]).validate(&context)?;
 
         assert_eq!(
             trace_json(&report),
@@ -1386,7 +1386,7 @@ red
             &["a.py", "package.json"],
         )?);
 
-        let report = validator(&files).validate(context)?;
+        let report = validator(&files).validate(&context)?;
 
         assert_eq!(
             trace_json(&report)["targets"],
@@ -1407,7 +1407,7 @@ red
         ];
         let context = with_traces(context_with_changed_files(&files, &[])?);
 
-        let report = validator(&files).validate(context)?;
+        let report = validator(&files).validate(&context)?;
 
         assert_eq!(
             trace_json(&report),
@@ -1432,7 +1432,7 @@ red
             "# <block affects=\":b\">\nred\n# </block>\n# <block name=\"b\">\nred\n# </block>\n",
         );
 
-        let report = validator(&[]).validate(context)?;
+        let report = validator(&[]).validate(&context)?;
 
         assert_eq!(report.traces, []);
         Ok(())
