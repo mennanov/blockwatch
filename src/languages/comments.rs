@@ -44,43 +44,25 @@ impl TreeSitterCommentsParser {
 
     /// Stops the walk at nodes of `kinds` without reading a comment out of them.
     pub(super) fn with_break_at_node_kinds(self, kinds: &'static [&'static str]) -> Self {
-        let Self {
-            parser,
-            node_visitor,
-            tree,
-        } = self;
-        Self {
-            parser,
-            node_visitor: Box::new(move |node, source_code| {
-                if kinds.contains(&node.kind()) {
-                    return Visit::Break(None);
-                }
-                node_visitor(node, source_code)
-            }),
-            tree,
-        }
+        self.with_break_when(move |node, _| kinds.contains(&node.kind()))
     }
 
     /// Stops the walk at every node the `predicate` accepts, without reading a comment out of it.
     ///
     /// Unlike [`Self::with_break_at_node_kinds`], the predicate also sees the source code, so it
     /// can judge a node by the surrounding text.
-    pub(super) fn with_break_when(self, predicate: fn(&Node, &str) -> bool) -> Self {
-        let Self {
-            parser,
-            node_visitor,
-            tree,
-        } = self;
-        Self {
-            parser,
-            node_visitor: Box::new(move |node, source_code| {
-                if predicate(node, source_code) {
-                    return Visit::Break(None);
-                }
-                node_visitor(node, source_code)
-            }),
-            tree,
-        }
+    pub(super) fn with_break_when(
+        mut self,
+        predicate: impl Fn(&Node, &str) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        let node_visitor = self.node_visitor;
+        self.node_visitor = Box::new(move |node, source_code| {
+            if predicate(node, source_code) {
+                return Visit::Break(None);
+            }
+            node_visitor(node, source_code)
+        });
+        self
     }
 }
 
