@@ -7,7 +7,7 @@ pub(crate) use path::SymbolPath;
 use crate::position::{LineIndex, Position};
 use path::Segment;
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::ops::Range;
 
@@ -188,9 +188,12 @@ impl Symbols {
         if let Some(unreadable) = self.unreadable_reason(path) {
             return Err(unreadable);
         }
-        let mut found = Vec::new();
+        let mut found = BTreeSet::new();
         resolve_all_from(self, path, None, &mut found)?;
-        Ok(found)
+        Ok(found
+            .into_iter()
+            .map(|index| &self.symbols[index])
+            .collect())
     }
 
     /// Why `path` itself cannot be read reliably, if it is unreadable or one of its key segments
@@ -362,7 +365,7 @@ fn resolve_filters<'a>(
     Ok((resolved, scope))
 }
 
-/// Appends every symbol matching `resolved` inside `scope`, in document order.
+/// Records the index in `symbols.symbols` of every symbol matching `resolved` inside `scope`.
 ///
 /// # Errors
 /// Returns [`Unreadable`] when a filter compares an unreadable key or leads to an unreadable path.
@@ -370,7 +373,7 @@ fn resolve_all_from<'a>(
     symbols: &'a Symbols,
     resolved: &SymbolPath,
     scope: Option<&'a Symbol>,
-    found: &mut Vec<&'a Symbol>,
+    found: &mut BTreeSet<usize>,
 ) -> Result<(), Unreadable<'a>> {
     let next_filter = resolved
         .segments()
@@ -384,7 +387,14 @@ fn resolve_all_from<'a>(
         if let Some(reason) = symbols.unreadable.get(resolved) {
             return Err(Unreadable { reason });
         }
-        found.extend(in_scope(symbols, scope).filter(|symbol| symbol.path == *resolved));
+        found.extend(
+            symbols
+                .symbols
+                .iter()
+                .enumerate()
+                .filter(|(_, symbol)| is_in_scope(symbol, scope) && symbol.path == *resolved)
+                .map(|(index, _)| index),
+        );
         return Ok(());
     };
     let parent = &resolved.segments()[..index];
@@ -415,7 +425,12 @@ fn in_scope<'a>(
     symbols
         .symbols
         .iter()
-        .filter(move |symbol| scope.is_none_or(|container| is_inside(symbol, container)))
+        .filter(move |symbol| is_in_scope(symbol, scope))
+}
+
+/// Whether `symbol` sits inside `scope`, or unconditionally true when `scope` is `None`.
+fn is_in_scope(symbol: &Symbol, scope: Option<&Symbol>) -> bool {
+    scope.is_none_or(|container| is_inside(symbol, container))
 }
 
 /// Why a child of `parent` has an unreadable `key`, if any.
@@ -1565,6 +1580,43 @@ mod resolve_tests {
         assert_eq!(
             symbols.resolve_all(&path("/groups/~[name=g]/items/~[name=x]/content")),
             Ok(vec![&first, &second])
+        );
+    }
+
+    #[test]
+    fn resolve_all_counts_an_item_with_duplicate_matching_keys_once() {
+        // An item that holds the filter's matching key twice (such as repeated XML elements) still
+        // yields each target symbol under it only once.
+        let content = symbol("/items/item/content", 3);
+        let symbols = Symbols::from(vec![
+            element("/items/item", 0..10),
+            scalar("/items/item/tag", 1, "a"),
+            scalar("/items/item/tag", 2, "a"),
+            content.clone(),
+        ]);
+
+        assert_eq!(
+            symbols.resolve_all(&path("/items/~[tag=a]/content")),
+            Ok(vec![&content])
+        );
+    }
+
+    #[test]
+    fn resolve_all_returns_matched_symbols_in_document_order() {
+        // Even when a filter key for `b` appears before the filter key for `a` (as with TOML
+        // subtables written before their parent table), results stay in document order.
+        let a_content = symbol("/items/a/content", 0);
+        let b_content = symbol("/items/b/content", 2);
+        let symbols = Symbols::from(vec![
+            a_content.clone(),
+            scalar("/items/b/name", 1, "x"),
+            b_content.clone(),
+            scalar("/items/a/name", 3, "x"),
+        ]);
+
+        assert_eq!(
+            symbols.resolve_all(&path("/items/~[name=x]/content")),
+            Ok(vec![&a_content, &b_content])
         );
     }
 
