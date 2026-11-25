@@ -69,6 +69,8 @@ impl<'a, Fs: FileSystem> TargetFiles<'a, Fs> {
             Err(
                 error @ (ResolveError::NotFound { .. }
                 | ResolveError::AmbiguousSymbol { .. }
+                | ResolveError::MissingParent { .. }
+                | ResolveError::UnmatchedFilter { .. }
                 | ResolveError::AmbiguousFilter { .. }),
             ) => Err(error.reason(content)),
         };
@@ -162,6 +164,29 @@ mod tests {
             message.starts_with("failed to resolve symbol reference config.rb#/x: "),
             "unexpected message: {message}"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn unmatched_filter_and_missing_parent_resolve_symbol_return_violation_reasons()
+    -> anyhow::Result<()> {
+        let context = validation_context("referencing.py", "");
+        let file_system = FakeFileSystem::new(HashMap::from([(
+            "items.yaml".to_string(),
+            "items:\n  - name: red\n".to_string(),
+        )]));
+        let mut files = TargetFiles::new(&context, &file_system);
+        let (_, unmatched) = files.resolve_symbol(
+            &RepoPath::from_reference("items.yaml")?,
+            &SymbolPath::parse("/items/~[name=blue]")?,
+        )?;
+        assert_eq!(unmatched, Err("no item matches ~[name=blue]".to_string()));
+
+        let (_, missing_parent) = files.resolve_symbol(
+            &RepoPath::from_reference("items.yaml")?,
+            &SymbolPath::parse("/itms/~[name=red]")?,
+        )?;
+        assert_eq!(missing_parent, Err("/itms not found".to_string()));
         Ok(())
     }
 }

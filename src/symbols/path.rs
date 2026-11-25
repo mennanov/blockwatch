@@ -86,6 +86,17 @@ impl SymbolPath {
         self
     }
 
+    /// Returns the first `len` segments of this path.
+    ///
+    /// # Panics
+    /// Panics if `len` is 0 or greater than the number of segments.
+    pub(super) fn prefix(&self, len: usize) -> Self {
+        assert!(len > 0, "a symbol path prefix needs at least one segment");
+        Self {
+            segments: self.segments[..len].to_vec(),
+        }
+    }
+
     /// Creates a rooted [`SymbolPath`] from unescaped segments.
     ///
     /// # Panics
@@ -441,7 +452,31 @@ fn unescape_rfc6901(segment: &str) -> anyhow::Result<String> {
 }
 
 #[cfg(test)]
+pub(super) mod test_utils {
+    use super::{FilterCondition, Segment};
+
+    /// The filter `~[key_path=value]`.
+    pub(in crate::symbols) fn filter(key_path: &[&str], value: &str) -> Segment {
+        compound_filter(&[(key_path, value)])
+    }
+
+    /// A compound filter `~[k1=v1][k2=v2]...`.
+    pub(in crate::symbols) fn compound_filter(conditions: &[(&[&str], &str)]) -> Segment {
+        Segment::Filter(
+            conditions
+                .iter()
+                .map(|(key_path, value)| FilterCondition {
+                    key_path: key_path.iter().map(|part| (*part).to_string()).collect(),
+                    value: (*value).to_string(),
+                })
+                .collect(),
+        )
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use super::test_utils::{compound_filter, filter};
     use super::*;
 
     fn key(key: &str) -> Segment {
@@ -452,20 +487,14 @@ mod tests {
         keys.iter().map(|k| key(k)).collect()
     }
 
-    fn filter(key_path: &[&str], value: &str) -> Segment {
-        compound_filter(&[(key_path, value)])
-    }
-
-    fn compound_filter(conditions: &[(&[&str], &str)]) -> Segment {
-        Segment::Filter(
-            conditions
-                .iter()
-                .map(|(key_path, value)| FilterCondition {
-                    key_path: key_path.iter().map(|part| (*part).to_string()).collect(),
-                    value: (*value).to_string(),
-                })
-                .collect(),
-        )
+    /// Checks that each `(raw, segments)` pair parses into `segments` and formats back to `raw`.
+    fn assert_parses_as_written(cases: &[(&str, Vec<Segment>)]) -> anyhow::Result<()> {
+        for (raw, segments) in cases {
+            let path = SymbolPath::parse(raw)?;
+            assert_eq!(path.segments(), segments, "unexpected segments for {raw}");
+            assert_eq!(path.to_string(), *raw);
+        }
+        Ok(())
     }
 
     #[test]
@@ -610,12 +639,7 @@ mod tests {
             ("/~[=]", vec![filter(&[""], "")]),
             ("/~[a~1b=c~0d%2C]", vec![filter(&["a/b"], "c~d,")]),
         ];
-        for (raw, segments) in test_cases {
-            let path = SymbolPath::parse(raw)?;
-            assert_eq!(path.segments(), segments, "unexpected segments for {raw}");
-            assert_eq!(path.to_string(), raw);
-        }
-        Ok(())
+        assert_parses_as_written(&test_cases)
     }
 
     #[test]
@@ -673,11 +697,7 @@ mod tests {
             ("/~[a/b=1]/", vec![filter(&["a", "b"], "1"), key("")]),
             ("/~[a//b=1]", vec![filter(&["a", "", "b"], "1")]),
         ];
-        for (raw, segments) in test_cases {
-            let path = SymbolPath::parse(raw)?;
-            assert_eq!(path.segments(), segments, "unexpected segments for {raw}");
-            assert_eq!(path.to_string(), raw);
-        }
+        assert_parses_as_written(&test_cases)?;
         // `%2F` decodes before splitting, so it separates nested filter key segments too.
         assert_eq!(
             SymbolPath::parse("/items/~[metadata%2Fname=api]/kind")?,
@@ -758,12 +778,7 @@ mod tests {
                 vec![compound_filter(&[(&[""], ""), (&[""], "")])],
             ),
         ];
-        for (raw, segments) in test_cases {
-            let path = SymbolPath::parse(raw)?;
-            assert_eq!(path.segments(), segments, "unexpected segments for {raw}");
-            assert_eq!(path.to_string(), raw);
-        }
-        Ok(())
+        assert_parses_as_written(&test_cases)
     }
 
     #[test]
@@ -781,11 +796,7 @@ mod tests {
             ("/~[a%3Db=1]", vec![filter(&["a=b"], "1")]),
             ("/~[a%5D[b=1]", vec![filter(&["a][b"], "1")]),
         ];
-        for (raw, segments) in test_cases {
-            let path = SymbolPath::parse(raw)?;
-            assert_eq!(path.segments(), segments, "unexpected segments for {raw}");
-            assert_eq!(path.to_string(), raw);
-        }
+        assert_parses_as_written(&test_cases)?;
         assert_eq!(
             SymbolPath::parse("/~[k=a%5d[b]")?,
             SymbolPath::parse("/~[k=a%5D[b]")?,
@@ -967,5 +978,13 @@ mod tests {
     #[should_panic(expected = "a symbol path needs at least one segment")]
     fn empty_segments_provided_from_segments_panics() {
         SymbolPath::from_segments(vec![]);
+    }
+
+    #[test]
+    fn prefix_returns_leading_segments_including_filters() -> anyhow::Result<()> {
+        let path = SymbolPath::parse("/groups/~[name=first]/items/~[name=blue]/port")?;
+        assert_eq!(path.prefix(1).to_string(), "/groups");
+        assert_eq!(path.prefix(3).to_string(), "/groups/~[name=first]/items");
+        Ok(())
     }
 }

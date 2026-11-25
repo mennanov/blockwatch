@@ -148,17 +148,16 @@ impl Symbols {
     /// When no symbol has `path`, the hints are the paths that resemble it: those at least 60%
     /// alike by edit distance, and those that end in the same segment. When `path` has a filter,
     /// they are only paths under the child that the last filter matched, and they keep every
-    /// filter as written. When a filter matches no child, the hints are `path` with each
-    /// condition's value swapped for each child's closest value combination that makes the path
-    /// resolve (at most one per child).
+    /// filter as written.
     ///
     /// # Errors
     /// Returns [`ResolveError::Unreadable`] when `path` is an unreadable path, or one of its
     /// segments is a word the parser skipped. So does a filter that leads to an unreadable path,
-    /// or whose key is unreadable in one of the children. Returns [`ResolveError::NotFound`] when no symbol
-    /// matches `path`, or a filter matches no child. Returns [`ResolveError::AmbiguousSymbol`]
-    /// when several symbols match `path`, and [`ResolveError::AmbiguousFilter`] when a filter
-    /// matches several children.
+    /// or whose key is unreadable in one of the children. Returns [`ResolveError::NotFound`] when
+    /// no symbol matches `path`, and [`ResolveError::AmbiguousSymbol`] when several symbols match
+    /// `path`. Returns [`ResolveError::MissingParent`] when the path before a filter does not
+    /// exist, [`ResolveError::UnmatchedFilter`] when a filter matches no child, and
+    /// [`ResolveError::AmbiguousFilter`] when it matches several.
     pub(crate) fn resolve(&self, path: &SymbolPath) -> Result<&Symbol, ResolveError<'_>> {
         if let Some(unreadable) = self.unreadable_reason(path) {
             return Err(ResolveError::Unreadable(unreadable));
@@ -245,6 +244,10 @@ pub(crate) enum ResolveError<'a> {
     NotFound { hints: Vec<SymbolPath> },
     /// Several symbols have the path. `candidates` holds every one of them, in document order.
     AmbiguousSymbol { candidates: Vec<&'a Symbol> },
+    /// `path`, the path before a filter as the reference wrote it, does not exist.
+    MissingParent { path: SymbolPath },
+    /// `filter`, a filter in the path, matches no child.
+    UnmatchedFilter { filter: Segment },
     /// `filter`, a filter in the path, matches several children. `keys` holds each child's first
     /// matching key for the filter's first condition, in document order.
     AmbiguousFilter {
@@ -265,8 +268,7 @@ impl ResolveError<'_> {
         match self {
             ResolveError::NotFound { hints } if hints.is_empty() => "symbol not found".to_string(),
             ResolveError::NotFound { hints } => {
-                let hints: Vec<String> =
-                    hints.iter().map(std::string::ToString::to_string).collect();
+                let hints: Vec<String> = hints.iter().map(ToString::to_string).collect();
                 format!("symbol not found; did you mean: {}", hints.join(", "))
             }
             ResolveError::AmbiguousSymbol { candidates } => {
@@ -275,6 +277,8 @@ impl ResolveError<'_> {
                     positions(candidates, source)
                 )
             }
+            ResolveError::MissingParent { path } => format!("{path} not found"),
+            ResolveError::UnmatchedFilter { filter } => format!("no item matches {filter}"),
             ResolveError::AmbiguousFilter { filter, keys } => {
                 format!(
                     "{} items match {filter}, at {}",
@@ -305,10 +309,6 @@ fn positions(symbols: &[&Symbol], source: &str) -> String {
 /// The most hints a path that does not resolve gets.
 const MAX_HINTS: usize = 3;
 
-/// The most filter-value combinations tried per item when building hints, so repeated keys across
-/// several conditions cannot grow exponentially.
-const MAX_HINT_COMBINATIONS_PER_ITEM: usize = 64;
-
 /// How alike a path has to be to the one that does not resolve to be a hint, as a normalized edit
 /// distance from 0 (nothing in common) to 1 (identical).
 const MIN_HINT_SIMILARITY: f64 = 0.6;
@@ -321,7 +321,8 @@ const MIN_HINT_SIMILARITY: f64 = 0.6;
 /// in HCL, the returned item is the child that holds the matched key, if one does.
 ///
 /// # Errors
-/// Returns [`ResolveError::NotFound`] when a filter matches no child, and
+/// Returns [`ResolveError::MissingParent`] when the path before a filter does not exist,
+/// [`ResolveError::UnmatchedFilter`] when a filter matches no child, and
 /// [`ResolveError::AmbiguousFilter`] when it matches several. The error is about the first such
 /// filter.
 fn resolve_filters<'a>(
@@ -344,9 +345,18 @@ fn resolve_filters<'a>(
         let mut matches = matching_children(symbols, scope, parent, conditions);
         match (matches.next(), matches.next()) {
             (None, _) => {
-                drop(matches);
-                return Err(ResolveError::NotFound {
-                    hints: filter_hints(symbols, scope, path, index, parent, conditions),
+                // Report a missing parent before blaming the filter, so a typo earlier in the path
+                // does not point at the filter value.
+                if !parent.is_empty()
+                    && !in_scope(symbols, scope)
+                        .any(|symbol| symbol.path.segments().starts_with(parent))
+                {
+                    return Err(ResolveError::MissingParent {
+                        path: path.prefix(index),
+                    });
+                }
+                return Err(ResolveError::UnmatchedFilter {
+                    filter: segment.clone(),
                 });
             }
             (Some(child), None) => {
@@ -473,84 +483,21 @@ impl<'a> ChildItem<'a> {
             .expect("a child path has at least its own segment")
     }
 
-    /// The scalar values this child holds at `key_path`, in document order.
-    fn scalar_values<'s>(
-        &'s self,
-        symbols: &'a Symbols,
-        key_path: &'s [String],
-    ) -> impl Iterator<Item = &'a str> + 's {
-        in_scope(symbols, self.scope)
-            .filter(move |symbol| is_item_key(&symbol.path, self.path, key_path))
-            .filter_map(|symbol| symbol.value.as_ref().map(|held| held.text.as_str()))
-    }
-
     /// Whether this child has a scalar at `condition.key_path` equal to `condition.value`.
     fn matches(&self, symbols: &Symbols, condition: &FilterCondition) -> bool {
-        self.scalar_values(symbols, &condition.key_path)
-            .any(|value| value == condition.value)
-    }
-
-    /// Up to [`MAX_HINT_COMBINATIONS_PER_ITEM`] distinct filter segments that fill each
-    /// condition's key from this child's scalar values, preferring values closest to what the
-    /// reference wrote and preserving document order on ties. Empty if this child lacks a scalar
-    /// for any condition's key.
-    fn hint_filters(&self, symbols: &'a Symbols, conditions: &[FilterCondition]) -> Vec<Segment> {
-        let mut combinations: Vec<Vec<FilterCondition>> =
-            vec![Vec::with_capacity(conditions.len())];
-        for condition in conditions {
-            let mut seen = HashSet::new();
-            let mut values: Vec<&str> = self
-                .scalar_values(symbols, &condition.key_path)
-                .filter(|value| seen.insert(*value))
-                .collect();
-            values.sort_by(|a, b| {
-                strsim::normalized_levenshtein(&condition.value, b)
-                    .total_cmp(&strsim::normalized_levenshtein(&condition.value, a))
-            });
-            combinations = combinations
-                .into_iter()
-                .flat_map(|prefix| {
-                    values.iter().map(move |value| {
-                        let mut next = prefix.clone();
-                        next.push(FilterCondition {
-                            key_path: condition.key_path.clone(),
-                            value: (*value).to_string(),
-                        });
-                        next
-                    })
-                })
-                .take(MAX_HINT_COMBINATIONS_PER_ITEM)
-                .collect();
-        }
-        combinations.into_iter().map(Segment::Filter).collect()
-    }
-}
-
-/// One [`ChildItem`] per distinct child of `parent` inside `scope` referenced by `keys`, in
-/// document order. Repeated keys inside one child item count that item once.
-fn distinct_children<'a>(
-    symbols: &'a Symbols,
-    scope: Option<&'a Symbol>,
-    parent: &[Segment],
-    keys: impl Iterator<Item = &'a Symbol>,
-) -> impl Iterator<Item = ChildItem<'a>> {
-    let index = parent.len();
-    let mut seen = HashSet::new();
-    keys.filter_map(move |key| {
-        let path = &key.path.segments()[..=index];
-        let child_scope = narrow_to_child(symbols, scope, path, key);
-        let item_id = (&path[index], child_scope.map(std::ptr::from_ref));
-        seen.insert(item_id).then_some(ChildItem {
-            key,
-            path,
-            scope: child_scope,
+        in_scope(symbols, self.scope).any(|symbol| {
+            is_item_key(&symbol.path, self.path, &condition.key_path)
+                && symbol
+                    .value
+                    .as_ref()
+                    .is_some_and(|held| held.text == condition.value)
         })
-    })
+    }
 }
 
 /// One [`ChildItem`] per distinct child of `parent` inside `scope` that satisfies every condition
 /// in `conditions`, in document order. Each item's `key` is its first matched key for the first
-/// condition.
+/// condition. Repeated matching keys inside one child count that child once.
 fn matching_children<'a>(
     symbols: &'a Symbols,
     scope: Option<&'a Symbol>,
@@ -558,17 +505,30 @@ fn matching_children<'a>(
     conditions: &[FilterCondition],
 ) -> impl Iterator<Item = ChildItem<'a>> {
     let first = &conditions[0];
-    let first_matches = child_keys(symbols, scope, parent, &first.key_path).filter(|symbol| {
-        symbol
-            .value
-            .as_ref()
-            .is_some_and(|held| held.text == first.value)
-    });
-    distinct_children(symbols, scope, parent, first_matches).filter(move |child| {
-        conditions[1..]
-            .iter()
-            .all(|condition| child.matches(symbols, condition))
-    })
+    let index = parent.len();
+    let mut seen = HashSet::new();
+    child_keys(symbols, scope, parent, &first.key_path)
+        .filter(|symbol| {
+            symbol
+                .value
+                .as_ref()
+                .is_some_and(|held| held.text == first.value)
+        })
+        .filter_map(move |key| {
+            let path = &key.path.segments()[..=index];
+            let child_scope = narrow_to_child(symbols, scope, path, key);
+            let item_id = (&path[index], child_scope.map(std::ptr::from_ref));
+            seen.insert(item_id).then_some(ChildItem {
+                key,
+                path,
+                scope: child_scope,
+            })
+        })
+        .filter(move |child| {
+            conditions[1..]
+                .iter()
+                .all(|condition| child.matches(symbols, condition))
+        })
 }
 
 /// Whether `path` is `key_path` under `child_path`, such as `/items/0/metadata/name` for
@@ -678,11 +638,7 @@ fn path_hints(
         Segment::Filter(_) => true,
     });
     match last_filter {
-        None => hints(
-            in_scope(symbols, scope).map(|symbol| &symbol.path),
-            path,
-            MIN_HINT_SIMILARITY,
-        ),
+        None => hints(in_scope(symbols, scope).map(|symbol| &symbol.path), path),
         Some(last) => {
             // A path under another child points at an item that the filters did not pick. A
             // position in place of a filter breaks when an item is added above it.
@@ -697,49 +653,17 @@ fn path_hints(
                     })
                 })
                 .collect();
-            hints(&candidates, path, MIN_HINT_SIMILARITY)
+            hints(&candidates, path)
         }
     }
 }
 
-/// The paths to suggest when the filter at `index` in `path` matches no child of `parent` inside
-/// `scope`: at most one candidate per item holding all the filter's keys—its closest value
-/// combination whose full path resolves uniquely in `symbols`—the most alike first.
-fn filter_hints(
-    symbols: &Symbols,
-    scope: Option<&Symbol>,
-    path: &SymbolPath,
-    index: usize,
-    parent: &[Segment],
-    conditions: &[FilterCondition],
-) -> Vec<SymbolPath> {
-    // The hints start from `path`, so the filters before `index` stay as the reference wrote them.
-    // A value combination that several children hold makes the filter ambiguous, so its path
-    // doesn't resolve. Picking each item's closest resolving combination stops an ambiguous shared
-    // value from hiding the item's other unique values while keeping one hint per item.
-    let scalar_first_keys = child_keys(symbols, scope, parent, &conditions[0].key_path)
-        .filter(|symbol| symbol.value.is_some());
-    let alternatives: Vec<SymbolPath> =
-        distinct_children(symbols, scope, parent, scalar_first_keys)
-            .filter_map(|child| {
-                child
-                    .hint_filters(symbols, conditions)
-                    .into_iter()
-                    .map(|filter| path.clone().with_segment(index, filter))
-                    .find(|alternative| symbols.resolve(alternative).is_ok())
-            })
-            .collect();
-    // Each alternative resolves and differs from `path` only in the filter's values, so a
-    // similarity cutoff would only drop real choices.
-    hints(&alternatives, path, 0.0)
-}
-
 /// The paths among `candidates` that resemble `path`, the most alike first: those at least
-/// `min_similarity` alike, as a normalized edit distance, and those that end in the same segment.
+/// [`MIN_HINT_SIMILARITY`] alike, as a normalized edit distance, and those that end in the same
+/// segment.
 fn hints<'p>(
     candidates: impl IntoIterator<Item = &'p SymbolPath>,
     path: &SymbolPath,
-    min_similarity: f64,
 ) -> Vec<SymbolPath> {
     // The paths are compared as written, escapes included, so that a `/` left unescaped in a key
     // reads as a small difference.
@@ -751,7 +675,8 @@ fn hints<'p>(
             (similarity, candidate)
         })
         .filter(|(similarity, candidate)| {
-            *similarity >= min_similarity || candidate.segments().last() == path.segments().last()
+            *similarity >= MIN_HINT_SIMILARITY
+                || candidate.segments().last() == path.segments().last()
         })
         .collect();
     alike.sort_by(|(a, _), (b, _)| b.total_cmp(a));
@@ -779,6 +704,7 @@ pub(crate) trait SymbolsParser: Send + Sync {
     reason = "a `Vec` of one range is the expected value here"
 )]
 mod resolve_tests {
+    use super::path::test_utils::{compound_filter, filter};
     use super::*;
 
     fn path(path: &str) -> SymbolPath {
@@ -813,24 +739,6 @@ mod resolve_tests {
             }),
             ..symbol(path_text, start)
         }
-    }
-
-    /// The filter `~[key_path=value]`.
-    fn filter(key_path: &[&str], value: &str) -> Segment {
-        compound_filter(&[(key_path, value)])
-    }
-
-    /// A compound filter `~[k1=v1][k2=v2]...`.
-    fn compound_filter(conditions: &[(&[&str], &str)]) -> Segment {
-        Segment::Filter(
-            conditions
-                .iter()
-                .map(|(key_path, value)| FilterCondition {
-                    key_path: key_path.iter().map(|part| (*part).to_string()).collect(),
-                    value: (*value).to_string(),
-                })
-                .collect(),
-        )
     }
 
     /// The symbols of one item of the list that `named_items` builds.
@@ -1053,86 +961,86 @@ mod resolve_tests {
     }
 
     #[test]
-    fn filter_matching_no_child_returns_the_other_values_as_hints() {
-        // `blues` is more alike to `blue` than `red` is, so it comes first.
+    fn filter_matching_no_child_returns_that_filter_as_unmatched() {
         let (symbols, _) = named_items(["red", "blues"]);
 
         assert_eq!(
             symbols.resolve(&path("/items/~[name=blue]/content")),
-            Err(ResolveError::NotFound {
-                hints: vec![
-                    path("/items/~[name=blues]/content"),
-                    path("/items/~[name=red]/content"),
-                ]
+            Err(ResolveError::UnmatchedFilter {
+                filter: filter(&["name"], "blue"),
             })
         );
-    }
-
-    #[test]
-    fn filter_matching_no_child_leaves_values_of_several_children_out_of_hints() {
-        // `blues` is the most alike value, but two children hold it, so
-        // `/items/~[name=blues]/content` would not resolve either.
-        let (symbols, _) = named_items(["blues", "red", "blues"]);
-
+        // An existing parent with no items and a root-level filter on an empty file still report
+        // the filter, not a missing parent.
+        let empty_parent = Symbols::from(vec![symbol("/items", 0)]);
         assert_eq!(
-            symbols.resolve(&path("/items/~[name=blue]/content")),
-            Err(ResolveError::NotFound {
-                hints: vec![path("/items/~[name=red]/content")]
+            empty_parent.resolve(&path("/items/~[name=blue]/content")),
+            Err(ResolveError::UnmatchedFilter {
+                filter: filter(&["name"], "blue"),
+            })
+        );
+        assert_eq!(
+            Symbols::default().resolve(&path("/~[name=blue]/content")),
+            Err(ResolveError::UnmatchedFilter {
+                filter: filter(&["name"], "blue"),
             })
         );
     }
 
     #[test]
-    fn filter_matching_no_child_leaves_children_without_the_rest_of_the_path_out_of_hints() {
-        // `blues` is the most alike value, but its item has no `content`.
-        let symbols = Symbols::from(vec![
-            scalar("/items/0/name", 0, "blues"),
-            scalar("/items/1/name", 1, "red"),
-            symbol("/items/1/content", 2),
+    fn filter_under_missing_parent_returns_that_parent_as_missing() {
+        let (symbols, _) = named_items(["red", "blue"]);
+        assert_eq!(
+            symbols.resolve(&path("/itms/~[name=red]/content")),
+            Err(ResolveError::MissingParent {
+                path: path("/itms"),
+            })
+        );
+
+        // An earlier filter stays as written in the missing parent path.
+        let (groups, _) = groups_at_one_path([("first", "blue"), ("second", "red")]);
+        assert_eq!(
+            groups.resolve(&path("/groups/~[name=first]/itms/~[name=blue]/content")),
+            Err(ResolveError::MissingParent {
+                path: path("/groups/~[name=first]/itms"),
+            })
+        );
+
+        // When siblings share a path, a parent that only another sibling holds is still missing.
+        let only_first_has_items = Symbols::from(vec![
+            element("/groups/group", 0..10),
+            scalar("/groups/group/name", 1, "first"),
+            element("/groups/group/items", 2..10),
+            scalar("/groups/group/items/item/name", 3, "blue"),
+            element("/groups/group", 10..20),
+            scalar("/groups/group/name", 11, "second"),
         ]);
-
         assert_eq!(
-            symbols.resolve(&path("/items/~[name=blue]/content")),
-            Err(ResolveError::NotFound {
-                hints: vec![path("/items/~[name=red]/content")]
+            only_first_has_items.resolve(&path("/groups/~[name=second]/items/~[name=blue]")),
+            Err(ResolveError::MissingParent {
+                path: path("/groups/~[name=second]/items"),
             })
         );
     }
 
     #[test]
-    fn filter_matching_no_child_leaves_children_where_a_later_filter_fails_out_of_hints() {
-        // Only the `first` group has an item named `blue`.
+    fn path_with_two_filters_returns_the_first_unmatched_filter() {
         let symbols = Symbols::from(vec![
             scalar("/groups/0/name", 0, "first"),
             scalar("/groups/0/items/0/name", 1, "blue"),
             symbol("/groups/0/items/0/content", 2),
-            scalar("/groups/1/name", 3, "second"),
-            scalar("/groups/1/items/0/name", 4, "red"),
-            symbol("/groups/1/items/0/content", 5),
         ]);
 
         assert_eq!(
-            symbols.resolve(&path("/groups/~[name=secnd]/items/~[name=blue]/content")),
-            Err(ResolveError::NotFound {
-                hints: vec![path("/groups/~[name=first]/items/~[name=blue]/content")]
+            symbols.resolve(&path("/groups/~[name=second]/items/~[name=red]/content")),
+            Err(ResolveError::UnmatchedFilter {
+                filter: filter(&["name"], "second"),
             })
         );
-    }
-
-    #[test]
-    fn filter_at_the_end_matching_no_child_returns_hints_below_the_similarity_floor() {
-        // `/~[name=crimson]` is 56% alike to `/~[name=blue]`, below the 60% that other hints need.
-        let symbols = Symbols::from(vec![
-            element("/0", 0..2),
-            scalar("/0/name", 1, "red"),
-            element("/1", 2..4),
-            scalar("/1/name", 3, "crimson"),
-        ]);
-
         assert_eq!(
-            symbols.resolve(&path("/~[name=blue]")),
-            Err(ResolveError::NotFound {
-                hints: vec![path("/~[name=red]"), path("/~[name=crimson]")]
+            symbols.resolve(&path("/groups/~[name=first]/items/~[name=red]/content")),
+            Err(ResolveError::UnmatchedFilter {
+                filter: filter(&["name"], "red"),
             })
         );
     }
@@ -1195,7 +1103,9 @@ mod resolve_tests {
 
         assert_eq!(
             symbols.resolve(&path("/items/~[name=blue]")),
-            Err(ResolveError::NotFound { hints: vec![] })
+            Err(ResolveError::UnmatchedFilter {
+                filter: filter(&["name"], "blue"),
+            })
         );
     }
 
@@ -1208,39 +1118,32 @@ mod resolve_tests {
 
         assert_eq!(
             symbols.resolve(&path("/items/~[name=blue]")),
-            Err(ResolveError::NotFound { hints: vec![] })
-        );
-    }
-
-    #[test]
-    fn second_filter_matching_no_child_returns_hints_with_the_first_filter_as_written() {
-        let symbols = Symbols::from(vec![
-            scalar("/groups/0/name", 0, "first"),
-            scalar("/groups/0/items/0/name", 1, "blue"),
-            symbol("/groups/0/items/0/content", 2),
-        ]);
-
-        assert_eq!(
-            symbols.resolve(&path("/groups/~[name=first]/items/~[name=red]/content")),
-            Err(ResolveError::NotFound {
-                hints: vec![path("/groups/~[name=first]/items/~[name=blue]/content")]
+            Err(ResolveError::UnmatchedFilter {
+                filter: filter(&["name"], "blue"),
             })
         );
     }
 
     #[test]
-    fn filter_on_a_key_without_a_value_leaves_that_key_out_of_hints() {
-        // The `name` of the first item is a list or a map, so it has no value to compare.
+    fn filter_on_a_key_without_a_value_does_not_match() {
+        // A key that holds a list or a map has no scalar value, whether it is checked by the first
+        // condition or a later one, even against `""`.
         let symbols = Symbols::from(vec![
-            symbol("/items/0/name", 0),
-            scalar("/items/1/name", 1, "red"),
-            symbol("/items/1/content", 2),
+            scalar("/items/0/kind", 0, "Service"),
+            symbol("/items/0/name", 1),
+            symbol("/items/0/content", 2),
         ]);
 
         assert_eq!(
-            symbols.resolve(&path("/items/~[name=blue]/content")),
-            Err(ResolveError::NotFound {
-                hints: vec![path("/items/~[name=red]/content")]
+            symbols.resolve(&path("/items/~[name=]/content")),
+            Err(ResolveError::UnmatchedFilter {
+                filter: filter(&["name"], ""),
+            })
+        );
+        assert_eq!(
+            symbols.resolve(&path("/items/~[kind=Service][name=]/content")),
+            Err(ResolveError::UnmatchedFilter {
+                filter: compound_filter(&[(&["kind"], "Service"), (&["name"], "")]),
             })
         );
     }
@@ -1442,13 +1345,13 @@ mod resolve_tests {
     }
 
     #[test]
-    fn second_filter_matching_no_child_returns_hints_only_from_the_first_pick() {
+    fn second_filter_over_groups_at_one_path_ignores_items_outside_the_first_pick() {
         let (symbols, _) = groups_at_one_path([("first", "blue"), ("second", "red")]);
 
         assert_eq!(
-            symbols.resolve(&path("/groups/~[name=second]/items/~[name=green]/content")),
-            Err(ResolveError::NotFound {
-                hints: vec![path("/groups/~[name=second]/items/~[name=red]/content")]
+            symbols.resolve(&path("/groups/~[name=second]/items/~[name=blue]/content")),
+            Err(ResolveError::UnmatchedFilter {
+                filter: filter(&["name"], "blue"),
             })
         );
     }
@@ -1615,6 +1518,35 @@ mod resolve_tests {
             error.reason(source),
             "2 items match ~[name=blue], at 1:3, 2:3"
         );
+    }
+
+    #[test]
+    fn unmatched_filter_reason_shows_the_filter() {
+        let single = ResolveError::UnmatchedFilter {
+            filter: filter(&["name"], "blue"),
+        };
+        assert_eq!(single.reason(""), "no item matches ~[name=blue]");
+
+        let compound = ResolveError::UnmatchedFilter {
+            filter: compound_filter(&[(&["kind"], "Rollout"), (&["metadata", "name"], "a/b")]),
+        };
+        assert_eq!(
+            compound.reason(""),
+            "no item matches ~[kind=Rollout][metadata/name=a~1b]"
+        );
+    }
+
+    #[test]
+    fn missing_parent_reason_shows_the_parent_path() {
+        let top = ResolveError::MissingParent {
+            path: path("/itms"),
+        };
+        assert_eq!(top.reason(""), "/itms not found");
+
+        let nested = ResolveError::MissingParent {
+            path: path("/groups/~[name=first]/itms"),
+        };
+        assert_eq!(nested.reason(""), "/groups/~[name=first]/itms not found");
     }
 
     #[test]
@@ -2000,29 +1932,6 @@ mod resolve_tests {
     }
 
     #[test]
-    fn nested_filter_key_matching_no_child_returns_unique_other_values_as_hints() {
-        // Hints keep the nested filter key, drop ambiguous or incomplete values, and deduplicate
-        // repeated keys within one item.
-        let symbols = Symbols::from(vec![
-            scalar("/items/0/metadata/name", 0, "apis"),
-            scalar("/items/0/metadata/name", 1, "apis"),
-            symbol("/items/0/spec", 2),
-            scalar("/items/1/metadata/name", 3, "dup"),
-            symbol("/items/1/spec", 4),
-            scalar("/items/2/metadata/name", 5, "dup"),
-            symbol("/items/2/spec", 6),
-            scalar("/items/3/metadata/name", 7, "no_spec"),
-        ]);
-
-        assert_eq!(
-            symbols.resolve(&path("/items/~[metadata/name=api]/spec")),
-            Err(ResolveError::NotFound {
-                hints: vec![path("/items/~[metadata/name=apis]/spec")]
-            })
-        );
-    }
-
-    #[test]
     fn resolve_all_with_nested_filter_key_returns_symbols_under_each_matched_child() {
         // `resolve_all` expands nested filter keys across multiple matched items without leaking
         // into non-matching siblings.
@@ -2079,10 +1988,12 @@ mod resolve_tests {
             symbols.resolve(&path(
                 "/~[kind=Rollout][metadata/name=api][metadata/namespace=staging]/spec/replicas"
             )),
-            Err(ResolveError::NotFound {
-                hints: vec![path(
-                    "/~[kind=Rollout][metadata/name=api][metadata/namespace=prod]/spec/replicas"
-                )]
+            Err(ResolveError::UnmatchedFilter {
+                filter: compound_filter(&[
+                    (&["kind"], "Rollout"),
+                    (&["metadata", "name"], "api"),
+                    (&["metadata", "namespace"], "staging"),
+                ]),
             })
         );
         // Condition 1 matches item 0 (`Service`) and condition 2 matches item 2 (`worker`),
@@ -2091,12 +2002,11 @@ mod resolve_tests {
             symbols.resolve(&path(
                 "/~[kind=Service][metadata/name=worker]/spec/replicas"
             )),
-            Err(ResolveError::NotFound {
-                hints: vec![
-                    path("/~[kind=Service][metadata/name=api]/spec/replicas"),
-                    path("/~[kind=Rollout][metadata/name=worker]/spec/replicas"),
-                    path("/~[kind=Rollout][metadata/name=api]/spec/replicas"),
-                ]
+            Err(ResolveError::UnmatchedFilter {
+                filter: compound_filter(&[
+                    (&["kind"], "Service"),
+                    (&["metadata", "name"], "worker"),
+                ]),
             })
         );
     }
@@ -2120,11 +2030,11 @@ mod resolve_tests {
             Symbols::from(two_items.clone()).resolve(&path(
                 "/project/dependencies/~[groupId=com.google][artifactId=guava]/version"
             )),
-            Err(ResolveError::NotFound {
-                hints: vec![
-                    path("/project/dependencies/~[groupId=com.google][artifactId=gson]/version"),
-                    path("/project/dependencies/~[groupId=org.junit][artifactId=guava]/version"),
-                ]
+            Err(ResolveError::UnmatchedFilter {
+                filter: compound_filter(&[
+                    (&["groupId"], "com.google"),
+                    (&["artifactId"], "guava"),
+                ]),
             })
         );
 
@@ -2169,7 +2079,8 @@ mod resolve_tests {
     #[test]
     fn compound_filter_with_repeated_key_matches_item_holding_both_values() {
         // Repeating a key in a compound filter (such as XML `<tag>a</tag><tag>b</tag>`) matches an
-        // item that holds both values, and returns `NotFound` when no single item holds both.
+        // item that holds both values, and returns `UnmatchedFilter` when no single item holds
+        // both.
         let both_version = symbol("/items/item/version", 3);
         let symbols = Symbols::from(vec![
             element("/items/item", 0..10),
@@ -2186,14 +2097,10 @@ mod resolve_tests {
             symbols.resolve(&path("/items/~[tag=a][tag=b]/version")),
             Ok(&both_version)
         );
-        // No single item holds both `b` and `c`.
         assert_eq!(
             symbols.resolve(&path("/items/~[tag=b][tag=c]/version")),
-            Err(ResolveError::NotFound {
-                hints: vec![
-                    path("/items/~[tag=b][tag=a]/version"),
-                    path("/items/~[tag=a][tag=c]/version"),
-                ]
+            Err(ResolveError::UnmatchedFilter {
+                filter: compound_filter(&[(&["tag"], "b"), (&["tag"], "c")]),
             })
         );
     }
@@ -2279,199 +2186,6 @@ mod resolve_tests {
                 "expected unreadable for {blocking}"
             );
         }
-    }
-
-    #[test]
-    fn compound_filter_matching_no_item_returns_full_matching_filter_hints() {
-        // Hints substitute every condition from items that hold all keys and resolve uniquely,
-        // catching typos in one or both conditions and returning the top 3 by edit distance.
-        let symbols = Symbols::from(vec![
-            scalar("/0/kind", 0, "Rollout"),
-            scalar("/0/metadata/name", 1, "api"),
-            symbol("/0/spec", 2),
-            scalar("/1/kind", 3, "Rollout"),
-            scalar("/1/metadata/name", 4, "app"),
-            symbol("/1/spec", 5),
-            scalar("/2/kind", 6, "Service"),
-            scalar("/2/metadata/name", 7, "api"),
-            symbol("/2/spec", 8),
-            scalar("/3/kind", 9, "DaemonSet"),
-            scalar("/3/metadata/name", 10, "metrics-collector"),
-            symbol("/3/spec", 11),
-            // Missing `metadata/name`: skipped.
-            scalar("/4/kind", 12, "Job"),
-            symbol("/4/spec", 13),
-            // Ambiguous pair: skipped.
-            scalar("/5/kind", 14, "Dup"),
-            scalar("/5/metadata/name", 15, "same"),
-            symbol("/5/spec", 16),
-            scalar("/6/kind", 17, "Dup"),
-            scalar("/6/metadata/name", 18, "same"),
-            symbol("/6/spec", 19),
-            // Missing `/spec`: skipped.
-            scalar("/7/kind", 20, "Rollout"),
-            scalar("/7/metadata/name", 21, "no-spec"),
-        ]);
-
-        // Typos in both `Rolout` and `appi` still rank `Rollout`/`api` first and cap at 3 hints.
-        assert_eq!(
-            symbols.resolve(&path("/~[kind=Rolout][metadata/name=appi]/spec")),
-            Err(ResolveError::NotFound {
-                hints: vec![
-                    path("/~[kind=Rollout][metadata/name=api]/spec"),
-                    path("/~[kind=Rollout][metadata/name=app]/spec"),
-                    path("/~[kind=Service][metadata/name=api]/spec"),
-                ]
-            })
-        );
-    }
-
-    #[test]
-    fn filter_hints_with_repeated_keys_try_every_unique_value_combination_on_each_item() {
-        // When an item holds several values for a filter key (such as repeated XML `<tag>`
-        // elements), an ambiguous shared value does not hide the item's other unique values, and
-        // duplicate identical values inside one item do not repeat a hint.
-        let symbols = Symbols::from(vec![
-            element("/items/item", 0..10),
-            scalar("/items/item/tag", 1, "common"),
-            scalar("/items/item/tag", 2, "alpha"),
-            symbol("/items/item/version", 3),
-            element("/items/item", 10..20),
-            scalar("/items/item/tag", 11, "common"),
-            scalar("/items/item/tag", 12, "beta"),
-            symbol("/items/item/version", 13),
-        ]);
-
-        assert_eq!(
-            symbols.resolve(&path("/items/~[tag=alph]/version")),
-            Err(ResolveError::NotFound {
-                hints: vec![
-                    path("/items/~[tag=alpha]/version"),
-                    path("/items/~[tag=beta]/version"),
-                ]
-            })
-        );
-        assert_eq!(
-            symbols.resolve(&path("/items/~[tag=bet]/version")),
-            Err(ResolveError::NotFound {
-                hints: vec![
-                    path("/items/~[tag=beta]/version"),
-                    path("/items/~[tag=alpha]/version"),
-                ]
-            })
-        );
-
-        // Even when the typo has equal edit distance to an ambiguous shared value (`x`) and a
-        // unique value (`y`), the unique value is still suggested.
-        let tied = Symbols::from(vec![
-            element("/items/item", 0..10),
-            scalar("/items/item/tag", 1, "x"),
-            scalar("/items/item/tag", 2, "y"),
-            scalar("/items/item/tag", 3, "y"),
-            symbol("/items/item/v", 4),
-            element("/items/item", 10..20),
-            scalar("/items/item/tag", 11, "x"),
-            symbol("/items/item/v", 12),
-        ]);
-        assert_eq!(
-            tied.resolve(&path("/items/~[tag=z]/v")),
-            Err(ResolveError::NotFound {
-                hints: vec![path("/items/~[tag=y]/v")]
-            })
-        );
-
-        // In a compound filter, an ambiguous value on one condition still tries the item's other
-        // values to find a unique combination.
-        let compound = Symbols::from(vec![
-            element("/items/item", 0..10),
-            scalar("/items/item/env", 1, "shared"),
-            scalar("/items/item/env", 2, "prod"),
-            scalar("/items/item/role", 3, "web"),
-            symbol("/items/item/v", 4),
-            element("/items/item", 10..20),
-            scalar("/items/item/env", 11, "shared"),
-            scalar("/items/item/role", 12, "web"),
-            symbol("/items/item/v", 13),
-        ]);
-        assert_eq!(
-            compound.resolve(&path("/items/~[env=z][role=web]/v")),
-            Err(ResolveError::NotFound {
-                hints: vec![path("/items/~[env=prod][role=web]/v")]
-            })
-        );
-
-        // When one item has several unique values for the same key, it contributes only its
-        // closest match.
-        let single_multi = Symbols::from(vec![
-            element("/items/item", 0..10),
-            scalar("/items/item/tag", 1, "alpha"),
-            scalar("/items/item/tag", 2, "beta"),
-            symbol("/items/item/v", 3),
-        ]);
-        assert_eq!(
-            single_multi.resolve(&path("/items/~[tag=bet]/v")),
-            Err(ResolveError::NotFound {
-                hints: vec![path("/items/~[tag=beta]/v")]
-            })
-        );
-    }
-
-    #[test]
-    fn filter_hints_deduplicate_repeated_values_and_cap_combinations_per_item() {
-        // Identical repeated values on one item are deduplicated so they do not exhaust the
-        // per-item combination cap; distinct values are ranked closest-first before capping.
-        let mut dedup_symbols = vec![element("/items/item", 0..200)];
-        for i in 0..MAX_HINT_COMBINATIONS_PER_ITEM {
-            dedup_symbols.push(scalar("/items/item/tag", i + 1, "x"));
-        }
-        dedup_symbols.push(scalar("/items/item/tag", 100, "y"));
-        dedup_symbols.push(symbol("/items/item/v", 101));
-        dedup_symbols.push(element("/items/item", 200..300));
-        dedup_symbols.push(scalar("/items/item/tag", 201, "x"));
-        dedup_symbols.push(symbol("/items/item/v", 202));
-        assert_eq!(
-            Symbols::from(dedup_symbols).resolve(&path("/items/~[tag=z]/v")),
-            Err(ResolveError::NotFound {
-                hints: vec![path("/items/~[tag=y]/v")]
-            })
-        );
-
-        // With distinct unrelated values filling the cap, a closer match at the end still ranks
-        // inside the cap, while an equally distant value past the cap is cut off.
-        let with_shared_tags = |shared_count: usize, extra: &str| {
-            let mut syms = vec![element("/items/item", 0..200)];
-            for i in 0..shared_count {
-                syms.push(scalar("/items/item/tag", i + 1, &format!("aa{i:02}")));
-            }
-            syms.push(scalar("/items/item/tag", 100, extra));
-            syms.push(symbol("/items/item/v", 101));
-            syms.push(element("/items/item", 200..400));
-            for i in 0..shared_count {
-                syms.push(scalar("/items/item/tag", 201 + i, &format!("aa{i:02}")));
-            }
-            syms.push(symbol("/items/item/v", 301));
-            Symbols::from(syms)
-        };
-
-        assert_eq!(
-            with_shared_tags(MAX_HINT_COMBINATIONS_PER_ITEM, "target")
-                .resolve(&path("/items/~[tag=targt]/v")),
-            Err(ResolveError::NotFound {
-                hints: vec![path("/items/~[tag=target]/v")]
-            })
-        );
-        assert_eq!(
-            with_shared_tags(MAX_HINT_COMBINATIONS_PER_ITEM - 1, "bb")
-                .resolve(&path("/items/~[tag=zz]/v")),
-            Err(ResolveError::NotFound {
-                hints: vec![path("/items/~[tag=bb]/v")]
-            })
-        );
-        assert_eq!(
-            with_shared_tags(MAX_HINT_COMBINATIONS_PER_ITEM, "bb")
-                .resolve(&path("/items/~[tag=zz]/v")),
-            Err(ResolveError::NotFound { hints: vec![] })
-        );
     }
 
     #[test]

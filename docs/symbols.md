@@ -102,9 +102,9 @@ services:
 | `#/services/1/port`              | `9090`    |
 | `#/services/~[name=worker]/port` | `9090`    |
 
-- **Exactly one item must match.** No match is like a missing key. When the items have the key, the message suggests
-  the values that only one item holds: `did you mean: /services/~[name=worker]/port`. Several matches are a violation
-  too: `2 items match ~[name=web], at 2:5, 6:5`.
+- **Exactly one item must match.** Zero or several matches are a violation: `no item matches ~[name=db]`, or
+  `2 items match ~[name=web], at 2:5, 6:5`. When the path before the filter does not exist, the violation shows that
+  path instead: `/servics not found`.
 - **The value compares as a symbol reads it:** a string without its quotes, any other value as written. So
   `~[port=8080]` matches `port: 8080` and `port: "8080"`.
 - **A filter key can be nested with `/`.** `~[metadata/name=api]` picks the item whose `metadata/name` holds `api`,

@@ -22,11 +22,12 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 - Symbol path filters now accept nested keys separated by `/` and chained `[key=value]` conditions on one item, such as
   `#/items/~[kind=Rollout][metadata/name=api]/spec/replicas` and `#/items/~[spec/containers/0/name=web]/kind`. Escape a
   literal `/` in a key segment or filter value as `~1`, and a literal `]` before `[` as `%5D`. Repeated matching keys
-  inside one item count that item once instead of failing as ambiguous, and `did you mean:` suggests full matching
-  compound filters.
+  inside one item count that item once instead of failing as ambiguous.
 
 ### Changed
 
+- A filter in a symbol path that matches no item now reports `no item matches ~[...]` (or `/parent not found` when the
+  path before the filter does not exist). Before, it reported `symbol not found` and suggested `did you mean:` paths.
 - Symbol path filters now split conditions and keys before percent-decoding, which changes three forms that worked in
   0.20.0:
   - `][` inside a filter value now starts another condition instead of matching literally; escape the `]` as `%5D`
