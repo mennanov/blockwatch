@@ -7,3 +7,12 @@ items:
     metadata:
       name: api
     size: 2
+workloads:
+  - kind: Service
+    metadata:
+      name: shared
+    replicas: 1
+  - kind: Rollout
+    metadata:
+      name: shared
+    replicas: 3

@@ -1,5 +1,5 @@
 //! `SymbolPath`: a parsed and validated symbol path. It follows RFC 6901 and adds filters, such as
-//! `~[name=blue]` and `~[metadata/name=api]`.
+//! `~[name=blue]` and `~[kind=Rollout][metadata/name=api]`.
 
 use anyhow::{Context, bail};
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
@@ -21,17 +21,21 @@ pub(crate) struct SymbolPath {
     segments: Vec<Segment>,
 }
 
+/// One `[key_path=value]` condition of a [`Segment::Filter`].
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct FilterCondition {
+    pub(crate) key_path: Vec<String>,
+    pub(crate) value: String,
+}
+
 /// One segment of a [`SymbolPath`], with its escapes decoded.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Segment {
     /// A key, or a position in a list, such as `0`.
     Key(String),
-    /// A filter, written `~[key=value]` or `~[a/b=value]`. It stands for the one child whose
-    /// `key_path` holds `value`.
-    Filter {
-        key_path: Vec<String>,
-        value: String,
-    },
+    /// A filter, written `~[key=value]` or `~[a=1][b/c=2]`. It stands for the one child matching
+    /// every condition. Never empty.
+    Filter(Vec<FilterCondition>),
 }
 
 impl SymbolPath {
@@ -48,25 +52,22 @@ impl SymbolPath {
 
         validate_percent_encoding(path_str)?;
 
-        // Percent-decoding precedes leading-slash validation and segment splitting, so `%2F`
-        // consistently acts as a separator in all positions, as required by RFC 6901 §6.
-        let decoded = percent_encoding::percent_decode_str(path_str)
-            .decode_utf8()
-            .with_context(|| format!("symbol path \"{fragment}\" contains invalid UTF-8 bytes"))?;
-
-        if trimmed.starts_with('#') && decoded.starts_with(|c: char| c.is_whitespace()) {
-            bail!("unexpected whitespace after '#'; symbol path must start with '/'");
-        }
-        if !decoded.starts_with('/') {
+        // `%2F` acts as a `/` separator in all positions, as required by RFC 6901 §6. Decoding
+        // happens per piece after splitting, so `%5D` inside a filter value stays distinct from
+        // the `]` that closes a condition.
+        let Some(leading_slash) = slash_len(path_str.as_bytes()) else {
+            let decoded = percent_decode(path_str, fragment)?;
+            if trimmed.starts_with('#') && decoded.starts_with(|c: char| c.is_whitespace()) {
+                bail!("unexpected whitespace after '#'; symbol path must start with '/'");
+            }
             bail!("symbol path must start with '/' (e.g. \"/{decoded}\")");
-        }
+        };
 
-        // A rooted path always has a leading `/`, so the segment slice starts after index 1.
-        #[expect(clippy::string_slice, reason = "`decoded` starts with `/`")]
-        let segments: Vec<Segment> = split_segments(&decoded[1..])
-            .into_iter()
-            .map(parse_segment)
-            .collect::<anyhow::Result<Vec<Segment>>>()?;
+        #[expect(
+            clippy::string_slice,
+            reason = "`leading_slash` is the byte length of leading `/` or `%2F`"
+        )]
+        let segments = parse_segments(&path_str[leading_slash..], fragment)?;
 
         Ok(Self { segments })
     }
@@ -133,11 +134,28 @@ impl fmt::Display for Segment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Key(key) => write!(f, "{}", encode(key)),
-            Self::Filter { key_path, value } => {
-                let key_path: Vec<String> = key_path.iter().map(|part| encode(part)).collect();
-                write!(f, "~[{}={}]", key_path.join("/"), encode(value))
+            Self::Filter(conditions) => {
+                f.write_str("~")?;
+                for condition in conditions {
+                    write!(f, "{condition}")?;
+                }
+                Ok(())
             }
         }
+    }
+}
+
+/// Writes one filter condition as `[key_path=value]`, escapes included.
+impl fmt::Display for FilterCondition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("[")?;
+        for (index, part) in self.key_path.iter().enumerate() {
+            if index > 0 {
+                f.write_str("/")?;
+            }
+            f.write_str(&encode(part))?;
+        }
+        write!(f, "={}]", encode_filter_value(&self.value))
     }
 }
 
@@ -171,71 +189,181 @@ fn encode(text: &str) -> String {
     encoded
 }
 
-/// Splits `path` (a decoded symbol path without its leading `/`) into raw segments separated by
-/// `/`, keeping `/` inside a filter's key path (`~[a/b=value]`) as part of that filter segment.
-fn split_segments(path: &str) -> Vec<&str> {
+/// Escapes a filter condition's value so [`SymbolPath::parse`] reads it back as the same text.
+fn encode_filter_value(text: &str) -> String {
+    // `][` starts the next condition in a compound filter, so a literal `]` before `[` is
+    // percent-encoded while a lone `]` elsewhere stays as written.
+    encode(text).replace("][", "%5D[")
+}
+
+/// If `bytes` starts with `/` (raw or percent-encoded as `%2F`/`%2f`), returns its byte length.
+fn slash_len(bytes: &[u8]) -> Option<usize> {
+    if bytes.first() == Some(&b'/') {
+        Some(1)
+    } else if bytes.len() >= 3
+        && bytes[0] == b'%'
+        && bytes[1] == b'2'
+        && bytes[2].eq_ignore_ascii_case(&b'f')
+    {
+        Some(3)
+    } else {
+        None
+    }
+}
+
+/// Splits `text` at the first `/` (or `%2F`/`%2f`), returning the part before it and the remainder
+/// after it (or `None` if there is no slash).
+fn split_next_slash(text: &str) -> (&str, Option<&str>) {
+    let bytes = text.as_bytes();
+    for i in 0..bytes.len() {
+        if let Some(len) = slash_len(&bytes[i..]) {
+            #[expect(
+                clippy::string_slice,
+                reason = "`i` and `i + len` bound an ASCII `/` or `%2F`"
+            )]
+            return (&text[..i], Some(&text[i + len..]));
+        }
+    }
+    (text, None)
+}
+
+/// Splits `text` on every `/` (or `%2F`/`%2f`), preserving empty parts.
+fn split_slashes(text: &str) -> impl Iterator<Item = &str> {
+    let mut rest = Some(text);
+    std::iter::from_fn(move || {
+        let current = rest?;
+        let (part, next) = split_next_slash(current);
+        rest = next;
+        Some(part)
+    })
+}
+
+/// Parses all raw segments of `path` (a percent-encoded symbol path after its leading `/` or
+/// `%2F`) into [`Segment`]s.
+fn parse_segments(path: &str, fragment: &str) -> anyhow::Result<Vec<Segment>> {
     let mut segments = Vec::new();
     let mut rest = path;
     loop {
-        let end = segment_end(rest);
-        #[expect(
-            clippy::string_slice,
-            reason = "`segment_end` returns a `/` byte index or `rest.len()`"
-        )]
-        segments.push(&rest[..end]);
-        match rest.get(end + 1..) {
-            Some(next) => rest = next,
-            None => return segments,
+        // RFC 6901 gives `~` a meaning only before `0` and `1`. So an escaped key never starts
+        // with `~[`, and a filter can't be mistaken for a key.
+        let (segment, next) = if rest.starts_with("~[") {
+            parse_filter_segment(rest, fragment)?
+        } else {
+            let (raw, next) = split_next_slash(rest);
+            (Segment::Key(decode_and_unescape(raw, fragment)?), next)
+        };
+        segments.push(segment);
+        match next {
+            Some(tail) => rest = tail,
+            None => return Ok(segments),
         }
     }
 }
 
-/// The byte index of the `/` that ends the first segment of `rest`, or `rest.len()` if none.
-///
-/// Inside a filter (`~[...`), `/` separates nested key segments before the first `=`, so the
-/// segment ends at the first `/` after `=`. A raw `/` in a value or a missing `]` stops there and
-/// fails in [`parse_segment`].
-fn segment_end(rest: &str) -> usize {
-    if rest.starts_with("~[") {
-        let Some(eq) = rest.find('=') else {
-            return rest.len();
+/// How a filter condition's value ended during scanning.
+enum ValueEnd<'a> {
+    /// Closed by `]` immediately followed by `[`, starting the next condition.
+    NextCondition(&'a str),
+    /// Closed by `]` at the end of the path or right before `/` (`%2F`).
+    EndOfSegment(Option<&'a str>),
+    /// Reached `/` (`%2F`) or end of input without a closing `]`.
+    Invalid,
+}
+
+/// Scans a percent-encoded filter value after `=` until its closing `]` (before `[`, `/`, `%2F`,
+/// or end of string).
+fn scan_filter_value(text: &str) -> (&str, ValueEnd<'_>) {
+    let bytes = text.as_bytes();
+    for i in 0..bytes.len() {
+        if slash_len(&bytes[i..]).is_some() {
+            return ("", ValueEnd::Invalid);
+        }
+        if bytes[i] == b']' {
+            #[expect(clippy::string_slice, reason = "`bytes[i]` is ASCII `]`")]
+            let (value, after) = (&text[..i], &text[i + 1..]);
+            if after.is_empty() {
+                return (value, ValueEnd::EndOfSegment(None));
+            }
+            if let Some(len) = slash_len(after.as_bytes()) {
+                #[expect(
+                    clippy::string_slice,
+                    reason = "`len` is the byte length of leading `/` or `%2F`"
+                )]
+                return (value, ValueEnd::EndOfSegment(Some(&after[len..])));
+            }
+            if after.starts_with('[') {
+                return (value, ValueEnd::NextCondition(after));
+            }
+        }
+    }
+    ("", ValueEnd::Invalid)
+}
+
+/// Parses a filter segment starting with `~[` at the front of `rest`, returning the parsed
+/// [`Segment::Filter`] and the remainder of `rest` after the following `/` (or `None` at end).
+fn parse_filter_segment<'a>(
+    rest: &'a str,
+    fragment: &str,
+) -> anyhow::Result<(Segment, Option<&'a str>)> {
+    let mut conditions = Vec::new();
+    #[expect(clippy::string_slice, reason = "`rest` starts with ASCII `~[`")]
+    let mut cursor = &rest[1..];
+    loop {
+        let after_open = cursor
+            .strip_prefix('[')
+            .expect("each filter condition starts with `[`");
+        let Some((raw_key, after_eq)) = after_open.split_once('=') else {
+            let (bad, _) = split_next_slash(rest);
+            bail!("invalid filter \"{bad}\" in symbol path; write it as ~[key=value]");
         };
-        #[expect(
-            clippy::string_slice,
-            reason = "`eq` is the byte index of the ASCII `=`"
-        )]
-        rest[eq + 1..]
-            .find('/')
-            .map_or(rest.len(), |offset| eq + 1 + offset)
-    } else {
-        rest.find('/').unwrap_or(rest.len())
+        let (raw_value, end) = scan_filter_value(after_eq);
+        match end {
+            ValueEnd::NextCondition(next_cond) => {
+                conditions.push(parse_condition(raw_key, raw_value, fragment)?);
+                cursor = next_cond;
+            }
+            ValueEnd::EndOfSegment(next_segment) => {
+                conditions.push(parse_condition(raw_key, raw_value, fragment)?);
+                return Ok((Segment::Filter(conditions), next_segment));
+            }
+            ValueEnd::Invalid => {
+                let (bad_value, _) = split_next_slash(after_eq);
+                let bad_len = rest.len() - after_eq.len() + bad_value.len();
+                #[expect(
+                    clippy::string_slice,
+                    reason = "`bad_len` ends on `/` or `%2F` or at `rest.len()`"
+                )]
+                let bad = &rest[..bad_len];
+                bail!("invalid filter \"{bad}\" in symbol path; write it as ~[key=value]");
+            }
+        }
     }
 }
 
-/// Parses one segment of a symbol path, after percent-decoding: a filter such as
-/// `~[name=blue]` or `~[metadata/name=api]`, or else a key.
-///
-/// # Errors
-/// Returns an error if the segment starts with `~[` but is not a whole filter, or if it has an
-/// invalid RFC 6901 escape.
-fn parse_segment(segment: &str) -> anyhow::Result<Segment> {
-    // RFC 6901 gives `~` a meaning only before `0` and `1`. So an escaped key never starts with
-    // `~[`, and a filter can't be mistaken for a key.
-    match segment.strip_prefix("~[") {
-        // The key path ends at the first `=` and the value at the last `]`, so a value can hold
-        // both. `/` inside the key path separates nested key segments.
-        Some(filter) => match filter.strip_suffix(']').and_then(|f| f.split_once('=')) {
-            Some((key_path, value)) => Ok(Segment::Filter {
-                key_path: key_path
-                    .split('/')
-                    .map(unescape_rfc6901)
-                    .collect::<anyhow::Result<Vec<String>>>()?,
-                value: unescape_rfc6901(value)?,
-            }),
-            None => bail!("invalid filter \"{segment}\" in symbol path; write it as ~[key=value]"),
-        },
-        None => Ok(Segment::Key(unescape_rfc6901(segment)?)),
-    }
+/// Decodes and unescapes one `[key_path=value]` filter condition.
+fn parse_condition(
+    raw_key: &str,
+    raw_value: &str,
+    fragment: &str,
+) -> anyhow::Result<FilterCondition> {
+    let key_path = split_slashes(raw_key)
+        .map(|part| decode_and_unescape(part, fragment))
+        .collect::<anyhow::Result<Vec<String>>>()?;
+    let value = decode_and_unescape(raw_value, fragment)?;
+    Ok(FilterCondition { key_path, value })
+}
+
+/// Percent-decodes `piece` as UTF-8, reporting `fragment` in any error.
+fn percent_decode<'a>(piece: &'a str, fragment: &str) -> anyhow::Result<std::borrow::Cow<'a, str>> {
+    percent_encoding::percent_decode_str(piece)
+        .decode_utf8()
+        .with_context(|| format!("symbol path \"{fragment}\" contains invalid UTF-8 bytes"))
+}
+
+/// Percent-decodes `piece` as UTF-8 and unescapes its RFC 6901 `~0`/`~1` sequences.
+fn decode_and_unescape(piece: &str, fragment: &str) -> anyhow::Result<String> {
+    let decoded = percent_decode(piece, fragment)?;
+    unescape_rfc6901(&decoded)
 }
 
 /// Escapes a segment according to RFC 6901 JSON Pointer syntax.
@@ -295,10 +423,19 @@ mod tests {
     }
 
     fn filter(key_path: &[&str], value: &str) -> Segment {
-        Segment::Filter {
-            key_path: key_path.iter().map(|part| (*part).to_string()).collect(),
-            value: value.to_string(),
-        }
+        compound_filter(&[(key_path, value)])
+    }
+
+    fn compound_filter(conditions: &[(&[&str], &str)]) -> Segment {
+        Segment::Filter(
+            conditions
+                .iter()
+                .map(|(key_path, value)| FilterCondition {
+                    key_path: key_path.iter().map(|part| (*part).to_string()).collect(),
+                    value: (*value).to_string(),
+                })
+                .collect(),
+        )
     }
 
     #[test]
@@ -520,6 +657,115 @@ mod tests {
     }
 
     #[test]
+    fn compound_filter_parses_conditions_and_displays_as_written() -> anyhow::Result<()> {
+        // Chained `[key=value]` brackets combine conditions on one item and display as written.
+        let test_cases = [
+            (
+                "/items/~[kind=Rollout][metadata/name=api]/spec/replicas",
+                vec![
+                    key("items"),
+                    compound_filter(&[(&["kind"], "Rollout"), (&["metadata", "name"], "api")]),
+                    key("spec"),
+                    key("replicas"),
+                ],
+            ),
+            (
+                "/~[a=1][b=2][c/d=3]",
+                vec![compound_filter(&[
+                    (&["a"], "1"),
+                    (&["b"], "2"),
+                    (&["c", "d"], "3"),
+                ])],
+            ),
+            (
+                "/items/~[kind=Rollout][apiVersion=argoproj.io~1v1alpha1]/spec",
+                vec![
+                    key("items"),
+                    compound_filter(&[
+                        (&["kind"], "Rollout"),
+                        (&["apiVersion"], "argoproj.io/v1alpha1"),
+                    ]),
+                    key("spec"),
+                ],
+            ),
+            (
+                "/items/~[kind=Rollout][metadata/labels/app.kubernetes.io~1name=api]/spec",
+                vec![
+                    key("items"),
+                    compound_filter(&[
+                        (&["kind"], "Rollout"),
+                        (&["metadata", "labels", "app.kubernetes.io/name"], "api"),
+                    ]),
+                    key("spec"),
+                ],
+            ),
+            (
+                "/items/~[a=1][b=2]/~[c=3][d=4]/val",
+                vec![
+                    key("items"),
+                    compound_filter(&[(&["a"], "1"), (&["b"], "2")]),
+                    compound_filter(&[(&["c"], "3"), (&["d"], "4")]),
+                    key("val"),
+                ],
+            ),
+            (
+                "/~[k=a=b]c][m=2]/next",
+                vec![
+                    compound_filter(&[(&["k"], "a=b]c"), (&["m"], "2")]),
+                    key("next"),
+                ],
+            ),
+            (
+                "/~[k=a]][m=2]",
+                vec![compound_filter(&[(&["k"], "a]"), (&["m"], "2")])],
+            ),
+            (
+                "/~[k=a][[python]=2]",
+                vec![compound_filter(&[(&["k"], "a"), (&["[python]"], "2")])],
+            ),
+            (
+                "/~[=][=]",
+                vec![compound_filter(&[(&[""], ""), (&[""], "")])],
+            ),
+        ];
+        for (raw, segments) in test_cases {
+            let path = SymbolPath::parse(raw)?;
+            assert_eq!(path.segments(), segments, "unexpected segments for {raw}");
+            assert_eq!(path.to_string(), raw);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn filter_value_with_bracket_pair_round_trips_using_percent_5d() -> anyhow::Result<()> {
+        // `%5D` encodes a literal `]` before `[` so a value holding `][` is not split into
+        // another condition, without double-decoding `%255D`.
+        let test_cases = [
+            ("/~[k=a%5D[b=1]", vec![filter(&["k"], "a][b=1")]),
+            (
+                "/~[k=a%5D[x]][m=2]",
+                vec![compound_filter(&[(&["k"], "a][x]"), (&["m"], "2")])],
+            ),
+            ("/~[k=a%255D[b=1]", vec![filter(&["k"], "a%5D[b=1")]),
+            ("/~[k=a%25%5D[b]", vec![filter(&["k"], "a%][b")]),
+        ];
+        for (raw, segments) in test_cases {
+            let path = SymbolPath::parse(raw)?;
+            assert_eq!(path.segments(), segments, "unexpected segments for {raw}");
+            assert_eq!(path.to_string(), raw);
+        }
+        assert_eq!(
+            SymbolPath::parse("/~[k=a%5d[b]")?,
+            SymbolPath::parse("/~[k=a%5D[b]")?,
+        );
+        assert_eq!(
+            SymbolPath::parse("/~[a=1]%2Fspec")?,
+            SymbolPath::parse("/~[a=1]/spec")?,
+        );
+        Ok(())
+    }
+
+    #[test]
     fn key_that_resembles_a_filter_parses_as_key() -> anyhow::Result<()> {
         // VS Code settings have keys such as `[python]`.
         let path = SymbolPath::parse("/[python]/[a=b]/~0[a=b]")?;
@@ -542,6 +788,15 @@ mod tests {
             "/items/~[apiVersion=argoproj.io/v1alpha1]/kind",
             "/~[a=1/b=2]",
             "/~[a/b=1]x/next",
+            "/~[a=1][]",
+            "/~[kind=Rollout][name]",
+            "/~[a=1][b=2",
+            "/~[a=1][b=2/spec",
+            "/~[a=1][b=2]x",
+            "/~[kind=Rollout][apiVersion=argoproj.io/v1alpha1]",
+            "/~[apiVersion=argoproj.io/v1alpha1][kind=Rollout]",
+            "/~[a=1%2F2]",
+            "/~[a=1%5D",
         ] {
             let err = SymbolPath::parse(raw).unwrap_err();
             assert!(
@@ -554,7 +809,7 @@ mod tests {
     #[test]
     fn nested_filter_inside_filter_key_fails_as_invalid_escape() {
         // A nested `~[...]` inside a filter key is rejected as an invalid RFC 6901 escape.
-        for raw in ["/~[a/~[b=1]/c=2]", "/~[a/~2=1]"] {
+        for raw in ["/~[a/~[b=1]/c=2]", "/~[a/~2=1]", "/~[k=1][a/~[b=1]/c=2]"] {
             let err = SymbolPath::parse(raw).unwrap_err();
             assert!(
                 err.to_string().contains("invalid RFC 6901 escape"),

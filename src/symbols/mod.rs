@@ -5,7 +5,7 @@ mod path;
 pub(crate) use path::SymbolPath;
 
 use crate::position::{LineIndex, Position};
-use path::Segment;
+use path::{FilterCondition, Segment};
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
@@ -208,7 +208,7 @@ impl Symbols {
                     Segment::Key(name) => self.skipped.get(name),
                     // A filter stands for a list item or a map entry, not for a name the file
                     // defines.
-                    Segment::Filter { .. } => None,
+                    Segment::Filter(_) => None,
                 })
             })
             .map(|reason| Unreadable { reason })
@@ -328,32 +328,36 @@ fn resolve_filters<'a>(
     let mut resolved = path.clone();
     let mut scope: Option<&Symbol> = None;
     for (index, segment) in path.segments().iter().enumerate() {
-        let (key_path, value) = match segment {
+        let conditions = match segment {
             Segment::Key(_) => continue,
-            Segment::Filter { key_path, value } => (key_path, value),
+            Segment::Filter(conditions) => conditions,
         };
         let parent = &resolved.segments()[..index];
-        if let Some(unreadable) = unreadable_child_key(symbols, parent, key_path) {
+        if let Some(unreadable) = unreadable_child_key(symbols, parent, conditions) {
             return Err(ResolveError::Unreadable(unreadable));
         }
-        let matches = matching_child_keys(symbols, scope, parent, key_path, value);
-        match matches.as_slice() {
-            [] => {
-                // The second call to `child_keys` walks `scope` again. It happens only when no
-                // child matches, so a filter that matches doesn't keep every key it looked at.
-                let keys = child_keys(symbols, scope, parent, key_path);
+        let mut matches = matching_children(symbols, scope, parent, conditions);
+        match (matches.next(), matches.next()) {
+            (None, _) => {
+                drop(matches);
                 return Err(ResolveError::NotFound {
-                    hints: filter_hints(symbols, path, index, key_path, keys),
+                    hints: filter_hints(symbols, scope, path, index, parent, conditions),
                 });
             }
-            [(key, child_scope)] => {
-                resolved = resolved.with_segment(index, key.path.segments()[index].clone());
-                scope = *child_scope;
+            (Some(child), None) => {
+                drop(matches);
+                resolved = resolved.with_segment(index, child.segment().clone());
+                scope = child.scope;
             }
-            _ => {
+            (Some(first), Some(second)) => {
+                let keys = [first, second]
+                    .into_iter()
+                    .chain(matches)
+                    .map(|child| child.key)
+                    .collect();
                 return Err(ResolveError::AmbiguousFilter {
                     filter: segment.clone(),
-                    keys: matches.into_iter().map(|(key, _)| key).collect(),
+                    keys,
                 });
             }
         }
@@ -381,9 +385,9 @@ fn resolve_all_from<'a>(
         .enumerate()
         .find_map(|(index, segment)| match segment {
             Segment::Key(_) => None,
-            Segment::Filter { key_path, value } => Some((index, key_path, value)),
+            Segment::Filter(conditions) => Some((index, conditions)),
         });
-    let Some((index, key_path, value)) = next_filter else {
+    let Some((index, conditions)) = next_filter else {
         if let Some(reason) = symbols.unreadable.get(resolved) {
             return Err(Unreadable { reason });
         }
@@ -398,14 +402,14 @@ fn resolve_all_from<'a>(
         return Ok(());
     };
     let parent = &resolved.segments()[..index];
-    if let Some(unreadable) = unreadable_child_key(symbols, parent, key_path) {
+    if let Some(unreadable) = unreadable_child_key(symbols, parent, conditions) {
         return Err(unreadable);
     }
-    for (matched_key, child_scope) in matching_child_keys(symbols, scope, parent, key_path, value) {
+    for child in matching_children(symbols, scope, parent, conditions) {
         let child_path = resolved
             .clone()
-            .with_segment(index, matched_key.path.segments()[index].clone());
-        resolve_all_from(symbols, &child_path, child_scope, found)?;
+            .with_segment(index, child.segment().clone());
+        resolve_all_from(symbols, &child_path, child.scope, found)?;
     }
     Ok(())
 }
@@ -427,47 +431,137 @@ fn is_in_scope(symbol: &Symbol, scope: Option<&Symbol>) -> bool {
     scope.is_none_or(|container| is_inside(symbol, container))
 }
 
-/// Why a child of `parent` has an unreadable path at or above `key_path`, if any.
+/// Why a child of `parent` has an unreadable path at or above any condition's `key_path`, if any.
 fn unreadable_child_key<'a>(
     symbols: &'a Symbols,
     parent: &[Segment],
-    key_path: &[String],
+    conditions: &[FilterCondition],
 ) -> Option<Unreadable<'a>> {
     // An unreadable path has no symbol, so the child it belongs to can't be told apart. Its
-    // key could hold the filter's value too.
-    symbols
-        .unreadable
-        .iter()
-        .find(|(unreadable, _)| is_unreadable_child_key(unreadable, parent, key_path))
-        .map(|(_, reason)| Unreadable { reason })
+    // key could hold a condition's value too.
+    conditions.iter().find_map(|condition| {
+        symbols
+            .unreadable
+            .iter()
+            .find(|(unreadable, _)| {
+                is_unreadable_child_key(unreadable, parent, &condition.key_path)
+            })
+            .map(|(_, reason)| Unreadable { reason })
+    })
 }
 
-/// One matched key per distinct child of `parent` inside `scope` whose `key_path` holds `value`,
-/// paired with the narrowed scope for that child, in document order.
-fn matching_child_keys<'s>(
-    symbols: &'s Symbols,
-    scope: Option<&'s Symbol>,
+/// One distinct child of a filter's parent, identified by its path and narrowed scope.
+struct ChildItem<'a> {
+    /// The first key symbol that located this child.
+    key: &'a Symbol,
+    /// The child's path segments through the filter's position, such as `/items/0`.
+    path: &'a [Segment],
+    /// The narrowed container symbol when siblings share `path`, or the enclosing scope.
+    scope: Option<&'a Symbol>,
+}
+
+impl<'a> ChildItem<'a> {
+    /// The segment this child puts in place of the filter, such as `0` or `item`.
+    fn segment(&self) -> &'a Segment {
+        self.path
+            .last()
+            .expect("a child path has at least its own segment")
+    }
+
+    /// The scalar values this child holds at `key_path`, in document order.
+    fn scalar_values<'s>(
+        &'s self,
+        symbols: &'a Symbols,
+        key_path: &'s [String],
+    ) -> impl Iterator<Item = &'a str> + 's {
+        in_scope(symbols, self.scope)
+            .filter(move |symbol| is_item_key(&symbol.path, self.path, key_path))
+            .filter_map(|symbol| symbol.value.as_ref().map(|held| held.text.as_str()))
+    }
+
+    /// Whether this child has a scalar at `condition.key_path` equal to `condition.value`.
+    fn matches(&self, symbols: &Symbols, condition: &FilterCondition) -> bool {
+        self.scalar_values(symbols, &condition.key_path)
+            .any(|value| value == condition.value)
+    }
+
+    /// A filter segment with each condition's value filled from this child, or `None` if this
+    /// child lacks a scalar for any condition's key.
+    fn hint_filter(&self, symbols: &'a Symbols, conditions: &[FilterCondition]) -> Option<Segment> {
+        let filled = conditions
+            .iter()
+            .map(|condition| {
+                let mut values = self.scalar_values(symbols, &condition.key_path);
+                let first = values.next()?;
+                let value = if first == condition.value {
+                    first
+                } else {
+                    values
+                        .find(|value| *value == condition.value)
+                        .unwrap_or(first)
+                };
+                Some(FilterCondition {
+                    key_path: condition.key_path.clone(),
+                    value: value.to_string(),
+                })
+            })
+            .collect::<Option<Vec<FilterCondition>>>()?;
+        Some(Segment::Filter(filled))
+    }
+}
+
+/// One [`ChildItem`] per distinct child of `parent` inside `scope` referenced by `keys`, in
+/// document order. Repeated keys inside one child item count that item once.
+fn distinct_children<'a>(
+    symbols: &'a Symbols,
+    scope: Option<&'a Symbol>,
     parent: &[Segment],
-    key_path: &[String],
-    value: &str,
-) -> Vec<(&'s Symbol, Option<&'s Symbol>)> {
+    keys: impl Iterator<Item = &'a Symbol>,
+) -> impl Iterator<Item = ChildItem<'a>> {
     let index = parent.len();
     let mut seen = HashSet::new();
-    let mut matches = Vec::new();
-    for key in child_keys(symbols, scope, parent, key_path)
-        .filter(|symbol| symbol.value.as_ref().is_some_and(|held| held.text == value))
-    {
-        let child_scope = narrow_to_child(symbols, scope, &key.path.segments()[..=index], key);
-        // Repeated matching keys inside one child item count that item once.
-        let item_id = (
-            &key.path.segments()[index],
-            child_scope.map(std::ptr::from_ref),
-        );
-        if seen.insert(item_id) {
-            matches.push((key, child_scope));
-        }
-    }
-    matches
+    keys.filter_map(move |key| {
+        let path = &key.path.segments()[..=index];
+        let child_scope = narrow_to_child(symbols, scope, path, key);
+        let item_id = (&path[index], child_scope.map(std::ptr::from_ref));
+        seen.insert(item_id).then_some(ChildItem {
+            key,
+            path,
+            scope: child_scope,
+        })
+    })
+}
+
+/// One [`ChildItem`] per distinct child of `parent` inside `scope` that satisfies every condition
+/// in `conditions`, in document order. Each item's `key` is its first matched key for the first
+/// condition.
+fn matching_children<'a>(
+    symbols: &'a Symbols,
+    scope: Option<&'a Symbol>,
+    parent: &[Segment],
+    conditions: &[FilterCondition],
+) -> impl Iterator<Item = ChildItem<'a>> {
+    let first = &conditions[0];
+    let first_matches = child_keys(symbols, scope, parent, &first.key_path).filter(|symbol| {
+        symbol
+            .value
+            .as_ref()
+            .is_some_and(|held| held.text == first.value)
+    });
+    distinct_children(symbols, scope, parent, first_matches).filter(move |child| {
+        conditions[1..]
+            .iter()
+            .all(|condition| child.matches(symbols, condition))
+    })
+}
+
+/// Whether `path` is `key_path` under `child_path`, such as `/items/0/metadata/name` for
+/// `child_path` `/items/0` and `key_path` `["metadata", "name"]`.
+fn is_item_key(path: &SymbolPath, child_path: &[Segment], key_path: &[String]) -> bool {
+    let segments = path.segments();
+    segments.len() == child_path.len() + key_path.len()
+        && segments.starts_with(child_path)
+        && segments_match_keys(&segments[child_path.len()..], key_path)
 }
 
 /// The child that holds `key` when several symbols inside `scope` have the path `child`, such as
@@ -548,7 +642,7 @@ fn segments_match_keys(segments: &[Segment], keys: &[String]) -> bool {
         .zip(keys)
         .all(|(segment, expected)| match segment {
             Segment::Key(name) => name == expected,
-            Segment::Filter { .. } => false,
+            Segment::Filter(_) => false,
         })
 }
 
@@ -565,7 +659,7 @@ fn path_hints(
 ) -> Vec<SymbolPath> {
     let last_filter = path.segments().iter().rposition(|segment| match segment {
         Segment::Key(_) => false,
-        Segment::Filter { .. } => true,
+        Segment::Filter(_) => true,
     });
     match last_filter {
         None => hints(
@@ -592,34 +686,29 @@ fn path_hints(
     }
 }
 
-/// The paths to suggest when the filter at `index` in `path`, on `key_path`, matches none of
-/// `keys`: `path` with the filter's value swapped for each value of `keys` that makes the path
-/// resolve in `symbols`. The most alike come first.
-fn filter_hints<'s>(
+/// The paths to suggest when the filter at `index` in `path` matches no child of `parent` inside
+/// `scope`: one candidate per item holding all the filter's keys whose full path resolves
+/// uniquely in `symbols`, the most alike first.
+fn filter_hints(
     symbols: &Symbols,
+    scope: Option<&Symbol>,
     path: &SymbolPath,
     index: usize,
-    key_path: &[String],
-    keys: impl Iterator<Item = &'s Symbol>,
+    parent: &[Segment],
+    conditions: &[FilterCondition],
 ) -> Vec<SymbolPath> {
     // The hints start from `path`, so the filters before `index` stay as the reference wrote them.
-    // A value that several children hold makes the filter ambiguous, so its path doesn't resolve.
-    // Checking each value once avoids duplicate hints when one child holds the key twice.
-    let mut seen_values = HashSet::new();
-    let alternatives: Vec<SymbolPath> = keys
-        // A key that holds a list or a map has no value to put in a filter.
-        .filter_map(|symbol| symbol.value.as_ref())
-        .filter(|held| seen_values.insert(held.text.as_str()))
-        .map(|held| {
-            let filter = Segment::Filter {
-                key_path: key_path.to_vec(),
-                value: held.text.clone(),
-            };
-            path.clone().with_segment(index, filter)
-        })
-        .filter(|alternative| symbols.resolve(alternative).is_ok())
-        .collect();
-    // Each alternative resolves and differs from `path` only in the filter's value, so a
+    // A value combination that several children hold makes the filter ambiguous, so its path
+    // doesn't resolve.
+    let scalar_first_keys = child_keys(symbols, scope, parent, &conditions[0].key_path)
+        .filter(|symbol| symbol.value.is_some());
+    let alternatives: Vec<SymbolPath> =
+        distinct_children(symbols, scope, parent, scalar_first_keys)
+            .filter_map(|child| child.hint_filter(symbols, conditions))
+            .map(|filter| path.clone().with_segment(index, filter))
+            .filter(|alternative| symbols.resolve(alternative).is_ok())
+            .collect();
+    // Each alternative resolves and differs from `path` only in the filter's values, so a
     // similarity cutoff would only drop real choices.
     hints(&alternatives, path, 0.0)
 }
@@ -707,10 +796,20 @@ mod resolve_tests {
 
     /// The filter `~[key_path=value]`.
     fn filter(key_path: &[&str], value: &str) -> Segment {
-        Segment::Filter {
-            key_path: key_path.iter().map(|part| (*part).to_string()).collect(),
-            value: value.to_string(),
-        }
+        compound_filter(&[(key_path, value)])
+    }
+
+    /// A compound filter `~[k1=v1][k2=v2]...`.
+    fn compound_filter(conditions: &[(&[&str], &str)]) -> Segment {
+        Segment::Filter(
+            conditions
+                .iter()
+                .map(|(key_path, value)| FilterCondition {
+                    key_path: key_path.iter().map(|part| (*part).to_string()).collect(),
+                    value: (*value).to_string(),
+                })
+                .collect(),
+        )
     }
 
     /// The symbols of one item of the list that `named_items` builds.
@@ -1923,6 +2022,315 @@ mod resolve_tests {
         assert_eq!(
             symbols.resolve_all(&path("/items/~[metadata/name=api]/spec")),
             Ok(vec![&first_spec, &second_spec])
+        );
+    }
+
+    #[test]
+    fn compound_filter_picks_the_item_matching_every_condition() {
+        // Every condition in a compound filter must match the same item, at any depth or at root.
+        let rollout_replicas = symbol("/1/spec/replicas", 7);
+        let symbols = Symbols::from(vec![
+            scalar("/0/kind", 0, "Service"),
+            scalar("/0/metadata/name", 1, "api"),
+            scalar("/0/metadata/name/sub", 2, "worker"),
+            symbol("/0/spec/replicas", 3),
+            scalar("/1/kind", 4, "Rollout"),
+            scalar("/1/metadata/name", 5, "api"),
+            scalar("/1/metadata/namespace", 6, "prod"),
+            rollout_replicas.clone(),
+            scalar("/2/kind", 8, "Rollout"),
+            scalar("/2/metadata/name", 9, "worker"),
+            symbol("/2/spec/replicas", 10),
+        ]);
+
+        assert_eq!(
+            symbols.resolve(&path("/~[kind=Rollout][metadata/name=api]/spec/replicas")),
+            Ok(&rollout_replicas)
+        );
+        assert_eq!(
+            symbols.resolve(&path(
+                "/~[kind=Rollout][metadata/name=api][metadata/namespace=prod]/spec/replicas"
+            )),
+            Ok(&rollout_replicas)
+        );
+        // Failing the third condition while matching the first two does not match.
+        assert_eq!(
+            symbols.resolve(&path(
+                "/~[kind=Rollout][metadata/name=api][metadata/namespace=staging]/spec/replicas"
+            )),
+            Err(ResolveError::NotFound {
+                hints: vec![path(
+                    "/~[kind=Rollout][metadata/name=api][metadata/namespace=prod]/spec/replicas"
+                )]
+            })
+        );
+        // Condition 1 matches item 0 (`Service`) and condition 2 matches item 2 (`worker`),
+        // never the same item.
+        assert_eq!(
+            symbols.resolve(&path(
+                "/~[kind=Service][metadata/name=worker]/spec/replicas"
+            )),
+            Err(ResolveError::NotFound {
+                hints: vec![
+                    path("/~[kind=Service][metadata/name=api]/spec/replicas"),
+                    path("/~[kind=Rollout][metadata/name=worker]/spec/replicas"),
+                    path("/~[kind=Rollout][metadata/name=api]/spec/replicas"),
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn compound_filter_over_items_at_one_path_requires_all_conditions_in_the_same_item() {
+        // When siblings share a path (such as XML `<dependency>` elements), condition 1 matching
+        // one item and condition 2 matching another does not match.
+        let guava_version = symbol("/project/dependencies/dependency/version", 43);
+        let two_items = vec![
+            element("/project/dependencies/dependency", 0..20),
+            scalar("/project/dependencies/dependency/groupId", 1, "com.google"),
+            scalar("/project/dependencies/dependency/artifactId", 2, "gson"),
+            symbol("/project/dependencies/dependency/version", 3),
+            element("/project/dependencies/dependency", 20..40),
+            scalar("/project/dependencies/dependency/groupId", 21, "org.junit"),
+            scalar("/project/dependencies/dependency/artifactId", 22, "guava"),
+            symbol("/project/dependencies/dependency/version", 23),
+        ];
+        assert_eq!(
+            Symbols::from(two_items.clone()).resolve(&path(
+                "/project/dependencies/~[groupId=com.google][artifactId=guava]/version"
+            )),
+            Err(ResolveError::NotFound {
+                hints: vec![
+                    path("/project/dependencies/~[groupId=com.google][artifactId=gson]/version"),
+                    path("/project/dependencies/~[groupId=org.junit][artifactId=guava]/version"),
+                ]
+            })
+        );
+
+        let mut three_items = two_items;
+        three_items.extend([
+            element("/project/dependencies/dependency", 40..60),
+            scalar("/project/dependencies/dependency/groupId", 41, "com.google"),
+            scalar("/project/dependencies/dependency/artifactId", 42, "guava"),
+            guava_version.clone(),
+        ]);
+        assert_eq!(
+            Symbols::from(three_items).resolve(&path(
+                "/project/dependencies/~[groupId=com.google][artifactId=guava]/version"
+            )),
+            Ok(&guava_version)
+        );
+    }
+
+    #[test]
+    fn compound_filter_matching_duplicate_keys_inside_one_item_counts_the_item_once() {
+        // Repeated matching keys for any condition inside one item still count that item once.
+        let content = symbol("/items/item/content", 5);
+        let symbols = Symbols::from(vec![
+            element("/items/item", 0..10),
+            scalar("/items/item/kind", 1, "Service"),
+            scalar("/items/item/kind", 2, "Service"),
+            scalar("/items/item/tag/name", 3, "api"),
+            scalar("/items/item/tag/name", 4, "api"),
+            content.clone(),
+            element("/items/item", 10..20),
+            scalar("/items/item/kind", 11, "Service"),
+            scalar("/items/item/tag/name", 12, "other"),
+            symbol("/items/item/content", 13),
+        ]);
+
+        assert_eq!(
+            symbols.resolve(&path("/items/~[kind=Service][tag/name=api]/content")),
+            Ok(&content)
+        );
+    }
+
+    #[test]
+    fn compound_filter_with_repeated_key_matches_item_holding_both_values() {
+        // Repeating a key in a compound filter (such as XML `<tag>a</tag><tag>b</tag>`) matches an
+        // item that holds both values, and returns `NotFound` when no single item holds both.
+        let both_version = symbol("/items/item/version", 3);
+        let symbols = Symbols::from(vec![
+            element("/items/item", 0..10),
+            scalar("/items/item/tag", 1, "a"),
+            scalar("/items/item/tag", 2, "b"),
+            both_version.clone(),
+            element("/items/item", 10..20),
+            scalar("/items/item/tag", 11, "a"),
+            scalar("/items/item/tag", 12, "c"),
+            symbol("/items/item/version", 13),
+        ]);
+
+        assert_eq!(
+            symbols.resolve(&path("/items/~[tag=a][tag=b]/version")),
+            Ok(&both_version)
+        );
+        // No single item holds both `b` and `c`.
+        assert_eq!(
+            symbols.resolve(&path("/items/~[tag=b][tag=c]/version")),
+            Err(ResolveError::NotFound {
+                hints: vec![
+                    path("/items/~[tag=b][tag=a]/version"),
+                    path("/items/~[tag=a][tag=c]/version"),
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn compound_filter_matching_several_items_reports_the_first_conditions_key_positions() {
+        // An ambiguous compound filter lists the line and column of the first condition's matched
+        // key for each matching item, skipping items that fail a later condition.
+        let source = "\
+- kind: Service
+  metadata:
+    namespace: prod
+- kind: Service
+  metadata:
+    namespace: staging
+- kind: Service
+  metadata:
+    namespace: prod
+- kind: Service
+  metadata:
+    namespace: prod
+";
+        let first_kind = scalar("/0/kind", 2, "Service");
+        let third_kind = scalar("/2/kind", 101, "Service");
+        let fourth_kind = scalar("/3/kind", 149, "Service");
+        let symbols = Symbols::from(vec![
+            first_kind.clone(),
+            scalar("/0/metadata/namespace", 32, "prod"),
+            symbol("/0/spec", 45),
+            scalar("/1/kind", 50, "Service"),
+            scalar("/1/metadata/namespace", 76, "staging"),
+            symbol("/1/spec", 85),
+            third_kind.clone(),
+            scalar("/2/metadata/namespace", 118, "prod"),
+            symbol("/2/spec", 130),
+            fourth_kind.clone(),
+            scalar("/3/metadata/namespace", 166, "prod"),
+            symbol("/3/spec", 178),
+        ]);
+
+        let error = symbols
+            .resolve(&path("/~[kind=Service][metadata/namespace=prod]/spec"))
+            .unwrap_err();
+        assert_eq!(
+            error,
+            ResolveError::AmbiguousFilter {
+                filter: compound_filter(&[
+                    (&["kind"], "Service"),
+                    (&["metadata", "namespace"], "prod"),
+                ]),
+                keys: vec![&first_kind, &third_kind, &fourth_kind],
+            }
+        );
+        assert_eq!(
+            error.reason(source),
+            "3 items match ~[kind=Service][metadata/namespace=prod], at 1:3, 7:3, 10:3"
+        );
+    }
+
+    #[test]
+    fn compound_filter_with_unreadable_path_at_or_above_any_condition_key_returns_its_reason() {
+        // An unreadable path at or above a later condition's key stops resolution even when the
+        // first condition's keys are readable.
+        let base = vec![
+            scalar("/items/0/kind", 0, "Service"),
+            scalar("/items/0/metadata/name", 1, "api"),
+            symbol("/items/0/spec", 2),
+            scalar("/items/1/kind", 3, "Rollout"),
+            scalar("/items/1/metadata/name", 4, "api"),
+            symbol("/items/1/spec", 5),
+        ];
+
+        for blocking in ["/items/0/metadata/name", "/items/0/metadata"] {
+            let symbols = Symbols::with_unreadable(
+                base.clone(),
+                HashMap::from([(path(blocking), "can't decode".to_string())]),
+            );
+            assert_eq!(
+                symbols.resolve(&path("/items/~[kind=Rollout][metadata/name=api]/spec")),
+                Err(ResolveError::Unreadable(Unreadable {
+                    reason: "can't decode"
+                })),
+                "expected unreadable for {blocking}"
+            );
+        }
+    }
+
+    #[test]
+    fn compound_filter_matching_no_item_returns_full_matching_filter_hints() {
+        // Hints substitute every condition from items that hold all keys and resolve uniquely,
+        // catching typos in one or both conditions and returning the top 3 by edit distance.
+        let symbols = Symbols::from(vec![
+            scalar("/0/kind", 0, "Rollout"),
+            scalar("/0/metadata/name", 1, "api"),
+            symbol("/0/spec", 2),
+            scalar("/1/kind", 3, "Rollout"),
+            scalar("/1/metadata/name", 4, "app"),
+            symbol("/1/spec", 5),
+            scalar("/2/kind", 6, "Service"),
+            scalar("/2/metadata/name", 7, "api"),
+            symbol("/2/spec", 8),
+            scalar("/3/kind", 9, "DaemonSet"),
+            scalar("/3/metadata/name", 10, "metrics-collector"),
+            symbol("/3/spec", 11),
+            // Missing `metadata/name`: skipped.
+            scalar("/4/kind", 12, "Job"),
+            symbol("/4/spec", 13),
+            // Ambiguous pair: skipped.
+            scalar("/5/kind", 14, "Dup"),
+            scalar("/5/metadata/name", 15, "same"),
+            symbol("/5/spec", 16),
+            scalar("/6/kind", 17, "Dup"),
+            scalar("/6/metadata/name", 18, "same"),
+            symbol("/6/spec", 19),
+            // Missing `/spec`: skipped.
+            scalar("/7/kind", 20, "Rollout"),
+            scalar("/7/metadata/name", 21, "no-spec"),
+        ]);
+
+        // Typos in both `Rolout` and `appi` still rank `Rollout`/`api` first and cap at 3 hints.
+        assert_eq!(
+            symbols.resolve(&path("/~[kind=Rolout][metadata/name=appi]/spec")),
+            Err(ResolveError::NotFound {
+                hints: vec![
+                    path("/~[kind=Rollout][metadata/name=api]/spec"),
+                    path("/~[kind=Rollout][metadata/name=app]/spec"),
+                    path("/~[kind=Service][metadata/name=api]/spec"),
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn resolve_all_with_compound_filter_returns_symbols_under_each_matching_item() {
+        // `resolve_all` matches only items satisfying every condition, including shared-path
+        // siblings.
+        let first = symbol("/items/item/spec", 3);
+        let second = symbol("/items/item/spec", 23);
+        let symbols = Symbols::from(vec![
+            element("/items/item", 0..10),
+            scalar("/items/item/kind", 1, "Service"),
+            scalar("/items/item/metadata/namespace", 2, "prod"),
+            first.clone(),
+            element("/items/item", 10..20),
+            scalar("/items/item/kind", 11, "Service"),
+            scalar("/items/item/metadata/namespace", 12, "staging"),
+            symbol("/items/item/spec", 13),
+            element("/items/item", 20..30),
+            scalar("/items/item/kind", 21, "Service"),
+            scalar("/items/item/metadata/namespace", 22, "prod"),
+            second.clone(),
+        ]);
+
+        assert_eq!(
+            symbols.resolve_all(&path(
+                "/items/~[kind=Service][metadata/namespace=prod]/spec"
+            )),
+            Ok(vec![&first, &second])
         );
     }
 }

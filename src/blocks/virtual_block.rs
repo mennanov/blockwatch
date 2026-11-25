@@ -899,6 +899,37 @@ items:
     }
 
     #[test]
+    fn target_if_with_a_compound_filter_resolve_checks_each_matched_item() -> anyhow::Result<()> {
+        // A compound filter in `target-if` looks for the rest of the path only under items that
+        // satisfy every condition.
+        let path = "#/items/~[kind=Service][metadata/name=api]/enabled";
+        let matched = "\
+items:
+  - kind: Service
+    metadata:
+      name: api
+  - kind: Service
+    metadata:
+      name: api
+    enabled: true
+";
+        let only_other_kind_enabled = "\
+items:
+  - kind: Service
+    metadata:
+      name: api
+  - kind: Rollout
+    metadata:
+      name: api
+    enabled: true
+";
+
+        assert!(gets_block("a.yml", matched, &[path], &[])?);
+        assert!(!gets_block("a.yml", only_other_kind_enabled, &[path], &[])?);
+        Ok(())
+    }
+
+    #[test]
     fn target_if_with_unreadable_symbol_resolve_returns_error() -> anyhow::Result<()> {
         let symbols = Symbols::with_unreadable(
             Vec::new(),
