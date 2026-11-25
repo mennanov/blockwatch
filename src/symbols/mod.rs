@@ -148,8 +148,9 @@ impl Symbols {
     /// When no symbol has `path`, the hints are the paths that resemble it: those at least 60%
     /// alike by edit distance, and those that end in the same segment. When `path` has a filter,
     /// they are only paths under the child that the last filter matched, and they keep every
-    /// filter as written. When a filter matches no child, the hints are `path` with the filter's
-    /// value swapped for each value of a child that makes the path resolve.
+    /// filter as written. When a filter matches no child, the hints are `path` with each
+    /// condition's value swapped for each child's closest value combination that makes the path
+    /// resolve (at most one per child).
     ///
     /// # Errors
     /// Returns [`ResolveError::Unreadable`] when `path` is an unreadable path, or one of its
@@ -244,8 +245,8 @@ pub(crate) enum ResolveError<'a> {
     NotFound { hints: Vec<SymbolPath> },
     /// Several symbols have the path. `candidates` holds every one of them, in document order.
     AmbiguousSymbol { candidates: Vec<&'a Symbol> },
-    /// `filter`, a filter in the path, matches several children. `keys` holds the key of each one
-    /// that holds the filter's value, in document order.
+    /// `filter`, a filter in the path, matches several children. `keys` holds each child's first
+    /// matching key for the filter's first condition, in document order.
     AmbiguousFilter {
         filter: Segment,
         keys: Vec<&'a Symbol>,
@@ -303,6 +304,10 @@ fn positions(symbols: &[&Symbol], source: &str) -> String {
 
 /// The most hints a path that does not resolve gets.
 const MAX_HINTS: usize = 3;
+
+/// The most filter-value combinations tried per item when building hints, so repeated keys across
+/// several conditions cannot grow exponentially.
+const MAX_HINT_COMBINATIONS_PER_ITEM: usize = 64;
 
 /// How alike a path has to be to the one that does not resolve to be a hint, as a normalized edit
 /// distance from 0 (nothing in common) to 1 (identical).
@@ -485,36 +490,39 @@ impl<'a> ChildItem<'a> {
             .any(|value| value == condition.value)
     }
 
-    /// A filter segment with each condition's value filled from this child, or `None` if this
-    /// child lacks a scalar for any condition's key.
-    fn hint_filter(&self, symbols: &'a Symbols, conditions: &[FilterCondition]) -> Option<Segment> {
-        let filled = conditions
-            .iter()
-            .map(|condition| {
-                // Pick the value closest to what the reference wrote, keeping document order on
-                // ties so an exact match (`1.0`) or closest typo wins over an earlier shared value.
-                let (value, _) = self
-                    .scalar_values(symbols, &condition.key_path)
-                    .map(|value| {
-                        (
-                            value,
-                            strsim::normalized_levenshtein(&condition.value, value),
-                        )
+    /// Up to [`MAX_HINT_COMBINATIONS_PER_ITEM`] distinct filter segments that fill each
+    /// condition's key from this child's scalar values, preferring values closest to what the
+    /// reference wrote and preserving document order on ties. Empty if this child lacks a scalar
+    /// for any condition's key.
+    fn hint_filters(&self, symbols: &'a Symbols, conditions: &[FilterCondition]) -> Vec<Segment> {
+        let mut combinations: Vec<Vec<FilterCondition>> =
+            vec![Vec::with_capacity(conditions.len())];
+        for condition in conditions {
+            let mut seen = HashSet::new();
+            let mut values: Vec<&str> = self
+                .scalar_values(symbols, &condition.key_path)
+                .filter(|value| seen.insert(*value))
+                .collect();
+            values.sort_by(|a, b| {
+                strsim::normalized_levenshtein(&condition.value, b)
+                    .total_cmp(&strsim::normalized_levenshtein(&condition.value, a))
+            });
+            combinations = combinations
+                .into_iter()
+                .flat_map(|prefix| {
+                    values.iter().map(move |value| {
+                        let mut next = prefix.clone();
+                        next.push(FilterCondition {
+                            key_path: condition.key_path.clone(),
+                            value: (*value).to_string(),
+                        });
+                        next
                     })
-                    .reduce(|best, candidate| {
-                        if candidate.1 > best.1 {
-                            candidate
-                        } else {
-                            best
-                        }
-                    })?;
-                Some(FilterCondition {
-                    key_path: condition.key_path.clone(),
-                    value: value.to_string(),
                 })
-            })
-            .collect::<Option<Vec<FilterCondition>>>()?;
-        Some(Segment::Filter(filled))
+                .take(MAX_HINT_COMBINATIONS_PER_ITEM)
+                .collect();
+        }
+        combinations.into_iter().map(Segment::Filter).collect()
     }
 }
 
@@ -695,8 +703,8 @@ fn path_hints(
 }
 
 /// The paths to suggest when the filter at `index` in `path` matches no child of `parent` inside
-/// `scope`: one candidate per item holding all the filter's keys whose full path resolves
-/// uniquely in `symbols`, the most alike first.
+/// `scope`: at most one candidate per item holding all the filter's keys—its closest value
+/// combination whose full path resolves uniquely in `symbols`—the most alike first.
 fn filter_hints(
     symbols: &Symbols,
     scope: Option<&Symbol>,
@@ -707,14 +715,19 @@ fn filter_hints(
 ) -> Vec<SymbolPath> {
     // The hints start from `path`, so the filters before `index` stay as the reference wrote them.
     // A value combination that several children hold makes the filter ambiguous, so its path
-    // doesn't resolve.
+    // doesn't resolve. Picking each item's closest resolving combination stops an ambiguous shared
+    // value from hiding the item's other unique values while keeping one hint per item.
     let scalar_first_keys = child_keys(symbols, scope, parent, &conditions[0].key_path)
         .filter(|symbol| symbol.value.is_some());
     let alternatives: Vec<SymbolPath> =
         distinct_children(symbols, scope, parent, scalar_first_keys)
-            .filter_map(|child| child.hint_filter(symbols, conditions))
-            .map(|filter| path.clone().with_segment(index, filter))
-            .filter(|alternative| symbols.resolve(alternative).is_ok())
+            .filter_map(|child| {
+                child
+                    .hint_filters(symbols, conditions)
+                    .into_iter()
+                    .map(|filter| path.clone().with_segment(index, filter))
+                    .find(|alternative| symbols.resolve(alternative).is_ok())
+            })
             .collect();
     // Each alternative resolves and differs from `path` only in the filter's values, so a
     // similarity cutoff would only drop real choices.
@@ -2314,9 +2327,10 @@ mod resolve_tests {
     }
 
     #[test]
-    fn filter_hints_with_repeated_keys_pick_the_closest_value_on_each_item() {
-        // When an item holds several values for the same key (such as repeated XML `<tag>`
-        // elements), hints pick the value closest to the typo rather than always the first one.
+    fn filter_hints_with_repeated_keys_try_every_unique_value_combination_on_each_item() {
+        // When an item holds several values for a filter key (such as repeated XML `<tag>`
+        // elements), an ambiguous shared value does not hide the item's other unique values, and
+        // duplicate identical values inside one item do not repeat a hint.
         let symbols = Symbols::from(vec![
             element("/items/item", 0..10),
             scalar("/items/item/tag", 1, "common"),
@@ -2331,14 +2345,132 @@ mod resolve_tests {
         assert_eq!(
             symbols.resolve(&path("/items/~[tag=alph]/version")),
             Err(ResolveError::NotFound {
-                hints: vec![path("/items/~[tag=alpha]/version")]
+                hints: vec![
+                    path("/items/~[tag=alpha]/version"),
+                    path("/items/~[tag=beta]/version"),
+                ]
             })
         );
         assert_eq!(
             symbols.resolve(&path("/items/~[tag=bet]/version")),
             Err(ResolveError::NotFound {
-                hints: vec![path("/items/~[tag=beta]/version")]
+                hints: vec![
+                    path("/items/~[tag=beta]/version"),
+                    path("/items/~[tag=alpha]/version"),
+                ]
             })
+        );
+
+        // Even when the typo has equal edit distance to an ambiguous shared value (`x`) and a
+        // unique value (`y`), the unique value is still suggested.
+        let tied = Symbols::from(vec![
+            element("/items/item", 0..10),
+            scalar("/items/item/tag", 1, "x"),
+            scalar("/items/item/tag", 2, "y"),
+            scalar("/items/item/tag", 3, "y"),
+            symbol("/items/item/v", 4),
+            element("/items/item", 10..20),
+            scalar("/items/item/tag", 11, "x"),
+            symbol("/items/item/v", 12),
+        ]);
+        assert_eq!(
+            tied.resolve(&path("/items/~[tag=z]/v")),
+            Err(ResolveError::NotFound {
+                hints: vec![path("/items/~[tag=y]/v")]
+            })
+        );
+
+        // In a compound filter, an ambiguous value on one condition still tries the item's other
+        // values to find a unique combination.
+        let compound = Symbols::from(vec![
+            element("/items/item", 0..10),
+            scalar("/items/item/env", 1, "shared"),
+            scalar("/items/item/env", 2, "prod"),
+            scalar("/items/item/role", 3, "web"),
+            symbol("/items/item/v", 4),
+            element("/items/item", 10..20),
+            scalar("/items/item/env", 11, "shared"),
+            scalar("/items/item/role", 12, "web"),
+            symbol("/items/item/v", 13),
+        ]);
+        assert_eq!(
+            compound.resolve(&path("/items/~[env=z][role=web]/v")),
+            Err(ResolveError::NotFound {
+                hints: vec![path("/items/~[env=prod][role=web]/v")]
+            })
+        );
+
+        // When one item has several unique values for the same key, it contributes only its
+        // closest match.
+        let single_multi = Symbols::from(vec![
+            element("/items/item", 0..10),
+            scalar("/items/item/tag", 1, "alpha"),
+            scalar("/items/item/tag", 2, "beta"),
+            symbol("/items/item/v", 3),
+        ]);
+        assert_eq!(
+            single_multi.resolve(&path("/items/~[tag=bet]/v")),
+            Err(ResolveError::NotFound {
+                hints: vec![path("/items/~[tag=beta]/v")]
+            })
+        );
+    }
+
+    #[test]
+    fn filter_hints_deduplicate_repeated_values_and_cap_combinations_per_item() {
+        // Identical repeated values on one item are deduplicated so they do not exhaust the
+        // per-item combination cap; distinct values are ranked closest-first before capping.
+        let mut dedup_symbols = vec![element("/items/item", 0..200)];
+        for i in 0..MAX_HINT_COMBINATIONS_PER_ITEM {
+            dedup_symbols.push(scalar("/items/item/tag", i + 1, "x"));
+        }
+        dedup_symbols.push(scalar("/items/item/tag", 100, "y"));
+        dedup_symbols.push(symbol("/items/item/v", 101));
+        dedup_symbols.push(element("/items/item", 200..300));
+        dedup_symbols.push(scalar("/items/item/tag", 201, "x"));
+        dedup_symbols.push(symbol("/items/item/v", 202));
+        assert_eq!(
+            Symbols::from(dedup_symbols).resolve(&path("/items/~[tag=z]/v")),
+            Err(ResolveError::NotFound {
+                hints: vec![path("/items/~[tag=y]/v")]
+            })
+        );
+
+        // With distinct unrelated values filling the cap, a closer match at the end still ranks
+        // inside the cap, while an equally distant value past the cap is cut off.
+        let with_shared_tags = |shared_count: usize, extra: &str| {
+            let mut syms = vec![element("/items/item", 0..200)];
+            for i in 0..shared_count {
+                syms.push(scalar("/items/item/tag", i + 1, &format!("aa{i:02}")));
+            }
+            syms.push(scalar("/items/item/tag", 100, extra));
+            syms.push(symbol("/items/item/v", 101));
+            syms.push(element("/items/item", 200..400));
+            for i in 0..shared_count {
+                syms.push(scalar("/items/item/tag", 201 + i, &format!("aa{i:02}")));
+            }
+            syms.push(symbol("/items/item/v", 301));
+            Symbols::from(syms)
+        };
+
+        assert_eq!(
+            with_shared_tags(MAX_HINT_COMBINATIONS_PER_ITEM, "target")
+                .resolve(&path("/items/~[tag=targt]/v")),
+            Err(ResolveError::NotFound {
+                hints: vec![path("/items/~[tag=target]/v")]
+            })
+        );
+        assert_eq!(
+            with_shared_tags(MAX_HINT_COMBINATIONS_PER_ITEM - 1, "bb")
+                .resolve(&path("/items/~[tag=zz]/v")),
+            Err(ResolveError::NotFound {
+                hints: vec![path("/items/~[tag=bb]/v")]
+            })
+        );
+        assert_eq!(
+            with_shared_tags(MAX_HINT_COMBINATIONS_PER_ITEM, "bb")
+                .resolve(&path("/items/~[tag=zz]/v")),
+            Err(ResolveError::NotFound { hints: vec![] })
         );
     }
 

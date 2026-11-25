@@ -24,8 +24,8 @@ pub(crate) struct SymbolPath {
 /// One `[key_path=value]` condition of a [`Segment::Filter`].
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct FilterCondition {
-    pub(crate) key_path: Vec<String>,
-    pub(crate) value: String,
+    pub(super) key_path: Vec<String>,
+    pub(super) value: String,
 }
 
 /// One segment of a [`SymbolPath`], with its escapes decoded.

@@ -25,6 +25,23 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   inside one item count that item once instead of failing as ambiguous, and `did you mean:` suggests full matching
   compound filters.
 
+### Changed
+
+- Symbol path filters now split conditions and keys before percent-decoding, which changes three forms that worked in
+  0.20.0:
+  - `][` inside a filter value now starts another condition instead of matching literally; escape the `]` as `%5D`
+    (`~[k=a%5D[b]=c]`).
+  - `%3D` inside a filter key now decodes to a literal `=` in the key (`~[a%3Db=1]` matches key `a=b`, value `1`)
+    instead of separating key from value.
+  - A filter segment must start with a literal `~[`; percent-encoded forms such as `~%5B...` or `%7E%5B...` are now
+    read as keys, not filters.
+
+### Fixed
+
+- YAML mapping and list symbol ranges no longer include trailing comment lines written after the block. Before, a
+  container at the end of a file or mapping could include a following `# ...` comment in its text for `same-as` and
+  virtual blocks.
+
 ## [0.20.0] - 2026-11-21
 
 ### Changed

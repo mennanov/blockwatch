@@ -1072,6 +1072,19 @@ list:
     }
 
     #[test]
+    fn trailing_comment_after_container_parse_symbols_excludes_comment_from_range()
+    -> anyhow::Result<()> {
+        // A comment written after a YAML mapping or list is not part of its symbol range.
+        let source = "x:\n  y: 1\n# trailing\n";
+
+        assert_eq!(
+            derived_symbols(source)?,
+            expected_symbols(&[("/x", None, "x:\n  y: 1\n"), ("/x/y", Some("1"), "y: 1"),])
+        );
+        Ok(())
+    }
+
+    #[test]
     fn documents_without_content_parse_symbols_do_not_count() -> anyhow::Result<()> {
         // A file with one non-empty document keeps unprefixed paths even with empty or
         // comment-only documents around it.
