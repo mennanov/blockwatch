@@ -21,8 +21,9 @@ fn comments_parser() -> impl CommentsParser {
 
 /// Finds the symbols of a YAML file by walking its syntax tree.
 ///
-/// Every key and every list item is a symbol. Strings are decoded, other values are kept as
-/// written. Aliases get no symbol.
+/// Every key and every list item is a symbol. When a file holds two or more non-empty documents,
+/// each document is a root symbol indexed from 0 (`/0`, `/1`, ...) with its contents nested under
+/// it. Strings are decoded, other values are kept as written. Aliases get no symbol.
 struct YamlSymbolsParser {
     parser: tree_sitter::Parser,
 }
@@ -36,8 +37,7 @@ impl YamlSymbolsParser {
 
 impl SymbolsParser for YamlSymbolsParser {
     /// # Errors
-    /// Returns an error if the file has a syntax error, holds several documents, or has a string
-    /// YAML can't decode.
+    /// Returns an error if the file has a syntax error or has a string YAML can't decode.
     fn parse(&mut self, source: &str) -> anyhow::Result<Symbols> {
         let tree = self
             .parser
@@ -46,7 +46,7 @@ impl SymbolsParser for YamlSymbolsParser {
         ensure_no_syntax_error(&tree, source)?;
 
         // The value of each document. Documents without one, such as the empty document after a
-        // trailing `---`, are left out, so they don't count as a second document.
+        // trailing `---`, are left out, so they don't count toward the document count or indices.
         let contents: Vec<Node> = members(tree.root_node())
             .into_iter()
             .filter_map(|document| {
@@ -58,10 +58,7 @@ impl SymbolsParser for YamlSymbolsParser {
         match contents.as_slice() {
             [] => Ok(Symbols::default()),
             [content] => Ok(Walk::symbols_in(source, *content)?.into()),
-            // A path can't say which document it means.
-            [_, _, ..] => bail!(
-                "files with several YAML documents are not supported yet; use a named block instead"
-            ),
+            documents => Ok(Walk::symbols_in_documents(source, documents)?.into()),
         }
     }
 }
@@ -149,15 +146,45 @@ impl<'s, 'tree> Walk<'s, 'tree> {
             pending: Vec::new(),
         };
         walk.push_members(Content::of(content)?);
+        walk.drain()?;
+        Ok(walk.symbols)
+    }
+
+    /// The symbols of `documents`, the values of a multi-document file in `source`, indexed from
+    /// 0, in document order.
+    ///
+    /// # Errors
+    /// Returns an error if a string can't be decoded. The error is about the first such string.
+    fn symbols_in_documents(
+        source: &'s str,
+        documents: &[Node<'tree>],
+    ) -> anyhow::Result<Vec<Symbol>> {
+        let mut walk = Walk {
+            source,
+            path: Vec::new(),
+            symbols: Vec::new(),
+            pending: Vec::new(),
+        };
+        for (index, &document) in documents.iter().enumerate() {
+            walk.path.clear();
+            walk.path.push(index.to_string());
+            walk.add_value_symbol(document, Some(document))?;
+            walk.drain()?;
+        }
+        Ok(walk.symbols)
+    }
+
+    /// Walks every queued member in document order.
+    fn drain(&mut self) -> anyhow::Result<()> {
         // The walk keeps its own stack, as deeply nested values could overflow the call stack.
-        while let Some((depth, member)) = walk.pending.pop() {
+        while let Some((depth, member)) = self.pending.pop() {
             // Members come off the stack in document order. So every member walked since the
             // value that holds `member` is inside that value, and the path still starts with the
             // path to that value.
-            walk.path.truncate(depth);
-            walk.add_member_symbols(member)?;
+            self.path.truncate(depth);
+            self.add_member_symbols(member)?;
         }
-        Ok(walk.symbols)
+        Ok(())
     }
 
     /// Puts the members of `content`, the value at the current path, on `pending`.
@@ -287,10 +314,37 @@ impl<'s, 'tree> Walk<'s, 'tree> {
 
     /// Where `node` is written. A node on several lines also covers its last line break.
     fn written_range(&self, node: Node) -> Range<usize> {
-        if node_text(&node, self.source).contains('\n') {
-            extended_past_line_break(self.source, node.byte_range())
+        // tree-sitter-yaml can extend block containers past trailing comments and line breaks up
+        // to the next `---` or EOF. Walking to the last non-extra child stops at the node's own
+        // content.
+        let mut end_node = node;
+        while matches!(
+            end_node.kind(),
+            "block_node"
+                | "block_mapping"
+                | "block_sequence"
+                | "block_mapping_pair"
+                | "block_sequence_item"
+        ) {
+            let mut cursor = end_node.walk();
+            let Some(last) = end_node
+                .children(&mut cursor)
+                .filter(|child| !child.is_extra())
+                .last()
+            else {
+                break;
+            };
+            end_node = last;
+        }
+        let range = node.start_byte()..end_node.end_byte();
+        #[expect(
+            clippy::string_slice,
+            reason = "tree-sitter nodes start and end on whole characters"
+        )]
+        if self.source[range.clone()].contains('\n') {
+            extended_past_line_break(self.source, range)
         } else {
-            node.byte_range()
+            range
         }
     }
 
@@ -1019,7 +1073,13 @@ list:
 
     #[test]
     fn documents_without_content_parse_symbols_do_not_count() -> anyhow::Result<()> {
-        for source in ["---\nv: 1\n---\n", "# only a comment\n---\nv: 1\n...\n"] {
+        // A file with one non-empty document keeps unprefixed paths even with empty or
+        // comment-only documents around it.
+        for source in [
+            "---\nv: 1\n---\n",
+            "# only a comment\n---\nv: 1\n...\n",
+            "---\n# comment\n---\nv: 1\n---\n# trailing\n",
+        ] {
             assert_eq!(value_at(source, "/v")?.as_deref(), Some("1"), "{source:?}");
         }
         assert_eq!(derived_symbols("")?, Vec::new());
@@ -1041,13 +1101,223 @@ list:
     }
 
     #[test]
-    fn several_documents_parse_symbols_returns_error() {
-        let err = parser().parse_symbols("v: 1\n---\nv: 2\n").unwrap_err();
+    fn several_documents_parse_symbols_indexes_each_document_from_zero() -> anyhow::Result<()> {
+        // Two or more non-empty documents become `/0`, `/1`, ... with their contents nested under
+        // them. Each document's range covers its value without `---`, `...`, or leading comments,
+        // extended past the trailing line break when multiline.
+        let source = "\
+# leading comment
+---
+kind: Service
+metadata:
+  name: api
+...
+# between documents
+---
+kind: Rollout
+# comment before next separator
+---
+apiVersion: v1
+metadata:
+  name: config
+# trailing comment at end of file
+";
 
         assert_eq!(
-            err.to_string(),
-            "files with several YAML documents are not supported yet; use a named block instead"
+            derived_symbols(source)?,
+            expected_symbols(&[
+                ("/0", None, "kind: Service\nmetadata:\n  name: api\n"),
+                ("/0/kind", Some("Service"), "kind: Service"),
+                ("/0/metadata", None, "metadata:\n  name: api\n"),
+                ("/0/metadata/name", Some("api"), "name: api"),
+                ("/1", None, "kind: Rollout"),
+                ("/1/kind", Some("Rollout"), "kind: Rollout"),
+                ("/2", None, "apiVersion: v1\nmetadata:\n  name: config\n"),
+                ("/2/apiVersion", Some("v1"), "apiVersion: v1"),
+                ("/2/metadata", None, "metadata:\n  name: config\n"),
+                ("/2/metadata/name", Some("config"), "name: config"),
+            ])
         );
+        Ok(())
+    }
+
+    #[test]
+    fn empty_documents_in_multi_document_file_parse_symbols_are_skipped() -> anyhow::Result<()> {
+        // Blank and comment-only documents between `---` markers do not take an index.
+        let source = "\
+---
+# header comment
+---
+a: 1
+---
+---
+# middle comment
+---
+b: 2
+...
+---
+";
+
+        assert_eq!(
+            derived_symbols(source)?,
+            expected_symbols(&[
+                ("/0", None, "a: 1"),
+                ("/0/a", Some("1"), "a: 1"),
+                ("/1", None, "b: 2"),
+                ("/1/b", Some("2"), "b: 2"),
+            ])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn scalar_and_sequence_documents_parse_symbols_work_like_list_items() -> anyhow::Result<()> {
+        // Scalar documents carry their decoded value at `/0`, `/1`, ...; sequence documents nest
+        // their items at `/0/0`, `/0/1`, ....
+        let scalars = "---\nhello\n---\nworld\n";
+        assert_eq!(
+            derived_symbols(scalars)?,
+            expected_symbols(&[
+                ("/0", Some("hello"), "hello"),
+                ("/1", Some("world"), "world"),
+            ])
+        );
+        let scalar_ranges: Vec<(String, Option<&str>)> = value_ranges(scalars)?
+            .into_iter()
+            .map(|(path, range)| (path, range.map(|range| &scalars[range])))
+            .collect();
+        assert_eq!(
+            scalar_ranges,
+            vec![
+                ("/0".to_string(), Some("hello")),
+                ("/1".to_string(), Some("world")),
+            ]
+        );
+
+        let mixed = "\
+---
+- a
+- name: b
+# trailing comment after sequence
+---
+|
+  line one
+  line two
+---
+!!str 123
+---
+!!null
+---
+{x: 1}
+";
+        assert_eq!(
+            derived_symbols(mixed)?,
+            expected_symbols(&[
+                ("/0", None, "- a\n- name: b\n"),
+                ("/0/0", Some("a"), "- a"),
+                ("/0/1", None, "- name: b"),
+                ("/0/1/name", Some("b"), "name: b"),
+                (
+                    "/1",
+                    Some("line one\nline two\n"),
+                    "|\n  line one\n  line two\n"
+                ),
+                ("/2", Some("123"), "!!str 123"),
+                ("/3", Some(""), "!!null"),
+                ("/4", None, "{x: 1}"),
+                ("/4/x", Some("1"), "x: 1"),
+            ])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn duplicate_keys_in_multi_document_file_parse_symbols_stay_scoped_to_their_document()
+    -> anyhow::Result<()> {
+        // The same key in two different documents gets distinct paths, while duplicate keys inside
+        // one document still share a path.
+        let source = "v: 1\nv: 2\n---\nv: 3\n";
+        let paths: Vec<String> = derived_symbols(source)?
+            .into_iter()
+            .map(|(path, _, _)| path)
+            .collect();
+
+        assert_eq!(paths, vec!["/0", "/0/v", "/0/v", "/1", "/1/v"]);
+        Ok(())
+    }
+
+    #[test]
+    fn multi_document_yaml_resolve_supports_indexed_paths_and_root_compound_filters()
+    -> anyhow::Result<()> {
+        // Multi-document manifests resolve by document index and by root-level compound filters,
+        // while unprefixed keys are not found and matching several documents is ambiguous.
+        let source = "\
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: api
+spec:
+  replicas: 2
+";
+        let symbols = parser().parse_symbols(source)?;
+
+        let value = |path: &str| -> anyhow::Result<String> {
+            let symbol = symbols
+                .resolve(&SymbolPath::parse(path)?)
+                .map_err(|err| anyhow::anyhow!("{}", err.reason(source)))?;
+            Ok(symbol.value_or_definition(source).into_owned())
+        };
+
+        assert_eq!(value("/0/kind")?, "Service");
+        assert_eq!(value("/1/spec/replicas")?, "2");
+        assert_eq!(
+            value("/0")?,
+            "apiVersion: v1\nkind: Service\nmetadata:\n  name: api\n"
+        );
+        assert_eq!(
+            value("/~[kind=Rollout][metadata/name=api]/spec/replicas")?,
+            "2"
+        );
+
+        let ambiguous = symbols
+            .resolve(&SymbolPath::parse("/~[metadata/name=api]/spec/replicas")?)
+            .unwrap_err();
+        assert_eq!(
+            ambiguous.reason(source),
+            "2 items match ~[metadata/name=api], at 4:3, 9:3"
+        );
+
+        let missing = symbols
+            .resolve(&SymbolPath::parse("/spec/replicas")?)
+            .unwrap_err();
+        assert_eq!(
+            missing.reason(source),
+            "symbol not found; did you mean: /1/spec/replicas"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_string_in_later_document_parse_symbols_reports_its_file_position() {
+        // An undecodable string in a later document reports its line and column in the file.
+        for (source, expected) in [
+            (
+                "a: 1\n---\nb: \"\\ud800\"\n---\nc: \"\\U00110000\"\n",
+                "the string at line 3, column 4 is not valid YAML: `d800` stands for no character",
+            ),
+            (
+                "a: 1\n---\n\"\\ud800\"\n",
+                "the string at line 3, column 1 is not valid YAML: `d800` stands for no character",
+            ),
+        ] {
+            let err = parser().parse_symbols(source).unwrap_err();
+            assert_eq!(format!("{err:#}"), expected, "{source:?}");
+        }
     }
 
     #[test]

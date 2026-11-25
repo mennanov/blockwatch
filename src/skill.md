@@ -159,7 +159,8 @@ A symbol points to one value or definition inside a file (`file#/path`, or `#/pa
 - **Value filters:** `~[key=value]` picks the unique match; `/` nests keys and chained `[...]` combine conditions
   (`~[kind=Rollout][metadata/name=api]`, XML `#/Project/ItemGroup/~[@Include=Serilog]/@Version`). Zero or many fail.
 - **How formats map:**
-  - **JSON / TOML / YAML:** keys, tables, and list items; strings read without quotes, containers as raw file text.
+  - **JSON / TOML / YAML:** keys, tables, and list items (multi-document YAML indexes each non-empty document from 0:
+    `#/0/kind`, `#/~[kind=Rollout]/spec/replicas`); strings read without quotes, containers as raw file text.
   - **Markdown / MDX:** heading path from `#` down (`README.md#/My project/Install`); `same-as` reads the body without
     the heading line.
   - **XML / CSS:** element names and `@attr` (`pom.xml#/project/version`, `#/Project/@Sdk`); CSS selectors/at-rules and
@@ -169,8 +170,7 @@ A symbol points to one value or definition inside a file (`file#/path`, or `#/pa
     without quotes; other values stay unevaluated as written.
 - **Check paths with the CLI:** a missing key is a violation (exit `1`) that prints `"did you mean: ..."` suggestions,
   and `blockwatch explain FILE:NAME` prints the exact extracted text.
-- **These stop the run (exit `2`):** a missing file, multi-document YAML, and a syntax error. In a code file, a syntax
-  error stops it only for paths to names near the error.
+- **These stop the run (exit `2`):** missing file or syntax error (in code files, only for paths near the error).
 
 ## Config file
 

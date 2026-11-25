@@ -14,6 +14,11 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Added
 
+- Multi-document YAML files (2 or more non-empty documents separated by `---`) now have symbols, with each document
+  indexed from 0 (`/0`, `/1`, ...) and its contents nested under it. Files with one non-empty document keep their
+  existing paths, and empty or comment-only documents do not take an index. Together with nested compound filters,
+  paths such as `k8s/workload.yaml#/~[kind=Rollout][metadata/name=api]/spec/replicas` work directly on multi-document
+  manifests.
 - Symbol path filters now accept nested keys separated by `/` and chained `[key=value]` conditions on one item, such as
   `#/items/~[kind=Rollout][metadata/name=api]/spec/replicas` and `#/items/~[spec/containers/0/name=web]/kind`. Escape a
   literal `/` in a key segment or filter value as `~1`, and a literal `]` before `[` as `%5D`. Repeated matching keys

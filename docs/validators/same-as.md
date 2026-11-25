@@ -383,7 +383,7 @@ const TIMEOUT_SECS: f64 = 2.0;
 - **Errors that stop the run:** an unknown `same-as-mode` or `same-as-format`, either of them on a block without
   `same-as` or `same-as-paths`, `same-as-pattern` on a block without `same-as`, `same-as-paths` or `name`, a
   `same-as-format` entry for a group that the pattern doesn't have, an invalid regex or glob, a missing target file,
-  and a symbol in a file with a syntax error, without symbols, or with several YAML documents.
+  and a symbol in a file with a syntax error or without symbols.
 - **Run it on the whole tree now and then.** `same-as` needs no diff, so a plain `blockwatch` run catches drift that
   `--only-changed` misses. See [CI integration](../ci.md).
 - **A rename alone goes unnoticed in a diff.** Renaming a target file without changing it (a plain `git mv`) gives

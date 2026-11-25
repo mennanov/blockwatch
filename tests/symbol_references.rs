@@ -266,6 +266,15 @@ fn yaml_target_resolves() {
 }
 
 #[test]
+fn multi_document_yaml_target_resolves() {
+    // Resolves indexed paths and root-level nested compound filters against a multi-document YAML
+    // manifest.
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/multi_doc_yaml_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
 fn yml_target_resolves() {
     let mut cmd = cargo_bin_cmd!();
     cmd.arg("tests/testdata/symbol_references/yml_source.rs");

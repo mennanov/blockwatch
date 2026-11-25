@@ -116,7 +116,7 @@ services:
 - **Repeated matching keys inside one item count that item once.**
 - **A filter picks a map entry too.** In `{"a": {"name": "x"}}`, `#/~[name=x]` is `#/a`.
 - **A path can hold several filters**, such as `#/groups/~[name=api]/services/~[name=web]/port`. A filter can come
-  first, in a file that is a list: `#/~[name=web]`.
+  first, in a file that is a list or has several YAML documents: `#/~[name=web]`.
 - **When several items share a path, the rest of the path looks only inside the item the filter picked.** For
   example, two `ingress` blocks in an HCL resource share a path.
   `#/resource/aws_security_group/web/~[from_port=443]/to_port` is the `to_port` of the block whose `from_port` is
@@ -229,9 +229,32 @@ jobs:
 - **An alias (`*name`) is not a symbol.** What it stands for is written elsewhere, so a path to it or through it is not
   found. In a list, an alias still takes its position. `<<` is an ordinary key.
 - **A key that is a list or a mapping,** such as `? [a, b]`, is skipped with everything under it.
-- **A key written twice is a violation**, because blockwatch can't tell which copy you mean.
-- **A file with several documents stops the run.** A path can't say which document it means. Put the value in a named
-  block instead.
+- **A key written twice in one document is a violation**, because blockwatch can't tell which copy you mean.
+
+A file with two or more non-empty documents indexes each document from 0 (`/0`, `/1`, ...) and nests its contents under
+that index. Empty and comment-only documents between `---` markers do not count, and a file with one document keeps its
+paths without an index:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: api
+spec:
+  replicas: 2
+```
+
+| Path                                                 | Points at                |
+|------------------------------------------------------|--------------------------|
+| `#/0/kind`                                           | `Service`                |
+| `#/1/spec/replicas`                                  | `2`                      |
+| `#/0`                                                | the whole first document |
+| `#/~[kind=Rollout][metadata/name=api]/spec/replicas` | `2`                      |
 
 <!-- </block> -->
 
