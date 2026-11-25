@@ -491,15 +491,23 @@ impl<'a> ChildItem<'a> {
         let filled = conditions
             .iter()
             .map(|condition| {
-                let mut values = self.scalar_values(symbols, &condition.key_path);
-                let first = values.next()?;
-                let value = if first == condition.value {
-                    first
-                } else {
-                    values
-                        .find(|value| *value == condition.value)
-                        .unwrap_or(first)
-                };
+                // Pick the value closest to what the reference wrote, keeping document order on
+                // ties so an exact match (`1.0`) or closest typo wins over an earlier shared value.
+                let (value, _) = self
+                    .scalar_values(symbols, &condition.key_path)
+                    .map(|value| {
+                        (
+                            value,
+                            strsim::normalized_levenshtein(&condition.value, value),
+                        )
+                    })
+                    .reduce(|best, candidate| {
+                        if candidate.1 > best.1 {
+                            candidate
+                        } else {
+                            best
+                        }
+                    })?;
                 Some(FilterCondition {
                     key_path: condition.key_path.clone(),
                     value: value.to_string(),
@@ -2301,6 +2309,35 @@ mod resolve_tests {
                     path("/~[kind=Rollout][metadata/name=app]/spec"),
                     path("/~[kind=Service][metadata/name=api]/spec"),
                 ]
+            })
+        );
+    }
+
+    #[test]
+    fn filter_hints_with_repeated_keys_pick_the_closest_value_on_each_item() {
+        // When an item holds several values for the same key (such as repeated XML `<tag>`
+        // elements), hints pick the value closest to the typo rather than always the first one.
+        let symbols = Symbols::from(vec![
+            element("/items/item", 0..10),
+            scalar("/items/item/tag", 1, "common"),
+            scalar("/items/item/tag", 2, "alpha"),
+            symbol("/items/item/version", 3),
+            element("/items/item", 10..20),
+            scalar("/items/item/tag", 11, "common"),
+            scalar("/items/item/tag", 12, "beta"),
+            symbol("/items/item/version", 13),
+        ]);
+
+        assert_eq!(
+            symbols.resolve(&path("/items/~[tag=alph]/version")),
+            Err(ResolveError::NotFound {
+                hints: vec![path("/items/~[tag=alpha]/version")]
+            })
+        );
+        assert_eq!(
+            symbols.resolve(&path("/items/~[tag=bet]/version")),
+            Err(ResolveError::NotFound {
+                hints: vec![path("/items/~[tag=beta]/version")]
             })
         );
     }

@@ -153,7 +153,7 @@ impl fmt::Display for FilterCondition {
             if index > 0 {
                 f.write_str("/")?;
             }
-            f.write_str(&encode(part))?;
+            f.write_str(&encode_filter_key(part))?;
         }
         write!(f, "={}]", encode_filter_value(&self.value))
     }
@@ -187,6 +187,14 @@ fn encode(text: &str) -> String {
         }
     }
     encoded
+}
+
+/// Escapes one segment of a filter condition's key path so [`SymbolPath::parse`] reads it back as
+/// the same text.
+fn encode_filter_key(text: &str) -> String {
+    // `=` ends the key path and `][` starts the next condition, so both are percent-encoded inside
+    // a key segment.
+    encode(text).replace('=', "%3D").replace("][", "%5D[")
 }
 
 /// Escapes a filter condition's value so [`SymbolPath::parse`] reads it back as the same text.
@@ -299,6 +307,22 @@ fn scan_filter_value(text: &str) -> (&str, ValueEnd<'_>) {
     ("", ValueEnd::Invalid)
 }
 
+/// Splits a percent-encoded filter condition after `[` at the `=` that ends its key path,
+/// returning `None` if `][` or the end of `text` appears before `=`.
+fn scan_filter_key(text: &str) -> Option<(&str, &str)> {
+    let bytes = text.as_bytes();
+    for i in 0..bytes.len() {
+        if bytes[i] == b'=' {
+            #[expect(clippy::string_slice, reason = "`bytes[i]` is ASCII `=`")]
+            return Some((&text[..i], &text[i + 1..]));
+        }
+        if bytes[i] == b']' && bytes.get(i + 1) == Some(&b'[') {
+            return None;
+        }
+    }
+    None
+}
+
 /// Parses a filter segment starting with `~[` at the front of `rest`, returning the parsed
 /// [`Segment::Filter`] and the remainder of `rest` after the following `/` (or `None` at end).
 fn parse_filter_segment<'a>(
@@ -312,8 +336,14 @@ fn parse_filter_segment<'a>(
         let after_open = cursor
             .strip_prefix('[')
             .expect("each filter condition starts with `[`");
-        let Some((raw_key, after_eq)) = after_open.split_once('=') else {
-            let (bad, _) = split_next_slash(rest);
+        let Some((raw_key, after_eq)) = scan_filter_key(after_open) else {
+            let (bad_key, _) = split_next_slash(after_open);
+            let bad_len = rest.len() - after_open.len() + bad_key.len();
+            #[expect(
+                clippy::string_slice,
+                reason = "`bad_len` ends on `/` or `%2F` or at `rest.len()`"
+            )]
+            let bad = &rest[..bad_len];
             bail!("invalid filter \"{bad}\" in symbol path; write it as ~[key=value]");
         };
         let (raw_value, end) = scan_filter_value(after_eq);
@@ -748,6 +778,8 @@ mod tests {
             ),
             ("/~[k=a%255D[b=1]", vec![filter(&["k"], "a%5D[b=1")]),
             ("/~[k=a%25%5D[b]", vec![filter(&["k"], "a%][b")]),
+            ("/~[a%3Db=1]", vec![filter(&["a=b"], "1")]),
+            ("/~[a%5D[b=1]", vec![filter(&["a][b"], "1")]),
         ];
         for (raw, segments) in test_cases {
             let path = SymbolPath::parse(raw)?;
@@ -797,6 +829,10 @@ mod tests {
             "/~[apiVersion=argoproj.io/v1alpha1][kind=Rollout]",
             "/~[a=1%2F2]",
             "/~[a=1%5D",
+            "/~[kind][metadata/name=api]",
+            "/~[][a=1]",
+            "/~[a=1][][b=2]",
+            "/~[kind=Rollout][name][metadata/namespace=prod]",
         ] {
             let err = SymbolPath::parse(raw).unwrap_err();
             assert!(
@@ -804,6 +840,12 @@ mod tests {
                 "unexpected error message for {raw}: {err}"
             );
         }
+        // Error text for a broken later condition keeps the earlier nested key intact.
+        let err = SymbolPath::parse("/~[metadata/name=api][bad]/spec").unwrap_err();
+        assert!(
+            err.to_string().contains("~[metadata/name=api][bad]"),
+            "unexpected error message: {err}"
+        );
     }
 
     #[test]

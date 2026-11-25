@@ -124,9 +124,9 @@ services:
 - **A filter that reaches an unreadable path stops the run**, as that path does. An unreadable path at or above any
   condition's key in a child, such as one with a syntax error, also stops the filter because that item could match too.
 - **The value starts after the first `=` and ends at the closing `]`,** so `=` and a lone `]` work as written
-  (`~[k=a=b]c]`). Write `%5D` for a literal `]` before `[` (so `][` inside a value does not start another condition).
-  The key can't hold `=`. Escape each key segment and value like any key: `/` as `~1` (in both key segments and values,
-  such as `~[apiVersion=argoproj.io~1v1alpha1]`), `,` as `%2C`, and so on.
+  (`~[k=a=b]c]`). Write `%5D` for a literal `]` before `[` (so `][` does not start another condition), and `%3D` for a
+  literal `=` inside a key. Escape each key segment and value like any key: `/` as `~1` (in both key segments and
+  values, such as `~[apiVersion=argoproj.io~1v1alpha1]`), `,` as `%2C`, and so on.
 
 Keys that look like filters still work. `[python]`, as in VS Code settings, needs no escape. A key that starts with
 `~[` is written `~0[`, as RFC 6901 already requires.
