@@ -14,6 +14,10 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Added
 
+- Python class members and dict string keys are now symbols, at any depth: class attributes, annotated fields, `Enum` /
+  `StrEnum` members, methods, type aliases, nested classes (`#/Color/RED`, `#/Point/x`, `#/Point/move`), and string
+  keys of dict literals on top-level or class assignments (`#/PRESETS/fast-mode`), in both Python and Starlark. See
+  [Python and Starlark](docs/symbols.md#python-and-starlark) ([#188](https://github.com/mennanov/blockwatch/issues/188)).
 - Support for Prisma schema files (`*.prisma`), with `//`, `///` and `/* */` comment parsing for `<block>` tags and
   symbols for `datasource`, `generator`, `model`, `view`, `type` and `enum` blocks and their members (`#/Color`,
   `#/Color/RED`, `#/Item/name`, `#/db/provider`, `#/client/provider`). See [Prisma](docs/symbols.md#prisma)

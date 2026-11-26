@@ -59,7 +59,7 @@ impl CodeLanguage for Kotlin {
         }
     }
 
-    const NAME_QUOTE: Option<char> = Some('`');
+    const NAME_QUOTES: &'static [char] = &['`'];
 }
 
 /// The quotes that open and close a raw string.

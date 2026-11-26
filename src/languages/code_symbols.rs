@@ -6,6 +6,7 @@ use crate::position::{Position, character_column_at};
 use crate::symbols::SymbolPath;
 use crate::symbols::{ScalarValue, Symbol, Symbols, SymbolsParser};
 use anyhow::{Context, anyhow};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::iter::Peekable;
 use std::ops::Range;
@@ -17,7 +18,8 @@ pub(crate) struct Definition<'tree> {
     /// The names of the definitions it sits in, outermost first. For a field of the class `Inner`
     /// inside the class `Outer`, they are `Outer` and `Inner`. Empty at the top level.
     pub(crate) parents: Vec<Node<'tree>>,
-    /// The identifiers it defines, usually one. Python's `A = B = 5` defines two.
+    /// The name nodes it defines, usually one identifier or string key. Python's `A = B = 5`
+    /// defines two.
     pub(crate) names: Vec<Node<'tree>>,
     /// The byte range of the whole definition, with its keywords, attributes and decorators, but
     /// without the comments above it.
@@ -59,6 +61,9 @@ pub(crate) enum Value<'tree> {
 /// Turns a string literal into its text, as [`CodeLanguage::decode_string`] does.
 type StringDecoder<'a> = &'a dyn Fn(&Node, &str) -> anyhow::Result<Option<String>>;
 
+/// Turns a definition's name node into its path segment, as [`CodeLanguage::name_segment`] does.
+type NameSegmenter<'a> = &'a dyn for<'s> Fn(&Node, &'s str) -> Cow<'s, str>;
+
 /// A programming language whose top-level definitions are its symbols.
 pub(crate) trait CodeLanguage: Send + Sync {
     /// The top-level definitions under `root`, the root of a file's syntax tree, in document
@@ -74,10 +79,16 @@ pub(crate) trait CodeLanguage: Send + Sync {
     /// shows the escape.
     fn decode_string(&self, node: &Node, source: &str) -> anyhow::Result<Option<String>>;
 
-    /// The character that the language can put around a name, such as the backticks of Kotlin's
-    /// `` `is` ``. The name is the same without them. `None` when the language has no such
-    /// character.
-    const NAME_QUOTE: Option<char> = None;
+    /// The path segment of `name`, a name node from [`Self::definitions`]. By default, its text
+    /// in `source` without any of [`Self::NAME_QUOTES`] around it.
+    fn name_segment<'s>(&self, name: &Node, source: &'s str) -> Cow<'s, str> {
+        Cow::Borrowed(segment(node_text(name, source), Self::NAME_QUOTES))
+    }
+
+    /// The characters that the language can put around a name, such as the backticks of Kotlin's
+    /// `` `is` `` or the quotes of Python's dict keys. A name loses one around it, and text
+    /// between two of the same character in a skipped syntax error counts as a skipped name.
+    const NAME_QUOTES: &'static [char] = &[];
 
     /// The characters other than letters, digits and `_` that can be inside a name, such as the
     /// `-` of HCL's `my-key`.
@@ -107,12 +118,13 @@ impl<L: CodeLanguage> SymbolsParser for CodeSymbolsParser<L> {
             .parse(source, None)
             .context("failed to parse syntax tree")?;
         let definitions = self.language.definitions(tree.root_node(), source);
-        Ok(symbols(
+        Ok(build_symbols(
             &tree,
             source,
             &definitions,
             &|node, source| self.language.decode_string(node, source),
-            L::NAME_QUOTE,
+            &|name, source| self.language.name_segment(name, source),
+            L::NAME_QUOTES,
             L::NAME_PUNCTUATION,
         ))
     }
@@ -145,18 +157,50 @@ pub(crate) fn symbols(
     name_quote: Option<char>,
     name_punctuation: &[char],
 ) -> Symbols {
+    let quotes = name_quote.as_slice();
+    build_symbols(
+        tree,
+        source,
+        definitions,
+        decode_string,
+        &|name, source| Cow::Borrowed(segment(node_text(name, source), quotes)),
+        quotes,
+        name_punctuation,
+    )
+}
+
+/// Builds the [`Symbols`] of `source` from `definitions`, turning each name node into a segment
+/// with `name_segment`. `name_quotes` and `name_punctuation` tell [`names_in`] which names a
+/// skipped syntax error could hold.
+fn build_symbols(
+    tree: &Tree,
+    source: &str,
+    definitions: &[Definition],
+    decode_string: StringDecoder<'_>,
+    name_segment: NameSegmenter<'_>,
+    name_quotes: &[char],
+    name_punctuation: &[char],
+) -> Symbols {
     let errors = syntax_errors(tree);
     let mut symbols = Vec::new();
     let mut unreadable = HashMap::new();
+    let mut parent_segments = HashMap::new();
     for definition in definitions {
-        let parents: Vec<String> = definition
-            .parents
-            .iter()
-            .map(|parent| segment(node_text(parent, source), name_quote).to_string())
-            .collect();
+        for parent in &definition.parents {
+            parent_segments
+                .entry(parent.id())
+                .or_insert_with(|| name_segment(parent, source).into_owned());
+        }
         let paths = definition.names.iter().map(|name| {
-            let name = segment(node_text(name, source), name_quote);
-            let segments = [parents.as_slice(), &[name.to_string()]].concat();
+            let name = name_segment(name, source);
+            let mut segments = Vec::with_capacity(definition.parents.len() + 1);
+            segments.extend(
+                definition
+                    .parents
+                    .iter()
+                    .map(|parent| parent_segments[&parent.id()].clone()),
+            );
+            segments.push(name.to_string());
             (name, SymbolPath::from_segments(segments))
         });
         match read_value(definition, source, &errors, decode_string) {
@@ -169,7 +213,7 @@ pub(crate) fn symbols(
                 for (name, path) in paths {
                     unreadable
                         .entry(path)
-                        .or_insert_with(|| problem.reason(name, source));
+                        .or_insert_with(|| problem.reason(&name, source));
                 }
             }
         }
@@ -178,7 +222,7 @@ pub(crate) fn symbols(
     // unreadable, defined or not.
     let mut skipped = HashMap::new();
     for error in errors.iter().filter(|error| error.is_error()) {
-        for name in names_in(node_text(error, source), name_quote, name_punctuation) {
+        for name in names_in(node_text(error, source), name_quotes, name_punctuation) {
             skipped
                 .entry(name.to_string())
                 .or_insert_with(|| Problem::SyntaxError(*error).reason(name, source));
@@ -191,10 +235,11 @@ pub(crate) fn symbols(
     }
 }
 
-/// The path segment of `name`, a name as the file writes it, without the `quote` around it.
-fn segment(name: &str, quote: Option<char>) -> &str {
-    quote
-        .and_then(|quote| name.strip_prefix(quote)?.strip_suffix(quote))
+/// The path segment of `name`, a name as the file writes it, without any of `quotes` around it.
+fn segment<'a>(name: &'a str, quotes: &[char]) -> &'a str {
+    quotes
+        .iter()
+        .find_map(|&quote| name.strip_prefix(quote)?.strip_suffix(quote))
         .unwrap_or(name)
 }
 
@@ -362,11 +407,11 @@ pub(crate) fn without_parentheses(mut node: Node<'_>) -> Node<'_> {
 }
 
 /// The words in `text` that could be names: runs of letters, digits and `_` that don't start
-/// with a digit, the same runs with the `punctuation` in them too, and the text after each
-/// `quote`, up to the next one.
+/// with a digit, the same runs with the `punctuation` in them too, and the text after each of
+/// `quotes`, up to the next one.
 fn names_in<'a>(
     text: &'a str,
-    quote: Option<char>,
+    quotes: &'a [char],
     punctuation: &'a [char],
 ) -> impl Iterator<Item = &'a str> {
     // Punctuation is part of a name only in some places. HCL reads `a-b` as one name, but
@@ -380,11 +425,13 @@ fn names_in<'a>(
             .filter(|word| word.chars().next().is_some_and(|first| !first.is_numeric()))
         });
     // A quoted name can hold spaces, so its words alone don't make it unreadable. A quote inside a
-    // string in `text` would pair the quotes wrongly, so every text between two quotes counts, and
-    // the words stay too.
-    let quoted = quote
-        .into_iter()
-        .flat_map(|quote| text.split(quote).skip(1));
+    // string in `text` would pair the quotes wrongly, so every non-empty slice between quotes
+    // counts, and the words stay too. Skipping empty slices avoids poisoning empty-string keys
+    // when an error span holds adjacent quotes, such as `"""a"""` or `'a''b'`, or ends on a quote.
+    let quoted = quotes
+        .iter()
+        .flat_map(|&quote| text.split(quote).skip(1))
+        .filter(|part| !part.is_empty());
     words.chain(quoted)
 }
 // </block>

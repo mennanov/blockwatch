@@ -56,7 +56,7 @@ impl CodeLanguage for Hcl {
         }
     }
 
-    const NAME_QUOTE: Option<char> = Some('"');
+    const NAME_QUOTES: &'static [char] = &['"'];
 
     const NAME_PUNCTUATION: &'static [char] = &['-', ':'];
 }

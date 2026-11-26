@@ -1,9 +1,11 @@
-use crate::languages::code_symbols::{self, CodeLanguage, CodeSymbolsParser, Definition, Value};
+use crate::languages::code_symbols::{
+    self, CodeLanguage, CodeSymbolsParser, Definition, NestedWalk, Value,
+};
 use crate::languages::{
     CommentsParser, LanguageParser, LanguageParserImpl, node_text, python_style_comments_parser,
-    walk_tree,
 };
 use anyhow::{anyhow, bail};
+use std::borrow::Cow;
 use tree_sitter::Node;
 
 /// Returns a [`LanguageParser`] for Python, with its symbols.
@@ -14,46 +16,18 @@ pub(super) fn parser() -> impl LanguageParser {
     ))
 }
 
-/// Python or Starlark, whose top-level names are variables, functions, classes and type aliases.
+/// Python or Starlark, whose files hold variables, functions, classes, type aliases and dict
+/// entries, and whose classes hold their members.
 pub(super) struct Python;
 
 impl CodeLanguage for Python {
     /// The top-level definitions under `root`, the root of a Python or Starlark file's syntax
-    /// tree, in document order. `source` is the text of the file.
+    /// tree, with class members and dict keys under them, in document order. A class or dict comes
+    /// before its members. `source` is the text of the file.
     fn definitions<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Definition<'tree>> {
-        let mut definitions = Vec::new();
-        walk_tree(root, |node| {
-            let definition = match node.kind() {
-                // Python gives the names in these bodies to the module, as it does at the top
-                // level. A loop or a `match` binds a name each time it runs, so its body doesn't
-                // count.
-                "module" | "block" | "if_statement" | "elif_clause" | "else_clause"
-                | "try_statement" | "except_clause" | "finally_clause" | "with_statement" => {
-                    return true;
-                }
-                "expression_statement" => node
-                    .named_child(0)
-                    .filter(|child| child.kind() == "assignment")
-                    .and_then(|assignment| assignment_definition(node, assignment, source)),
-                "function_definition" | "class_definition" => named_definition(node, node, source),
-                "decorated_definition" => node
-                    .child_by_field_name("definition")
-                    .and_then(|definition| named_definition(node, definition, source)),
-                "type_alias_statement" => node
-                    .child_by_field_name("left")
-                    .and_then(|alias| alias.named_child(0))
-                    // `type Pair[T] = ...` writes its name in a generic type.
-                    .and_then(|alias| match alias.kind() {
-                        "generic_type" => alias.named_child(0),
-                        _ => Some(alias),
-                    })
-                    .and_then(|name| definition(node, vec![name], None, source)),
-                _ => None,
-            };
-            definitions.extend(definition);
-            false
-        });
-        definitions
+        code_symbols::nested_definitions(root, |body, parents, walk| {
+            self.push_members(body, parents, source, walk);
+        })
     }
 
     /// Decodes a Python string, or several written one after the other, which Python joins. Returns
@@ -91,51 +65,174 @@ impl CodeLanguage for Python {
             _ => Ok(None),
         }
     }
+
+    /// Decodes a string dict key into its path segment, and keeps identifiers as written.
+    ///
+    /// # Panics
+    /// Panics if `name` is a string that [`Self::decode_string`] cannot decode.
+    fn name_segment<'s>(&self, name: &Node, source: &'s str) -> Cow<'s, str> {
+        match self.decode_string(name, source) {
+            Ok(Some(text)) => Cow::Owned(text),
+            Ok(None) => Cow::Borrowed(node_text(name, source)),
+            // `push_members` keeps only keys that `decode_string` decoded.
+            Err(error) => unreachable!("undecodable string key reached name_segment: {error:#}"),
+        }
+    }
+
+    // Dict keys can be single- or double-quoted, so skipped syntax errors check both.
+    const NAME_QUOTES: &'static [char] = &['"', '\''];
 }
 
-/// The definition of `statement`, which holds `assignment`, or `None` when it assigns to no name,
-/// as `a, b = 1, 2` and `obj.x = 1` do. In `A = B = 5`, both names share the definition.
-fn assignment_definition<'tree>(
-    statement: Node<'tree>,
-    mut assignment: Node<'tree>,
-    source: &str,
-) -> Option<Definition<'tree>> {
-    let mut names = Vec::new();
-    loop {
-        names.extend(assignment.child_by_field_name("left"));
-        match assignment.child_by_field_name("right") {
-            Some(right) if right.kind() == "assignment" => assignment = right,
-            // `X: int` declares a name without a value.
-            value => return definition(statement, names, value.map(Value::Initializer), source),
+impl Python {
+    /// Adds the definitions in `body` to `walk`: the root of a file, a class body, a control-flow
+    /// block or a dict literal. `parents` are the names of the classes and dicts that `body` sits
+    /// in. Adds each nested class body, block and dict in `body` to `walk`, with its own parents.
+    fn push_members<'tree>(
+        &self,
+        body: Node<'tree>,
+        parents: &[Node<'tree>],
+        source: &str,
+        walk: &mut NestedWalk<'tree>,
+    ) {
+        let mut cursor = body.walk();
+        if body.kind() == "dictionary" {
+            for member in body.named_children(&mut cursor) {
+                if member.kind() != "pair" {
+                    continue;
+                }
+                let Some(key) = member
+                    .child_by_field_name("key")
+                    .map(code_symbols::without_parentheses)
+                else {
+                    continue;
+                };
+                // Only decoded string keys become symbols. Bytes, f-strings with fields,
+                // undecodable escapes and non-string keys are skipped with everything under them.
+                if !matches!(self.decode_string(&key, source), Ok(Some(_))) {
+                    continue;
+                }
+                let value = member.child_by_field_name("value");
+                let dict = dict_body(value);
+                walk.add_definition_with_body(parents, key, member.byte_range(), value, dict);
+            }
+            return;
+        }
+        for member in body.named_children(&mut cursor) {
+            match member.kind() {
+                // Python gives the names in these bodies to the enclosing module or class, as it
+                // does at the top level. A loop or a `match` binds a name each time it runs, so
+                // its body doesn't count.
+                "block" | "if_statement" | "elif_clause" | "else_clause" | "try_statement"
+                | "except_clause" | "finally_clause" | "with_statement" => {
+                    walk.add_body(member, parents.to_vec());
+                }
+                "expression_statement" => {
+                    if let Some(assignment) = member
+                        .named_child(0)
+                        .filter(|child| child.kind() == "assignment")
+                    {
+                        push_assignment(member, assignment, parents, source, walk);
+                    }
+                }
+                "function_definition" | "class_definition" => {
+                    push_named(member, member, parents, source, walk);
+                }
+                "decorated_definition" => {
+                    if let Some(definition) = member.child_by_field_name("definition") {
+                        push_named(member, definition, parents, source, walk);
+                    }
+                }
+                "type_alias_statement" => {
+                    if let Some(name) = member
+                        .child_by_field_name("left")
+                        .and_then(|alias| alias.named_child(0))
+                        // `type Pair[T] = ...` writes its name in a generic type.
+                        .and_then(|alias| match alias.kind() {
+                            "generic_type" => alias.named_child(0),
+                            _ => Some(alias),
+                        })
+                        .filter(|name| is_name(name, source))
+                    {
+                        walk.add_definition(parents, name, member.byte_range(), None);
+                    }
+                }
+                _ => {}
+            }
         }
     }
 }
 
-/// The definition of `function`, a function or a class, which `node` holds with its decorators.
-fn named_definition<'tree>(
-    node: Node<'tree>,
-    function: Node<'tree>,
+/// Adds the definition of `statement`, which holds `assignment`, to `walk`, with `parents` as its
+/// enclosing classes. In `A = B = 5`, both names share the definition. When the value is a dict
+/// literal, adds the dict to `walk` under each assigned name.
+fn push_assignment<'tree>(
+    statement: Node<'tree>,
+    mut assignment: Node<'tree>,
+    parents: &[Node<'tree>],
     source: &str,
-) -> Option<Definition<'tree>> {
-    let name = function.child_by_field_name("name")?;
-    definition(node, vec![name], None, source)
+    walk: &mut NestedWalk<'tree>,
+) {
+    let mut names = Vec::new();
+    let value = loop {
+        names.extend(assignment.child_by_field_name("left"));
+        match assignment.child_by_field_name("right") {
+            Some(right) if right.kind() == "assignment" => assignment = right,
+            // `X: int` declares a name without a value.
+            value => break value,
+        }
+    };
+    names.retain(|name| is_name(name, source));
+    if names.is_empty() {
+        return;
+    }
+    let dict = dict_body(value);
+    walk.definitions.push(Definition {
+        parents: parents.to_vec(),
+        names: names.clone(),
+        range: statement.byte_range(),
+        value: value.map(Value::Initializer),
+    });
+    if let Some(dict) = dict {
+        // `NestedWalk` reads the last body first, so reversing keeps the names' order.
+        for name in names.into_iter().rev() {
+            walk.add_body(dict, [parents, &[name]].concat());
+        }
+    }
 }
 
-/// The definition of `names` at `node`, or `None` when none of them is a name code can refer to.
-fn definition<'tree>(
+/// Adds the definition of `target`, a function or a class, which `node` holds with its decorators,
+/// to `walk`. For a class, adds its body to `walk` under its name.
+fn push_named<'tree>(
     node: Node<'tree>,
-    mut names: Vec<Node<'tree>>,
-    value: Option<Value<'tree>>,
+    target: Node<'tree>,
+    parents: &[Node<'tree>],
     source: &str,
-) -> Option<Definition<'tree>> {
+    walk: &mut NestedWalk<'tree>,
+) {
+    let Some(name) = target
+        .child_by_field_name("name")
+        .filter(|name| is_name(name, source))
+    else {
+        return;
+    };
+    let body = target
+        .child_by_field_name("body")
+        .filter(|_| target.kind() == "class_definition");
+    walk.add_definition_with_body(parents, name, node.byte_range(), None, body);
+}
+
+/// The dict literal inside `value`, without parentheses around it, or `None` when `value` is not a
+/// dict literal.
+fn dict_body(value: Option<Node<'_>>) -> Option<Node<'_>> {
+    value
+        .map(code_symbols::without_parentheses)
+        .filter(|value| value.kind() == "dictionary")
+}
+
+/// Whether `node` is an identifier that code can refer to.
+fn is_name(node: &Node, source: &str) -> bool {
     // `_` names a value that the code throws away.
-    names.retain(|name| name.kind() == "identifier" && node_text(name, source) != "_");
-    (!names.is_empty()).then(|| Definition {
-        parents: Vec::new(),
-        names,
-        range: node.byte_range(),
-        value,
-    })
+    node.kind() == "identifier" && node_text(node, source) != "_"
 }
 
 /// Adds the text of `content`, a part of a string between its quotes and its fields, to `text`.
@@ -372,6 +469,7 @@ match mode:
                     "PRESETS: dict[str, str] = {\n    \"a\": \"b\",\n}",
                     Some("{\n    \"a\": \"b\",\n}")
                 ),
+                symbol("/PRESETS/a", r#""a": "b""#, Some("b")),
                 symbol("/WRAPPED", "WRAPPED = (32)", Some("32")),
                 symbol("/X", "X = 1", Some("1")),
                 symbol("/Y", "Y = 2", Some("2")),
@@ -381,7 +479,9 @@ match mode:
                 symbol("/load", "def load(path):\n    return path", None),
                 symbol("/fetch", "async def fetch():\n    pass", None),
                 symbol("/Point", "@dataclass\nclass Point:\n    x: int = 0", None),
+                symbol("/Point/x", "x: int = 0", Some("0")),
                 symbol("/MenuItem", "class MenuItem(Enum):\n    RED = 1", None),
+                symbol("/MenuItem/RED", "RED = 1", Some("1")),
                 symbol("/MODE", "MODE = 1", Some("1")),
                 symbol("/ELIF_NAME", "ELIF_NAME = 2", Some("2")),
                 symbol("/MODE", "MODE = 2", Some("2")),
@@ -394,6 +494,417 @@ match mode:
             ]
         );
         // </block>
+        Ok(())
+    }
+
+    #[test]
+    fn class_members_and_nested_classes_parse_symbols_returns_every_member_in_order()
+    -> anyhow::Result<()> {
+        let source = r#"class Color(StrEnum):
+    RED = "red"
+    GREEN = "green"
+
+
+@dataclass(frozen=True)
+class Record:
+    label: str
+    version: int = 1
+    A = B = 2
+    _ = 3
+    a, b = 4, 5
+    X = 6; Y = 7
+    DEFAULTS = {"mode": "fast"}
+    type Kind = str
+
+    def __init__(self):
+        self.instance_only = 1
+        local_var = 2
+        class LocalClass:
+            HIDDEN = 3
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls()
+
+    async def run(self):
+        pass
+
+    @dataclass
+    class Meta:
+        revision: int = 2
+
+    if TYPE_CHECKING:
+        COND = 1
+    elif OTHER:
+        ELIF_COND = 2
+    else:
+        COND = 3
+
+    try:
+        TRIED = 1
+    except ImportError:
+        EXCEPTED = 2
+    else:
+        TRY_ELSE = 3
+    finally:
+        FINALLY = 4
+
+    try:
+        GROUP_TRIED = 1
+    except* ValueError:
+        GROUP_EXCEPTED = 2
+
+    with open("f"):
+        WITH_NAME = 1
+
+    for i in range(2):
+        LOOPED = i
+
+    while ready:
+        WHILE_NAME = 1
+
+    match mode:
+        case 1:
+            MATCHED = 1
+
+
+class _:
+    SKIPPED = 1
+"#;
+
+        assert_eq!(
+            symbols(&python(source)?, source),
+            vec![
+                symbol(
+                    "/Color",
+                    "class Color(StrEnum):\n    RED = \"red\"\n    GREEN = \"green\"",
+                    None
+                ),
+                symbol("/Color/RED", r#"RED = "red""#, Some("red")),
+                symbol("/Color/GREEN", r#"GREEN = "green""#, Some("green")),
+                symbol(
+                    "/Record",
+                    source
+                        .split("\n\n\n")
+                        .nth(1)
+                        .expect("Record is the second block"),
+                    None
+                ),
+                symbol("/Record/label", "label: str", None),
+                symbol("/Record/version", "version: int = 1", Some("1")),
+                symbol("/Record/A", "A = B = 2", Some("2")),
+                symbol("/Record/B", "A = B = 2", Some("2")),
+                symbol("/Record/X", "X = 6", Some("6")),
+                symbol("/Record/Y", "Y = 7", Some("7")),
+                symbol(
+                    "/Record/DEFAULTS",
+                    r#"DEFAULTS = {"mode": "fast"}"#,
+                    Some(r#"{"mode": "fast"}"#)
+                ),
+                symbol("/Record/DEFAULTS/mode", r#""mode": "fast""#, Some("fast")),
+                symbol("/Record/Kind", "type Kind = str", None),
+                symbol(
+                    "/Record/__init__",
+                    "def __init__(self):\n        self.instance_only = 1\n        local_var = 2\n        class LocalClass:\n            HIDDEN = 3",
+                    None
+                ),
+                symbol(
+                    "/Record/from_dict",
+                    "@classmethod\n    def from_dict(cls, data):\n        return cls()",
+                    None
+                ),
+                symbol("/Record/run", "async def run(self):\n        pass", None),
+                symbol(
+                    "/Record/Meta",
+                    "@dataclass\n    class Meta:\n        revision: int = 2",
+                    None
+                ),
+                symbol("/Record/Meta/revision", "revision: int = 2", Some("2")),
+                symbol("/Record/COND", "COND = 1", Some("1")),
+                symbol("/Record/ELIF_COND", "ELIF_COND = 2", Some("2")),
+                symbol("/Record/COND", "COND = 3", Some("3")),
+                symbol("/Record/TRIED", "TRIED = 1", Some("1")),
+                symbol("/Record/EXCEPTED", "EXCEPTED = 2", Some("2")),
+                symbol("/Record/TRY_ELSE", "TRY_ELSE = 3", Some("3")),
+                symbol("/Record/FINALLY", "FINALLY = 4", Some("4")),
+                symbol("/Record/GROUP_TRIED", "GROUP_TRIED = 1", Some("1")),
+                symbol("/Record/GROUP_EXCEPTED", "GROUP_EXCEPTED = 2", Some("2")),
+                symbol("/Record/WITH_NAME", "WITH_NAME = 1", Some("1")),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn dict_keys_parse_symbols_returns_decoded_string_keys_and_nested_dicts() -> anyhow::Result<()>
+    {
+        let source = r#"PRESETS: dict[str, str] = {
+    "fast-mode": "fast",
+    'safe-mode': 'safe',
+}
+
+NESTED = ({
+    "db": ({
+        "host": "localhost",
+        "port": (5432),
+    }),
+    """triple""": 1,
+    r"raw\n": 2,
+    u"unicode": 3,
+    f"brace{{}}": 4,
+    ("joined-"
+     "key"): 5,
+    "esc\"quote": 6,
+    "a/b": 7,
+    "": 8,
+    "_": 9,
+})
+
+A = B = {"k": {"x": 1}, "m": 2}
+
+SKIPPED = {
+    b"bytes": 1,
+    f"{var}": 2,
+    123: 3,
+    True: 4,
+    None: 5,
+    IDENT: 6,
+    ("a",): 7,
+    ("a", "b"): 8,
+    **OTHER,
+    "kept": 9,
+}
+
+COMP = {k: v for k, v in items}
+SET = {"a", "b"}
+EMPTY = {}
+_ = {"ignored": 1}
+"#;
+
+        assert_eq!(
+            values(&python(source)?, source),
+            vec![
+                value(
+                    "/PRESETS",
+                    "{\n    \"fast-mode\": \"fast\",\n    'safe-mode': 'safe',\n}"
+                ),
+                value("/PRESETS/fast-mode", "fast"),
+                value("/PRESETS/safe-mode", "safe"),
+                value(
+                    "/NESTED",
+                    "{\n    \"db\": ({\n        \"host\": \"localhost\",\n        \"port\": (5432),\n    }),\n    \"\"\"triple\"\"\": 1,\n    r\"raw\\n\": 2,\n    u\"unicode\": 3,\n    f\"brace{{}}\": 4,\n    (\"joined-\"\n     \"key\"): 5,\n    \"esc\\\"quote\": 6,\n    \"a/b\": 7,\n    \"\": 8,\n    \"_\": 9,\n}"
+                ),
+                value(
+                    "/NESTED/db",
+                    "{\n        \"host\": \"localhost\",\n        \"port\": (5432),\n    }"
+                ),
+                value("/NESTED/db/host", "localhost"),
+                value("/NESTED/db/port", "5432"),
+                value("/NESTED/triple", "1"),
+                value(r"/NESTED/raw\n", "2"),
+                value("/NESTED/unicode", "3"),
+                value("/NESTED/brace{}", "4"),
+                value("/NESTED/joined-key", "5"),
+                value("/NESTED/esc%22quote", "6"),
+                value("/NESTED/a~1b", "7"),
+                value("/NESTED/", "8"),
+                value("/NESTED/_", "9"),
+                value("/A", r#"{"k": {"x": 1}, "m": 2}"#),
+                value("/B", r#"{"k": {"x": 1}, "m": 2}"#),
+                value("/A/k", r#"{"x": 1}"#),
+                value("/B/k", r#"{"x": 1}"#),
+                value("/A/k/x", "1"),
+                value("/B/k/x", "1"),
+                value("/A/m", "2"),
+                value("/B/m", "2"),
+                value(
+                    "/SKIPPED",
+                    "{\n    b\"bytes\": 1,\n    f\"{var}\": 2,\n    123: 3,\n    True: 4,\n    None: 5,\n    IDENT: 6,\n    (\"a\",): 7,\n    (\"a\", \"b\"): 8,\n    **OTHER,\n    \"kept\": 9,\n}"
+                ),
+                value("/SKIPPED/kept", "9"),
+                value("/COMP", "{k: v for k, v in items}"),
+                value("/SET", r#"{"a", "b"}"#),
+                value("/EMPTY", "{}"),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn duplicate_dict_keys_parse_symbols_reports_ambiguous() -> anyhow::Result<()> {
+        let source = r#"D = {
+    "a": 1,
+    'a': 2,
+    "\x61": 3,
+}
+"#;
+
+        assert_eq!(
+            unresolved(&python(source)?, source, "/D/a")?,
+            "ambiguous symbol, defined at 2:5, 3:5, 4:5"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn undecodable_dict_key_or_value_parse_symbols_keeps_other_entries_readable()
+    -> anyhow::Result<()> {
+        let source = r#"D = {
+    "\N{EM DASH}": {"nested": 1},
+    "\ud800": 2,
+    "\x4": 3,
+    "bad_val": "\ud800",
+    "ok": "fine",
+}
+"#;
+
+        let parsed = python(source)?;
+        assert_eq!(
+            values(&parsed, source),
+            vec![
+                value(
+                    "/D",
+                    "{\n    \"\\N{EM DASH}\": {\"nested\": 1},\n    \"\\ud800\": 2,\n    \"\\x4\": 3,\n    \"bad_val\": \"\\ud800\",\n    \"ok\": \"fine\",\n}"
+                ),
+                value("/D/ok", "fine"),
+            ]
+        );
+        assert_eq!(
+            unresolved(&parsed, source, "/D/bad_val")?,
+            decode_error(5, 16, r"`\ud800` stands for no character")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn syntax_error_in_class_or_dict_parse_symbols_makes_affected_paths_unreadable()
+    -> anyhow::Result<()> {
+        let source = r#"class Broken:
+    BAD = [1, for]
+    OK = 2
+
+CONFIG = {
+    "fast-mode": "fast",
+    "bad": [1, for],
+    "double-broken" "missing-colon",
+    'single-broken' 'missing-colon',
+}
+"#;
+
+        let parsed = python(source)?;
+        assert_eq!(
+            values(&parsed, source),
+            vec![value("/Broken/OK", "2"), value("/CONFIG/fast-mode", "fast"),]
+        );
+        assert_eq!(
+            unresolved(&parsed, source, "/Broken")?,
+            syntax_error(2, 15, "Broken")
+        );
+        assert_eq!(
+            unresolved(&parsed, source, "/Broken/BAD")?,
+            syntax_error(2, 15, "BAD")
+        );
+        assert_eq!(
+            unresolved(&parsed, source, "/CONFIG")?,
+            syntax_error(7, 16, "CONFIG")
+        );
+        assert_eq!(
+            unresolved(&parsed, source, "/CONFIG/bad")?,
+            syntax_error(7, 16, "bad")
+        );
+        assert_eq!(
+            unresolved(&parsed, source, "/CONFIG/double-broken")?,
+            syntax_error(8, 5, "double-broken")
+        );
+        assert_eq!(
+            unresolved(&parsed, source, "/CONFIG/single-broken")?,
+            syntax_error(8, 5, "single-broken")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn error_with_quotes_parse_symbols_leaves_unrelated_empty_key_readable() -> anyhow::Result<()> {
+        // Error spans ending on a quote, holding `"""..."""`, or holding adjacent quotes must not
+        // add `""` to `skipped`.
+        let source = r#"GOOD = {"": "ok"}
+BAD = {"k": 1, "a" "b"}
+BAD_SINGLE = {'k': 1, 'c''d'}
+BAD_TRIPLE = {"k": 1, """e""" """f"""}
+def broken(:
+    """Docstring."""
+    pass
+"#;
+
+        let parsed = python(source)?;
+        assert_eq!(
+            parsed
+                .resolve(&crate::symbols::SymbolPath::parse("/GOOD/")?)
+                .map(|s| s.value.as_ref().map(|v| v.text.as_str())),
+            Ok(Some("ok"))
+        );
+        assert_eq!(
+            unresolved(&parsed, source, "/BAD/a")?,
+            syntax_error(2, 16, "a")
+        );
+        assert_eq!(
+            unresolved(&parsed, source, "/BAD_SINGLE/c")?,
+            syntax_error(3, 23, "c")
+        );
+        assert_eq!(
+            unresolved(&parsed, source, "/BAD_TRIPLE/e")?,
+            syntax_error(4, 23, "e")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn starlark_dict_parse_symbols_returns_nested_keys() -> anyhow::Result<()> {
+        let source = r#"CONFIG = {
+    "env": "prod",
+    "limits": {
+        "cpu": "4",
+    },
+}
+"#;
+
+        assert_eq!(
+            values(&starlark(source)?, source),
+            vec![
+                value(
+                    "/CONFIG",
+                    "{\n    \"env\": \"prod\",\n    \"limits\": {\n        \"cpu\": \"4\",\n    },\n}"
+                ),
+                value("/CONFIG/env", "prod"),
+                value("/CONFIG/limits", "{\n        \"cpu\": \"4\",\n    }"),
+                value("/CONFIG/limits/cpu", "4"),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn deeply_nested_classes_and_dicts_parse_symbols_do_not_overflow_stack() -> anyhow::Result<()> {
+        // Each nested class or dict has a path one segment longer than the one around it, and a
+        // recursive walk would overflow the call stack.
+        let class_depth = 500;
+        let classes: String = (0..class_depth)
+            .map(|i| format!("{}class C:\n", " ".repeat(i)))
+            .chain(std::iter::once(format!(
+                "{}pass\n",
+                " ".repeat(class_depth)
+            )))
+            .collect();
+        assert_eq!(python(&classes)?.symbols.len(), class_depth);
+
+        let dict_depth = 3_000;
+        let dicts = format!(
+            "D = {}{{\"k\": 1}}{}\n",
+            "{\"a\": ".repeat(dict_depth - 1),
+            "}".repeat(dict_depth - 1)
+        );
+        // D plus `dict_depth - 1` "a" keys plus 1 "k" key.
+        assert_eq!(python(&dicts)?.symbols.len(), dict_depth + 1);
         Ok(())
     }
 

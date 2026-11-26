@@ -446,7 +446,7 @@ h1, h2 { margin: 0; }
 In a code file, each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is
 `#/NAME`.
 With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`. In Java, C#, Kotlin, Swift, Protocol
-Buffers, PHP, Dart and Prisma, the members of a type are symbols too, under the type's name:
+Buffers, PHP, Dart, Prisma and Python, the members of a type are symbols too, under the type's name:
 `Config.java#/Config/MAX_PORTS`.
 In HCL, each block, attribute and object key is a symbol: `main.tf#/variable/region/default`.
 
@@ -463,7 +463,7 @@ In HCL, each block, attribute and object key is a symbol: `main.tf#/variable/reg
   where the error is.
 - **A path to a string that blockwatch can't decode stops the run.** Other paths in the file still resolve.
 - **Members are not symbols yet**, such as a method or a field, except in Java, C#, Kotlin, Swift, Protocol Buffers,
-  HCL, PHP, Dart and Prisma.
+  HCL, PHP, Dart, Prisma and Python.
 
 <!-- </block> -->
 
@@ -563,37 +563,64 @@ if TYPE_CHECKING:
 else:
     MODE = "run"
 
+class Color(StrEnum):
+    RED = "red"
+
 @dataclass
 class Point:
+    label: str
     x: int = 0
+
+    def move(self):
+        pass
+
+PRESETS: dict[str, str] = {
+    "fast-mode": "fast",
+}
 
 def load(path):
     return path
 ```
 
-| Path               | Points at                                  |
-|--------------------|--------------------------------------------|
-| `#/PYTHON_VERSION` | `3.12`                                     |
-| `#/TIMEOUT`        | `30`                                       |
-| `#/B`              | `5`, as does `#/A`                         |
-| `#/MODE`           | a violation, as `MODE` is defined twice    |
-| `#/Point`          | the whole class, `@dataclass` included     |
-| `#/load`           | the whole function                         |
+| Path                    | Points at                               |
+|-------------------------|-----------------------------------------|
+| `#/PYTHON_VERSION`      | `3.12`                                  |
+| `#/TIMEOUT`             | `30`                                    |
+| `#/B`                   | `5`, as does `#/A`                      |
+| `#/MODE`                | a violation, as `MODE` is defined twice |
+| `#/Color/RED`           | `red`                                   |
+| `#/Point`               | the whole class, `@dataclass` included  |
+| `#/Point/label`         | `label: str`, as it has no default      |
+| `#/Point/x`             | `0`                                     |
+| `#/Point/move`          | the whole method                        |
+| `#/PRESETS`             | the whole dict, as written              |
+| `#/PRESETS/fast-mode`   | `fast`                                  |
+| `#/load`                | the whole function                      |
 
-- **The bodies of a top-level `if`, `try` or `with` are top-level too**, as Python treats them. So a name defined in
-  two branches is defined twice. The bodies of `for`, `while` and `match` don't count.
-- **`A = B = 5` gives both names the whole statement.** `X: int` has no value. `X += [...]` doesn't change the value
-  of `X`.
+- **Class members are symbols too**, at any depth: class attributes, annotated fields, `Enum` members, methods, type
+  aliases and nested classes. A path goes from the outer class down: `#/Outer/Inner/X`. Local names and `self.x = 1`
+  inside a method are not symbols.
+- **String keys of a dict literal are symbols**, at any depth, for top-level dicts and dicts on class attributes:
+  `#/PRESETS/fast-mode` or `#/CONFIG/db/host`. Each key decodes like a string value, so `"a\"b"` is `a"b` and
+  `"a" "b"` is `ab`. Escape keys as in [Writing a path](#writing-a-path) (`/` as `~1`, `~` as `~0`, `,` as `%2C`,
+  `%` as `%25`). Bytes, f-strings with fields, undecodable escapes, non-string keys (such as numbers or names) and
+  `**other` are skipped, along with everything under them. Dict comprehensions and sets have no key symbols.
+- **The bodies of `if`, `try` or `with` at the top level or inside a class count**, as Python runs them. So a name
+  defined in two branches is defined twice, and so are two methods with one name (such as a `@property` and its setter).
+  The bodies of `for`, `while` and `match` don't count.
+- **`A = B = 5` gives both names the whole statement**, and `A = B = {"k": 1}` puts `k` under both `#/A/k` and `#/B/k`.
+  `X: int` has no value. `X += [...]` doesn't change the value of `X`.
 - **A decorator is part of the definition.**
-- **Imports, `as` targets, `a, b = 1, 2`, `obj.x = 1` and `_` are not symbols.** A type alias is one, without a
-  value: `type Pair[T] = tuple[T, T]` is `#/Pair`.
+- **Imports, `as` targets, `a, b = 1, 2`, `obj.x = 1` and `_` are not symbols.** A type alias is one, without a value:
+  `type Pair[T] = tuple[T, T]` is `#/Pair`.
 - **Strings follow Python's escapes.** `"\xe9"` is `é`. An escape Python doesn't know, such as `\d`, stays as written.
   A raw string is its text. An f-string without a field is its text, with `{{` as `{`. An f-string with a field and
-  bytes stay as written. A path to a string with a `\N{...}` escape stops the run, and so does a path to a string
-  with an escape that Python rejects, such as `"\x4"` or `"\N"`.
-- **Starlark files, such as `BUILD` and `.bzl`, follow the same rules.** A rule call, such as
+  bytes stay as written. A path to a string with a `\N{...}` escape stops the run, and so does a path to a string with
+  an escape that Python rejects, such as `"\x4"` or `"\N"`.
+- **Starlark files, such as `BUILD` and `.bzl`, follow the same rules**, dict keys included. A rule call, such as
   `cc_library(name = "lib")`, is not a symbol.
-- **Class members are not symbols yet.**
+- **A syntax error stops the run for the member or dict entry that holds it, and for each class or dict around it.**
+  The other members and entries still resolve.
 
 <!-- </block> -->
 

@@ -75,7 +75,7 @@ impl CodeLanguage for Swift {
         unescape(&text, &escape).map(Some)
     }
 
-    const NAME_QUOTE: Option<char> = Some('`');
+    const NAME_QUOTES: &'static [char] = &['`'];
 }
 
 /// The quotes that open and close a multi-line string.
