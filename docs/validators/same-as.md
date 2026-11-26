@@ -141,7 +141,7 @@ If the layout matters, leave the pattern off. Without one, the content is compar
 ## Whole files as targets
 
 A target without `:` or `#` is a whole file. The block is compared against the file's full text, and nothing in the
-file is parsed. So any file can be a target, even one that can't hold a block, such as `.env` or a lockfile:
+file is parsed. So any file can be a target, even one that can't hold a block, such as `.nvmrc` or a lockfile:
 
 ```rust
 // <block same-as=".nvmrc" same-as-pattern="\d+\.\d+\.\d+">

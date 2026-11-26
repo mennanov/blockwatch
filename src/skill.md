@@ -140,15 +140,15 @@ A symbol points to one value or definition inside a file (`file#/path`, or `#/pa
 
 `JSON`, `TOML`, `YAML`, `Markdown`, `MDX`, `XML`, `CSS`, `Go`, `C`, `C++`, `Python`, `Starlark`, `Rust`,
 `TypeScript`, `JavaScript`, `Java`, `C#`, `Kotlin`, `Swift`, `Protocol Buffers`, `HCL`, `PHP`, `Bash`,
-`Makefile`, `Dart`, `Dockerfile`, `Prisma`.
+`Makefile`, `Dart`, `Dockerfile`, `Prisma`, `Dotenv`.
 
 ### Variants and copies
 
 - Files mapped via `-E` or `extensions` inherit that language's symbols.
 - Copy suffixes (`.dist`, `.example`, `.in`, `.sample`, `.template`) read as the base name
   (`config.toml.example#/port`).
-- Variants of `Dockerfile`, `Containerfile`, and `Makefile` with `.`, `-`, or `_` (such as `Dockerfile.ci`,
-  `Dockerfile-dev`, `Makefile.am`) keep their symbols, except `Dockerfile.dockerignore` and `Makefile.{PL,SH,bat,cmd}`.
+- Variants of `.env`, `Dockerfile`, `Containerfile`, and `Makefile` with `.`, `-`, or `_` (such as `.env.local`,
+  `Dockerfile.ci`, `Makefile.am`) keep their symbols, except `Dockerfile.dockerignore` and `Makefile.{PL,SH,bat,cmd}`.
   No `.` may follow a `-` or `_`: `Dockerfile-logo.png` is not a variant. Zsh (`*.zsh`) and Go module files
   (`go.mod`, `go.sum`, `go.work`) have no symbols.
 

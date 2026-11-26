@@ -26,10 +26,10 @@ impl Language {
 /// doesn't tell which parser to use.
 pub(super) const NAMES: &[(&str, Language)] = {
     use Language::{
-        Bash, C, CMake, CSharp, Cpp, Css, Dart, Dockerfile, Elixir, Go, GoModule, GraphQl, Groovy,
-        Hcl, Html, Java, JavaScript, Json, Kotlin, Lean, Lua, Makefile, Markdown, Mdx, Nix, OCaml,
-        Php, Prisma, Proto, Python, Ruby, Rust, Scala, Sql, Starlark, Swift, Toml, Tsx, TypeScript,
-        Xml, Yaml, Zsh,
+        Bash, C, CMake, CSharp, Cpp, Css, Dart, Dockerfile, Dotenv, Elixir, Go, GoModule, GraphQl,
+        Groovy, Hcl, Html, Java, JavaScript, Json, Kotlin, Lean, Lua, Makefile, Markdown, Mdx, Nix,
+        OCaml, Php, Prisma, Proto, Python, Ruby, Rust, Scala, Sql, Starlark, Swift, Toml, Tsx,
+        TypeScript, Xml, Yaml, Zsh,
     };
     &[
         /* <block name="language-names"
@@ -188,6 +188,7 @@ pub(super) const NAMES: &[(&str, Language)] = {
         ("dotsettings", Xml),
         ("eliom", OCaml),
         ("eliomi", OCaml),
+        ("env", Dotenv),
         ("envrc", Bash),
         ("es6", JavaScript),
         ("ex", Elixir),
@@ -473,14 +474,15 @@ affects="docs/cli.md:detection-rules, src/skill.md#/blockwatch/Symbols/Variants 
 /// `config.toml.example`. `.in` is the input that autoconf or CMake turns into the file.
 const COPY_SUFFIXES: &[&str] = &[".dist", ".example", ".in", ".sample", ".template"];
 
-/// The names whose variants are files of the same language, such as `Dockerfile.ci`,
-/// `Dockerfile-dev` and `Dockerfile_prod`. Each row has the spellings of a name, their language,
-/// and the `.`-separated parts that make a variant some other kind of file:
+/// The names whose variants are files of the same language, such as `.env.local`,
+/// `Dockerfile.ci`, `Dockerfile-dev` and `Dockerfile_prod`. Each row has the spellings of a name,
+/// their language, and the `.`-separated parts that make a variant some other kind of file:
 ///
 /// - `Dockerfile.dockerignore` is Docker's ignore file for `Dockerfile`.
 /// - `Makefile.PL` is Perl's MakeMaker script, and `Makefile.SH` a shell script that writes a
 ///   Makefile. `Makefile.bat` and `Makefile.cmd` are Windows batch files.
 const NAME_RULES: &[(&[&str], Language, &[&str])] = &[
+    (&[".env"], Language::Dotenv, &[]),
     (
         &["Dockerfile", "dockerfile", "Containerfile", "containerfile"],
         Language::Dockerfile,
@@ -640,6 +642,7 @@ mod tests {
             ("main.rs", Rust),
             ("app.ts", TypeScript),
             ("config.yml", Yaml),
+            ("web-build.env", Dotenv),
             // A whole file name in the list counts as an extension too.
             ("ci.Dockerfile", Dockerfile),
         ]);
@@ -663,6 +666,11 @@ mod tests {
             ("Dockerfile.ci.yml", Yaml),
             ("Dockerfile-dev.yml", Yaml),
             ("a.rs.unknown.json", Json),
+            (".env.json", Json),
+            (".env.yaml", Yaml),
+            (".env.d.ts", TypeScript),
+            (".env.sh", Bash),
+            (".envrc", Bash),
         ]);
         // An extension in the middle of the name doesn't count.
         assert_no_language(&["a.rs.unknown"]);
@@ -713,6 +721,13 @@ mod tests {
             ("Makefile.am", Makefile),
             ("makefile.inc", Makefile),
             ("GNUmakefile-local", Makefile),
+            (".env.local", Dotenv),
+            (".env.production", Dotenv),
+            (".env.development.local", Dotenv),
+            (".env-local", Dotenv),
+            (".env_local", Dotenv),
+            (".env.", Dotenv),
+            (".env-", Dotenv),
         ]);
     }
 
@@ -759,6 +774,10 @@ mod tests {
             "my-Dockerfile",
             "Gemfile.lock",
             "Vagrantfile-dev",
+            ".env-notes.txt",
+            "my.env.local",
+            "env.local",
+            ".envs",
         ]);
     }
 
@@ -781,6 +800,14 @@ mod tests {
             ("Dockerfile.yml.example", Yaml),
             // The rest can be a variant, as in gettext's `po/Makefile.in.in`.
             ("Makefile.in.in", Makefile),
+            (".env.example", Dotenv),
+            (".env.sample", Dotenv),
+            (".env.template", Dotenv),
+            (".env.dist", Dotenv),
+            (".env.in", Dotenv),
+            (".env.local.example", Dotenv),
+            ("web-build.env.example", Dotenv),
+            (".env.json.example", Json),
         ]);
         assert_resolves_with(&[("cu", Cpp)], &[("a.cu.in", Some(Cpp))]);
         // A copy follows a mapping of the name it copies. A variant doesn't.
@@ -797,7 +824,7 @@ mod tests {
             "a.rs.tmpl",
             "a.rs.orig",
             // The rest has no language.
-            ".env.example",
+            ".unknown.example",
             "config.in",
             "Dockerfile.dockerignore.example",
             // Only one suffix is stripped.
@@ -820,6 +847,10 @@ mod tests {
         );
         assert_resolves_with(&[("h", C)], &[("a.h", Some(C))]);
         assert_resolves_with(&[("Dockerfile", Bash)], &[("Dockerfile", Some(Bash))]);
+        assert_resolves_with(
+            &[("env", Bash)],
+            &[(".env", Some(Bash)), ("app.env", Some(Bash))],
+        );
     }
 
     /// A mapping of a name covers that name only, not its variants. To map a variant, map its
@@ -1086,6 +1117,7 @@ mod tests {
             ("a.dotsettings", Xml),
             ("a.eliom", OCaml),
             ("a.eliomi", OCaml),
+            (".env", Dotenv),
             (".envrc", Bash),
             ("a.es6", JavaScript),
             ("a.ex", Elixir),

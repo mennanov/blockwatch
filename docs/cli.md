@@ -201,10 +201,10 @@ blockwatch picks a file's language by its name, never by its content. The first 
 2. **A copy.** A name that ends in `.example`, `.sample`, `.dist`, `.template` or `.in` is a copy of another file,
    and is read by the rest of its name: `config.toml.example` is TOML, and `config.h.in` is C++. Template languages,
    such as `.j2` and `.tmpl`, are not stripped.
-3. **A variant.** `Dockerfile`, `dockerfile`, `Containerfile`, `containerfile`, `Jenkinsfile`, `jenkinsfile`,
-   `Makefile`, `makefile` and `GNUmakefile` can be followed by `.`, `-` or `_` and more: `Dockerfile.ci`,
-   `Dockerfile-dev` and `Makefile.am` keep the name's language. After `-` or `_`, no `.` may follow, so
-   `Dockerfile-logo.png` is not a Dockerfile. Some variants are other kinds of files and are skipped:
+3. **A variant.** `.env`, `Dockerfile`, `dockerfile`, `Containerfile`, `containerfile`, `Jenkinsfile`, `jenkinsfile`,
+   `Makefile`, `makefile` and `GNUmakefile` can be followed by `.`, `-` or `_` and more: `.env.local`,
+   `Dockerfile.ci`, `Dockerfile-dev` and `Makefile.am` keep the name's language. After `-` or `_`, no `.` may follow,
+   so `Dockerfile-logo.png` is not a Dockerfile. Some variants are other kinds of files and are skipped:
    - a Dockerfile variant with the part `dockerignore`, such as `Dockerfile.dockerignore`;
    - a Makefile variant with the part `PL`, `SH`, `bat` or `cmd`, such as `Makefile.PL`.
 
@@ -228,6 +228,7 @@ without `*`, such as `.babelrc` or `Cargo.lock`, is a whole file name.
 | CSS | `*.css` |
 | Dart | `*.dart` |
 | Dockerfile | `Containerfile`, `Dockerfile`, `*.containerfile`, `*.dockerfile` |
+| Dotenv | `*.env` |
 | Elixir | `mix.lock`, `*.ex`, `*.exs` |
 | Go | `*.go` |
 | Go modules | `go.mod`, `go.sum`, `go.work`, `go.work.sum` |
@@ -489,7 +490,7 @@ same-as-pattern = 'os\.environ\["(?P<value>[A-Z_]+)"\]'
 A virtual block is a block of the file it wraps:
 
 - **Any text file can hold a pattern or a whole-file block**, even one that blockwatch has no grammar for, such as
-  `.txt` or `.env`. Such a file has no tags, only the blocks that the config file declares. A symbol needs a file with
+  `.txt` or `.csv`. Such a file has no tags, only the blocks that the config file declares. A symbol needs a file with
   [symbols](symbols.md).
 - **A symlink stands for the file it points at.** When `package.json` is a symlink to `base.json`, the target
   `package.json#/version` wraps `base.json#/version`, and its violations are reported in `base.json`.

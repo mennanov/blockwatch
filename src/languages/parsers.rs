@@ -2,10 +2,10 @@
 
 use super::file_names::LanguageResolver;
 use super::{
-    Language, LanguageParser, bash, c, c_sharp, cmake, cpp, css, dart, dockerfile, elixir, go,
-    graphql, groovy, hcl, html, java, javascript, json, kotlin, lean, lua, makefile, markdown, mdx,
-    nix, ocaml, php, prisma, proto, python, ruby, rust, scala, sql, starlark, swift, toml, tsx,
-    typescript, xml, yaml,
+    Language, LanguageParser, bash, c, c_sharp, cmake, cpp, css, dart, dockerfile, dotenv, elixir,
+    go, graphql, groovy, hcl, html, java, javascript, json, kotlin, lean, lua, makefile, markdown,
+    mdx, nix, ocaml, php, prisma, proto, python, ruby, rust, scala, sql, starlark, swift, toml,
+    tsx, typescript, xml, yaml,
 };
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -79,6 +79,7 @@ fn new_parser(language: Language) -> Box<dyn LanguageParser> {
         Language::Css => Box::new(css::parser()),
         Language::Dart => Box::new(dart::parser()),
         Language::Dockerfile => Box::new(dockerfile::parser()),
+        Language::Dotenv => Box::new(dotenv::parser()),
         Language::Elixir => Box::new(elixir::parser()),
         Language::Go => Box::new(go::parser()),
         Language::GoModule => Box::new(go::module_files_parser()),
@@ -181,6 +182,7 @@ mod tests {
             (Language::Dart, "Dart"),
             (Language::Dockerfile, "Dockerfile"),
             (Language::Prisma, "Prisma"),
+            (Language::Dotenv, "Dotenv"),
         ];
         // </block>
         let mut documented: Vec<Language> =
@@ -327,6 +329,22 @@ mod supported_languages_tests {
             (
                 "app.dockerfile".to_string(),
                 "# <block>\nFROM debian\n# </block>".to_string(),
+            ),
+            (
+                ".env".to_string(),
+                "# <block>\nPORT=8080\n# </block>".to_string(),
+            ),
+            (
+                "web-build.env".to_string(),
+                "# <block>\nVITE_API_URL=https://api.example.com\n# </block>".to_string(),
+            ),
+            (
+                ".env.local".to_string(),
+                "# <block>\nDEBUG=true\n# </block>".to_string(),
+            ),
+            (
+                ".env.example".to_string(),
+                "# <block>\nDATABASE_POOL_LIMIT=10\n# </block>".to_string(),
             ),
             (
                 "dart.dart".to_string(),

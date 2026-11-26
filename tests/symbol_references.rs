@@ -315,3 +315,17 @@ fn dockerfile_target_resolves() {
     cmd.arg("tests/testdata/symbol_references/dockerfile_source.rs");
     cmd.output().unwrap().assert().success();
 }
+
+#[test]
+fn dotenv_target_resolves() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/dotenv_source.rs");
+    cmd.output().unwrap().assert().success();
+}
+
+#[test]
+fn dotenv_example_block_and_target_resolve() {
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("tests/testdata/symbol_references/.env.example");
+    cmd.output().unwrap().assert().success();
+}

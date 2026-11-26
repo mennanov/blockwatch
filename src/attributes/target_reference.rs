@@ -15,7 +15,7 @@ pub(crate) enum TargetReference {
         name: String,
     },
     /// A whole file. Nothing is parsed out of it, which is what lets a reference point at a format
-    /// blockwatch has no grammar for (`.env`, lockfiles, plain-text fixtures).
+    /// blockwatch has no grammar for (lockfiles, plain-text fixtures).
     File(RepoPath),
     /// A symbol, found by `path` in `file`, or in the referencing file itself when `file` is `None`.
     Symbol {

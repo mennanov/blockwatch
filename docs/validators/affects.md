@@ -56,7 +56,7 @@ A target without `:` or `#` is a whole file:
 // <block affects="config/schema.json">
 ```
 
-A block has to live in a comment, and some files can't have comments: plain JSON, `.env`, lockfiles, CSV, text
+A block has to live in a comment, and some files can't have comments: plain JSON, lockfiles, CSV, text
 fixtures. A whole-file target works for all of them. Change the block, and the run fails until that file changes too.
 
 Things to know:

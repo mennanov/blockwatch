@@ -53,6 +53,7 @@ declares, instead of tags in a comment.
 | Dart             | `*.dart`                                                               | [Dart](#dart)                                           |
 | Dockerfile       | `Dockerfile`, `Containerfile`, `*.dockerfile`                          | [Dockerfile](#dockerfile)                               |
 | Prisma           | `*.prisma`                                                             | [Prisma](#prisma)                                       |
+| Dotenv           | `.env`, `*.env`, `.env.*`                                              | [Dotenv](#dotenv)                                       |
 
 <!-- </block> -->
 
@@ -1599,6 +1600,49 @@ view ActiveItem {
   if only one block defines that member.
 - **A syntax error stops the run for the member that holds it and for its enclosing block.** Other members and blocks in
   the file still resolve.
+
+<!-- </block> -->
+
+## Dotenv
+
+<!-- <block name="dotenv-paths"> -->
+
+```dotenv
+# Database configuration
+DATABASE_POOL_LIMIT=10
+EMAIL_FROM=Example <noreply@example.com>
+export VITE_API_URL=https://api.example.com
+COLOR=#5097ba
+PORT = 8080 # inline comment
+MESSAGE="hello\nworld\t\"\$1\"\\end\d"
+SINGLE='literal \n $HOME # hash'
+MULTILINE=`line 1
+line 2`
+EMPTY=
+```
+
+| Path                    | Points at                                             |
+|-------------------------|-------------------------------------------------------|
+| `#/DATABASE_POOL_LIMIT` | `10`                                                  |
+| `#/EMAIL_FROM`          | `Example <noreply@example.com>`                       |
+| `#/VITE_API_URL`        | `https://api.example.com`                             |
+| `#/COLOR`               | `#5097ba`                                             |
+| `#/PORT`                | `8080`                                                |
+| `#/MESSAGE`             | `hello`, `world`, `"$1"\end\d` (with newline and tab) |
+| `#/SINGLE`              | `literal \n $HOME # hash`                             |
+| `#/MULTILINE`           | `line 1` and `line 2` on two lines                    |
+| `#/EMPTY`               | `""` (empty string)                                   |
+
+- **Each `KEY=VALUE` assignment is a symbol**, with an optional `export` prefix. Spaces and tabs around `=` are
+  ignored.
+- **Unquoted values keep spaces and `<`/`>` characters**, with trailing spaces and tabs removed. A `#` starts an inline
+  comment only when a space or tab comes right before it, so `#5097ba` and URL fragments stay part of the value.
+- **Quoted values (`"..."`, `'...'`, `` `...` ``) can span multiple lines**, normalizing `\r\n` line breaks to `\n`.
+  Double quotes decode `\n`, `\r`, `\t`, `\"`, `\\`, and `\$`, keeping unknown escapes as written. Single quotes and
+  backticks keep every character literally. Variable references such as `$VAR` are not expanded.
+- **Duplicate keys are a violation**, because blockwatch can't tell which copy you mean.
+- **A syntax error anywhere stops the run**, such as a line without `=`, an invalid key, an unterminated quote, or text
+  after a closing quote.
 
 <!-- </block> -->
 

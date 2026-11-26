@@ -10,7 +10,7 @@ Some parts of a codebase have to change together: a function and its docs, or a 
 blockwatch lets you write those rules in comments, right next to the code, or in `blockwatch.toml`. If they fall out of
 sync, your pre-commit hook or CI run fails.
 
-Supports [38 languages](#supported-languages).
+Supports [39 languages](#supported-languages).
 
 [//]: # (</block>)
 
@@ -103,9 +103,9 @@ Two validators work across files:
 Both can point to a block, a whole file, a specific value in a file like `package.json#/version`, a section of a
 Markdown file, an element or attribute in an XML file such as `pom.xml` or a `.csproj`, a declaration in a CSS file,
 a constant in a Go, C, C++, Python, Rust, TypeScript, JavaScript, Java, C#, Kotlin, Swift, PHP or Dart file, a
-variable in a shell script or a Makefile, a field in a Protocol Buffers or Prisma file, or a value in a Terraform or
-other HCL file (see [Symbols](docs/symbols.md)). The other validators check a single block on their own: the things
-you'd otherwise have to nitpick in code review.
+variable in a `.env` file, shell script or Makefile, a field in a Protocol Buffers or Prisma file, or a value in a
+Terraform or other HCL file (see [Symbols](docs/symbols.md)). The other validators check a single block on their own:
+the things you'd otherwise have to nitpick in code review.
 
 <!-- <block name="available-validators"
      same-as="src/validators/validator.rs:validator-registry, docs/validators/README.md:validators-index"
@@ -283,6 +283,7 @@ of each, such as `Gemfile` for Ruby. It also says how variants such as `Dockerfi
 - CSS
 - Dart
 - Dockerfile
+- Dotenv
 - Elixir
 - Go
 - GraphQL

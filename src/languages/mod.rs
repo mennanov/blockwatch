@@ -10,6 +10,7 @@ mod cpp;
 mod css;
 mod dart;
 mod dockerfile;
+mod dotenv;
 mod elixir;
 mod file_names;
 mod go;
@@ -77,6 +78,7 @@ pub(crate) enum Language {
     Css,
     Dart,
     Dockerfile,
+    Dotenv,
     Elixir,
     Go,
     /// `go.mod`, `go.sum` and `go.work`.
