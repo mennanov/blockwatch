@@ -210,15 +210,17 @@ impl Problem<'_> {
     /// The reason to report for `name`, which shows where in `source` the problem is.
     fn reason(&self, name: &str, source: &str) -> String {
         match self {
-            Problem::SyntaxError(node) => {
-                let Position { line, character } = position(node, source);
-                format!(
-                    "file has a syntax error at line {line}, column {character} near {name}, and the path could resolve to the wrong value"
-                )
-            }
+            Problem::SyntaxError(node) => syntax_error_reason(position(node, source), name),
             Problem::Undecodable(position, why) => undecodable_reason(*position, why),
         }
     }
+}
+
+/// The reason to report for a path affected by a syntax error at `position` near `name`.
+pub(crate) fn syntax_error_reason(Position { line, character }: Position, name: &str) -> String {
+    format!(
+        "file has a syntax error at line {line}, column {character} near {name}, and the path could resolve to the wrong value"
+    )
 }
 
 /// The reason to report for a path whose string at `position` blockwatch can't decode, because

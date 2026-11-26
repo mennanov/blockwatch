@@ -1443,8 +1443,7 @@ ENTRYPOINT ["/app"]
 - **An `ARG` without a default is not a symbol.** An `ENV` or a `LABEL` without a value, such as `ENV NAME` alone on
   its line, fails to resolve. Docker rejects it too. An empty default, such as `ARG NAME=`, gives an empty string.
 - **An `ARG` and an `ENV` with one name in a stage are defined twice**, and so are names repeated across unnamed stages
-  or a top-level `LABEL` with the same name as a stage index (such as `LABEL 0=...`). Wrap the one you mean in a block
-  instead.
+  or a top-level name matching a stage index (such as `LABEL 0=...`). Wrap the one you mean in a block instead.
 - **In `ENV A=1 B=2` and `ARG A=1 B=2`, each name covers only its own pair.** In `FROM`, the symbol covers the whole
   line.
 - **Strings decode quotes and line continuations.** In `"..."`, the escape character goes away only before `"`, `$` or

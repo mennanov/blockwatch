@@ -16,7 +16,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 - Dockerfile (and Containerfile) `FROM` stages now have 0-based positional symbols (`#/0`, `#/1`, ...), matching
   Docker's `COPY --from=0`. Unnamed stages can now be referenced directly (for example `apps/*/Dockerfile#/0`), while
-  named stages keep their `#/<name>` symbols and unnamed-stage `ARG`, `ENV`, and `LABEL` names stay at the top level.
+  named stages keep their `#/<name>` symbols and unnamed-stage `ARG`, `ENV`, and `LABEL` names stay at the top level. A
+  top-level name matching a stage index (such as `LABEL 0=...`) now reports an ambiguous symbol.
 
 ## [0.21.0] - 2026-11-25
 

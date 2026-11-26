@@ -3,7 +3,6 @@ use crate::languages::{
     self, CommentsParser, LanguageParser, LanguageParserImpl, node_text, tree_sitter_parser,
     walk_tree,
 };
-use crate::position::Position;
 use crate::symbols::{ScalarValue, Symbol, SymbolPath, Symbols, SymbolsParser};
 use anyhow::Context;
 use tree_sitter::Node;
@@ -57,11 +56,9 @@ impl StageIndices {
     /// Records a parsed `FROM` instruction as the next 0-based stage symbol, or marks its index
     /// unreadable when it or an earlier skipped `FROM` has a syntax error.
     fn record_stage(&mut self, from: Node<'_>, source: &str) {
-        let index = self.next_index;
+        let path = SymbolPath::from_segments(vec![self.next_index.to_string()]);
         self.next_index += 1;
-        let name = index.to_string();
-        let path = SymbolPath::from_segments(vec![name.clone()]);
-        if let Some(reason) = self.stage_error(from, &name, source) {
+        if let Some(reason) = self.stage_error(from, source) {
             self.unreadable.push((path, reason));
         } else {
             self.symbols.push(Symbol {
@@ -76,15 +73,24 @@ impl StageIndices {
     }
 
     /// Records any skipped `FROM` lines in a top-level `ERROR` node, marking their indices and
-    /// all later stage indices unreadable.
-    fn record_error(&mut self, error: Node<'_>, source: &str) {
-        for line in node_text(&error, source).lines() {
+    /// all later stage indices unreadable. When `skip_first_line` is true, the error started
+    /// mid-line after the previous instruction, so only its later lines can start a `FROM`.
+    fn record_error(&mut self, error: Node<'_>, skip_first_line: bool, source: &str) {
+        for line in node_text(&error, source)
+            .lines()
+            .skip(usize::from(skip_first_line))
+        {
             if !is_from_line(line.trim_start_matches([' ', '\t'])) {
                 continue;
             }
             let reason = self
                 .broken_reason
-                .get_or_insert_with(|| syntax_error_reason(error, "FROM", source))
+                .get_or_insert_with(|| {
+                    code_symbols::syntax_error_reason(
+                        code_symbols::position(&error, source),
+                        "FROM",
+                    )
+                })
                 .clone();
             let path = SymbolPath::from_segments(vec![self.next_index.to_string()]);
             self.next_index += 1;
@@ -108,12 +114,15 @@ impl StageIndices {
 
     /// Why `from` cannot be read reliably, if an earlier `FROM` was skipped or `from` itself
     /// holds or ends at a syntax error.
-    fn stage_error(&self, from: Node<'_>, name: &str, source: &str) -> Option<String> {
+    fn stage_error(&self, from: Node<'_>, source: &str) -> Option<String> {
         if let Some(reason) = &self.broken_reason {
             return Some(reason.clone());
         }
         if from.has_error() {
-            return Some(syntax_error_reason(from, name, source));
+            return Some(code_symbols::syntax_error_reason(
+                code_symbols::position(&from, source),
+                "FROM",
+            ));
         }
         error_after(from).map(|error| {
             code_symbols::undecodable_reason(
@@ -137,11 +146,10 @@ fn collect_instructions<'tree>(
     let mut cursor = root.walk();
     for child in root.children(&mut cursor) {
         if child.is_error() {
-            // A trailing error on the same line as the previous instruction belongs to it,
-            // not to a new `FROM` instruction.
-            if last_instruction_end_row != Some(child.start_position().row) {
-                stages.record_error(child, source);
-            }
+            // A trailing error on the previous instruction's line can't start a `FROM` on its
+            // first line, but a multi-line error can still swallow a `FROM` on later lines.
+            let skip_first_line = last_instruction_end_row == Some(child.start_position().row);
+            stages.record_error(child, skip_first_line, source);
             continue;
         }
         if !child.is_named() || child.is_extra() {
@@ -157,6 +165,10 @@ fn collect_instructions<'tree>(
         } else {
             instruction_definitions(child, stage, source)
         };
+        if child.has_error() {
+            // Error recovery inside an instruction can swallow a `FROM` on a later line.
+            stages.record_error(child, true, source);
+        }
         apply_trailing_error(child, &mut found, source);
         definitions.extend(found);
         last_instruction_end_row = Some(child.end_position().row);
@@ -219,14 +231,6 @@ fn decode_string(node: &Node, source: &str) -> anyhow::Result<Option<String>> {
         }
         _ => Ok(None),
     }
-}
-
-/// The unreadable reason for a syntax error at `node` affecting `name`.
-fn syntax_error_reason(node: Node<'_>, name: &str, source: &str) -> String {
-    let Position { line, character } = code_symbols::position(&node, source);
-    format!(
-        "file has a syntax error at line {line}, column {character} near {name}, and the path could resolve to the wrong value"
-    )
 }
 
 /// Whether `line`, with leading spaces and tabs removed, starts with a `FROM` keyword.
@@ -649,7 +653,9 @@ COPY . /app
 #[cfg(test)]
 mod symbols_tests {
     use super::*;
-    use crate::languages::code_symbols::test_utils::{symbol, symbols, unresolved};
+    use crate::languages::code_symbols::test_utils::{
+        decode_error, symbol, symbols, syntax_error, unresolved,
+    };
     use crate::symbols::{Symbols, SymbolsParser};
 
     /// The symbols of `source`, a Dockerfile.
@@ -792,9 +798,7 @@ FROM scratch AS final
             ("  FROM\nFROM ubuntu:24.04 AS app\n", 3),
         ] {
             let parsed = dockerfile(source)?;
-            let expected = format!(
-                "file has a syntax error at line 1, column {column} near FROM, and the path could resolve to the wrong value"
-            );
+            let expected = syntax_error(1, column, "FROM");
             for path in ["/0", "/1"] {
                 assert_eq!(unresolved(&parsed, source, path)?, expected, "{source:?}");
             }
@@ -811,12 +815,12 @@ FROM scratch AS final
         let parsed = dockerfile(consecutive)?;
         assert_eq!(
             unresolved(&parsed, consecutive, "/0")?,
-            "file has a syntax error at line 1, column 1 near 0, and the path could resolve to the wrong value"
+            syntax_error(1, 1, "FROM")
         );
         for path in ["/1", "/2"] {
             assert_eq!(
                 unresolved(&parsed, consecutive, path)?,
-                "file has a syntax error at line 2, column 1 near FROM, and the path could resolve to the wrong value",
+                syntax_error(2, 1, "FROM"),
                 "{path}"
             );
         }
@@ -840,7 +844,7 @@ FROM scratch AS final
         for path in ["/2", "/3"] {
             assert_eq!(
                 unresolved(&parsed, error_before_broken_from, path)?,
-                "file has a syntax error at line 4, column 1 near FROM, and the path could resolve to the wrong value",
+                syntax_error(4, 1, "FROM"),
                 "{path}"
             );
         }
@@ -855,7 +859,7 @@ FROM scratch AS final
         );
         assert_eq!(
             unresolved(&parsed, trailing_broken, "/1")?,
-            "file has a syntax error at line 2, column 1 near FROM, and the path could resolve to the wrong value"
+            syntax_error(2, 1, "FROM")
         );
 
         let trailing_junk = "FROM alpine:3.20 AS app from bar\nFROM debian:12\n";
@@ -863,7 +867,11 @@ FROM scratch AS final
         for path in ["/0", "/app"] {
             assert_eq!(
                 unresolved(&parsed, trailing_junk, path)?,
-                "blockwatch can't decode the string at line 1, column 24: the instruction has a syntax error here, so its value could be cut short",
+                decode_error(
+                    1,
+                    24,
+                    "the instruction has a syntax error here, so its value could be cut short"
+                ),
                 "{path}"
             );
         }
@@ -879,9 +887,50 @@ FROM scratch AS final
         for path in ["/0", "/1"] {
             assert_eq!(
                 unresolved(&parsed, after_comment, path)?,
-                "file has a syntax error at line 2, column 1 near FROM, and the path could resolve to the wrong value",
+                syntax_error(2, 1, "FROM"),
                 "{path}"
             );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn multiline_error_swallowing_from_parse_symbols_marks_later_stages_unreadable()
+    -> anyhow::Result<()> {
+        for (source, line, column) in [
+            (
+                "FROM alpine\nCMD echo \\\n\"\nFROM ubuntu\nFROM debian\n",
+                2,
+                1,
+            ),
+            (
+                "FROM alpine\nHEALTHCHECK CMD x \\\n\"\nFROM ubuntu\nFROM debian\n",
+                2,
+                1,
+            ),
+            ("FROM alpine\nCMD echo \\\n\"\nFROM\nFROM ubuntu\n", 2, 1),
+            (
+                "FROM alpine\nENV CUT=\"a\\\n\nFROM ubuntu\nb\"\nFROM debian\n",
+                2,
+                9,
+            ),
+        ] {
+            let parsed = dockerfile(source)?;
+            assert_eq!(
+                parsed
+                    .resolve(&SymbolPath::parse("/0")?)
+                    .map(|found| found.value_or_definition(source)),
+                Ok(std::borrow::Cow::Borrowed("alpine")),
+                "{source:?}"
+            );
+            for path in ["/1", "/2"] {
+                assert_eq!(
+                    unresolved(&parsed, source, path)?,
+                    syntax_error(line, column, "FROM"),
+                    "{path} in {source:?}"
+                );
+            }
         }
 
         Ok(())
