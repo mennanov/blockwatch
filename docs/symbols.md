@@ -446,8 +446,8 @@ h1, h2 { margin: 0; }
 In a code file, each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is
 `#/NAME`.
 With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`. In Java, C#, Kotlin, Swift, Protocol
-Buffers, PHP, Dart, Prisma and Python, the members of a type are symbols too, under the type's name:
-`Config.java#/Config/MAX_PORTS`.
+Buffers, PHP, Dart, Prisma, Python, TypeScript and JavaScript, the members of a type are symbols too, under the type's
+name: `Config.java#/Config/MAX_PORTS`.
 In HCL, each block, attribute and object key is a symbol: `main.tf#/variable/region/default`.
 
 - **A value is the initializer as written.** blockwatch never works it out: `20 * 1024 * 1024` stays as it is, and so
@@ -463,7 +463,7 @@ In HCL, each block, attribute and object key is a symbol: `main.tf#/variable/reg
   where the error is.
 - **A path to a string that blockwatch can't decode stops the run.** Other paths in the file still resolve.
 - **Members are not symbols yet**, such as a method or a field, except in Java, C#, Kotlin, Swift, Protocol Buffers,
-  HCL, PHP, Dart, Prisma and Python.
+  HCL, PHP, Dart, Prisma, Python, TypeScript and JavaScript.
 
 <!-- </block> -->
 
@@ -674,8 +674,30 @@ export const MAX_RETRIES = 5;
 const MODE = "dev" as const;
 const A = 1, B = 2;
 
+export const LIMITS = {
+  SLUG: 40,
+  "branch-name": 100,
+} as const;
+
 @sealed
-export class Point {}
+export class Point {
+  static readonly ORIGIN = 0;
+  constructor(public readonly x: number) {}
+  distance() { return this.x; }
+}
+
+export enum Status {
+  OPEN = "open",
+  PENDING,
+}
+
+export interface Options {
+  readonly retries?: number;
+}
+
+export namespace Api {
+  export const VERSION = "1.0";
+}
 
 type Mode = "dev" | "prod";
 
@@ -684,27 +706,52 @@ function normalize(text: string): string {
 }
 ```
 
-| Path             | Points at                                  |
-|------------------|--------------------------------------------|
-| `#/MAX_RETRIES`  | `5`                                        |
-| `#/MODE`         | `dev`                                      |
-| `#/B`            | `2`, and covers only `B = 2`               |
-| `#/Point`        | the whole class, `@sealed` included        |
-| `#/Mode`         | the whole type                             |
-| `#/normalize`    | the whole function                         |
+| Path                   | Points at                           |
+|------------------------|-------------------------------------|
+| `#/MAX_RETRIES`        | `5`                                 |
+| `#/MODE`               | `dev`                               |
+| `#/B`                  | `2`, and covers only `B = 2`        |
+| `#/LIMITS`             | the whole object, as written        |
+| `#/LIMITS/SLUG`        | `40`                                |
+| `#/LIMITS/branch-name` | `100`                               |
+| `#/Point`              | the whole class, `@sealed` included |
+| `#/Point/ORIGIN`       | `0`                                 |
+| `#/Point/x`            | `public readonly x: number`         |
+| `#/Point/distance`     | the whole method                    |
+| `#/Status/OPEN`        | `open`                              |
+| `#/Status/PENDING`     | `PENDING`, as it has no value       |
+| `#/Options/retries`    | `readonly retries?: number`         |
+| `#/Api/VERSION`        | `1.0`                               |
+| `#/Mode`               | the whole type                      |
+| `#/normalize`          | the whole function                  |
 
 - **`const`, `let`, `var`, functions, classes, enums, interfaces, type aliases and namespaces are symbols.**
   `export default function main() {}` is `#/main`.
-- **Type syntax is not part of a value.** `"dev" as const` is `dev`, `x satisfies T` is `x`, and `x!` is `x`.
-- **A function with overloads is its implementation**, the one with a body.
+- **Object literal properties are symbols**, at any depth, on variables, class fields and parameter defaults:
+  `#/LIMITS/SLUG` or `#/CONFIG/db/host`. Shorthand properties (`{ PORT }`) keep the name as their value. Object
+  methods, getters, setters and plain decimal integer keys (such as `0` or `200`, up to `2^53 - 1`) are symbols too.
+  Other numeric keys (`0x10`, `1_000`, `1.5`, `1e2`, `1n`) are skipped, along with everything under them. String keys
+  decode like string values, so `"a\"b"` is `a"b`. Escape keys as in [Writing a path](#writing-a-path) (`/` as `~1`,
+  `~` as `~0`, `,` as `%2C`, `%` as `%25`). Computed keys (`[key]`), spreads (`...other`) and undecodable string keys
+  are skipped, with everything under them.
+- **Class, enum, interface and namespace members are symbols too.** Class members include fields, `#private` names
+  (`#/Box/%23secret`), getters, setters, methods, abstract methods, and TypeScript constructor parameter properties
+  (`public`, `private`, `protected`, `readonly` or `override`). A getter and a setter with one name are defined twice;
+  wrap the one you mean in a block instead. `constructor`, overload signatures, index signatures and `static {}` blocks
+  are not symbols. Dotted namespaces (`namespace A.B { export const C = 1; }`) nest each part (`#/A/B/C`).
+- **Type syntax is not part of a value.** `"dev" as const` is `dev`, `x satisfies T` is `x`, `<T>x` is `x`, and `x!` is
+  `x`. Object literals and class expressions wrapped in those forms still expose their members.
+- **A function or class method with overloads is its implementation**, the one with a body. Overloaded signatures in
+  an `interface` or `abstract class` have no body, so they are defined twice.
 - **`declare const`, `declare function`, `declare module "x"` and `declare global` are not symbols.** They only state
-  types. A `declare class`, `enum` or `namespace` is one.
+  types. A `declare class`, `enum` or `namespace` and its members are symbols, except method signatures without a body.
 - **Imports, `export { ... }`, `const { a } = b`, `module.exports`, an anonymous `export default` and `_` are not
   symbols.**
 - **Strings follow JavaScript's escapes.** `"\uD83D\uDE00"` is `😀`. A template without `${...}` is its text. A template
   with a field and a tagged template, such as ``String.raw`a` ``, stay as written. A path to a string with a legacy
   escape, such as `\07`, stops the run.
-- **Enum members, class members and the contents of a namespace are not symbols yet.**
+- **A syntax error stops the run for the member or property that holds it, and for each type, namespace or object
+  around it.** The other members and properties still resolve.
 
 <!-- </block> -->
 

@@ -14,6 +14,12 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Added
 
+- TypeScript, TSX, and JavaScript now expose nested symbols at any depth. Object literal properties (including
+  through `as const`, `satisfies`, and `<T>` assertions) are symbols, such as `#/STRING_LIMITS/SLUG` and
+  `#/brand/iconPlate`. Class members (`#/Config/MAX_RETRIES`), enum members (`#/Status/OPEN`), interface members, and
+  namespace members (`#/Api/VERSION`) are symbols too. See
+  [TypeScript and JavaScript](docs/symbols.md#typescript-and-javascript)
+  ([#187](https://github.com/mennanov/blockwatch/issues/187)).
 - Python class members and dict string keys are now symbols, at any depth: class attributes, annotated fields, `Enum` /
   `StrEnum` members, methods, type aliases, nested classes (`#/Color/RED`, `#/Point/x`, `#/Point/move`), and string
   keys of dict literals on top-level or class assignments (`#/PRESETS/fast-mode`), in both Python and Starlark. See

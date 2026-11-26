@@ -165,9 +165,9 @@ A symbol points to one value or definition inside a file (`file#/path`, or `#/pa
     the heading line.
   - **XML / CSS:** element names and `@attr` (`pom.xml#/project/version`, `#/Project/@Sdk`); CSS selectors/at-rules and
     properties (`theme.css#/:root/--brand`).
-  - **Code files:** top-level names (`consts.go#/MaxPorts`), HCL blocks/keys, Python/Starlark dict keys, and Dockerfile
-    stages from 0 (`#/0`, `#/builder`). The members of a type are symbols too, under the type's name, in Java, C#,
-    Kotlin, Swift, Protocol Buffers, PHP, Dart, Prisma and Python. Strings read without quotes; others stay as written.
+  - **Code files:** top-level names (`consts.go#/MaxPorts`), HCL/Python/JS/TS keys, Dockerfile stages (`#/0`). The
+    members of a type are symbols too, under the type's name, in Java, C#, Kotlin, Swift, Protocol Buffers, PHP,
+    Dart, Prisma, Python, TypeScript and JavaScript. Strings decode escapes; other values stay as written.
 - **Check paths with the CLI:** a missing key is a violation (exit `1`) that prints `"did you mean: ..."` suggestions,
   and `blockwatch explain FILE:NAME` prints the exact extracted text.
 - **These stop the run (exit `2`):** missing file or syntax error (in code files, only for paths near the error).
