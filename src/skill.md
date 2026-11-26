@@ -161,10 +161,10 @@ A symbol points to one value or definition inside a file (`file#/path`, or `#/pa
 - **How formats map:**
   - **JSON / TOML / YAML:** keys, tables, and list items (multi-document YAML indexes each non-empty document from 0:
     `#/0/kind`, `#/~[kind=Rollout]/spec/replicas`); strings read without quotes, containers as raw file text.
-  - **Markdown / MDX:** heading path from `#` down (`README.md#/My project/Install`); `same-as` reads the body without
-    the heading line.
+  - **Markdown / MDX:** heading path (`README.md#/My project/Install`); `same-as` reads the body without the heading.
   - **XML / CSS:** element names and `@attr` (`pom.xml#/project/version`, `#/Project/@Sdk`); CSS selectors/at-rules and
     properties (`theme.css#/:root/--brand`).
+  - **Dotenv:** `KEY=VALUE` assignments (`.env#/PORT`); `"..."` decodes escapes, `'...'` and `` `...` `` stay literal.
   - **Code files:** top-level names (`consts.go#/MaxPorts`), HCL/Python/JS/TS keys, Dockerfile stages (`#/0`). The
     members of a type are symbols too, under the type's name, in Java, C#, Kotlin, Swift, Protocol Buffers, PHP,
     Dart, Prisma, Python, TypeScript and JavaScript. Strings decode escapes; other values stay as written.

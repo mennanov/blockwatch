@@ -665,6 +665,9 @@ mod tests {
         assert_resolves(&[
             ("Dockerfile.ci.yml", Yaml),
             ("Dockerfile-dev.yml", Yaml),
+            ("Makefile.env", Dotenv),
+            ("Dockerfile.env", Dotenv),
+            ("Jenkinsfile.env", Dotenv),
             ("a.rs.unknown.json", Json),
             (".env.json", Json),
             (".env.yaml", Yaml),

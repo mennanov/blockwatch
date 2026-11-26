@@ -61,7 +61,7 @@ impl LanguageParser for DotenvParser {
 
 type Input<'s> = LocatingSlice<&'s str>;
 
-/// Whether [`scan`] recovers past syntax errors (for comments) or fails loudly (for symbols).
+/// Whether [`scan`] collects `#` comments or `KEY=VALUE` symbols.
 #[derive(Clone, Copy)]
 enum ScanMode {
     Comments,
@@ -128,10 +128,13 @@ fn scan(source: &str, mode: ScanMode) -> anyhow::Result<ScanResult> {
     Ok(result)
 }
 
-/// Parses one logical assignment, comment, or blank line.
+/// Parses one assignment, comment, or blank line, stopping before its trailing line ending.
 ///
-/// Multiline quoted values consume internal line breaks; the caller consumes the line ending
-/// after the entry.
+/// Multiline quoted values consume internal line breaks.
+///
+/// # Errors
+/// Returns an error if the line has no `=`, a missing or invalid variable name, an unterminated
+/// quoted value, text after a closing quote, or a bare `\r` outside a quoted value.
 fn parse_line(
     input: &mut Input<'_>,
     mode: ScanMode,
@@ -214,16 +217,15 @@ fn read_value(
 ) -> Result<Option<(ScalarValue, usize)>, ParseError> {
     let after_eq = input.current_token_start();
     let ws = horizontal_ws(input);
-    let after_ws = input.current_token_start();
 
     if eol_or_eof(input) {
-        return Ok(empty_value(mode, after_eq, after_ws));
+        return Ok(empty_value(mode, after_eq));
     }
     if !ws.is_empty()
         && let Some(span) = try_parse(input, comment)
     {
         record_comment(mode, result, span);
-        return Ok(empty_value(mode, after_eq, after_ws));
+        return Ok(empty_value(mode, after_eq));
     }
 
     match try_parse(input, peek_quote) {
@@ -418,7 +420,7 @@ fn record_comment(mode: ScanMode, result: &mut ScanResult, span: Range<usize>) {
     }
 }
 
-fn empty_value(mode: ScanMode, after_eq: usize, after_ws: usize) -> Option<(ScalarValue, usize)> {
+fn empty_value(mode: ScanMode, after_eq: usize) -> Option<(ScalarValue, usize)> {
     match mode {
         ScanMode::Comments => None,
         ScanMode::Symbols => Some((
@@ -426,7 +428,7 @@ fn empty_value(mode: ScanMode, after_eq: usize, after_ws: usize) -> Option<(Scal
                 text: String::new(),
                 byte_range: after_eq..after_eq,
             },
-            after_ws,
+            after_eq,
         )),
     }
 }
@@ -448,7 +450,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_comments_correctly() -> anyhow::Result<()> {
+    fn valid_file_parse_comments_returns_every_comment_in_order() -> anyhow::Result<()> {
         let comments: Vec<Comment> = DotenvParser
             .parse_comments(
                 r##"# Top comment
@@ -506,8 +508,7 @@ TIGHT="a"#tight inline comment
     }
 
     #[test]
-    fn hash_inside_quotes_or_without_space_in_unquoted_value_is_not_a_comment() -> anyhow::Result<()>
-    {
+    fn hash_in_quotes_or_tight_value_parse_comments_returns_empty() -> anyhow::Result<()> {
         assert_eq!(
             comments_in(
                 r#"COLOR=#5097ba
@@ -651,7 +652,7 @@ export export=3
                     Some("line 1\nline 2"),
                 ),
                 symbol("/EMPTY", "EMPTY=", Some("")),
-                symbol("/EMPTY_COMMENT", "EMPTY_COMMENT= ", Some("")),
+                symbol("/EMPTY_COMMENT", "EMPTY_COMMENT=", Some("")),
                 symbol("/EMPTY_QUOTED", "EMPTY_QUOTED=\"\"", Some("")),
                 symbol("/app.name", "app.name=blockwatch", Some("blockwatch")),
                 symbol("/my-key", "my-key=value", Some("value")),
@@ -677,7 +678,7 @@ export export=3
     }
 
     #[test]
-    fn value_byte_ranges_include_quotes_and_exclude_surrounding_whitespace() -> anyhow::Result<()> {
+    fn padded_values_parse_symbols_sets_trimmed_value_ranges() -> anyhow::Result<()> {
         let source = "PLAIN=  hello   # comment\nQUOTED=  \"a\\nb\"  # comment\nEMPTY=   \n";
         let parsed = dotenv(source)?;
 
@@ -711,7 +712,7 @@ export export=3
     }
 
     #[test]
-    fn double_quote_cr_escape_and_bare_cr_are_preserved() -> anyhow::Result<()> {
+    fn quoted_carriage_returns_parse_symbols_preserves_cr() -> anyhow::Result<()> {
         let source = "A=\"a\\rb\"\nB=\"x\ry\"\nC=\"line\\\rnext\"\n";
         let parsed = dotenv(source)?;
 
@@ -734,7 +735,7 @@ export export=3
     }
 
     #[test]
-    fn edge_cases_export_tabs_eof_and_empty_whitespace_parse_correctly() -> anyhow::Result<()> {
+    fn export_tabs_eof_and_empty_whitespace_parse_symbols_returns_symbols() -> anyhow::Result<()> {
         let source = "export\tTAB_EXPORT=1\nexport_foo=2\n1FOO=3\nTAB_COMMENT=x\t# c\nEMPTY_TAB=\t# c\nPORT = \nTIGHT=\"a\"#tight\nAT_EOF=4   ";
         let parsed = dotenv(source)?;
 
@@ -745,8 +746,8 @@ export export=3
                 symbol("/export_foo", "export_foo=2", Some("2")),
                 symbol("/1FOO", "1FOO=3", Some("3")),
                 symbol("/TAB_COMMENT", "TAB_COMMENT=x", Some("x")),
-                symbol("/EMPTY_TAB", "EMPTY_TAB=\t", Some("")),
-                symbol("/PORT", "PORT = ", Some("")),
+                symbol("/EMPTY_TAB", "EMPTY_TAB=", Some("")),
+                symbol("/PORT", "PORT =", Some("")),
                 symbol("/TIGHT", r#"TIGHT="a""#, Some("a")),
                 symbol("/AT_EOF", "AT_EOF=4", Some("4")),
             ]

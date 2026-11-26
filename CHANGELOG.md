@@ -37,6 +37,12 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
   named stages keep their `#/<name>` symbols and unnamed-stage `ARG`, `ENV`, and `LABEL` names stay at the top level. A
   top-level name matching a stage index (such as `LABEL 0=...`) now reports an ambiguous symbol.
 
+### Changed
+
+- Files ending in `.env` now resolve as Dotenv ahead of prefix variants, so `Makefile.env`, `Dockerfile.env`, and
+  `Jenkinsfile.env` are read as Dotenv rather than Makefile, Dockerfile, or Groovy. Use `-E Makefile.env=makefile`
+  (or `extensions` in `blockwatch.toml`) if a project keeps Makefile syntax in `Makefile.env`.
+
 ## [0.21.0] - 2026-11-25
 
 ### Added

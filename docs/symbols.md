@@ -53,7 +53,7 @@ declares, instead of tags in a comment.
 | Dart             | `*.dart`                                                               | [Dart](#dart)                                           |
 | Dockerfile       | `Dockerfile`, `Containerfile`, `*.dockerfile`                          | [Dockerfile](#dockerfile)                               |
 | Prisma           | `*.prisma`                                                             | [Prisma](#prisma)                                       |
-| Dotenv           | `.env`, `*.env`, `.env.*`                                              | [Dotenv](#dotenv)                                       |
+| Dotenv           | `.env`, `*.env`, `.env.*`, `.env-*`, `.env_*`                          | [Dotenv](#dotenv)                                       |
 
 <!-- </block> -->
 
@@ -1641,8 +1641,10 @@ EMPTY=
   Double quotes decode `\n`, `\r`, `\t`, `\"`, `\\`, and `\$`, keeping unknown escapes as written. Single quotes and
   backticks keep every character literally. Variable references such as `$VAR` are not expanded.
 - **Duplicate keys are a violation**, because blockwatch can't tell which copy you mean.
-- **A syntax error anywhere stops the run**, such as a line without `=`, an invalid key, an unterminated quote, text
-  after a closing quote, or a bare `\r` line ending (use LF or CRLF instead).
+- **A syntax error anywhere stops the run**, such as a line without `=` (including Docker bare `VAR` passthrough
+  lines), Ruby's `KEY: value` syntax, an invalid key, an unterminated quote, text after a closing quote, or a bare
+  `\r` line ending (use LF or CRLF instead). Escaped quotes inside single quotes (such as python-dotenv's `'it\'s'`)
+  are not supported because single quotes keep every character literally.
 
 <!-- </block> -->
 
