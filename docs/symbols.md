@@ -1641,8 +1641,8 @@ EMPTY=
   Double quotes decode `\n`, `\r`, `\t`, `\"`, `\\`, and `\$`, keeping unknown escapes as written. Single quotes and
   backticks keep every character literally. Variable references such as `$VAR` are not expanded.
 - **Duplicate keys are a violation**, because blockwatch can't tell which copy you mean.
-- **A syntax error anywhere stops the run**, such as a line without `=`, an invalid key, an unterminated quote, or text
-  after a closing quote.
+- **A syntax error anywhere stops the run**, such as a line without `=`, an invalid key, an unterminated quote, text
+  after a closing quote, or a bare `\r` line ending (use LF or CRLF instead).
 
 <!-- </block> -->
 

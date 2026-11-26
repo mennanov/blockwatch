@@ -1,10 +1,8 @@
 //! Finds `#` comments and `KEY=VALUE` symbols in dotenv (`.env`) files with `winnow`.
 
-use crate::languages::{
-    Comment, CommentsParser, LanguageParser, LanguageParserImpl, blank_line_marker,
-};
+use crate::languages::{Comment, LanguageParser, blank_line_marker};
 use crate::position::LineIndex;
-use crate::symbols::{ScalarValue, Symbol, SymbolPath, Symbols, SymbolsParser};
+use crate::symbols::{ScalarValue, Symbol, SymbolPath, Symbols};
 use anyhow::bail;
 use std::ops::Range;
 use winnow::Result as PResult;
@@ -12,51 +10,51 @@ use winnow::combinator::{alt, eof, not, opt, peek, repeat};
 use winnow::error::ContextError;
 use winnow::prelude::*;
 use winnow::stream::{LocatingSlice, Location, Stream};
-use winnow::token::{any, take_while};
+use winnow::token::{any, none_of, take_till, take_while};
 
 /// Returns a [`LanguageParser`] for dotenv files, with `#` comments and `KEY=VALUE` symbols.
 pub(super) fn parser() -> impl LanguageParser {
-    LanguageParserImpl::new(DotenvCommentsParser).with_symbols(DotenvSymbolsParser)
+    DotenvParser
 }
 
-/// Finds `#` comments in a dotenv file.
-struct DotenvCommentsParser;
+/// Parses `#` comments and `KEY=VALUE` symbols in a dotenv file.
+struct DotenvParser;
 
-impl CommentsParser for DotenvCommentsParser {
-    fn parse<'source>(
-        &'source mut self,
-        source: &'source str,
-    ) -> impl Iterator<Item = Comment> + 'source {
-        let parsed = scan(source, ScanMode::Comments)
-            .expect("scanning in comments mode recovers from malformed lines");
-        let lines = LineIndex::new(source);
-        parsed.comments.into_iter().map(move |range| {
+impl LanguageParser for DotenvParser {
+    /// Returns `#` comments in document order.
+    ///
+    /// # Errors
+    /// Returns an error if the file is not valid dotenv syntax, so blocks after a bad line are
+    /// never silently dropped.
+    fn parse_comments<'a>(
+        &'a mut self,
+        contents: &'a str,
+    ) -> anyhow::Result<Box<dyn Iterator<Item = Comment> + 'a>> {
+        let parsed = scan(contents, ScanMode::Comments)?;
+        let lines = LineIndex::new(contents);
+        let comments = parsed.comments.into_iter().map(move |range| {
             #[expect(
                 clippy::string_slice,
                 reason = "winnow's LocatingSlice spans stop on character boundaries"
             )]
-            let text = &source[range.clone()];
+            let text = &contents[range.clone()];
             Comment {
                 position_range: lines.range(&range),
                 comment_text: blank_line_marker(text, &["#"])
                     .expect("the scanner starts every comment at `#`"),
                 source_range: range,
             }
-        })
+        });
+        Ok(Box::new(comments))
     }
-}
 
-/// Finds `KEY=VALUE` symbols in a dotenv file.
-struct DotenvSymbolsParser;
-
-impl SymbolsParser for DotenvSymbolsParser {
     /// Returns every `KEY=VALUE` assignment in document order.
     ///
     /// # Errors
-    /// Returns an error if a non-empty, non-comment line is missing `=`, has an invalid key, has
-    /// an unterminated quoted value, or has unexpected text after a closing quote.
-    fn parse(&mut self, source: &str) -> anyhow::Result<Symbols> {
-        let parsed = scan(source, ScanMode::Symbols)?;
+    /// Returns an error if the file is not valid dotenv syntax, such as a line without `=`, an
+    /// invalid key, an unterminated quoted value, text after a closing quote, or a bare `\r`.
+    fn parse_symbols(&mut self, contents: &str) -> anyhow::Result<Symbols> {
+        let parsed = scan(contents, ScanMode::Symbols)?;
         Ok(Symbols::from(parsed.symbols))
     }
 }
@@ -107,7 +105,7 @@ struct ScanResult {
     symbols: Vec<Symbol>,
 }
 
-/// Scans `source` once, collecting `#` comment ranges and `KEY=VALUE` symbols.
+/// Scans `source` once, collecting `#` comment ranges or `KEY=VALUE` symbols.
 fn scan(source: &str, mode: ScanMode) -> anyhow::Result<ScanResult> {
     let mut input = Input::new(source);
     try_parse(&mut input, '\u{feff}');
@@ -117,18 +115,13 @@ fn scan(source: &str, mode: ScanMode) -> anyhow::Result<ScanResult> {
     };
     while input.eof_offset() > 0 {
         if let Err(err) = parse_line(&mut input, mode, &mut result) {
-            match mode {
-                ScanMode::Comments => skip_to_eol(&mut input),
-                ScanMode::Symbols => {
-                    let position = LineIndex::new(source).position(err.offset);
-                    bail!(
-                        "file is not valid dotenv at line {}, column {}: {}",
-                        position.line,
-                        position.character,
-                        err.message
-                    );
-                }
-            }
+            let position = LineIndex::new(source).position(err.offset);
+            bail!(
+                "file is not valid dotenv at line {}, column {}: {}",
+                position.line,
+                position.character,
+                err.message
+            );
         }
         try_parse(&mut input, line_ending);
     }
@@ -147,6 +140,9 @@ fn parse_line(
     horizontal_ws(input);
     if eol_or_eof(input) {
         return Ok(());
+    }
+    if peek_bare_cr(input) {
+        return Err(bare_cr_error(input));
     }
     if let Some(span) = try_parse(input, comment) {
         record_comment(mode, result, span);
@@ -192,6 +188,9 @@ fn missing_equals_error(
     key_span: &Range<usize>,
     ws_after_key: &str,
 ) -> ParseError {
+    if peek_bare_cr(input) {
+        return bare_cr_error(input);
+    }
     if ws_after_key.is_empty()
         && !eol_or_eof(input)
         && let Some(ch) = try_parse(input, any)
@@ -256,6 +255,8 @@ fn read_quoted_value(
     if !eol_or_eof(input) {
         if let Some(span) = try_parse(input, comment) {
             record_comment(mode, result, span);
+        } else if peek_bare_cr(input) {
+            return Err(bare_cr_error(input));
         } else {
             return Err(ParseError {
                 offset: input.current_token_start(),
@@ -353,7 +354,6 @@ fn unquoted_raw<'s>(input: &mut Input<'s>) -> PResult<(&'s str, Range<usize>)> {
     let chunk = alt((
         take_while(1.., |c: char| !matches!(c, ' ' | '\t' | '\r' | '\n')).void(),
         (take_while(1.., [' ', '\t']), not('#')).void(),
-        ('\r', not('\n')).void(),
     ));
     repeat::<_, _, (), _, _>(0.., chunk)
         .take()
@@ -367,23 +367,6 @@ fn horizontal_ws<'s>(input: &mut Input<'s>) -> &'s str {
         .expect("`take_while(0..)` cannot fail")
 }
 
-fn till_eol<'s>(input: &mut Input<'s>) -> PResult<&'s str> {
-    let chunk = alt((
-        take_while(1.., |c: char| c != '\r' && c != '\n').void(),
-        ('\r', not('\n')).void(),
-    ));
-    repeat::<_, _, (), _, _>(0.., chunk)
-        .take()
-        .parse_next(input)
-}
-
-fn skip_to_eol(input: &mut Input<'_>) {
-    till_eol
-        .void()
-        .parse_next(input)
-        .expect("`till_eol` cannot fail");
-}
-
 fn line_ending(input: &mut Input<'_>) -> PResult<()> {
     alt(("\r\n", "\n")).void().parse_next(input)
 }
@@ -392,15 +375,26 @@ fn eol_or_eof(input: &mut Input<'_>) -> bool {
     try_parse(input, peek(alt((line_ending, eof.void())))).is_some()
 }
 
+fn peek_bare_cr(input: &mut Input<'_>) -> bool {
+    try_parse(input, peek(('\r', not('\n')))).is_some()
+}
+
+fn bare_cr_error(input: &Input<'_>) -> ParseError {
+    ParseError {
+        offset: input.current_token_start(),
+        message: "bare carriage return (`\\r`) is not a supported line ending; use LF (`\\n`) or CRLF (`\\r\\n`)".to_string(),
+    }
+}
+
 fn comment(input: &mut Input<'_>) -> PResult<Range<usize>> {
-    ('#', till_eol).span().parse_next(input)
+    ('#', take_till(0.., ['\r', '\n'])).span().parse_next(input)
 }
 
 fn export_prefix(input: &mut Input<'_>) -> PResult<()> {
     (
         "export",
         take_while(1.., [' ', '\t']),
-        peek(not(alt(("=".void(), "#".void(), line_ending, eof.void())))),
+        peek(none_of(['=', '#', '\r', '\n'])),
     )
         .void()
         .parse_next(input)
@@ -446,17 +440,17 @@ mod tests {
     use super::*;
     use crate::position::Position;
 
-    fn comments_in(source: &str) -> Vec<&str> {
-        DotenvCommentsParser
-            .parse(source)
+    fn comments_in(source: &str) -> anyhow::Result<Vec<&str>> {
+        Ok(DotenvParser
+            .parse_comments(source)?
             .map(|comment| &source[comment.source_range])
-            .collect()
+            .collect())
     }
 
     #[test]
-    fn parses_comments_correctly() {
-        let comments: Vec<Comment> = DotenvCommentsParser
-            .parse(
+    fn parses_comments_correctly() -> anyhow::Result<()> {
+        let comments: Vec<Comment> = DotenvParser
+            .parse_comments(
                 r##"# Top comment
 PORT=8080 # inline comment
   # Indented comment
@@ -465,7 +459,7 @@ EMPTY= # after empty value
 QUOTED="a # b" # after quoted value
 TIGHT="a"#tight inline comment
 "##,
-            )
+            )?
             .collect();
 
         assert_eq!(
@@ -508,10 +502,12 @@ TIGHT="a"#tight inline comment
                 },
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn hash_inside_quotes_or_without_space_in_unquoted_value_is_not_a_comment() {
+    fn hash_inside_quotes_or_without_space_in_unquoted_value_is_not_a_comment() -> anyhow::Result<()>
+    {
         assert_eq!(
             comments_in(
                 r#"COLOR=#5097ba
@@ -522,15 +518,16 @@ line 2"
 SINGLE='literal # hash'
 BACKTICK=`backtick # hash`
 "#,
-            ),
+            )?,
             Vec::<&str>::new()
         );
+        Ok(())
     }
 
     #[test]
-    fn comments_survive_bom_crlf_utf8_and_malformed_lines() {
-        let source = "\u{feff}A=café # café\r\nBAD LINE\r\n=missing\r\nB=\"x\" extra # ignored\r\n# still read\r\n";
-        let comments: Vec<Comment> = DotenvCommentsParser.parse(source).collect();
+    fn bom_crlf_utf8_and_eof_comment_parse_comments_returns_comments() -> anyhow::Result<()> {
+        let source = "\u{feff}A=café # café\r\n# second\r\nB=1 # at eof";
+        let comments: Vec<Comment> = DotenvParser.parse_comments(source)?.collect();
 
         assert_eq!(
             comments,
@@ -541,22 +538,50 @@ BACKTICK=`backtick # hash`
                     comment_text: "  café".to_string(),
                 },
                 Comment {
-                    position_range: Position::new(5, 1)..Position::new(5, 13),
-                    source_range: 63..75,
-                    comment_text: "  still read".to_string(),
+                    position_range: Position::new(2, 1)..Position::new(2, 9),
+                    source_range: 20..28,
+                    comment_text: "  second".to_string(),
+                },
+                Comment {
+                    position_range: Position::new(3, 5)..Position::new(3, 13),
+                    source_range: 34..42,
+                    comment_text: "  at eof".to_string(),
                 },
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn unterminated_quote_does_not_emit_inner_hash_as_comment() {
-        assert_eq!(
-            comments_in("BROKEN=\"open\n# inside quote\n"),
-            Vec::<&str>::new()
-        );
-        assert_eq!(comments_in("A=1 # at eof"), ["# at eof"]);
-        assert_eq!(comments_in("MALFORMED_AT_EOF"), Vec::<&str>::new());
+    fn invalid_syntax_parse_comments_returns_error() {
+        for (source, expected) in [
+            (
+                "KEY=\"open\n# <block>\nA=1\n# </block>\n",
+                "file is not valid dotenv at line 1, column 5: unterminated quoted value",
+            ),
+            (
+                "FOO # <block>\n",
+                "file is not valid dotenv at line 1, column 4: expected `=` after variable name `FOO`",
+            ),
+            (
+                "=missing\n# <block>\n",
+                "file is not valid dotenv at line 1, column 1: expected a variable name before `=`",
+            ),
+            (
+                "B=\"x\" extra # ignored\n",
+                "file is not valid dotenv at line 1, column 7: unexpected text after closing quote",
+            ),
+            (
+                "A=1\rB=2\r",
+                "file is not valid dotenv at line 1, column 4: bare carriage return (`\\r`) is not a supported line ending; use LF (`\\n`) or CRLF (`\\r\\n`)",
+            ),
+        ] {
+            let err = match DotenvParser.parse_comments(source) {
+                Ok(_) => panic!("expected error for {source:?}"),
+                Err(err) => err,
+            };
+            assert_eq!(err.to_string(), expected, "{source:?}");
+        }
     }
 }
 
@@ -568,7 +593,7 @@ mod symbols_tests {
     };
 
     fn dotenv(source: &str) -> anyhow::Result<Symbols> {
-        DotenvSymbolsParser.parse(source)
+        DotenvParser.parse_symbols(source)
     }
 
     #[test]
@@ -814,7 +839,47 @@ export export=3
             ),
             (
                 "A=\"x\"\rB=\"y\"\n",
-                "file is not valid dotenv at line 1, column 6: unexpected text after closing quote",
+                "file is not valid dotenv at line 1, column 6: bare carriage return (`\\r`) is not a supported line ending; use LF (`\\n`) or CRLF (`\\r\\n`)",
+            ),
+            (
+                "A=1\rB=2\r",
+                "file is not valid dotenv at line 1, column 4: bare carriage return (`\\r`) is not a supported line ending; use LF (`\\n`) or CRLF (`\\r\\n`)",
+            ),
+            (
+                "KEY=\"a\"\r",
+                "file is not valid dotenv at line 1, column 8: bare carriage return (`\\r`) is not a supported line ending; use LF (`\\n`) or CRLF (`\\r\\n`)",
+            ),
+            (
+                "\r",
+                "file is not valid dotenv at line 1, column 1: bare carriage return (`\\r`) is not a supported line ending; use LF (`\\n`) or CRLF (`\\r\\n`)",
+            ),
+            (
+                "   \r",
+                "file is not valid dotenv at line 1, column 4: bare carriage return (`\\r`) is not a supported line ending; use LF (`\\n`) or CRLF (`\\r\\n`)",
+            ),
+            (
+                "# hi\rA=1",
+                "file is not valid dotenv at line 1, column 5: bare carriage return (`\\r`) is not a supported line ending; use LF (`\\n`) or CRLF (`\\r\\n`)",
+            ),
+            (
+                "A=\r",
+                "file is not valid dotenv at line 1, column 3: bare carriage return (`\\r`) is not a supported line ending; use LF (`\\n`) or CRLF (`\\r\\n`)",
+            ),
+            (
+                "A= \r",
+                "file is not valid dotenv at line 1, column 4: bare carriage return (`\\r`) is not a supported line ending; use LF (`\\n`) or CRLF (`\\r\\n`)",
+            ),
+            (
+                "FOO\r",
+                "file is not valid dotenv at line 1, column 4: bare carriage return (`\\r`) is not a supported line ending; use LF (`\\n`) or CRLF (`\\r\\n`)",
+            ),
+            (
+                "export \r",
+                "file is not valid dotenv at line 1, column 8: bare carriage return (`\\r`) is not a supported line ending; use LF (`\\n`) or CRLF (`\\r\\n`)",
+            ),
+            (
+                "A=1 # hi\rB=2",
+                "file is not valid dotenv at line 1, column 9: bare carriage return (`\\r`) is not a supported line ending; use LF (`\\n`) or CRLF (`\\r\\n`)",
             ),
         ] {
             let err = dotenv(source).expect_err(source);
