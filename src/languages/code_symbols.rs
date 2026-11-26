@@ -592,6 +592,20 @@ pub(crate) fn decode_utf16(
     string_from_utf16(units)
 }
 
+/// Takes the character after a backslash from `characters`.
+///
+/// # Errors
+/// Returns an error if `characters` has no more characters.
+pub(crate) fn escaped_character(
+    characters: &mut impl Iterator<Item = char>,
+) -> anyhow::Result<char> {
+    // Grammars put a character after every backslash in a string, but the decoders don't rely on
+    // that.
+    characters
+        .next()
+        .ok_or_else(|| anyhow!("the string ends with a `\\` that escapes nothing"))
+}
+
 /// Adds the UTF-16 code units of `character` to `units`.
 pub(crate) fn push_utf16(character: char, units: &mut Vec<u16>) {
     units.extend(character.encode_utf16(&mut [0; 2]).iter());
@@ -1126,5 +1140,18 @@ class B:
         assert_eq!(utf16_unit("0e9"), None, "3 digits");
         assert_eq!(utf16_unit("000e9"), None, "5 digits");
         assert_eq!(utf16_unit("+0e9"), None, "a sign");
+    }
+
+    #[test]
+    fn nothing_after_backslash_escaped_character_returns_error() -> anyhow::Result<()> {
+        let error = escaped_character(&mut "".chars())
+            .expect_err("a backslash with nothing after it is not an escape");
+
+        assert_eq!(
+            error.to_string(),
+            "the string ends with a `\\` that escapes nothing"
+        );
+        assert_eq!(escaped_character(&mut "n".chars())?, 'n');
+        Ok(())
     }
 }

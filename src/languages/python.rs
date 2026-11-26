@@ -207,11 +207,11 @@ fn push_written(
 /// # Errors
 /// Returns an error if `escape` gives a character by its name, or stands for no character.
 fn push_escape(escape: &str, text: &mut String) -> anyhow::Result<()> {
-    // The grammar starts each escape with a backslash and at least one more character.
+    // The grammar starts each escape with a backslash.
     let mut characters = escape.chars();
     characters.next();
     let rest = characters.as_str();
-    let first = characters.next().unwrap_or_default();
+    let first = code_symbols::escaped_character(&mut characters)?;
     let digits = characters.as_str();
     match first {
         // An octal escape takes up to three digits, so `\18` is `\1` and `8`. The grammar also

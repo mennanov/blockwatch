@@ -100,8 +100,7 @@ fn is_white_space(character: char) -> bool {
 /// # Errors
 /// Returns an error if the escape is not one of Java's, or if it is `\u005c`.
 fn push_escape(characters: &mut Peekable<Chars>, units: &mut Vec<u16>) -> anyhow::Result<()> {
-    // The grammar puts a character after every backslash in a string.
-    let escaped = characters.next().unwrap_or_default();
+    let escaped = code_symbols::escaped_character(characters)?;
     let character = match escaped {
         'b' => '\u{8}',
         's' => ' ',

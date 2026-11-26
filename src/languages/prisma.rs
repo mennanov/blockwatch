@@ -60,11 +60,9 @@ impl CodeLanguage for Prisma {
 /// code units it stands for to `units`.
 ///
 /// # Errors
-/// Returns an error if the escape is not one of Prisma's, or if no character follows the backslash.
+/// Returns an error if the escape is not one of Prisma's.
 fn push_escape(characters: &mut Peekable<Chars>, units: &mut Vec<u16>) -> anyhow::Result<()> {
-    let escaped = characters
-        .next()
-        .ok_or_else(|| anyhow!("the string ends with a `\\` that escapes nothing"))?;
+    let escaped = code_symbols::escaped_character(characters)?;
     let character = match escaped {
         '"' | '\\' | '/' => escaped,
         'b' => '\u{8}',
@@ -365,17 +363,6 @@ b"
             decode_error(10, 24, CONTROL_CHARACTER)
         );
         Ok(())
-    }
-
-    #[test]
-    fn backslash_at_string_end_push_escape_returns_error() {
-        let error = push_escape(&mut "".chars().peekable(), &mut Vec::new())
-            .expect_err("a backslash with nothing after it is not an escape");
-
-        assert_eq!(
-            error.to_string(),
-            "the string ends with a `\\` that escapes nothing"
-        );
     }
 
     #[test]

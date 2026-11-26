@@ -178,10 +178,10 @@ fn without_type_syntax(mut value: Node<'_>) -> Node<'_> {
 /// Returns an error if `escape` is a legacy octal escape, such as `\07`, or stands for no
 /// character.
 fn push_escape(escape: &str, units: &mut Vec<u16>) -> anyhow::Result<()> {
-    // The grammar starts each escape with a backslash and at least one more character.
+    // The grammar starts each escape with a backslash.
     let mut characters = escape.chars();
     characters.next();
-    let first = characters.next().unwrap_or_default();
+    let first = code_symbols::escaped_character(&mut characters)?;
     let digits = characters.as_str();
     let character = match first {
         // A backslash at the end of a line joins the next line to it. JavaScript also ends a line

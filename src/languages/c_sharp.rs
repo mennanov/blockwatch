@@ -129,8 +129,7 @@ fn raw_text(quoted: &str) -> anyhow::Result<String> {
 /// Returns an error if the escape is not one of C#'s, or if it is a `\U` escape that stands for no
 /// character.
 fn push_escape(characters: &mut Peekable<Chars>, units: &mut Vec<u16>) -> anyhow::Result<()> {
-    // The grammar puts a character after every backslash in a string.
-    let escaped = characters.next().unwrap_or_default();
+    let escaped = code_symbols::escaped_character(characters)?;
     let character = match escaped {
         '\'' | '"' | '\\' => escaped,
         '0' => '\0',
