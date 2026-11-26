@@ -14,9 +14,9 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Added
 
-- Support for dotenv files (`.env`, `*.env`, `.env.*`, and copy suffixes such as `.env.example`), with `#` comment
-  parsing for `<block>` tags and `KEY=VALUE` symbols (including optional `export` prefix, unquoted values with spaces
-  or `<`/`>`, and single/double/backtick-quoted values). See [Dotenv](docs/symbols.md#dotenv)
+- Support for dotenv files (`.env`, `*.env`, `.env.*`, `.env-*`, `.env_*`, and copy suffixes such as `.env.example`),
+  with `#` comment parsing for `<block>` tags and `KEY=VALUE` symbols (including optional `export` prefix, unquoted
+  values with spaces or `<`/`>`, and single/double/backtick-quoted values). See [Dotenv](docs/symbols.md#dotenv)
   ([#186](https://github.com/mennanov/blockwatch/issues/186)).
 - TypeScript, TSX, and JavaScript now expose nested symbols at any depth. Object literal properties (including
   through `as const`, `satisfies`, and `<T>` assertions) are symbols, such as `#/STRING_LIMITS/SLUG` and

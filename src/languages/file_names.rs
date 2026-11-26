@@ -728,6 +728,7 @@ mod tests {
             (".env_local", Dotenv),
             (".env.", Dotenv),
             (".env-", Dotenv),
+            (".env_", Dotenv),
         ]);
     }
 
@@ -848,9 +849,14 @@ mod tests {
         assert_resolves_with(&[("h", C)], &[("a.h", Some(C))]);
         assert_resolves_with(&[("Dockerfile", Bash)], &[("Dockerfile", Some(Bash))]);
         assert_resolves_with(
-            &[("env", Bash)],
-            &[(".env", Some(Bash)), ("app.env", Some(Bash))],
+            &[("env", Bash), ("myfmt", Dotenv)],
+            &[
+                (".env", Some(Bash)),
+                ("app.env", Some(Bash)),
+                ("a.myfmt", Some(Dotenv)),
+            ],
         );
+        assert_eq!(Language::from_key("env"), Some(Dotenv));
     }
 
     /// A mapping of a name covers that name only, not its variants. To map a variant, map its
@@ -870,6 +876,18 @@ mod tests {
             &[("Earthfile.ci", Some(Dockerfile))],
         );
         assert_resolves_with(&[("Makefile.am", Bash)], &[("Makefile.am", Some(Bash))]);
+        assert_resolves_with(
+            &[(".env", Bash)],
+            &[
+                (".env", Some(Bash)),
+                (".env.example", Some(Bash)),
+                (".env.local", Some(Dotenv)),
+            ],
+        );
+        assert_resolves_with(
+            &[(".env.local", Bash)],
+            &[(".env.local", Some(Bash)), (".env", Some(Dotenv))],
+        );
     }
 
     /// Only the file name counts, not the directories.
@@ -886,7 +904,15 @@ mod tests {
     /// Case matters, because some languages differ only by case, such as `.C` (C++) and `.c` (C).
     #[test]
     fn name_is_matched_case_sensitively() {
-        assert_no_language(&["a.RS", "DOCKERFILE", "DOCKERFILE.ci", "config.toml.EXAMPLE"]);
+        assert_no_language(&[
+            "a.RS",
+            "DOCKERFILE",
+            "DOCKERFILE.ci",
+            "config.toml.EXAMPLE",
+            ".ENV",
+            ".ENV.local",
+            "app.ENV",
+        ]);
     }
 
     /// blockwatch picks a language by the name alone, so a name that several languages use, by

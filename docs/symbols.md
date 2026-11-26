@@ -1633,8 +1633,8 @@ EMPTY=
 | `#/MULTILINE`           | `line 1` and `line 2` on two lines                    |
 | `#/EMPTY`               | `""` (empty string)                                   |
 
-- **Each `KEY=VALUE` assignment is a symbol**, with an optional `export` prefix. Spaces and tabs around `=` are
-  ignored.
+- **Each `KEY=VALUE` assignment is a symbol**, with an optional `export` prefix. Keys hold ASCII letters, digits, `_`,
+  `.` and `-`. Spaces and tabs around `=` are ignored.
 - **Unquoted values keep spaces and `<`/`>` characters**, with trailing spaces and tabs removed. A `#` starts an inline
   comment only when a space or tab comes right before it, so `#5097ba` and URL fragments stay part of the value.
 - **Quoted values (`"..."`, `'...'`, `` `...` ``) can span multiple lines**, normalizing `\r\n` line breaks to `\n`.

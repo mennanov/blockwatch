@@ -12,7 +12,7 @@ use winnow::combinator::{alt, eof, not, opt, peek, repeat};
 use winnow::error::ContextError;
 use winnow::prelude::*;
 use winnow::stream::{LocatingSlice, Location, Stream};
-use winnow::token::{any, none_of, take_till, take_while};
+use winnow::token::{any, take_while};
 
 /// Returns a [`LanguageParser`] for dotenv files, with `#` comments and `KEY=VALUE` symbols.
 pub(super) fn parser() -> impl LanguageParser {
@@ -149,7 +149,7 @@ fn parse_line(
         return Ok(());
     }
     if let Some(span) = try_parse(input, comment) {
-        result.comments.push(span);
+        record_comment(mode, result, span);
         return Ok(());
     }
 
@@ -193,7 +193,8 @@ fn missing_equals_error(
     ws_after_key: &str,
 ) -> ParseError {
     if ws_after_key.is_empty()
-        && let Some(ch) = try_parse(input, none_of(['\r', '\n', '#']))
+        && !eol_or_eof(input)
+        && let Some(ch) = try_parse(input, any)
     {
         return ParseError {
             offset: input.previous_token_end() - ch.len_utf8(),
@@ -214,15 +215,16 @@ fn read_value(
 ) -> Result<Option<(ScalarValue, usize)>, ParseError> {
     let after_eq = input.current_token_start();
     let ws = horizontal_ws(input);
+    let after_ws = input.current_token_start();
 
     if eol_or_eof(input) {
-        return Ok(empty_value(mode, after_eq));
+        return Ok(empty_value(mode, after_eq, after_ws));
     }
     if !ws.is_empty()
         && let Some(span) = try_parse(input, comment)
     {
-        result.comments.push(span);
-        return Ok(empty_value(mode, after_eq));
+        record_comment(mode, result, span);
+        return Ok(empty_value(mode, after_eq, after_ws));
     }
 
     match try_parse(input, peek_quote) {
@@ -253,7 +255,7 @@ fn read_quoted_value(
     horizontal_ws(input);
     if !eol_or_eof(input) {
         if let Some(span) = try_parse(input, comment) {
-            result.comments.push(span);
+            record_comment(mode, result, span);
         } else {
             return Err(ParseError {
                 offset: input.current_token_start(),
@@ -328,7 +330,7 @@ fn read_unquoted_value(
 
     horizontal_ws(input);
     if let Some(comment_span) = try_parse(input, comment) {
-        result.comments.push(comment_span);
+        record_comment(mode, result, comment_span);
     }
 
     match mode {
@@ -351,6 +353,7 @@ fn unquoted_raw<'s>(input: &mut Input<'s>) -> PResult<(&'s str, Range<usize>)> {
     let chunk = alt((
         take_while(1.., |c: char| !matches!(c, ' ' | '\t' | '\r' | '\n')).void(),
         (take_while(1.., [' ', '\t']), not('#')).void(),
+        ('\r', not('\n')).void(),
     ));
     repeat::<_, _, (), _, _>(0.., chunk)
         .take()
@@ -364,30 +367,40 @@ fn horizontal_ws<'s>(input: &mut Input<'s>) -> &'s str {
         .expect("`take_while(0..)` cannot fail")
 }
 
+fn till_eol<'s>(input: &mut Input<'s>) -> PResult<&'s str> {
+    let chunk = alt((
+        take_while(1.., |c: char| c != '\r' && c != '\n').void(),
+        ('\r', not('\n')).void(),
+    ));
+    repeat::<_, _, (), _, _>(0.., chunk)
+        .take()
+        .parse_next(input)
+}
+
 fn skip_to_eol(input: &mut Input<'_>) {
-    take_till::<_, _, ContextError>(0.., ['\r', '\n'])
+    till_eol
         .void()
         .parse_next(input)
-        .expect("`take_till(0..)` cannot fail");
+        .expect("`till_eol` cannot fail");
 }
 
 fn line_ending(input: &mut Input<'_>) -> PResult<()> {
-    alt(("\r\n", "\n", "\r")).void().parse_next(input)
+    alt(("\r\n", "\n")).void().parse_next(input)
 }
 
 fn eol_or_eof(input: &mut Input<'_>) -> bool {
-    try_parse(input, peek(alt(("\r".void(), "\n".void(), eof.void())))).is_some()
+    try_parse(input, peek(alt((line_ending, eof.void())))).is_some()
 }
 
 fn comment(input: &mut Input<'_>) -> PResult<Range<usize>> {
-    ('#', take_till(0.., ['\r', '\n'])).span().parse_next(input)
+    ('#', till_eol).span().parse_next(input)
 }
 
 fn export_prefix(input: &mut Input<'_>) -> PResult<()> {
     (
         "export",
         take_while(1.., [' ', '\t']),
-        peek(none_of(['=', '#', '\r', '\n'])),
+        peek(not(alt(("=".void(), "#".void(), line_ending, eof.void())))),
     )
         .void()
         .parse_next(input)
@@ -404,7 +417,14 @@ fn try_parse<'s, O>(
     opt(parser).parse_next(input).expect("`opt` cannot fail")
 }
 
-fn empty_value(mode: ScanMode, after_eq: usize) -> Option<(ScalarValue, usize)> {
+fn record_comment(mode: ScanMode, result: &mut ScanResult, span: Range<usize>) {
+    match mode {
+        ScanMode::Comments => result.comments.push(span),
+        ScanMode::Symbols => {}
+    }
+}
+
+fn empty_value(mode: ScanMode, after_eq: usize, after_ws: usize) -> Option<(ScalarValue, usize)> {
     match mode {
         ScanMode::Comments => None,
         ScanMode::Symbols => Some((
@@ -412,7 +432,7 @@ fn empty_value(mode: ScanMode, after_eq: usize) -> Option<(ScalarValue, usize)> 
                 text: String::new(),
                 byte_range: after_eq..after_eq,
             },
-            after_eq,
+            after_ws,
         )),
     }
 }
@@ -606,7 +626,7 @@ export export=3
                     Some("line 1\nline 2"),
                 ),
                 symbol("/EMPTY", "EMPTY=", Some("")),
-                symbol("/EMPTY_COMMENT", "EMPTY_COMMENT=", Some("")),
+                symbol("/EMPTY_COMMENT", "EMPTY_COMMENT= ", Some("")),
                 symbol("/EMPTY_QUOTED", "EMPTY_QUOTED=\"\"", Some("")),
                 symbol("/app.name", "app.name=blockwatch", Some("blockwatch")),
                 symbol("/my-key", "my-key=value", Some("value")),
@@ -667,7 +687,7 @@ export export=3
 
     #[test]
     fn double_quote_cr_escape_and_bare_cr_are_preserved() -> anyhow::Result<()> {
-        let source = "A=\"a\\rb\"\rB=\"x\ry\"\nC=\"line\\\rnext\"\n";
+        let source = "A=\"a\\rb\"\nB=\"x\ry\"\nC=\"line\\\rnext\"\n";
         let parsed = dotenv(source)?;
 
         assert_eq!(
@@ -685,6 +705,39 @@ export export=3
     fn empty_and_comment_only_files_parse_symbols_returns_empty() -> anyhow::Result<()> {
         assert_eq!(dotenv("")?.symbols, []);
         assert_eq!(dotenv("\u{feff}\n   \n# just a comment\n")?.symbols, []);
+        Ok(())
+    }
+
+    #[test]
+    fn edge_cases_export_tabs_eof_and_empty_whitespace_parse_correctly() -> anyhow::Result<()> {
+        let source = "export\tTAB_EXPORT=1\nexport_foo=2\n1FOO=3\nTAB_COMMENT=x\t# c\nEMPTY_TAB=\t# c\nPORT = \nTIGHT=\"a\"#tight\nAT_EOF=4   ";
+        let parsed = dotenv(source)?;
+
+        assert_eq!(
+            symbols(&parsed, source),
+            vec![
+                symbol("/TAB_EXPORT", "export\tTAB_EXPORT=1", Some("1")),
+                symbol("/export_foo", "export_foo=2", Some("2")),
+                symbol("/1FOO", "1FOO=3", Some("3")),
+                symbol("/TAB_COMMENT", "TAB_COMMENT=x", Some("x")),
+                symbol("/EMPTY_TAB", "EMPTY_TAB=\t", Some("")),
+                symbol("/PORT", "PORT = ", Some("")),
+                symbol("/TIGHT", r#"TIGHT="a""#, Some("a")),
+                symbol("/AT_EOF", "AT_EOF=4", Some("4")),
+            ]
+        );
+
+        let eof_no_ws = dotenv("A=1")?;
+        assert_eq!(
+            symbols(&eof_no_ws, "A=1"),
+            vec![symbol("/A", "A=1", Some("1"))]
+        );
+
+        let mixed_dup = dotenv("PORT=8080\nexport PORT=9090\n")?;
+        assert_eq!(
+            unresolved(&mixed_dup, "PORT=8080\nexport PORT=9090\n", "/PORT")?,
+            "ambiguous symbol, defined at 1:1, 2:1"
+        );
         Ok(())
     }
 
@@ -716,8 +769,24 @@ export export=3
                 "file is not valid dotenv at line 1, column 1: expected a variable name before `=`",
             ),
             (
+                "\u{feff}=value\n",
+                "file is not valid dotenv at line 1, column 2: expected a variable name before `=`",
+            ),
+            (
+                "$FOO=1\n",
+                "file is not valid dotenv at line 1, column 1: invalid character `$` in variable name",
+            ),
+            (
+                "é=1\n",
+                "file is not valid dotenv at line 1, column 1: invalid character `é` in variable name",
+            ),
+            (
                 "FOO$BAR=1\n",
                 "file is not valid dotenv at line 1, column 4: invalid character `$` in variable name",
+            ),
+            (
+                "FOO#BAR=1\n",
+                "file is not valid dotenv at line 1, column 4: invalid character `#` in variable name",
             ),
             (
                 "KEY=\"unterminated\n",
@@ -738,6 +807,14 @@ export export=3
             (
                 "KEY=\"a\" extra\n",
                 "file is not valid dotenv at line 1, column 9: unexpected text after closing quote",
+            ),
+            (
+                "KEY=\"café\" extra\n",
+                "file is not valid dotenv at line 1, column 12: unexpected text after closing quote",
+            ),
+            (
+                "A=\"x\"\rB=\"y\"\n",
+                "file is not valid dotenv at line 1, column 6: unexpected text after closing quote",
             ),
         ] {
             let err = dotenv(source).expect_err(source);
