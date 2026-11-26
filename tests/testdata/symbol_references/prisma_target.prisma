@@ -1,0 +1,13 @@
+datasource db {
+  provider = "postgresql"
+}
+
+enum Color {
+  RED
+  GREEN
+}
+
+model Item {
+  id   String @id
+  name String @unique
+}

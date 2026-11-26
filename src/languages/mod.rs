@@ -30,6 +30,7 @@ mod nix;
 mod ocaml;
 mod parsers;
 mod php;
+mod prisma;
 mod proto;
 mod python;
 mod ruby;
@@ -96,6 +97,7 @@ pub(crate) enum Language {
     Nix,
     OCaml,
     Php,
+    Prisma,
     Proto,
     Python,
     Ruby,

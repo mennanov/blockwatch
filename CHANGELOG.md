@@ -14,6 +14,10 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ### Added
 
+- Support for Prisma schema files (`*.prisma`), with `//`, `///` and `/* */` comment parsing for `<block>` tags and
+  symbols for `datasource`, `generator`, `model`, `view`, `type` and `enum` blocks and their members (`#/Color`,
+  `#/Color/RED`, `#/Item/name`, `#/db/provider`, `#/client/provider`). See [Prisma](docs/symbols.md#prisma)
+  ([#185](https://github.com/mennanov/blockwatch/issues/185)).
 - Dockerfile (and Containerfile) `FROM` stages now have 0-based positional symbols (`#/0`, `#/1`, ...), matching
   Docker's `COPY --from=0`. Unnamed stages can now be referenced directly (for example `apps/*/Dockerfile#/0`), while
   named stages keep their `#/<name>` symbols and unnamed-stage `ARG`, `ENV`, and `LABEL` names stay at the top level. A

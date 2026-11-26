@@ -28,8 +28,8 @@ pub(super) const NAMES: &[(&str, Language)] = {
     use Language::{
         Bash, C, CMake, CSharp, Cpp, Css, Dart, Dockerfile, Elixir, Go, GoModule, GraphQl, Groovy,
         Hcl, Html, Java, JavaScript, Json, Kotlin, Lean, Lua, Makefile, Markdown, Mdx, Nix, OCaml,
-        Php, Proto, Python, Ruby, Rust, Scala, Sql, Starlark, Swift, Toml, Tsx, TypeScript, Xml,
-        Yaml, Zsh,
+        Php, Prisma, Proto, Python, Ruby, Rust, Scala, Sql, Starlark, Swift, Toml, Tsx, TypeScript,
+        Xml, Yaml, Zsh,
     };
     &[
         /* <block name="language-names"
@@ -327,6 +327,7 @@ pub(super) const NAMES: &[(&str, Language)] = {
         ("podspec", Ruby),
         ("poetry.lock", Toml),
         ("prawn", Ruby),
+        ("prisma", Prisma),
         ("props", Xml),
         ("proto", Proto),
         ("ps1xml", Xml),
@@ -1224,6 +1225,7 @@ mod tests {
             ("a.podspec", Ruby),
             ("poetry.lock", Toml),
             ("a.prawn", Ruby),
+            ("a.prisma", Prisma),
             ("a.props", Xml),
             ("a.proto", Proto),
             ("a.ps1xml", Xml),

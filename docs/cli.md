@@ -247,6 +247,7 @@ without `*`, such as `.babelrc` or `Cargo.lock`, is a whole file name.
 | Nix | `*.nix` |
 | OCaml | `*.eliom`, `*.eliomi`, `*.ml`, `*.ml4`, `*.mli` |
 | PHP | `.php_cs`, `.php_cs.dist`, `Phakefile`, `*.aw`, `*.ctp`, `*.php`, `*.php3`, `*.php4`, `*.php5`, `*.phps`, `*.phpt`, `*.phtml` |
+| Prisma | `*.prisma` |
 | Protocol Buffers | `*.proto` |
 | Python | `.gclient`, `DEPS`, `SConscript`, `SConstruct`, `wscript`, `*.gyp`, `*.gypi`, `*.lmi`, `*.py`, `*.py3`, `*.pyde`, `*.pyi`, `*.pyp`, `*.pyt`, `*.pyw`, `*.tac`, `*.vpy`, `*.wsgi`, `*.xpy` |
 | Ruby | `.irbrc`, `.pryrc`, `.simplecov`, `Appraisals`, `Berksfile`, `Brewfile`, `Buildfile`, `Capfile`, `Dangerfile`, `Deliverfile`, `Fastfile`, `Gemfile`, `Guardfile`, `Jarfile`, `Mavenfile`, `Podfile`, `Puppetfile`, `Rakefile`, `Snapfile`, `Steepfile`, `Thorfile`, `Vagrantfile`, `buildfile`, `*.builder`, `*.eye`, `*.gemspec`, `*.god`, `*.jbuilder`, `*.mspec`, `*.podspec`, `*.prawn`, `*.rabl`, `*.rake`, `*.rb`, `*.rbi`, `*.rbuild`, `*.rbw`, `*.rbx`, `*.ru`, `*.ruby`, `*.thor`, `*.watchr` |

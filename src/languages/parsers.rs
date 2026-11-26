@@ -4,8 +4,8 @@ use super::file_names::LanguageResolver;
 use super::{
     Language, LanguageParser, bash, c, c_sharp, cmake, cpp, css, dart, dockerfile, elixir, go,
     graphql, groovy, hcl, html, java, javascript, json, kotlin, lean, lua, makefile, markdown, mdx,
-    nix, ocaml, php, proto, python, ruby, rust, scala, sql, starlark, swift, toml, tsx, typescript,
-    xml, yaml,
+    nix, ocaml, php, prisma, proto, python, ruby, rust, scala, sql, starlark, swift, toml, tsx,
+    typescript, xml, yaml,
 };
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -98,6 +98,7 @@ fn new_parser(language: Language) -> Box<dyn LanguageParser> {
         Language::Nix => Box::new(nix::parser()),
         Language::OCaml => Box::new(ocaml::parser()),
         Language::Php => Box::new(php::parser()),
+        Language::Prisma => Box::new(prisma::parser()),
         Language::Proto => Box::new(proto::parser()),
         Language::Python => Box::new(python::parser()),
         Language::Ruby => Box::new(ruby::parser()),
@@ -179,6 +180,7 @@ mod tests {
             (Language::Makefile, "Makefile"),
             (Language::Dart, "Dart"),
             (Language::Dockerfile, "Dockerfile"),
+            (Language::Prisma, "Prisma"),
         ];
         // </block>
         let mut documented: Vec<Language> =
@@ -513,6 +515,10 @@ mod supported_languages_tests {
             (
                 "phtml.phtml".to_string(),
                 "<?php\n# <block>\necho 'world';\n# </block>\n?>".to_string(),
+            ),
+            (
+                "schema.prisma".to_string(),
+                "// <block>\nmodel User {\n  id Int @id\n}\n// </block>".to_string(),
             ),
             (
                 "proto.proto".to_string(),

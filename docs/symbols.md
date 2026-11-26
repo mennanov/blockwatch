@@ -52,6 +52,7 @@ declares, instead of tags in a comment.
 | Makefile         | `Makefile`, `GNUmakefile`, `*.makefile`, `*.mk`, `*.mak`               | [Makefile](#makefile)                                   |
 | Dart             | `*.dart`                                                               | [Dart](#dart)                                           |
 | Dockerfile       | `Dockerfile`, `Containerfile`, `*.dockerfile`                          | [Dockerfile](#dockerfile)                               |
+| Prisma           | `*.prisma`                                                             | [Prisma](#prisma)                                       |
 
 <!-- </block> -->
 
@@ -445,7 +446,8 @@ h1, h2 { margin: 0; }
 In a code file, each top-level name is a symbol: a constant, a variable, a type, a function or a macro. Its path is
 `#/NAME`.
 With `const MaxPorts = 8` in `consts.go`, `consts.go#/MaxPorts` points at `8`. In Java, C#, Kotlin, Swift, Protocol
-Buffers, PHP and Dart, the members of a type are symbols too, under the type's name: `Config.java#/Config/MAX_PORTS`.
+Buffers, PHP, Dart and Prisma, the members of a type are symbols too, under the type's name:
+`Config.java#/Config/MAX_PORTS`.
 In HCL, each block, attribute and object key is a symbol: `main.tf#/variable/region/default`.
 
 - **A value is the initializer as written.** blockwatch never works it out: `20 * 1024 * 1024` stays as it is, and so
@@ -461,7 +463,7 @@ In HCL, each block, attribute and object key is a symbol: `main.tf#/variable/reg
   where the error is.
 - **A path to a string that blockwatch can't decode stops the run.** Other paths in the file still resolve.
 - **Members are not symbols yet**, such as a method or a field, except in Java, C#, Kotlin, Swift, Protocol Buffers,
-  HCL, PHP and Dart.
+  HCL, PHP, Dart and Prisma.
 
 <!-- </block> -->
 
@@ -1456,6 +1458,73 @@ ENTRYPOINT ["/app"]
   the `#` at the start of its line. Docker also reads it after a space, but blockwatch can't, so its values fail to
   resolve.
 - **Instructions after `ONBUILD`, other instructions and comments are not symbols.**
+
+<!-- </block> -->
+
+## Prisma
+
+<!-- <block name="prisma-paths"> -->
+
+```prisma
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["views"]
+}
+
+enum Color {
+  RED
+  GREEN @map("green")
+}
+
+model Item {
+  id      String   @id @default(uuid())
+  name    String   @unique
+  address Address?
+
+  @@map("items")
+}
+
+type Address {
+  street String
+}
+
+view ActiveItem {
+  id String @unique
+}
+```
+
+| Path                        | Points at                         |
+|-----------------------------|-----------------------------------|
+| `#/db`                      | the whole `datasource` block      |
+| `#/db/provider`             | `postgresql`                      |
+| `#/db/url`                  | `env("DATABASE_URL")`, as written |
+| `#/client/previewFeatures`  | `["views"]`, as written           |
+| `#/Color`                   | the whole `enum`                  |
+| `#/Color/RED`               | `RED`                             |
+| `#/Color/GREEN`             | `GREEN @map("green")`             |
+| `#/Item`                    | the whole `model`                 |
+| `#/Item/name`               | `name    String   @unique`        |
+| `#/Address/street`          | `street String`                   |
+| `#/ActiveItem/id`           | `id String @unique`               |
+
+- **Each `datasource`, `generator`, `model`, `view`, `type` and `enum` block is a symbol, and so is each member in it**:
+  a property of a `datasource` or `generator`, a field of a `model`, `view` or `type`, or an `enum` value.
+- **Properties in `datasource` and `generator` blocks have values.** A double-quoted string is decoded using JSON string
+  escapes: `"postgresql"` is `postgresql`. Any other expression stays as written, such as `env("DATABASE_URL")` or
+  `["views"]`. A single-quoted string or an invalid escape stops the run for that path.
+- **Fields and enum values have no value**, so `same-as` reads their whole declaration, attributes included (such as
+  `@unique`, `@db.VarChar(255)` or `@map("green")`).
+- **Block attributes such as `@@map`, `@@index`, `@@unique` and `@@schema` are not symbols.**
+- **A symbol covers its whole block or member**, without the comments above it.
+- **Two blocks with the same name make that top-level path a violation.** A member path under one of them still resolves
+  if only one block defines that member.
+- **A syntax error stops the run for the member that holds it and for its enclosing block.** Other members and blocks in
+  the file still resolve.
 
 <!-- </block> -->
 

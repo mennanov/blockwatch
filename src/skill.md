@@ -140,7 +140,7 @@ A symbol points to one value or definition inside a file (`file#/path`, or `#/pa
 
 `JSON`, `TOML`, `YAML`, `Markdown`, `MDX`, `XML`, `CSS`, `Go`, `C`, `C++`, `Python`, `Starlark`, `Rust`,
 `TypeScript`, `JavaScript`, `Java`, `C#`, `Kotlin`, `Swift`, `Protocol Buffers`, `HCL`, `PHP`, `Bash`,
-`Makefile`, `Dart`, `Dockerfile`.
+`Makefile`, `Dart`, `Dockerfile`, `Prisma`.
 
 ### Variants and copies
 
@@ -167,7 +167,7 @@ A symbol points to one value or definition inside a file (`file#/path`, or `#/pa
     properties (`theme.css#/:root/--brand`).
   - **Code files:** top-level names (`consts.go#/MaxPorts`, `main.tf#/variable/region/default`), and Dockerfile stages
     from 0 (`#/0`, `#/builder`). The members of a type are symbols too, under the type's name, in Java, C#, Kotlin,
-    Swift, Protocol Buffers, PHP and Dart. Strings read without quotes; other values stay as written.
+    Swift, Protocol Buffers, PHP, Dart and Prisma. Strings read without quotes; other values stay as written.
 - **Check paths with the CLI:** a missing key is a violation (exit `1`) that prints `"did you mean: ..."` suggestions,
   and `blockwatch explain FILE:NAME` prints the exact extracted text.
 - **These stop the run (exit `2`):** missing file or syntax error (in code files, only for paths near the error).
