@@ -12,6 +12,8 @@ Releases up to and including v0.3.11 predate this file. Their notes live on the
 
 ## [Unreleased] - ReleaseDate
 
+## [0.22.0] - 2026-11-26
+
 ### Added
 
 - Support for dotenv files (`.env`, `*.env`, `.env.*`, `.env-*`, `.env_*`, and copy suffixes such as `.env.example`),
