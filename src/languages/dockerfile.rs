@@ -1,85 +1,251 @@
-use crate::languages::code_symbols::{self, CodeLanguage, CodeSymbolsParser, Definition, Value};
-use crate::languages::{self, node_text, walk_tree};
-use crate::languages::{CommentsParser, LanguageParser, LanguageParserImpl};
-use crate::symbols::ScalarValue;
+use crate::languages::code_symbols::{self, Definition, Value};
+use crate::languages::{
+    self, CommentsParser, LanguageParser, LanguageParserImpl, node_text, tree_sitter_parser,
+    walk_tree,
+};
+use crate::position::Position;
+use crate::symbols::{ScalarValue, Symbol, SymbolPath, Symbols, SymbolsParser};
+use anyhow::Context;
 use tree_sitter::Node;
 
-/// Dockerfile (and Containerfile), whose files hold container build instructions such as `FROM`,
-/// `ARG`, `ENV` and `LABEL`.
-struct Dockerfile;
+/// Finds the symbols of a Dockerfile (or Containerfile): stages, `ARG`s with defaults, `ENV`s
+/// and `LABEL`s.
+struct DockerfileSymbolsParser {
+    parser: tree_sitter::Parser,
+}
 
-impl CodeLanguage for Dockerfile {
-    fn definitions<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Definition<'tree>> {
-        let mut definitions = Vec::new();
-        let mut stage = None;
-        let mut cursor = root.walk();
-        for instruction in root.named_children(&mut cursor) {
-            let mut found = if instruction.kind() == "from_instruction" {
-                stage = stage_name(instruction, source);
-                stage
-                    .map(|name| stage_definition(instruction, name))
-                    .into_iter()
-                    .collect()
-            } else {
-                instruction_definitions(instruction, stage, source)
-            };
-            if let Some(error) = error_after(instruction) {
-                // The grammar stops at the error, so the last value can miss its rest.
-                for definition in found
-                    .iter_mut()
-                    .filter(|definition| definition.range.end == instruction.end_byte())
-                {
-                    definition.value = Some(Value::Undecodable(
-                        code_symbols::position(&error, source),
-                        anyhow::anyhow!(
-                            "the instruction has a syntax error here, so its value could be cut short"
-                        ),
-                    ));
-                }
-            }
-            definitions.extend(found);
+impl DockerfileSymbolsParser {
+    /// A parser for Dockerfiles and Containerfiles.
+    fn new() -> Self {
+        Self {
+            parser: tree_sitter_parser(&tree_sitter_containerfile::LANGUAGE.into()),
         }
-        definitions
+    }
+}
+
+impl SymbolsParser for DockerfileSymbolsParser {
+    fn parse(&mut self, source: &str) -> anyhow::Result<Symbols> {
+        let tree = self
+            .parser
+            .parse(source, None)
+            .context("failed to parse syntax tree")?;
+        let (definitions, stages) = collect_instructions(tree.root_node(), source);
+        let mut parsed = code_symbols::symbols(
+            &tree,
+            source,
+            &definitions,
+            &decode_string,
+            Some('"'),
+            &['-', '.'],
+        );
+        stages.merge_into(&mut parsed);
+        Ok(parsed)
+    }
+}
+
+/// Positional stage symbols (`/0`, `/1`, ...) collected while walking a Dockerfile's top-level
+/// instructions.
+#[derive(Default)]
+struct StageIndices {
+    next_index: usize,
+    broken_reason: Option<String>,
+    symbols: Vec<Symbol>,
+    unreadable: Vec<(SymbolPath, String)>,
+}
+
+impl StageIndices {
+    /// Records a parsed `FROM` instruction as the next 0-based stage symbol, or marks its index
+    /// unreadable when it or an earlier skipped `FROM` has a syntax error.
+    fn record_stage(&mut self, from: Node<'_>, source: &str) {
+        let index = self.next_index;
+        self.next_index += 1;
+        let name = index.to_string();
+        let path = SymbolPath::from_segments(vec![name.clone()]);
+        if let Some(reason) = self.stage_error(from, &name, source) {
+            self.unreadable.push((path, reason));
+        } else {
+            self.symbols.push(Symbol {
+                path,
+                def_byte_ranges: vec![from.byte_range()],
+                value: stage_image(from).map(|image| ScalarValue {
+                    text: node_text(&image, source).to_string(),
+                    byte_range: image.byte_range(),
+                }),
+            });
+        }
     }
 
-    fn decode_string(&self, node: &Node, source: &str) -> anyhow::Result<Option<String>> {
-        match node.kind() {
-            "double_quoted_string" => {
-                if has_expansion(*node) {
-                    return Ok(None);
-                }
-                let text = joined_lines(node, source);
-                let unquoted = code_symbols::between_quotes(&text, "\"")?;
-                let escape = escape_directive(source)?;
-                // Inside double quotes, the escape character before any other character is
-                // kept, as in a shell: `"a\nb"` is `a\nb`.
-                Ok(Some(unescape(unquoted, escape, |next| {
-                    next == '"' || next == '$' || next == escape
+    /// Records any skipped `FROM` lines in a top-level `ERROR` node, marking their indices and
+    /// all later stage indices unreadable.
+    fn record_error(&mut self, error: Node<'_>, source: &str) {
+        for line in node_text(&error, source).lines() {
+            if !is_from_line(line.trim_start_matches([' ', '\t'])) {
+                continue;
+            }
+            let reason = self
+                .broken_reason
+                .get_or_insert_with(|| syntax_error_reason(error, "FROM", source))
+                .clone();
+            let path = SymbolPath::from_segments(vec![self.next_index.to_string()]);
+            self.next_index += 1;
+            self.unreadable.push((path, reason));
+        }
+    }
+
+    /// Merges the collected stage symbols and unreadable indices into `parsed`, keeping document
+    /// order with each `/<index>` ahead of its named alias.
+    fn merge_into(mut self, parsed: &mut Symbols) {
+        if !self.symbols.is_empty() {
+            self.symbols.extend(std::mem::take(&mut parsed.symbols));
+            self.symbols
+                .sort_by_key(|symbol| symbol.def_byte_ranges[0].start);
+            parsed.symbols = self.symbols;
+        }
+        for (path, reason) in self.unreadable {
+            parsed.unreadable.entry(path).or_insert(reason);
+        }
+    }
+
+    /// Why `from` cannot be read reliably, if an earlier `FROM` was skipped or `from` itself
+    /// holds or ends at a syntax error.
+    fn stage_error(&self, from: Node<'_>, name: &str, source: &str) -> Option<String> {
+        if let Some(reason) = &self.broken_reason {
+            return Some(reason.clone());
+        }
+        if from.has_error() {
+            return Some(syntax_error_reason(from, name, source));
+        }
+        error_after(from).map(|error| {
+            code_symbols::undecodable_reason(
+                code_symbols::position(&error, source),
+                "the instruction has a syntax error here, so its value could be cut short",
+            )
+        })
+    }
+}
+
+/// Walks the top-level nodes under `root`, collecting `code_symbols` definitions and positional
+/// stage symbols in document order.
+fn collect_instructions<'tree>(
+    root: Node<'tree>,
+    source: &str,
+) -> (Vec<Definition<'tree>>, StageIndices) {
+    let mut definitions = Vec::new();
+    let mut stages = StageIndices::default();
+    let mut stage = None;
+    let mut last_instruction_end_row = None;
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        if child.is_error() {
+            // A trailing error on the same line as the previous instruction belongs to it,
+            // not to a new `FROM` instruction.
+            if last_instruction_end_row != Some(child.start_position().row) {
+                stages.record_error(child, source);
+            }
+            continue;
+        }
+        if !child.is_named() || child.is_extra() {
+            continue;
+        }
+        let mut found = if child.kind() == "from_instruction" {
+            stages.record_stage(child, source);
+            stage = stage_name(child, source);
+            stage
+                .map(|name| stage_definition(child, name))
+                .into_iter()
+                .collect()
+        } else {
+            instruction_definitions(child, stage, source)
+        };
+        apply_trailing_error(child, &mut found, source);
+        definitions.extend(found);
+        last_instruction_end_row = Some(child.end_position().row);
+    }
+    (definitions, stages)
+}
+
+/// Marks definitions ending at `instruction` undecodable when a syntax error follows on the same
+/// line.
+fn apply_trailing_error(instruction: Node<'_>, found: &mut [Definition<'_>], source: &str) {
+    let Some(error) = error_after(instruction) else {
+        return;
+    };
+    // The grammar stops at the error, so the last value can miss its rest.
+    for definition in found
+        .iter_mut()
+        .filter(|definition| definition.range.end == instruction.end_byte())
+    {
+        definition.value = Some(Value::Undecodable(
+            code_symbols::position(&error, source),
+            anyhow::anyhow!(
+                "the instruction has a syntax error here, so its value could be cut short"
+            ),
+        ));
+    }
+}
+
+/// Decodes a Dockerfile string literal, or returns `None` for any other node or a string with `$`.
+fn decode_string(node: &Node, source: &str) -> anyhow::Result<Option<String>> {
+    match node.kind() {
+        "double_quoted_string" => {
+            if has_expansion(*node) {
+                return Ok(None);
+            }
+            let text = joined_lines(node, source);
+            let unquoted = code_symbols::between_quotes(&text, "\"")?;
+            let escape = escape_directive(source)?;
+            // Inside double quotes, the escape character before any other character is
+            // kept, as in a shell: `"a\nb"` is `a\nb`.
+            Ok(Some(unescape(unquoted, escape, |next| {
+                next == '"' || next == '$' || next == escape
+            })))
+        }
+        "single_quoted_string" => {
+            let text = joined_lines(node, source);
+            Ok(Some(code_symbols::between_quotes(&text, "'")?.to_string()))
+        }
+        "unquoted_string" => {
+            if has_expansion(*node) {
+                return Ok(None);
+            }
+            let escape = escape_directive(source)?;
+            if node_text(node, source).contains(escape) {
+                Ok(Some(unescape(&joined_lines(node, source), escape, |_| {
+                    true
                 })))
+            } else {
+                Ok(None)
             }
-            "single_quoted_string" => {
-                let text = joined_lines(node, source);
-                Ok(Some(code_symbols::between_quotes(&text, "'")?.to_string()))
-            }
-            "unquoted_string" => {
-                if has_expansion(*node) {
-                    return Ok(None);
-                }
-                let escape = escape_directive(source)?;
-                if node_text(node, source).contains(escape) {
-                    Ok(Some(unescape(&joined_lines(node, source), escape, |_| {
-                        true
-                    })))
-                } else {
-                    Ok(None)
-                }
-            }
-            _ => Ok(None),
         }
+        _ => Ok(None),
     }
+}
 
-    const NAME_QUOTE: Option<char> = Some('"');
-    const NAME_PUNCTUATION: &'static [char] = &['-', '.'];
+/// The unreadable reason for a syntax error at `node` affecting `name`.
+fn syntax_error_reason(node: Node<'_>, name: &str, source: &str) -> String {
+    let Position { line, character } = code_symbols::position(&node, source);
+    format!(
+        "file has a syntax error at line {line}, column {character} near {name}, and the path could resolve to the wrong value"
+    )
+}
+
+/// Whether `line`, with leading spaces and tabs removed, starts with a `FROM` keyword.
+fn is_from_line(line: &str) -> bool {
+    let Some(head) = line.get(..4) else {
+        return false;
+    };
+    head.eq_ignore_ascii_case("from")
+        && matches!(
+            line.as_bytes().get(4),
+            None | Some(b' ' | b'\t' | b'\r' | b'\\' | b'`')
+        )
+}
+
+/// The `image_spec` child of `from`, a `FROM` instruction, if any.
+fn stage_image(from: Node<'_>) -> Option<Node<'_>> {
+    let mut cursor = from.walk();
+    from.named_children(&mut cursor)
+        .find(|child| child.kind() == "image_spec")
 }
 
 /// The name of the stage that `from`, a `FROM` instruction, starts. `None` when the stage has no
@@ -102,11 +268,7 @@ fn error_after(instruction: Node<'_>) -> Option<Node<'_>> {
 
 /// The definition of the stage `name`, which `from` starts. Its value is the image.
 fn stage_definition<'tree>(from: Node<'tree>, name: Node<'tree>) -> Definition<'tree> {
-    let mut cursor = from.walk();
-    let image = from
-        .named_children(&mut cursor)
-        .find(|child| child.kind() == "image_spec");
-    Definition::new(vec![], name, from.byte_range(), image)
+    Definition::new(vec![], name, from.byte_range(), stage_image(from))
 }
 
 /// The definitions of the names that `instruction` sets, in document order. They are under
@@ -207,9 +369,7 @@ fn pair_value<'tree>(pair: Node<'tree>, field: &str, source: &str) -> Option<Val
             }
             let mut text = String::new();
             for part in &parts {
-                match code_symbols::node_value(*part, source, &|node, source| {
-                    Dockerfile.decode_string(node, source)
-                }) {
+                match code_symbols::node_value(*part, source, &decode_string) {
                     Ok(value) => text.push_str(&value.text),
                     Err((node, error)) => {
                         return Some(Value::Undecodable(
@@ -357,10 +517,7 @@ fn unescape(text: &str, escape_char: char, is_escaped: impl Fn(char) -> bool) ->
 
 /// Returns a [`LanguageParser`] for Dockerfile (Containerfile).
 pub(super) fn parser() -> impl LanguageParser {
-    LanguageParserImpl::new(comments_parser()).with_symbols(CodeSymbolsParser::new(
-        &tree_sitter_containerfile::LANGUAGE.into(),
-        Dockerfile,
-    ))
+    LanguageParserImpl::new(comments_parser()).with_symbols(DockerfileSymbolsParser::new())
 }
 
 fn comments_parser() -> impl CommentsParser {
@@ -492,14 +649,271 @@ COPY . /app
 #[cfg(test)]
 mod symbols_tests {
     use super::*;
-    use crate::languages::code_symbols::CodeSymbolsParser;
     use crate::languages::code_symbols::test_utils::{symbol, symbols, unresolved};
     use crate::symbols::{Symbols, SymbolsParser};
 
     /// The symbols of `source`, a Dockerfile.
     fn dockerfile(source: &str) -> anyhow::Result<Symbols> {
-        CodeSymbolsParser::new(&tree_sitter_containerfile::LANGUAGE.into(), Dockerfile)
-            .parse(source)
+        DockerfileSymbolsParser::new().parse(source)
+    }
+
+    #[test]
+    fn single_unnamed_stage_parse_symbols_exposes_stage_zero() -> anyhow::Result<()> {
+        for (source, expected_def, expected_image) in [
+            (
+                "FROM python:3.12-slim\nWORKDIR /app\n",
+                "FROM python:3.12-slim",
+                "python:3.12-slim",
+            ),
+            (
+                "from python:3.12-slim\n",
+                "from python:3.12-slim",
+                "python:3.12-slim",
+            ),
+            (
+                "FROM --platform=linux/amd64 python:3.12-slim@sha256:abcdef\n",
+                "FROM --platform=linux/amd64 python:3.12-slim@sha256:abcdef",
+                "python:3.12-slim@sha256:abcdef",
+            ),
+        ] {
+            assert_eq!(
+                symbols(&dockerfile(source)?, source),
+                vec![symbol("/0", expected_def, Some(expected_image))],
+                "{source:?}"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn mixed_named_and_unnamed_stages_parse_symbols_indexes_every_stage_from_zero()
+    -> anyhow::Result<()> {
+        let source = r"FROM golang:1.25 AS builder
+FROM python:3.12-slim
+FROM scratch AS final
+";
+
+        assert_eq!(
+            symbols(&dockerfile(source)?, source),
+            vec![
+                symbol("/0", "FROM golang:1.25 AS builder", Some("golang:1.25")),
+                symbol(
+                    "/builder",
+                    "FROM golang:1.25 AS builder",
+                    Some("golang:1.25")
+                ),
+                symbol("/1", "FROM python:3.12-slim", Some("python:3.12-slim")),
+                symbol("/2", "FROM scratch AS final", Some("scratch")),
+                symbol("/final", "FROM scratch AS final", Some("scratch")),
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn label_named_zero_with_stage_zero_parse_symbols_marks_zero_ambiguous() -> anyhow::Result<()> {
+        let source = "FROM alpine:3.20\nLABEL 0=\"zero\"\n";
+
+        assert_eq!(
+            unresolved(&dockerfile(source)?, source, "/0")?,
+            "ambiguous symbol, defined at 1:1, 2:7"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn stage_named_like_another_stage_index_parse_symbols_marks_it_ambiguous() -> anyhow::Result<()>
+    {
+        let source = "FROM alpine:3.20 AS 1\nFROM ubuntu:24.04\n";
+        assert_eq!(
+            unresolved(&dockerfile(source)?, source, "/1")?,
+            "ambiguous symbol, defined at 1:1, 2:1"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn duplicate_stage_names_and_multiline_from_parse_symbols_index_each_stage()
+    -> anyhow::Result<()> {
+        let duplicate = "FROM alpine:3.20 AS builder\nFROM ubuntu:24.04 AS builder\n";
+        let parsed = dockerfile(duplicate)?;
+        assert_eq!(
+            parsed
+                .resolve(&SymbolPath::parse("/0")?)
+                .map(|found| found.value_or_definition(duplicate)),
+            Ok(std::borrow::Cow::Borrowed("alpine:3.20"))
+        );
+        assert_eq!(
+            parsed
+                .resolve(&SymbolPath::parse("/1")?)
+                .map(|found| found.value_or_definition(duplicate)),
+            Ok(std::borrow::Cow::Borrowed("ubuntu:24.04"))
+        );
+        assert_eq!(
+            unresolved(&parsed, duplicate, "/builder")?,
+            "ambiguous symbol, defined at 1:1, 2:1"
+        );
+
+        let multiline = "FROM \\\n  alpine:3.20 \\\n  AS builder\n";
+        assert_eq!(
+            symbols(&dockerfile(multiline)?, multiline),
+            vec![
+                symbol(
+                    "/0",
+                    "FROM \\\n  alpine:3.20 \\\n  AS builder",
+                    Some("alpine:3.20")
+                ),
+                symbol(
+                    "/builder",
+                    "FROM \\\n  alpine:3.20 \\\n  AS builder",
+                    Some("alpine:3.20")
+                ),
+            ]
+        );
+
+        let onbuild = "ONBUILD FROM alpine:3.20\nFROM ubuntu:24.04\n";
+        assert_eq!(
+            symbols(&dockerfile(onbuild)?, onbuild),
+            vec![symbol("/0", "FROM ubuntu:24.04", Some("ubuntu:24.04"))]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn broken_from_parse_symbols_marks_affected_stage_indices_unreadable() -> anyhow::Result<()> {
+        for (source, column) in [
+            ("FROM\nFROM ubuntu:24.04 AS app\n", 1),
+            ("from\nFROM ubuntu:24.04 AS app\n", 1),
+            ("  FROM\nFROM ubuntu:24.04 AS app\n", 3),
+        ] {
+            let parsed = dockerfile(source)?;
+            let expected = format!(
+                "file has a syntax error at line 1, column {column} near FROM, and the path could resolve to the wrong value"
+            );
+            for path in ["/0", "/1"] {
+                assert_eq!(unresolved(&parsed, source, path)?, expected, "{source:?}");
+            }
+            assert_eq!(
+                parsed
+                    .resolve(&SymbolPath::parse("/app")?)
+                    .map(|found| found.value_or_definition(source)),
+                Ok(std::borrow::Cow::Borrowed("ubuntu:24.04")),
+                "{source:?}"
+            );
+        }
+
+        let consecutive = "FROM\nFROM\nFROM ubuntu:24.04\n";
+        let parsed = dockerfile(consecutive)?;
+        assert_eq!(
+            unresolved(&parsed, consecutive, "/0")?,
+            "file has a syntax error at line 1, column 1 near 0, and the path could resolve to the wrong value"
+        );
+        for path in ["/1", "/2"] {
+            assert_eq!(
+                unresolved(&parsed, consecutive, path)?,
+                "file has a syntax error at line 2, column 1 near FROM, and the path could resolve to the wrong value",
+                "{path}"
+            );
+        }
+        assert_eq!(unresolved(&parsed, consecutive, "/3")?, "symbol not found");
+
+        let error_before_broken_from =
+            "FROM alpine:3.20\nUNKNOWN echo from here\nFROM ubuntu:24.04\nFROM\nFROM debian:12\n";
+        let parsed = dockerfile(error_before_broken_from)?;
+        assert_eq!(
+            parsed
+                .resolve(&SymbolPath::parse("/0")?)
+                .map(|found| found.value_or_definition(error_before_broken_from)),
+            Ok(std::borrow::Cow::Borrowed("alpine:3.20"))
+        );
+        assert_eq!(
+            parsed
+                .resolve(&SymbolPath::parse("/1")?)
+                .map(|found| found.value_or_definition(error_before_broken_from)),
+            Ok(std::borrow::Cow::Borrowed("ubuntu:24.04"))
+        );
+        for path in ["/2", "/3"] {
+            assert_eq!(
+                unresolved(&parsed, error_before_broken_from, path)?,
+                "file has a syntax error at line 4, column 1 near FROM, and the path could resolve to the wrong value",
+                "{path}"
+            );
+        }
+
+        let trailing_broken = "FROM alpine:3.20\nFROM\n";
+        let parsed = dockerfile(trailing_broken)?;
+        assert_eq!(
+            parsed
+                .resolve(&SymbolPath::parse("/0")?)
+                .map(|found| found.value_or_definition(trailing_broken)),
+            Ok(std::borrow::Cow::Borrowed("alpine:3.20"))
+        );
+        assert_eq!(
+            unresolved(&parsed, trailing_broken, "/1")?,
+            "file has a syntax error at line 2, column 1 near FROM, and the path could resolve to the wrong value"
+        );
+
+        let trailing_junk = "FROM alpine:3.20 AS app from bar\nFROM debian:12\n";
+        let parsed = dockerfile(trailing_junk)?;
+        for path in ["/0", "/app"] {
+            assert_eq!(
+                unresolved(&parsed, trailing_junk, path)?,
+                "blockwatch can't decode the string at line 1, column 24: the instruction has a syntax error here, so its value could be cut short",
+                "{path}"
+            );
+        }
+        assert_eq!(
+            parsed
+                .resolve(&SymbolPath::parse("/1")?)
+                .map(|found| found.value_or_definition(trailing_junk)),
+            Ok(std::borrow::Cow::Borrowed("debian:12"))
+        );
+
+        let after_comment = "# comment\nFROM\nFROM ubuntu:24.04\n";
+        let parsed = dockerfile(after_comment)?;
+        for path in ["/0", "/1"] {
+            assert_eq!(
+                unresolved(&parsed, after_comment, path)?,
+                "file has a syntax error at line 2, column 1 near FROM, and the path could resolve to the wrong value",
+                "{path}"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn unrelated_error_mentioning_from_parse_symbols_keeps_later_stages() -> anyhow::Result<()> {
+        for source in [
+            "FROM alpine:3.20\nCOPY --from=0 /only_one_arg\nFROM ubuntu:24.04\n",
+            "FROM alpine:3.20\nENV MSG=\"hello from\\\n\nworld\"\nFROM ubuntu:24.04\n",
+            "FROM alpine:3.20\nENV CUT=\"a\\\n\n# FROM fake\nb\"\nFROM ubuntu:24.04\n",
+            "FROM alpine:3.20\nFROM_IMAGE=1\nFROM ubuntu:24.04\n",
+            "FROM alpine:3.20\nUNKNOWN FROM_IMAGE\nFROM ubuntu:24.04\n",
+        ] {
+            let parsed = dockerfile(source)?;
+            assert_eq!(
+                parsed
+                    .resolve(&SymbolPath::parse("/0")?)
+                    .map(|found| found.value_or_definition(source)),
+                Ok(std::borrow::Cow::Borrowed("alpine:3.20")),
+                "{source:?}"
+            );
+            assert_eq!(
+                parsed
+                    .resolve(&SymbolPath::parse("/1")?)
+                    .map(|found| found.value_or_definition(source)),
+                Ok(std::borrow::Cow::Borrowed("ubuntu:24.04")),
+                "{source:?}"
+            );
+        }
+
+        Ok(())
     }
 
     #[test]
@@ -535,6 +949,11 @@ ENTRYPOINT ["/app"]
                     Some("debian:bookworm-slim")
                 ),
                 symbol(
+                    "/0",
+                    "FROM golang:${GO_VERSION}-alpine AS builder",
+                    Some("golang:${GO_VERSION}-alpine")
+                ),
+                symbol(
                     "/builder",
                     "FROM golang:${GO_VERSION}-alpine AS builder",
                     Some("golang:${GO_VERSION}-alpine")
@@ -553,10 +972,16 @@ ENTRYPOINT ["/app"]
                     Some("2.1.0")
                 ),
                 symbol(
+                    "/1",
+                    "FROM ghcr.io/astral-sh/uv:0.13.5 AS uv",
+                    Some("ghcr.io/astral-sh/uv:0.13.5")
+                ),
+                symbol(
                     "/uv",
                     "FROM ghcr.io/astral-sh/uv:0.13.5 AS uv",
                     Some("ghcr.io/astral-sh/uv:0.13.5")
                 ),
+                symbol("/2", "FROM ${BASE}", Some("${BASE}")),
                 symbol("/APP_HOME", r#"APP_HOME="/srv/app""#, Some("/srv/app")),
                 symbol(
                     "/PATH",
@@ -581,6 +1006,7 @@ LABEL maintainer=team
         assert_eq!(
             symbols(&dockerfile(source)?, source),
             vec![
+                symbol("/0", "FROM alpine:3.20", Some("alpine:3.20")),
                 symbol("/PORT", "PORT=8080", Some("8080")),
                 symbol("/HOST", "HOST=localhost", Some("localhost")),
                 symbol("/maintainer", "maintainer=team", Some("team")),
@@ -679,6 +1105,7 @@ ENV KEY_SPACE val2
         assert_eq!(
             symbols(&dockerfile(source)?, source),
             vec![
+                symbol("/0", "FROM alpine:3.20", Some("alpine:3.20")),
                 symbol("/KEY_EQUALS", "KEY_EQUALS=val1", Some("val1")),
                 symbol("/KEY_SPACE", "KEY_SPACE val2", Some("val2")),
             ]
@@ -695,11 +1122,14 @@ LABEL "com.example.vendor"="ACME"
 
         assert_eq!(
             symbols(&dockerfile(source)?, source),
-            vec![symbol(
-                "/com.example.vendor",
-                r#""com.example.vendor"="ACME""#,
-                Some("ACME")
-            )]
+            vec![
+                symbol("/0", "FROM alpine:3.20", Some("alpine:3.20")),
+                symbol(
+                    "/com.example.vendor",
+                    r#""com.example.vendor"="ACME""#,
+                    Some("ACME")
+                ),
+            ]
         );
 
         Ok(())
@@ -712,11 +1142,18 @@ LABEL "com.example.vendor"="ACME"
 
         assert_eq!(
             symbols(&dockerfile(source)?, source),
-            vec![symbol(
-                "/build",
-                "FROM --platform=linux/amd64 golang:1.23@sha256:abcdef AS build",
-                Some("golang:1.23@sha256:abcdef")
-            )]
+            vec![
+                symbol(
+                    "/0",
+                    "FROM --platform=linux/amd64 golang:1.23@sha256:abcdef AS build",
+                    Some("golang:1.23@sha256:abcdef")
+                ),
+                symbol(
+                    "/build",
+                    "FROM --platform=linux/amd64 golang:1.23@sha256:abcdef AS build",
+                    Some("golang:1.23@sha256:abcdef")
+                ),
+            ]
         );
 
         Ok(())
@@ -733,7 +1170,10 @@ ARG PORT=8080
 
         assert_eq!(
             symbols(&dockerfile(source)?, source),
-            vec![symbol("/PORT", "PORT=8080", Some("8080"))]
+            vec![
+                symbol("/0", "FROM alpine:3.20", Some("alpine:3.20")),
+                symbol("/PORT", "PORT=8080", Some("8080")),
+            ]
         );
 
         Ok(())
@@ -1112,7 +1552,10 @@ ENV SINGLE_BRACED='${FOO}'
 
         assert_eq!(
             symbols(&dockerfile(source)?, source),
-            vec![symbol("/PORT", "PORT=8080", Some("8080"))]
+            vec![
+                symbol("/0", "FROM alpine:3.20 AS $stage", Some("alpine:3.20")),
+                symbol("/PORT", "PORT=8080", Some("8080")),
+            ]
         );
 
         Ok(())

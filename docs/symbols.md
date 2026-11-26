@@ -1418,6 +1418,7 @@ ENTRYPOINT ["/app"]
 |----------------------------------------------|----------------------------------------------------|
 | `#/GO_VERSION`                               | `1.25`                                             |
 | `#/BASE`                                     | `debian:bookworm-slim`                             |
+| `#/0`                                        | `golang:${GO_VERSION}-alpine`, as written          |
 | `#/builder`                                  | `golang:${GO_VERSION}-alpine`, as written          |
 | `#/builder/GO_VERSION`                       | not found: it has no default                       |
 | `#/builder/TARGETARCH`                       | `amd64`                                            |
@@ -1425,21 +1426,25 @@ ENTRYPOINT ["/app"]
 | `#/builder/GOFLAGS`                          | `-mod=vendor`                                      |
 | `#/builder/LEGACY`                           | `some value`                                       |
 | `#/builder/org.opencontainers.image.version` | `2.1.0`                                            |
+| `#/1`                                        | `ghcr.io/astral-sh/uv:0.13.5`                      |
 | `#/uv`                                       | `ghcr.io/astral-sh/uv:0.13.5`                      |
+| `#/2`                                        | `${BASE}`, as written                              |
 | `#/APP_HOME`                                 | `/srv/app`                                         |
 | `#/PATH`                                     | `"${APP_HOME}/bin:${PATH}"`, as written            |
 
-- **Each `ARG` with a default, each `ENV` and each `LABEL` is a symbol, and so is each named stage.**
-- **A named stage is a path segment. An unnamed stage is not.** `FROM ... AS builder` puts its names under `#/builder/`.
-  The names of an unnamed stage sit at the top level, next to the `ARG`s before the first `FROM`.
+- **Each `ARG` with a default, each `ENV`, each `LABEL` and each `FROM` stage is a symbol.**
+- **Every `FROM` stage has a 0-based position (`#/0`, `#/1`, ...), matching Docker's `COPY --from=0`.** A named stage
+  also has its name (`#/builder`), and puts its `ARG`, `ENV` and `LABEL` names under `#/builder/`. The names of an
+  unnamed stage sit at the top level, next to the `ARG`s before the first `FROM`.
 - **A stage name keeps its case.** Docker ignores the case, so `--from=builder` finds `AS Builder`, but the path must
   be `#/Builder/`.
-- **A named stage's value is its image**, with its tag and digest, as written: `#/uv` gives
-  `ghcr.io/astral-sh/uv:0.13.5`. An image in `COPY --from=...` and an unnamed stage have no symbol.
+- **A stage's value is its image**, with its tag and digest, as written: `#/1` and `#/uv` both give
+  `ghcr.io/astral-sh/uv:0.13.5`, and `#/2` gives `${BASE}`. An image in `COPY --from=...` has no symbol.
 - **An `ARG` without a default is not a symbol.** An `ENV` or a `LABEL` without a value, such as `ENV NAME` alone on
   its line, fails to resolve. Docker rejects it too. An empty default, such as `ARG NAME=`, gives an empty string.
-- **An `ARG` and an `ENV` with one name in a stage are defined twice**, and so are names repeated across unnamed stages.
-  Wrap the one you mean in a block instead.
+- **An `ARG` and an `ENV` with one name in a stage are defined twice**, and so are names repeated across unnamed stages
+  or a top-level `LABEL` with the same name as a stage index (such as `LABEL 0=...`). Wrap the one you mean in a block
+  instead.
 - **In `ENV A=1 B=2` and `ARG A=1 B=2`, each name covers only its own pair.** In `FROM`, the symbol covers the whole
   line.
 - **Strings decode quotes and line continuations.** In `"..."`, the escape character goes away only before `"`, `$` or
